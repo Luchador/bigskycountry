@@ -1,9 +1,11 @@
 #include "input.hpp"
 
+// Constructor
 Input::Input(SDL_Window* window) : window(window)
 {
 }
 
+// Reset look deltas at the start of every frame.
 void Input::BeginFrame()
 {
     lookX = 0.0f;
@@ -46,10 +48,12 @@ bool Input::HandleEvent(const SDL_Event& event)
             if (event.button.button == SDL_BUTTON_RIGHT)
             {
                 const bool pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+
                 if (pressed && SDL_GetKeyboardFocus() != window)
                 {
                     return true;
                 }
+
                 return SDL_SetWindowRelativeMouseMode(window, pressed);
             }
             break;
@@ -77,9 +81,11 @@ CameraInput Input::ReadCameraInput() const
 
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
+    // Opposing keys cancel each other out.
     input.forward = keys[SDL_SCANCODE_W] - keys[SDL_SCANCODE_S];
     input.right = keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A];
     input.up = keys[SDL_SCANCODE_E] - keys[SDL_SCANCODE_Q];
+
     input.lookX = lookX;
     input.lookY = lookY;
 

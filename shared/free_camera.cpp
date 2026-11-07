@@ -9,12 +9,7 @@ namespace
 {
     constexpr double moveSpeed = 3.0; // meters per second
     constexpr double lookSensitivity = 0.0025; // radians per mouse unit
-    constexpr double pitchLimit = 89.0 * std::numbers::pi / 180.0;
-
-    double Dot(Vector3 a, Vector3 b)
-    {
-        return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
+    constexpr double pitchLimit = Math::DegreesToRadians(89.0);
 }
 
 Vector3 FreeCamera::Forward() const
@@ -37,32 +32,18 @@ void FreeCamera::Update(const CameraInput& input, double elapsedSeconds)
     const Vector3 forward = Forward();
     const Vector3 right = Right();
 
-    const Vector3 move =
-    {
-        forward.x * input.forward + right.x * input.right,
-        forward.y * input.forward + input.up,
-        forward.z * input.forward + right.z * input.right
-    };
-
-    const double length = std::sqrt(Dot(move, move));
-
-    if (length > 0.0)
-    {
-        const double distance = moveSpeed * elapsedSeconds / length;
-        position.x += move.x * distance;
-        position.y += move.y * distance;
-        position.z += move.z * distance;
-    }
+    const Vector3 worldUp = { 0.0, 1.0, 0.0 };
+    const Vector3 move = forward * input.forward + right * input.right + worldUp * input.up;
+    position = position + Math::Normalize(move) * (moveSpeed * elapsedSeconds);
 }
 
 Vector3 FreeCamera::WorldToView(Vector3 point) const
 {
-    const Vector3 offset = { point.x - position.x, point.y - position.y, point.z - position.z };
+    const Vector3 offset = point - position;
     const Vector3 forward = Forward();
     const Vector3 right = Right();
 
-    // Camera up is forward crossed with right. Right always lies in the XZ plane.
-    const Vector3 up = { forward.y * right.z, forward.z * right.x - forward.x * right.z, -forward.y * right.x };
+    const Vector3 up = Math::Cross(forward, right);
 
-    return { Dot(offset, right), Dot(offset, up), Dot(offset, forward) };
+    return { Math::Dot(offset, right), Math::Dot(offset, up), Math::Dot(offset, forward) };
 }
