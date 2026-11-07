@@ -1,5 +1,7 @@
 # file(COPY) preserves timestamps and skips textures that are already up to date.
-file(COPY "${textureSource}/" DESTINATION "${textureDestination}")
+if(IS_DIRECTORY "${textureSource}")
+    file(COPY "${textureSource}/" DESTINATION "${textureDestination}")
+endif()
 
 # If a source texture was renamed or deleted, retire only our previous copy.
 if(EXISTS "${textureManifest}")

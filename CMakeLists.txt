@@ -11,11 +11,15 @@ FetchContent_Declare(SDL3
 FetchContent_MakeAvailable(SDL3)
 
 add_library(BigSkyApplication STATIC
+    shared/road.cpp
+    shared/road_file.cpp
+    shared/road_render.cpp
     shared/application.cpp
     shared/free_camera.cpp
     shared/input.cpp
     shared/math.cpp
     shared/texture_loader.cpp
+    shared/world_state.cpp
 )
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
 target_include_directories(BigSkyApplication PUBLIC shared)
@@ -24,7 +28,7 @@ target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
-add_executable(BigSkyCountryEditor WIN32 editor/main.cpp)
+add_executable(BigSkyCountryEditor WIN32 editor/main.cpp editor/road_editor.cpp)
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
 # Both executables use the same runtime directory, including on multi-config builds.

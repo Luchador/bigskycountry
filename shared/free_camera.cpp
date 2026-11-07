@@ -24,6 +24,14 @@ Vector3 FreeCamera::Right() const
     return { std::cos(yaw), 0.0, -std::sin(yaw) };
 }
 
+void FreeCamera::LookAt(Vector3 eye, Vector3 target)
+{
+    const Vector3 direction = target - eye;
+    position = eye;
+    yaw = std::atan2(direction.x, direction.z);
+    pitch = std::clamp(std::atan2(direction.y, std::hypot(direction.x, direction.z)), -pitchLimit, pitchLimit);
+}
+
 void FreeCamera::Update(const CameraInput& input, double elapsedSeconds)
 {
     yaw = std::remainder(yaw + input.lookX * lookSensitivity, 2.0 * std::numbers::pi);

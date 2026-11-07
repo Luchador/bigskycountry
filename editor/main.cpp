@@ -1,8 +1,9 @@
-#include "application.hpp"
+#include "road_editor.hpp"
 
 #include <SDL3/SDL_main.h>
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
-    return RunApplication(ApplicationMode::Editor);
+    RoadEditor roads;
+    return RunApplication(ApplicationMode::Editor, argc > 1 ? argv[1] : nullptr, &roads);
 }

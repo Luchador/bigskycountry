@@ -1,9 +1,11 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 
+#include "road_render.hpp"
 #include "application.hpp"
 #include "free_camera.hpp"
 #include "input.hpp"
+#include "world_state.hpp"
 
 namespace
 {
@@ -49,7 +51,40 @@ namespace
         return SDL_RenderGeometry(renderer, nullptr, vertices, 3, nullptr, 0);
     }
 
-    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode)
+    constexpr SDL_FRect roadButton{12, 12, 150, 28};
+
+    bool OpenRoadTool(const SDL_Event& event, SDL_Renderer* renderer)
+    {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_R && !event.key.repeat)
+        {
+            return true;
+        }
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
+        {
+            SDL_FPoint position{};
+            return SDL_RenderCoordinatesFromWindow(renderer, event.button.x, event.button.y, &position.x, &position.y) &&
+                   SDL_PointInRectFloat(&position, &roadButton);
+        }
+        return false;
+    }
+
+    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads, bool editor)
+    {
+        if (!SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255) || !SDL_RenderClear(renderer) ||
+            !DrawWorldRoads(renderer, view, roads) || !DrawTriangle(renderer, view))
+        {
+            return false;
+        }
+        if (editor && (!SDL_SetRenderDrawColor(renderer, 32, 43, 47, 255) || !SDL_RenderFillRect(renderer, &roadButton) ||
+            !SDL_SetRenderDrawColor(renderer, 230, 235, 238, 255) || !SDL_RenderDebugText(renderer, 23, 22, "Road editor  [R]")))
+        {
+            return false;
+        }
+        return SDL_RenderPresent(renderer);
+    }
+
+    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode,
+                       RoadMap& roads, EditorTool* roadTool)
     {
         Input input(window);
 
@@ -59,14 +94,16 @@ namespace
         }
 
         FreeCamera freeCamera;
-        const FreeCamera gameView;
+        if (!roads.roads.empty())
+        {
+            const Road& first = roads.roads.front();
+            const Vector3 focus = (first.points[0].position + first.points[1].position) * 0.5;
+            const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
+            freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
+        }
+        const FreeCamera gameView = freeCamera;
         Uint64 previousTime = SDL_GetTicksNS();
         const bool vsyncEnabled = SDL_SetRenderVSync(renderer, 1);
-
-        if (!SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255))
-        {
-            return false;
-        }
 
         while (true)
         {
@@ -79,6 +116,25 @@ namespace
                 if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
                 {
                     return true;
+                }
+
+                if (roadTool && OpenRoadTool(event, renderer))
+                {
+                    if (!input.SetCameraEnabled(false))
+                    {
+                        return false;
+                    }
+                    const ToolResult result = roadTool->Run(window, renderer, roads, freeCamera);
+                    if (result != ToolResult::Closed)
+                    {
+                        return result == ToolResult::Quit;
+                    }
+                    if (!input.SetCameraEnabled(true))
+                    {
+                        return false;
+                    }
+                    previousTime = SDL_GetTicksNS();
+                    continue;
                 }
 
                 if (mode == ApplicationMode::Game && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F1 && !event.key.repeat)
@@ -103,18 +159,23 @@ namespace
             }
 
             const Uint64 now = SDL_GetTicksNS();
-            const double elapsedSeconds = std::min((now - previousTime) / 1.0e9, 0.1);
-
+            const Uint64 elapsedNanoseconds = now - previousTime;
             previousTime = now;
+
+            if (mode == ApplicationMode::Game)
+            {
+                g_WorldState.AdvanceTime(elapsedNanoseconds);
+            }
 
             if (input.IsCameraEnabled())
             {
-                freeCamera.Update(input.ReadCameraInput(), elapsedSeconds);
+                const double cameraElapsedSeconds = std::min(elapsedNanoseconds / 1.0e9, 0.1);
+                freeCamera.Update(input.ReadCameraInput(), cameraElapsedSeconds);
             }
 
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
 
-            if (!SDL_RenderClear(renderer) || !DrawTriangle(renderer, view) || !SDL_RenderPresent(renderer))
+            if (!DrawScene(renderer, view, roads, roadTool != nullptr))
             {
                 return false;
             }
@@ -127,7 +188,7 @@ namespace
     }
 }
 
-int RunApplication(ApplicationMode mode)
+int RunApplication(ApplicationMode mode, const char* roadFile, EditorTool* roadTool)
 {
     const char* title = mode == ApplicationMode::Editor ? "Big Sky Country Editor" : "Big Sky Country";
     SDL_Window* window = nullptr;
@@ -141,7 +202,8 @@ int RunApplication(ApplicationMode mode)
 
     if (success)
     {
-        success = RunWindowLoop(window, renderer, mode);
+        RoadMap roads;
+        success = roads.Open(roadFile) && RunWindowLoop(window, renderer, mode, roads, roadTool);
     }
 
     if (!success)

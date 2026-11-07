@@ -7,6 +7,7 @@ struct CameraInput;
 class FreeCamera
 {
     public:
+        void LookAt(Vector3 eye, Vector3 target);
         void Update(const CameraInput& input, double elapsedSeconds);
         Vector3 WorldToView(Vector3 point) const;
 
