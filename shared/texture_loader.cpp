@@ -1,0 +1,185 @@
+#include "texture_loader.hpp"
+
+#include <algorithm>
+#include <memory>
+#include <span>
+#include <string>
+
+namespace
+{
+    using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
+
+    bool StripFooter(std::span<const Uint8>& data, size_t imageStart)
+    {
+        constexpr char signature[] = "TRUEVISION-XFILE.";
+        constexpr size_t footerSize = 26;
+
+        if (data.size() < footerSize || SDL_memcmp(data.data() + data.size() - sizeof(signature), signature, sizeof(signature)) != 0)
+        {
+            return true; // Original TGA files have no footer.
+        }
+
+        // TGA 2.0 may append extension and developer areas after the image packets.
+        const size_t footerStart = data.size() - footerSize;
+        size_t imageEnd = footerStart;
+
+        for (size_t field = 0; field < 8; field += 4)
+        {
+            Uint32 offset;
+            SDL_memcpy(&offset, data.data() + footerStart + field, sizeof(offset));
+            offset = SDL_Swap32LE(offset);
+
+            if (offset != 0)
+            {
+                if (offset < imageStart || offset >= footerStart)
+                {
+                    return SDL_SetError("Invalid TGA footer offset");
+                }
+                imageEnd = std::min(imageEnd, static_cast<size_t>(offset));
+            }
+        }
+
+        data = data.first(imageEnd);
+
+        return true;
+    }
+
+    bool ReadPackets(std::span<const Uint8> data, SDL_Surface* surface, int bytesPerPixel, bool topOrigin, bool rightOrigin)
+    {
+        const size_t pixelCount = static_cast<size_t>(surface->w) * surface->h;
+        size_t written = 0;
+
+        while (written < pixelCount)
+        {
+            if (data.empty())
+            {
+                return SDL_SetError("Missing TGA packet");
+            }
+
+            const bool repeat = (data[0] & 0x80) != 0;
+            const size_t count = (data[0] & 0x7f) + 1;
+            const size_t payloadSize = (repeat ? 1 : count) * bytesPerPixel;
+            data = data.subspan(1);
+
+            if (count > pixelCount - written || data.size() < payloadSize)
+            {
+                return SDL_SetError("Invalid or truncated TGA packet");
+            }
+
+            for (size_t i = 0; i < count; ++i, ++written)
+            {
+                const int column = static_cast<int>(written % surface->w);
+                const int row = static_cast<int>(written / surface->w);
+                const int x = rightOrigin ? surface->w - 1 - column : column;
+                const int y = topOrigin ? row : surface->h - 1 - row;
+                auto* destination = static_cast<Uint8*>(surface->pixels) + static_cast<size_t>(y) * surface->pitch;
+                const Uint8* pixel = data.data() + (repeat ? 0 : i * bytesPerPixel);
+                SDL_memcpy(destination + x * bytesPerPixel, pixel, bytesPerPixel);
+            }
+
+            data = data.subspan(payloadSize);
+        }
+
+        return true;
+    }
+
+    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data)
+    {
+        constexpr size_t headerSize = 18;
+
+        if (data.size() < headerSize)
+        {
+            SDL_SetError("Truncated TGA header");
+            return nullptr;
+        }
+
+        const int width = data[12] | (data[13] << 8);
+        const int height = data[14] | (data[15] << 8);
+        const int depth = data[16];
+        const Uint8 descriptor = data[17];
+
+        if (data[1] != 0 || data[2] != 10 || (depth != 24 && depth != 32) || (descriptor & 0xc0) != 0)
+        {
+            SDL_SetError("Expected a non-interleaved 24-bit or 32-bit RLE true-color TGA");
+            return nullptr;
+        }
+
+        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
+
+        if (width == 0 || height == 0 || (maxSize > 0 && (width > maxSize || height > maxSize)))
+        {
+            SDL_SetError("Unsupported TGA dimensions: %d x %d", width, height);
+            return nullptr;
+        }
+
+        const int bytesPerPixel = depth / 8;
+        const size_t imageStart = headerSize + data[0]; // Skip the optional image ID.
+
+        if (!StripFooter(data, imageStart))
+        {
+            return nullptr;
+        }
+
+        const size_t pixelCount = static_cast<size_t>(width) * height;
+        const size_t minPacketBytes = ((pixelCount + 127) / 128) * (1 + bytesPerPixel);
+
+        if (data.size() < imageStart || data.size() - imageStart < minPacketBytes)
+        {
+            SDL_SetError("Truncated TGA image data");
+            return nullptr;
+        }
+
+        const SDL_PixelFormat format = depth == 24 ? SDL_PIXELFORMAT_BGR24 : SDL_PIXELFORMAT_BGRA32;
+        Surface surface(SDL_CreateSurface(width, height, format), SDL_DestroySurface);
+
+        if (!surface || !ReadPackets(data.subspan(imageStart), surface.get(), bytesPerPixel, (descriptor & 0x20) != 0, (descriptor & 0x10) != 0))
+        {
+            return nullptr;
+        }
+
+        return SDL_CreateTextureFromSurface(renderer, surface.get());
+    }
+}
+
+SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)
+{
+    if (!renderer || !relativePath)
+    {
+        SDL_SetError("A renderer and a texture path are required");
+        return nullptr;
+    }
+
+    std::string name(relativePath);
+    std::replace(name.begin(), name.end(), '\\', '/');
+
+    if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
+    {
+        SDL_SetError("Expected a path relative to assets/textures: '%s'", relativePath);
+        return nullptr;
+    }
+
+    const char* base = SDL_GetBasePath();
+
+    if (!base)
+    {
+        return nullptr;
+    }
+
+    const std::string path = std::string(base) + "assets/textures/" + name;
+    size_t size = 0;
+    std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
+    SDL_Texture* texture = nullptr;
+
+    if (file)
+    {
+        texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size });
+    }
+
+    if (!texture)
+    {
+        const std::string reason = SDL_GetError();
+        SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
+    }
+
+    return texture;
+}

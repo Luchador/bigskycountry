@@ -15,6 +15,7 @@ add_library(BigSkyApplication STATIC
     shared/free_camera.cpp
     shared/input.cpp
     shared/math.cpp
+    shared/texture_loader.cpp
 )
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
 target_include_directories(BigSkyApplication PUBLIC shared)
@@ -25,3 +26,15 @@ target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
 add_executable(BigSkyCountryEditor WIN32 editor/main.cpp)
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
+
+# Both executables use the same runtime directory, including on multi-config builds.
+add_custom_target(BigSkyTextures
+    COMMAND "${CMAKE_COMMAND}"
+        "-DtextureSource=${CMAKE_CURRENT_SOURCE_DIR}/assets/textures"
+        "-DtextureDestination=$<TARGET_FILE_DIR:BigSkyCountry>/assets/textures"
+        "-DtextureManifest=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/BigSkyTextures-$<CONFIG>.list"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_textures.cmake"
+    VERBATIM
+)
+add_dependencies(BigSkyCountry BigSkyTextures)
+add_dependencies(BigSkyCountryEditor BigSkyTextures)
