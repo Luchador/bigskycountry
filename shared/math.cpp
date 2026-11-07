@@ -25,6 +25,7 @@ double Math::Length(const Vector3& vector)
 Vector3 Math::Normalize(const Vector3& vector)
 {
     const double length = Length(vector);
+
     if (length == 0.0)
     {
         return {};
