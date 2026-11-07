@@ -6,6 +6,8 @@
 namespace
 {
     constexpr SDL_FColor roadColor{0.43f, 0.43f, 0.43f, 1.0f};
+    constexpr SDL_FColor yellowStripeColor{0.96f, 0.85f, 0.12f, 1.0f};
+    constexpr SDL_FColor whiteStripeColor{0.9f, 0.9f, 0.9f, 1.0f};
 
     struct Polygon
     {
