@@ -10,7 +10,11 @@ FetchContent_Declare(SDL3
 )
 FetchContent_MakeAvailable(SDL3)
 
-add_library(BigSkyApplication STATIC shared/application.cpp)
+add_library(BigSkyApplication STATIC
+    shared/application.cpp
+    shared/free_camera.cpp
+    shared/input.cpp
+)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
 target_include_directories(BigSkyApplication PUBLIC shared)
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)

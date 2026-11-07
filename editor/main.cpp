@@ -4,5 +4,5 @@
 
 int main(int, char**)
 {
-    return RunApplication("Big Sky Country Editor");
+    return RunApplication(ApplicationMode::Editor);
 }

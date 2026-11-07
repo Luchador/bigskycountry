@@ -4,5 +4,5 @@
 
 int main(int, char**)
 {
-    return RunApplication("Big Sky Country");
+    return RunApplication(ApplicationMode::Game);
 }

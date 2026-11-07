@@ -1,3 +1,9 @@
 #pragma once
 
-int RunApplication(const char* title);
+enum class ApplicationMode
+{
+    Game,
+    Editor
+};
+
+int RunApplication(ApplicationMode mode);
