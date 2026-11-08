@@ -342,24 +342,26 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map) const
         }
     }
 
-    auto drawRoad = [&](const Road& road) { return DrawPlanRoad(renderer, road, center, scale, canvas); };
-    for (const Road& road : map.roads)
-    {
-        if (!drawRoad(road))
-        {
-            return false;
-        }
-    }
-
+    std::optional<Road> preview;
     if (drawing && !draft.points.empty())
     {
-        Road preview = draft;
+        preview = draft;
         if (mouse.x >= panel)
         {
-            preview.points.push_back({ToWorld(mouse.x, mouse.y), {}});
+            preview->points.push_back({ToWorld(mouse.x, mouse.y), {}});
         }
-        preview.Rebuild();
-        if (!drawRoad(preview))
+        preview->Rebuild();
+    }
+    for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
+    {
+        for (const Road& road : map.roads)
+        {
+            if (!DrawPlanRoad(renderer, road, center, scale, canvas, layer))
+            {
+                return false;
+            }
+        }
+        if (preview && !DrawPlanRoad(renderer, *preview, center, scale, canvas, layer))
         {
             return false;
         }

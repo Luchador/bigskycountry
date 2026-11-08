@@ -48,14 +48,14 @@ namespace
     }
 
     template <typename ViewTransform>
-
-    void AppendRoad(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
+    void AppendTriangles(const std::vector<Road::Triangle>& triangles, SDL_FColor color, ViewTransform transform,
+                         double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
     {
 
         const double halfWidth = viewport.w * 0.5, halfHeight = viewport.h * 0.5;
         const Vector3 sides[] = {{focal, 0, halfWidth}, {-focal, 0, halfWidth}, {0, focal, halfHeight}, {0, -focal, halfHeight}};
 
-        for (const auto& triangle : road.triangles)
+        for (const auto& triangle : triangles)
         {
             Polygon p{};
 
@@ -82,11 +82,24 @@ namespace
                     const Vector3 v = p.points[index];
                     vertices.push_back({{static_cast<float>(viewport.x + halfWidth + v.x * focal / v.z),
                                          static_cast<float>(viewport.y + halfHeight - v.y * focal / v.z)},
-                                        roadColor,
+                                        color,
                                         {}});
                 }
             }
         }
+    }
+
+    template <typename ViewTransform>
+    void AppendRoad(const Road& road, RoadLayer layer, ViewTransform transform, double focal, SDL_Rect viewport,
+                    std::vector<SDL_Vertex>& vertices)
+    {
+        if (layer == RoadLayer::Pavement)
+        {
+            AppendTriangles(road.triangles, roadColor, transform, focal, viewport, vertices);
+            return;
+        }
+        AppendTriangles(road.yellowStripes, yellowStripeColor, transform, focal, viewport, vertices);
+        AppendTriangles(road.whiteStripes, whiteStripeColor, transform, focal, viewport, vertices);
     }
 
     // Draw a batch of road triangles and return whether the operation succeeded.
@@ -112,20 +125,26 @@ bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const Road
 
     std::vector<SDL_Vertex> vertices;
 
-    for (const Road& road : map.roads)
+    const auto transform = [&](Vector3 p) { return camera.WorldToView(p); };
+    const double focal = std::min(viewport.w, viewport.h) * 0.5;
+    // SDL_RenderGeometry draws in submission order. Paint belongs above all pavement.
+    for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
     {
-        AppendRoad(road, [&](Vector3 p) { return camera.WorldToView(p); }, std::min(viewport.w, viewport.h) * 0.5, viewport, vertices);
+        for (const Road& road : map.roads)
+        {
+            AppendRoad(road, layer, transform, focal, viewport, vertices);
+        }
     }
 
     return Submit(renderer, vertices);
 }
 
 // Draw a road in the Editor's 2D view
-bool DrawPlanRoad(SDL_Renderer* renderer, const Road& road, Vector3 center, double scale, SDL_Rect viewport)
+bool DrawPlanRoad(SDL_Renderer* renderer, const Road& road, Vector3 center, double scale, SDL_Rect viewport, RoadLayer layer)
 {
     std::vector<SDL_Vertex> vertices;
 
-    AppendRoad(road, [&](Vector3 p) { return Vector3{p.x - center.x, p.z - center.z, 1.0}; }, scale, viewport, vertices);
+    AppendRoad(road, layer, [&](Vector3 p) { return Vector3{p.x - center.x, p.z - center.z, 1.0}; }, scale, viewport, vertices);
 
     return Submit(renderer, vertices);
 }

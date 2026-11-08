@@ -29,13 +29,20 @@ struct RoadPoint
 
 struct Road
 {
+    using Triangle = std::array<Vector3, 3>;
+
     RoadStyle style;
     std::vector<RoadPoint> points;
-    std::vector<std::array<Vector3, 3>> triangles;
+    std::vector<Triangle> triangles;
+    std::vector<Triangle> whiteStripes;
+    std::vector<Triangle> yellowStripes;
 
     Vector3 Tangent(std::size_t index) const;
     void RotatePoint(std::size_t index, double heading);
     void Rebuild();
+
+private:
+    void BuildStripes(const std::vector<Vector3>& samples);
 };
 
 class RoadMap

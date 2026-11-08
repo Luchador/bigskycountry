@@ -12,6 +12,7 @@ FetchContent_MakeAvailable(SDL3)
 
 add_library(BigSkyApplication STATIC
     shared/road.cpp
+    shared/road_stripes.cpp
     shared/road_file.cpp
     shared/road_render.cpp
     shared/application.cpp
