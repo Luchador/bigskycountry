@@ -9,52 +9,10 @@
 
 namespace
 {
-    bool DrawTriangle(SDL_Renderer* renderer, const FreeCamera& camera)
-    {
-        int width;
-        int height;
-    
-        if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
-        {
-            return false;
-        }
-
-        // A camera-facing triangle, four meters in front of the starting camera.
-        const Vector3 center = camera.WorldToView({ 0.0, 0.0, 4.0 });
-
-        if (center.z < 0.1)
-        {
-            return true;
-        }
-
-        const double pixelsPerMeter = 0.5 * std::min(width, height) / center.z;
-        const double x = width * 0.5 + center.x * pixelsPerMeter;
-        const double y = height * 0.5 - center.y * pixelsPerMeter;
-        const double halfExtent = 2.0 * pixelsPerMeter;
-
-        if (x + halfExtent < 0.0 || x - halfExtent > width || y + halfExtent < 0.0 || y - halfExtent > height)
-        {
-            return true;
-        }
-
-        const float centerX = static_cast<float>(x);
-        const float centerY = static_cast<float>(y);
-        const float halfSize = static_cast<float>(halfExtent);
-
-        const SDL_Vertex vertices[] =
-        {
-            { { centerX, centerY - halfSize },            { 1.0f, 0.0f, 0.0f, 1.0f }, {} },
-            { { centerX - halfSize, centerY + halfSize }, { 0.0f, 1.0f, 0.0f, 1.0f }, {} },
-            { { centerX + halfSize, centerY + halfSize }, { 1.0f, 1.0f, 1.0f, 1.0f }, {} },
-        };
-
-        return SDL_RenderGeometry(renderer, nullptr, vertices, 3, nullptr, 0);
-    }
-
     bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads)
     {
         return SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255) && SDL_RenderClear(renderer) &&
-               DrawWorldRoads(renderer, view, roads) && DrawTriangle(renderer, view);
+               DrawWorldRoads(renderer, view, roads);
     }
 
     bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode,
