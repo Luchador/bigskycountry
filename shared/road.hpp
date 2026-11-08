@@ -8,6 +8,13 @@
 #include <string>
 #include <vector>
 
+enum class ThreeLaneLayout
+{
+    TwoNorthbound = 0,
+    TwoSouthbound = 1,
+    CenterTurn = 2
+};
+
 struct RoadStyle
 {
     static constexpr double laneWidth = 5.0;
@@ -16,6 +23,7 @@ struct RoadStyle
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = false;
+    ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
 
     double LeftWidth() const;
     double RightWidth() const;

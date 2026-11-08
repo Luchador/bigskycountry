@@ -41,7 +41,7 @@ bool RoadMap::Open(const char* documentPath)
     file.imbue(std::locale::classic());
     std::string token;
     int version;
-    if (!(file >> token >> version) || token != "BSC_ROADS" || version != 1)
+    if (!(file >> token >> version) || token != "BSC_ROADS" || (version != 1 && version != 2))
     {
         return SDL_SetError("Cannot read road document: %s", filename.c_str());
     }
@@ -55,6 +55,16 @@ bool RoadMap::Open(const char* documentPath)
             !(file >> style.curved >> style.lanes >> style.leftShoulder >> style.rightShoulder) || style.lanes < 1)
         {
             return SDL_SetError("Invalid road settings: %s", filename.c_str());
+        }
+        if (version == 2)
+        {
+            int layout;
+            if (!(file >> layout) || layout < static_cast<int>(ThreeLaneLayout::TwoNorthbound) ||
+                layout > static_cast<int>(ThreeLaneLayout::CenterTurn))
+            {
+                return SDL_SetError("Invalid three-lane layout: %s", filename.c_str());
+            }
+            style.threeLaneLayout = static_cast<ThreeLaneLayout>(layout);
         }
         while (file >> token && token == "point")
         {
@@ -92,12 +102,12 @@ bool RoadMap::Save() const
 {
     std::ostringstream file;
     file.imbue(std::locale::classic());
-    file << "BSC_ROADS 1\n" << std::setprecision(std::numeric_limits<double>::max_digits10);
+    file << "BSC_ROADS 2\n" << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const Road& road : roads)
     {
         const auto& style = road.style;
         file << "road " << style.curved << ' ' << style.lanes << ' ' << style.leftShoulder << ' '
-             << style.rightShoulder << '\n';
+             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << '\n';
         for (const RoadPoint& point : road.points)
         {
             file << "point " << point.position.x << ' ' << point.position.z << ' ' << point.heading.has_value()

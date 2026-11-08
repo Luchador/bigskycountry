@@ -7,6 +7,7 @@ namespace
 {
     constexpr double stripeWidth = 0.16;
     constexpr double yellowGap = 0.16; // Clear space between the two yellow stripes.
+    constexpr double yellowPairOffset = (yellowGap + stripeWidth) * 0.5;
     constexpr double stripeHeight = 0.02;
     constexpr double dashLength = 3.0;
     constexpr double gapLength = 9.0;
@@ -174,6 +175,15 @@ namespace
         }
         PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
     }
+
+    void PaintDoubleYellow(const std::vector<Span>& spans, double boundary, std::vector<Road::Triangle>& mesh)
+    {
+        for (int side : {-1, 1})
+        {
+            const auto stripe = OffsetPath(spans, boundary + side * yellowPairOffset);
+            PaintStrip(stripe, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
+        }
+    }
 }
 
 void Road::BuildStripes(const std::vector<Vector3>& samples)
@@ -186,17 +196,45 @@ void Road::BuildStripes(const std::vector<Vector3>& samples)
     }
 
     const double halfTravelWidth = style.lanes * RoadStyle::laneWidth * 0.5;
-    const int lanesPerDirection = style.lanes / 2;
 
     for (int side : {-1, 1})
     {
         // Place the white stripe wholly inside the travel edge, beside any shoulder.
         const auto edge = OffsetPath(spans, side * halfTravelWidth);
         PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
+    }
 
-        const auto yellow = OffsetPath(spans, side * (yellowGap + stripeWidth) * 0.5);
-        PaintStrip(yellow, -stripeWidth * 0.5, stripeWidth * 0.5, yellowStripes);
+    if (style.lanes == 3)
+    {
+        constexpr double halfLane = RoadStyle::laneWidth * 0.5;
+        if (style.threeLaneLayout == ThreeLaneLayout::CenterTurn)
+        {
+            for (int side : {-1, 1})
+            {
+                const auto solid = OffsetPath(spans, side * (halfLane + yellowPairOffset));
+                PaintStrip(solid, -stripeWidth * 0.5, stripeWidth * 0.5, yellowStripes);
+                const auto dashed = OffsetPath(spans, side * (halfLane - yellowPairOffset));
+                PaintDashes(dashed, yellowStripes);
+            }
+        }
+        else
+        {
+            // North is +Z. On an east-west road, use +X as the northbound direction.
+            const Vector3 travel = spans.back().end - spans.front().start;
+            const bool northFollowsPoints = travel.z == 0.0 ? travel.x >= 0.0 : travel.z > 0.0;
+            const bool twoNorthbound = style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound;
+            // Traffic keeps right. Positive offsets are left of the authored path.
+            const double boundary = (twoNorthbound == northFollowsPoints) ? halfLane : -halfLane;
+            PaintDoubleYellow(spans, boundary, yellowStripes);
+            PaintDashes(OffsetPath(spans, -boundary), whiteStripes);
+        }
+        return;
+    }
 
+    PaintDoubleYellow(spans, 0.0, yellowStripes);
+    const int lanesPerDirection = style.lanes / 2;
+    for (int side : {-1, 1})
+    {
         for (int lane = 1; lane < lanesPerDirection; ++lane)
         {
             const auto divider = OffsetPath(spans, side * lane * RoadStyle::laneWidth);

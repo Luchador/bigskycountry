@@ -12,6 +12,7 @@ namespace
     constexpr float panel = 218.0f;
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
+    constexpr float threeLanePanelHeight = 104.0f;
 
     bool Near(SDL_FPoint a, SDL_FPoint b)
     {
@@ -84,19 +85,31 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const RoadMap& map) const
 {
     const Road* current = drawing ? &draft : Selected(map);
     const RoadStyle& style = current ? current->style : defaults;
-    return {
+    const float offset = style.lanes == 3 ? threeLanePanelHeight : 0.0f;
+    std::vector<Button> buttons{
         {Action::Back, {12, 44, 194, 28}, "Back to 3D   [R]"},
         {Action::New, {12, 84, 194, 28}, "New road", false, !drawing},
         {Action::Straight, {12, 148, 94, 28}, "Straight", !style.curved},
         {Action::Curve, {112, 148, 94, 28}, "Bezier", style.curved},
         {Action::Fewer, {12, 210, 32, 28}, "-", false, style.lanes > 1},
         {Action::More, {174, 210, 32, 28}, "+", false, style.lanes < std::numeric_limits<int>::max()},
-        {Action::Left, {12, 274, 94, 28}, "Left", style.leftShoulder},
-        {Action::Right, {112, 274, 94, 28}, "Right", style.rightShoulder},
-        {Action::Finish, {12, 350, 194, 28}, "Finish road  [Enter]", false, drawing && draft.points.size() >= 2},
-        {Action::Cancel, {12, 384, 194, 28}, "Cancel draft [Esc]", false, drawing},
-        {Action::Remove, {12, 424, 194, 28}, "Delete selected road", false, current && !drawing},
-        {Action::Save, {12, 458, 194, 28}, "Save   [Ctrl+S]"}};
+        {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder},
+        {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
+        {Action::Finish, {12, 350 + offset, 194, 28}, "Finish road  [Enter]", false, drawing && draft.points.size() >= 2},
+        {Action::Cancel, {12, 384 + offset, 194, 28}, "Cancel draft [Esc]", false, drawing},
+        {Action::Remove, {12, 424 + offset, 194, 28}, "Delete selected road", false, current && !drawing},
+        {Action::Save, {12, 458 + offset, 194, 28}, "Save   [Ctrl+S]"}};
+
+    if (style.lanes == 3)
+    {
+        buttons.push_back({Action::TwoNorthbound, {12, 268, 194, 26}, "2 north / 1 south",
+                           style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound});
+        buttons.push_back({Action::TwoSouthbound, {12, 298, 194, 26}, "1 north / 2 south",
+                           style.threeLaneLayout == ThreeLaneLayout::TwoSouthbound});
+        buttons.push_back({Action::CenterTurn, {12, 328, 194, 26}, "Center turn lane",
+                           style.threeLaneLayout == ThreeLaneLayout::CenterTurn});
+    }
+    return buttons;
 }
 
 void RoadEditor::Save(RoadMap& map)
@@ -179,6 +192,15 @@ void RoadEditor::Activate(Action action, RoadMap& map)
         break;
     case Action::More:
         ++style.lanes;
+        break;
+    case Action::TwoNorthbound:
+        style.threeLaneLayout = ThreeLaneLayout::TwoNorthbound;
+        break;
+    case Action::TwoSouthbound:
+        style.threeLaneLayout = ThreeLaneLayout::TwoSouthbound;
+        break;
+    case Action::CenterTurn:
+        style.threeLaneLayout = ThreeLaneLayout::CenterTurn;
         break;
     case Action::Left:
         style.leftShoulder = !style.leftShoulder;
@@ -430,10 +452,15 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map) const
     }
     const Road* current = drawing ? &draft : Selected(map);
     const RoadStyle& style = current ? current->style : defaults;
+    const float offset = style.lanes == 3 ? threeLanePanelHeight : 0.0f;
+    if (style.lanes == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
+    {
+        return false;
+    }
     if (!Text(renderer, 12, 132, "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
-        !Text(renderer, 12, 258, "Shoulders (5 m each)", muted) ||
+        !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
         !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", style.lanes) ||
-        !SDL_RenderDebugTextFormat(renderer, 12, 320, "Width: %.0f m", style.LeftWidth() + style.RightWidth()))
+        !SDL_RenderDebugTextFormat(renderer, 12, 320 + offset, "Width: %.0f m", style.LeftWidth() + style.RightWidth()))
     {
         return false;
     }
