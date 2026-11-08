@@ -29,7 +29,15 @@ target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
-add_executable(BigSkyCountryEditor WIN32 editor/main.cpp editor/road_editor.cpp)
+add_executable(BigSkyCountryEditor WIN32
+    editor/main.cpp
+    editor/road_editor.cpp
+    editor/editor_menu.cpp
+    editor/edit_history.cpp
+)
+if(WIN32)
+    target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32)
+endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
 # Both executables use the same runtime directory, including on multi-config builds.

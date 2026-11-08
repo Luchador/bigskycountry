@@ -27,6 +27,7 @@ struct RoadStyle
     double dividedGap = 4.0;
     ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
 
+    bool operator==(const RoadStyle&) const = default;
     int GetLaneCount() const;
     void SetLaneCount(int count);
     bool HasCenterTurnLane() const;

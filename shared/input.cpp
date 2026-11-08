@@ -70,7 +70,7 @@ bool Input::HandleEvent(const SDL_Event& event)
     return true;
 }
 
-CameraInput Input::ReadCameraInput() const
+CameraInput Input::ReadCameraInput(bool allowBackward) const
 {
     CameraInput input;
 
@@ -82,7 +82,7 @@ CameraInput Input::ReadCameraInput() const
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
     // Opposing keys cancel each other out.
-    input.forward = keys[SDL_SCANCODE_W] - keys[SDL_SCANCODE_S];
+    input.forward = keys[SDL_SCANCODE_W] - (allowBackward && keys[SDL_SCANCODE_S]);
     input.right = keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A];
     input.up = keys[SDL_SCANCODE_E] - keys[SDL_SCANCODE_Q];
 

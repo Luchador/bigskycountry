@@ -144,7 +144,9 @@ namespace
             if (input.IsCameraEnabled())
             {
                 const double cameraElapsedSeconds = std::min(elapsedNanoseconds / 1.0e9, 0.1);
-                freeCamera.Update(input.ReadCameraInput(), cameraElapsedSeconds);
+                // Ctrl+S belongs to File > Save in the editor.
+                const bool allowBackward = !roadTool || !(SDL_GetModState() & SDL_KMOD_CTRL);
+                freeCamera.Update(input.ReadCameraInput(allowBackward), cameraElapsedSeconds);
             }
 
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
@@ -182,7 +184,8 @@ int RunApplication(ApplicationMode mode, const char* roadFile, EditorTool* roadT
     if (success)
     {
         RoadMap roads;
-        success = roads.Open(roadFile) && RunWindowLoop(window, renderer, mode, roads, roadTool);
+        success = roads.Open(roadFile) && (!roadTool || roadTool->Initialize(window)) &&
+                  RunWindowLoop(window, renderer, mode, roads, roadTool);
     }
 
     if (!success)

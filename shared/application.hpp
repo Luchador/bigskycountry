@@ -18,6 +18,7 @@ class EditorTool
 {
 public:
     virtual ~EditorTool() = default;
+    virtual bool Initialize(SDL_Window* window) = 0;
     virtual bool IsPlanView() const = 0;
     virtual EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
                                     RoadMap& map, FreeCamera& camera) = 0;
