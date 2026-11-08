@@ -6,7 +6,7 @@
 #include <cmath>
 #include <memory>
 
-SkyDisc::Mesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color)
+SkyDisc::DiscMesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color)
 {
     const Vector3 right = (direction.x == 0.0 && direction.z == 0.0) ? Vector3{1.0, 0.0, 0.0} : Math::Normalize(Math::Cross({0.0, 1.0, 0.0}, direction));
     const Vector3 up = Math::Cross(direction, right);
@@ -20,6 +20,7 @@ SkyDisc::Mesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_
     // A point on the sprite has world height direction.y + y * up.y. Cut the sprite at height zero.
     if (direction.y + top * up.y <= 0.0)
     {
+        // Return an empty mesh.
         return {};
     }
 
@@ -32,6 +33,7 @@ SkyDisc::Mesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_
 
     const Vector3 center = camera.WorldDirectionToView(direction);
     const Vector3 u = camera.WorldDirectionToView(right), v = camera.WorldDirectionToView(up);
+
     ViewGeometry::Polygon quad{};
     quad.points[0] = center + u * left + v * top;
     quad.points[1] = center + u * rightEdge + v * top;
@@ -51,7 +53,7 @@ SkyDisc::Mesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_
         }
     }
 
-    Mesh mesh;
+    DiscMesh mesh;
     mesh.count = quad.count;
 
     for (int i = 0; i < quad.count; ++i)

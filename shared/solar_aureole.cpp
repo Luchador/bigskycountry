@@ -62,6 +62,7 @@ SDL_FColor SolarAureole::Brighten(SDL_FColor sky, Vector3 unitRay) const
 {
     // Continue smoothly into the existing haze just below the horizon.
     const double visibility = strength * SmoothStep(-0.07, 0.0, unitRay.y);
+
     if (visibility == 0.0)
     {
         return sky;

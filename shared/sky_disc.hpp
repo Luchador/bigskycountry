@@ -8,7 +8,7 @@ class FreeCamera;
 
 namespace SkyDisc
 {
-    struct Mesh
+    struct DiscMesh
     {
         std::array<SDL_Vertex, 8> vertices{};
         int count = 0;
@@ -17,5 +17,5 @@ namespace SkyDisc
 
     // Project a textured disc at infinity, clipped to the horizon and viewport.
     // The visible disc bounds set the angular diameter independently of transparent padding.
-    Mesh Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color);
+    DiscMesh Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color);
 }

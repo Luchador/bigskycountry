@@ -39,7 +39,7 @@ bool Moon::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direct
         return false;
     }
 
-    const SkyDisc::Mesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, {1.0f, 1.0f, 1.0f, 1.0f});
+    const SkyDisc::DiscMesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, {1.0f, 1.0f, 1.0f, 1.0f});
 
     return mesh.count == 0 || SDL_RenderGeometry(renderer, texture.get(), mesh.vertices.data(), mesh.count,  mesh.fan, 3 * (mesh.count - 2));
 }

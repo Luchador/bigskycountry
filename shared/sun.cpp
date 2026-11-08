@@ -78,6 +78,7 @@ bool Sun::Load(SDL_Renderer* renderer)
     if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) || !discShader.Initialize(renderer, texture.get()))
     {
         texture.reset();
+
         return false;
     }
 
@@ -92,12 +93,12 @@ bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 directi
     }
 
     const SDL_FColor tint = Tint(std::asin(std::clamp(direction.y, -1.0, 1.0)));
+
     // Budget disc emission against the unbrightened SDR sky. The aureole is already
     // in the framebuffer and is intentionally excluded from this calculation.
-    const SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g),
-                              std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
+    const SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g), std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
 
-    const SkyDisc::Mesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, emission);
+    const SkyDisc::DiscMesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, emission);
 
     return mesh.count == 0 || discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count, mesh.fan, 3 * (mesh.count - 2));
 }
