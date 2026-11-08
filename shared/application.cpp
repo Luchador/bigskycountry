@@ -92,6 +92,15 @@ namespace
                     }
                 }
 
+                // The editor consumes wheel events used for top-down map zoom.
+                if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.windowID == SDL_GetWindowID(window) &&
+                    (input.IsCameraEnabled() || roadTool))
+                {
+                    const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+                    freeCamera.ScrollSpeed(steps);
+                    continue;
+                }
+
                 if (!input.HandleEvent(event))
                 {
                     return false;
@@ -117,6 +126,10 @@ namespace
 
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
 
+            if (roadTool && !roadTool->SetContentViewport(renderer))
+            {
+                return false;
+            }
             if ((!roadTool || !roadTool->IsPlanView()) &&
                 !DrawScene(renderer, view, world, sky))
             {

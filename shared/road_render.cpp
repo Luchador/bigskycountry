@@ -150,11 +150,18 @@ bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const std:
 
     SDL_Rect viewport{};
 
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &viewport.w, &viewport.h))
+    if (!SDL_GetRenderViewport(renderer, &viewport))
     {
         return false;
     }
 
+    // Geometry is submitted in viewport-local coordinates.
+    viewport.x = 0;
+    viewport.y = 0;
+    if (viewport.w == 0 || viewport.h == 0)
+    {
+        return true;
+    }
     std::vector<SDL_Vertex> vertices;
 
     const auto transform = [&](Vector3 p) { return camera.WorldToView(p); };

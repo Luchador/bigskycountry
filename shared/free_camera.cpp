@@ -7,9 +7,41 @@
 
 namespace
 {
-    constexpr double moveSpeed = 3.0; // meters per second
+    constexpr double minMoveSpeed = 0.1; // meters per second
+    constexpr double maxMoveSpeed = 50'000.0;
+    const double speedLogRange = std::log(maxMoveSpeed / minMoveSpeed);
     constexpr double lookSensitivity = 0.0025; // radians per mouse unit
     constexpr double pitchLimit = Math::DegreesToRadians(89.0);
+}
+
+double FreeCamera::GetSpeedFraction() const
+{
+    return std::log(moveSpeed / minMoveSpeed) / speedLogRange;
+}
+
+void FreeCamera::SetSpeedFraction(double fraction)
+{
+    if (fraction <= 0.0)
+    {
+        moveSpeed = minMoveSpeed;
+    }
+    else if (fraction >= 1.0)
+    {
+        moveSpeed = maxMoveSpeed;
+    }
+    else
+    {
+        moveSpeed = minMoveSpeed * std::exp(fraction * speedLogRange);
+    }
+}
+
+void FreeCamera::ScrollSpeed(double wheelSteps)
+{
+    // Sixty wheel notches cover the slider. Trackpads can send fractional steps.
+    if (wheelSteps != 0.0)
+    {
+        SetSpeedFraction(GetSpeedFraction() + wheelSteps / 60.0);
+    }
 }
 
 Vector3 FreeCamera::Forward() const

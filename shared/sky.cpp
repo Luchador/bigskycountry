@@ -132,13 +132,14 @@ void Sky::UpdateGrid()
 
 bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
 {
-    int width, height;
-
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
+    SDL_Rect content;
+    if (!SDL_GetRenderViewport(renderer, &content))
     {
         return false;
     }
 
+    const int width = content.w;
+    const int height = content.h;
     if (width <= 0 || height <= 0)
     {
         return true;

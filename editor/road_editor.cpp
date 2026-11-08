@@ -557,7 +557,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     return SDL_SetRenderClipRect(renderer, nullptr);
 }
 
-bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const WorldDocument& world) const
+bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const
 {
     if (!Fill(renderer, {0, 0, panel, static_cast<float>(height)}, {24, 32, 38, 255}))
     {
@@ -608,13 +608,22 @@ bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const WorldDocument& worl
     return Text(renderer, 14, 18, "Road editor", ink);
 }
 
-bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
+bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 {
-    menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
+    int outputHeight;
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &outputHeight))
     {
         return false;
     }
+    const int top = std::min(CameraToolbar::height, outputHeight);
+    height = outputHeight - top;
+    const SDL_Rect content{0, top, width, height};
+    return SDL_SetRenderViewport(renderer, &content);
+}
+
+bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
+{
+    menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
     if (planView)
     {
         if (!RenderPlan(renderer, world))
@@ -627,7 +636,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
         const Road* road = Selected(world);
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
         if ((road && !DrawWorldRoadOutline(renderer, camera, *road, {0, 0, width, height})) ||
-            !Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look", ink) ||
+            !Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look | Wheel to change speed", ink) ||
             !SDL_RenderDebugTextFormat(renderer, panel + 12, 28, "Sky %02d:%02d CDT   [ earlier   ] later",
                                        minutes / 60, minutes % 60) ||
             !Text(renderer, panel + 12, static_cast<float>(height) - 20, status.c_str(), ink))
@@ -635,7 +644,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
             return false;
         }
     }
-    return RenderToolbar(renderer, world);
+    return RenderRoadPanel(renderer, world) && SDL_SetRenderViewport(renderer, nullptr) &&
+           cameraToolbar.Draw(renderer, width, camera);
 }
 
 void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
@@ -701,6 +711,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
     {
+        cameraToolbar.CancelDrag();
         Release(world);
         return EditorEvent::Pass;
     }
@@ -731,17 +742,31 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
     }
 
-    // Input owns relative mouse motion and the right-button release during 3D look.
-    if (!planView && (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || SDL_GetWindowRelativeMouseMode(window)))
+    // Relative mouse motion and right-button release belong to 3D look.
+    if (SDL_GetWindowRelativeMouseMode(window) ||
+        (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN && event.type != SDL_EVENT_MOUSE_BUTTON_UP &&
+         event.type != SDL_EVENT_MOUSE_MOTION && event.type != SDL_EVENT_MOUSE_WHEEL))
     {
         return EditorEvent::Pass;
     }
 
     SDL_Event e = event;
-    if (!SDL_ConvertEventToRenderCoordinates(renderer, &e) ||
-        !SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
+    if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &e))
     {
         return EditorEvent::Error;
+    }
+    if (e.type == SDL_EVENT_MOUSE_WHEEL && (!planView || e.wheel.mouse_y < 0))
+    {
+        return EditorEvent::Pass; // Adjust the free camera, including over the bar in plan view.
+    }
+    if (drag == Drag::None && cameraToolbar.HandlePointer(e, width, camera))
+    {
+        mouse = {-1, -1};
+        return EditorEvent::Handled;
+    }
+    if (!planView && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
+    {
+        return EditorEvent::Pass;
     }
     switch (e.type)
     {

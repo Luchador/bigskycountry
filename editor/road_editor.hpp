@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application.hpp"
+#include "camera_toolbar.hpp"
 #include "edit_history.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
@@ -10,6 +11,7 @@ class RoadEditor : public EditorTool
 public:
     bool Initialize(SDL_Window* window) override { return menu.Attach(window); }
     bool IsPlanView() const override { return planView; }
+    bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
                             WorldDocument& world, FreeCamera& camera) override;
     bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
@@ -56,7 +58,7 @@ private:
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
-    bool RenderToolbar(SDL_Renderer* renderer, const WorldDocument& world) const;
+    bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
     void PickWorldRoad(const WorldDocument& world, const FreeCamera& camera);
@@ -77,6 +79,7 @@ private:
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
+    CameraToolbar cameraToolbar;
     bool planView = false;
     bool dragChanged = false;
     bool saveFailed = false;
