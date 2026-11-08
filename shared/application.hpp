@@ -3,7 +3,7 @@
 struct SDL_Window;
 struct SDL_Renderer;
 union SDL_Event;
-class RoadMap;
+class WorldDocument;
 class FreeCamera;
 
 enum class ApplicationMode
@@ -21,8 +21,8 @@ public:
     virtual bool Initialize(SDL_Window* window) = 0;
     virtual bool IsPlanView() const = 0;
     virtual EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
-                                    RoadMap& map, FreeCamera& camera) = 0;
-    virtual bool Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCamera& camera) = 0;
+                                    WorldDocument& world, FreeCamera& camera) = 0;
+    virtual bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) = 0;
 };
 
-int RunApplication(ApplicationMode mode, const char* roadFile = nullptr, EditorTool* roadTool = nullptr);
+int RunApplication(ApplicationMode mode, const char* worldFile = nullptr, EditorTool* roadTool = nullptr);

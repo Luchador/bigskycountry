@@ -1,5 +1,6 @@
 #include "road_editor.hpp"
 #include "world_state.hpp"
+#include "world_document.hpp"
 #include "road_render.hpp"
 #include "free_camera.hpp"
 
@@ -56,19 +57,19 @@ namespace
     }
 }
 
-const Road* RoadEditor::Selected(const RoadMap& map) const
+const Road* RoadEditor::Selected(const WorldDocument& world) const
 {
-    return state.selected >= 0 ? &map.roads[state.selected] : nullptr;
+    return state.selected >= 0 ? &world.roads[state.selected] : nullptr;
 }
 
-RoadStyle& RoadEditor::Style(RoadMap& map)
+RoadStyle& RoadEditor::Style(WorldDocument& world)
 {
     if (EditingDraft())
     {
         return state.draft->style;
     }
 
-    return state.selected >= 0 ? map.roads[state.selected].style : state.defaults;
+    return state.selected >= 0 ? world.roads[state.selected].style : state.defaults;
 }
 
 Vector3 RoadEditor::ToWorld(float x, float y) const
@@ -86,9 +87,9 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
     return ToScreen(road.points[index].position + road.Tangent(index) * (handleLength / scale));
 }
 
-std::vector<RoadEditor::Button> RoadEditor::Buttons(const RoadMap& map) const
+std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) const
 {
-    const Road* current = EditingDraft() ? &*state.draft : Selected(map);
+    const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
@@ -125,31 +126,31 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const RoadMap& map) const
     return buttons;
 }
 
-bool RoadEditor::Save(RoadMap& map)
+bool RoadEditor::Save(WorldDocument& world)
 {
-    saveFailed = !map.Save();
+    saveFailed = !world.Save();
     if (saveFailed)
     {
         status = "Save failed - use File > Save to retry";
         SDL_Log("%s", SDL_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save roads", SDL_GetError(), nullptr);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save world", SDL_GetError(), nullptr);
         return false;
     }
     status = "Saved";
     return true;
 }
 
-void RoadEditor::Commit(RoadMap& map, int roadIndex, EditSnapshot before, const Road* after)
+void RoadEditor::Commit(WorldDocument& world, int roadIndex, EditSnapshot before, const Road* after)
 {
     if (history.Record(roadIndex, std::move(before), EditSnapshot(state, after)) && roadIndex >= 0)
     {
-        Save(map);
+        Save(world);
     }
 }
 
-void RoadEditor::RunCommand(EditorCommand command, RoadMap& map, FreeCamera& camera)
+void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera)
 {
-    Release(map);
+    Release(world);
     if (command == EditorCommand::Save)
     {
         if (!saveFailed && EditingDraft())
@@ -159,32 +160,32 @@ void RoadEditor::RunCommand(EditorCommand command, RoadMap& map, FreeCamera& cam
                 status = "Place at least two points to save the draft";
                 return;
             }
-            Activate(Action::Finish, map, camera);
+            Activate(Action::Finish, world, camera);
         }
         else
         {
-            Save(map);
+            Save(world);
         }
         return;
     }
 
     const bool undo = command == EditorCommand::Undo;
-    const auto result = undo ? history.Undo(map, state) : history.Redo(map, state);
+    const auto result = undo ? history.Undo(world.roads, state) : history.Redo(world.roads, state);
     if (result != EditHistory::Result::Unavailable &&
-        (result != EditHistory::Result::MapChanged || Save(map)))
+        (result != EditHistory::Result::MapChanged || Save(world)))
     {
         status = undo ? "Undone" : "Redone";
     }
 }
 
-void RoadEditor::BeginDraft(RoadMap& map)
+void RoadEditor::BeginDraft(WorldDocument& world)
 {
     // Resuming an existing draft is navigation, creating one is an edit.
     std::optional<EditSnapshot> before;
     if (!state.draft)
     {
         before.emplace(state);
-        const RoadStyle style = Style(map);
+        const RoadStyle style = Style(world);
         state.draft.emplace().style = style;
     }
 
@@ -193,25 +194,25 @@ void RoadEditor::BeginDraft(RoadMap& map)
     status.clear();
     if (before)
     {
-        Commit(map, -1, std::move(*before));
+        Commit(world, -1, std::move(*before));
     }
 }
 
-void RoadEditor::Activate(Action action, RoadMap& map, FreeCamera& camera)
+void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camera)
 {
     switch (action)
     {
     case Action::ChangeView:
-        ChangeView(map, camera);
+        ChangeView(world, camera);
         return;
     case Action::New:
         if (!planView)
         {
-            ChangeView(map, camera);
+            ChangeView(world, camera);
         }
         if (!state.drawing)
         {
-            BeginDraft(map);
+            BeginDraft(world);
         }
         return;
     case Action::Cancel:
@@ -220,7 +221,7 @@ void RoadEditor::Activate(Action action, RoadMap& map, FreeCamera& camera)
         state.draft.reset();
         state.drawing = false;
         status.clear();
-        Commit(map, -1, std::move(before));
+        Commit(world, -1, std::move(before));
         return;
     }
     case Action::Finish:
@@ -232,33 +233,33 @@ void RoadEditor::Activate(Action action, RoadMap& map, FreeCamera& camera)
         EditSnapshot before(state);
         state.draft->Rebuild();
         state.defaults = state.draft->style;
-        map.roads.push_back(std::move(*state.draft));
+        world.roads.push_back(std::move(*state.draft));
         state.draft.reset();
         state.drawing = false;
-        state.selected = static_cast<int>(map.roads.size()) - 1;
-        state.point = static_cast<int>(map.roads.back().points.size()) - 1;
-        Commit(map, state.selected, std::move(before), &map.roads.back());
+        state.selected = static_cast<int>(world.roads.size()) - 1;
+        state.point = static_cast<int>(world.roads.back().points.size()) - 1;
+        Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
     case Action::Remove:
         if (state.selected >= 0 && !EditingDraft())
         {
             const int index = state.selected;
-            EditSnapshot before(state, &map.roads[index]);
-            map.roads.erase(map.roads.begin() + index);
+            EditSnapshot before(state, &world.roads[index]);
+            world.roads.erase(world.roads.begin() + index);
             state.selected = state.point = -1;
-            Commit(map, index, std::move(before));
+            Commit(world, index, std::move(before));
         }
         return;
     default:
-        ChangeStyle(action, map);
+        ChangeStyle(action, world);
         return;
     }
 }
 
-void RoadEditor::ChangeStyle(Action action, RoadMap& map)
+void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
 {
-    RoadStyle& current = Style(map);
+    RoadStyle& current = Style(world);
     RoadStyle style = current;
     switch (action)
     {
@@ -297,7 +298,7 @@ void RoadEditor::ChangeStyle(Action action, RoadMap& map)
         return;
     }
     const int index = EditingDraft() ? -1 : state.selected;
-    Road* road = index >= 0 ? &map.roads[index] : nullptr;
+    Road* road = index >= 0 ? &world.roads[index] : nullptr;
     EditSnapshot before(state, road);
     current = style;
     state.defaults = style;
@@ -305,10 +306,10 @@ void RoadEditor::ChangeStyle(Action action, RoadMap& map)
     {
         road->Rebuild();
     }
-    Commit(map, index, std::move(before), road);
+    Commit(world, index, std::move(before), road);
 }
 
-void RoadEditor::PressCanvas(RoadMap& map, float x, float y)
+void RoadEditor::PressCanvas(WorldDocument& world, float x, float y)
 {
     const Vector3 pos = ToWorld(x, y);
     const SDL_FPoint cursor{x, y};
@@ -318,14 +319,14 @@ void RoadEditor::PressCanvas(RoadMap& map, float x, float y)
         {
             EditSnapshot before(state);
             state.draft->points.push_back({pos, {}});
-            Commit(map, -1, std::move(before));
+            Commit(world, -1, std::move(before));
         }
         return;
     }
 
-    if (state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(map.roads[state.selected], state.point)))
+    if (state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
-        dragStart.emplace(state, Selected(map));
+        dragStart.emplace(state, Selected(world));
         drag = Drag::Rotate;
         return;
     }
@@ -333,7 +334,7 @@ void RoadEditor::PressCanvas(RoadMap& map, float x, float y)
     // Selected controls get priority where roads overlap.
     auto pickPoint = [&](int roadIndex)
     {
-        const auto& points = map.roads[roadIndex].points;
+        const auto& points = world.roads[roadIndex].points;
         for (size_t i = 0; i < points.size(); ++i)
         {
             if (Near(cursor, ToScreen(points[i].position)))
@@ -341,7 +342,7 @@ void RoadEditor::PressCanvas(RoadMap& map, float x, float y)
                 state.selected = roadIndex;
                 state.point = static_cast<int>(i);
                 grabOffset = points[i].position - pos;
-                dragStart.emplace(state, Selected(map));
+                dragStart.emplace(state, Selected(world));
                 drag = Drag::Move;
                 return true;
             }
@@ -352,23 +353,23 @@ void RoadEditor::PressCanvas(RoadMap& map, float x, float y)
     {
         return;
     }
-    for (int i = static_cast<int>(map.roads.size()) - 1; i >= 0; --i)
+    for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         if (pickPoint(i))
         {
             return;
         }
     }
-    SelectAt(map, pos);
+    SelectAt(world, pos);
 }
 
-void RoadEditor::SelectAt(const RoadMap& map, Vector3 pos)
+void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
 {
     state.selected = state.point = -1;
     // Later roads are drawn last, so pick them first wherever pavement overlaps.
-    for (int i = static_cast<int>(map.roads.size()) - 1; i >= 0; --i)
+    for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
-        for (const auto& triangle : map.roads[i].triangles)
+        for (const auto& triangle : world.roads[i].triangles)
         {
             if (HitTriangle(pos, triangle))
             {
@@ -379,7 +380,7 @@ void RoadEditor::SelectAt(const RoadMap& map, Vector3 pos)
     }
 }
 
-void RoadEditor::Motion(RoadMap& map, const SDL_MouseMotionEvent& motion)
+void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
 {
     mouse = {motion.x, motion.y};
     if (drag == Drag::Pan)
@@ -389,7 +390,7 @@ void RoadEditor::Motion(RoadMap& map, const SDL_MouseMotionEvent& motion)
     }
     else if (drag == Drag::Move || drag == Drag::Rotate)
     {
-        Road& road = map.roads[state.selected];
+        Road& road = world.roads[state.selected];
         RoadPoint& anchor = road.points[state.point];
         Vector3 pos = ToWorld(mouse.x, mouse.y);
         if (drag == Drag::Move)
@@ -417,18 +418,18 @@ void RoadEditor::Motion(RoadMap& map, const SDL_MouseMotionEvent& motion)
     }
 }
 
-void RoadEditor::Release(RoadMap& map)
+void RoadEditor::Release(WorldDocument& world)
 {
     if (dragStart && dragChanged)
     {
-        Commit(map, state.selected, std::move(*dragStart), Selected(map));
+        Commit(world, state.selected, std::move(*dragStart), Selected(world));
     }
     dragStart.reset();
     dragChanged = false;
     drag = Drag::None;
 }
 
-bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
+bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const
 {
     constexpr SDL_Color amber{255, 191, 84, 255}, cyan{99, 207, 205, 255};
     if (!SDL_SetRenderDrawColor(renderer, 36, 45, 49, 255) || !SDL_RenderClear(renderer))
@@ -478,7 +479,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
     }
     for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
     {
-        for (const Road& road : map.roads)
+        for (const Road& road : world.roads)
         {
             if (!DrawPlanRoad(renderer, road, center, scale, canvas, layer))
             {
@@ -491,7 +492,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
         }
     }
 
-    if (const Road* road = Selected(map))
+    if (const Road* road = Selected(world))
     {
         if (!DrawPlanRoad(renderer, *road, center, scale, canvas, RoadLayer::Outline))
         {
@@ -519,9 +520,9 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
         }
         return true;
     };
-    for (int i = 0; i < static_cast<int>(map.roads.size()); ++i)
+    for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
     {
-        if (!drawPoints(map.roads[i], i == state.selected))
+        if (!drawPoints(world.roads[i], i == state.selected))
         {
             return false;
         }
@@ -532,7 +533,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
     }
     if (!state.drawing && state.selected >= 0 && state.point >= 0)
     {
-        const Road& road = map.roads[state.selected];
+        const Road& road = world.roads[state.selected];
         const SDL_FPoint a = ToScreen(road.points[state.point].position);
         const SDL_FPoint b = Handle(road, state.point);
         if (a.x > panel - 40 && a.x < width + 40 && a.y > -40 && a.y < height + 40)
@@ -549,21 +550,21 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const
     if (!Text(renderer, panel + 12, 12, hint, ink) ||
         !Text(renderer, panel + 12, 28, "Wheel: zoom | Right drag: pan", muted) ||
         !SDL_RenderDebugTextFormat(renderer, panel + 12, static_cast<float>(height) - 20,
-                                   "Grid: %.0f m    Roads: %zu    %s", spacing, map.roads.size(), status.c_str()))
+                                   "Grid: %.0f m    Roads: %zu    %s", spacing, world.roads.size(), status.c_str()))
     {
         return false;
     }
     return SDL_SetRenderClipRect(renderer, nullptr);
 }
 
-bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const RoadMap& map) const
+bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const WorldDocument& world) const
 {
     if (!Fill(renderer, {0, 0, panel, static_cast<float>(height)}, {24, 32, 38, 255}))
     {
         return false;
     }
 
-    for (const Button& b : Buttons(map))
+    for (const Button& b : Buttons(world))
     {
         const SDL_Color fill = b.active ? SDL_Color{45, 101, 102, 255} : SDL_Color{47, 59, 66, 255};
         if (!Fill(renderer, b.rect, b.enabled ? fill : SDL_Color{34, 44, 50, 255}) ||
@@ -572,7 +573,7 @@ bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const RoadMap& map) const
             return false;
         }
     }
-    const Road* current = EditingDraft() ? &*state.draft : Selected(map);
+    const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
@@ -607,7 +608,7 @@ bool RoadEditor::RenderToolbar(SDL_Renderer* renderer, const RoadMap& map) const
     return Text(renderer, 14, 18, "Road editor", ink);
 }
 
-bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCamera& camera)
+bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
 {
     menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
     if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
@@ -616,14 +617,14 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCa
     }
     if (planView)
     {
-        if (!RenderPlan(renderer, map))
+        if (!RenderPlan(renderer, world))
         {
             return false;
         }
     }
     else
     {
-        const Road* road = Selected(map);
+        const Road* road = Selected(world);
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
         if ((road && !DrawWorldRoadOutline(renderer, camera, *road, {0, 0, width, height})) ||
             !Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look", ink) ||
@@ -634,33 +635,33 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCa
             return false;
         }
     }
-    return RenderToolbar(renderer, map);
+    return RenderToolbar(renderer, world);
 }
 
-void RoadEditor::ChangeView(RoadMap& map, FreeCamera& camera)
+void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
 {
-    Release(map);
+    Release(world);
     planView = !planView;
     if (planView && !initialized)
     {
-        if (map.roads.empty())
+        if (world.roads.empty())
         {
-            BeginDraft(map);
+            BeginDraft(world);
         }
-        else if (!Selected(map))
+        else if (!Selected(world))
         {
-            center = map.roads.front().points.front().position;
+            center = world.roads.front().points.front().position;
         }
         initialized = true;
     }
-    if (!planView && !map.roads.empty())
+    if (!planView && !world.roads.empty())
     {
         const double distance = std::max(15.0, std::min(width - panel, static_cast<float>(height)) * 0.5 / scale);
         camera.LookAt(center + Vector3{0.0, distance, -distance}, center);
     }
 }
 
-void RoadEditor::PickWorldRoad(const RoadMap& map, const FreeCamera& camera)
+void RoadEditor::PickWorldRoad(const WorldDocument& world, const FreeCamera& camera)
 {
     state.selected = state.point = -1;
     const double focal = std::min(width, height) * 0.5;
@@ -672,7 +673,7 @@ void RoadEditor::PickWorldRoad(const RoadMap& map, const FreeCamera& camera)
     const double y = (height * 0.5 - mouse.y) / focal;
     if (const auto hit = camera.PickGround(x, y, roadNearDepth))
     {
-        SelectAt(map, *hit);
+        SelectAt(world, *hit);
         if (state.selected >= 0)
         {
             state.drawing = false;
@@ -682,16 +683,16 @@ void RoadEditor::PickWorldRoad(const RoadMap& map, const FreeCamera& camera)
 }
 
 EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
-                                   RoadMap& map, FreeCamera& camera)
+                                   WorldDocument& world, FreeCamera& camera)
 {
     if (event.type == SDL_EVENT_QUIT)
     {
-        Release(map);
+        Release(world);
         return EditorEvent::Pass;
     }
     if (const auto command = menu.Command(event))
     {
-        RunCommand(*command, map, camera);
+        RunCommand(*command, world, camera);
         return EditorEvent::Handled;
     }
     if (SDL_GetWindowFromEvent(&event) != window)
@@ -700,7 +701,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
     {
-        Release(map);
+        Release(world);
         return EditorEvent::Pass;
     }
     if (!planView && event.type == SDL_EVENT_KEY_DOWN &&
@@ -715,17 +716,17 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         if (event.key.key == SDLK_ESCAPE && EditingDraft())
         {
-            Activate(Action::Cancel, map, camera);
+            Activate(Action::Cancel, world, camera);
             return EditorEvent::Handled;
         }
         if (event.key.key == SDLK_R || (event.key.key == SDLK_ESCAPE && planView))
         {
-            ChangeView(map, camera);
+            ChangeView(world, camera);
             return EditorEvent::Handled;
         }
         if (event.key.key == SDLK_RETURN && planView)
         {
-            Activate(Action::Finish, map, camera);
+            Activate(Action::Finish, world, camera);
             return EditorEvent::Handled;
         }
     }
@@ -754,11 +755,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             if (e.button.button == SDL_BUTTON_LEFT)
             {
-                for (const Button& button : Buttons(map))
+                for (const Button& button : Buttons(world))
                 {
                     if (button.enabled && SDL_PointInRectFloat(&mouse, &button.rect))
                     {
-                        Activate(button.action, map, camera);
+                        Activate(button.action, world, camera);
                         break;
                     }
                 }
@@ -768,11 +769,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             if (planView)
             {
-                PressCanvas(map, mouse.x, mouse.y);
+                PressCanvas(world, mouse.x, mouse.y);
             }
             else
             {
-                PickWorldRoad(map, camera);
+                PickWorldRoad(world, camera);
             }
         }
         else if (!planView)
@@ -785,13 +786,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        Motion(map, e.motion);
+        Motion(world, e.motion);
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if ((drag == Drag::Pan && e.button.button == SDL_BUTTON_RIGHT) ||
             (drag != Drag::Pan && e.button.button == SDL_BUTTON_LEFT))
         {
-            Release(map);
+            Release(world);
         }
         break;
     case SDL_EVENT_MOUSE_WHEEL:

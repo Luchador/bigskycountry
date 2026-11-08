@@ -11,8 +11,8 @@ public:
     bool Initialize(SDL_Window* window) override { return menu.Attach(window); }
     bool IsPlanView() const override { return planView; }
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
-                            RoadMap& map, FreeCamera& camera) override;
-    bool Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCamera& camera) override;
+                            WorldDocument& world, FreeCamera& camera) override;
+    bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
 
 private:
     enum class Drag
@@ -48,27 +48,27 @@ private:
         bool enabled = true;
     };
 
-    std::vector<Button> Buttons(const RoadMap& map) const;
-    RoadStyle& Style(RoadMap& map);
-    const Road* Selected(const RoadMap& map) const;
+    std::vector<Button> Buttons(const WorldDocument& world) const;
+    RoadStyle& Style(WorldDocument& world);
+    const Road* Selected(const WorldDocument& world) const;
     bool EditingDraft() const { return planView && state.drawing; }
     Vector3 ToWorld(float x, float y) const;
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
-    bool RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const;
-    bool RenderToolbar(SDL_Renderer* renderer, const RoadMap& map) const;
-    void ChangeView(RoadMap& map, FreeCamera& camera);
-    void BeginDraft(RoadMap& map);
-    void PickWorldRoad(const RoadMap& map, const FreeCamera& camera);
-    void SelectAt(const RoadMap& map, Vector3 pos);
-    void Activate(Action action, RoadMap& map, FreeCamera& camera);
-    void ChangeStyle(Action action, RoadMap& map);
-    void PressCanvas(RoadMap& map, float x, float y);
-    void Motion(RoadMap& map, const SDL_MouseMotionEvent& motion);
-    void Release(RoadMap& map);
-    bool Save(RoadMap& map);
-    void RunCommand(EditorCommand command, RoadMap& map, FreeCamera& camera);
-    void Commit(RoadMap& map, int roadIndex, EditSnapshot before, const Road* after = nullptr);
+    bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
+    bool RenderToolbar(SDL_Renderer* renderer, const WorldDocument& world) const;
+    void ChangeView(WorldDocument& world, FreeCamera& camera);
+    void BeginDraft(WorldDocument& world);
+    void PickWorldRoad(const WorldDocument& world, const FreeCamera& camera);
+    void SelectAt(const WorldDocument& world, Vector3 pos);
+    void Activate(Action action, WorldDocument& world, FreeCamera& camera);
+    void ChangeStyle(Action action, WorldDocument& world);
+    void PressCanvas(WorldDocument& world, float x, float y);
+    void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);
+    void Release(WorldDocument& world);
+    bool Save(WorldDocument& world);
+    void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
+    void Commit(WorldDocument& world, int roadIndex, EditSnapshot before, const Road* after = nullptr);
 
     double scale = 4.0; // pixels per meter
     Vector3 center{};

@@ -7,6 +7,7 @@
 #include "free_camera.hpp"
 #include "input.hpp"
 #include "world_state.hpp"
+#include "world_document.hpp"
 
 namespace
 {
@@ -15,12 +16,12 @@ namespace
         return SDL_CreateRenderer(window, nullptr);
     }
 
-    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads, Sky& sky)
+    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const WorldDocument& world, Sky& sky)
     {
-        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) && DrawWorldRoads(renderer, view, roads);
+        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) && DrawWorldRoads(renderer, view, world.roads);
     }
 
-    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, RoadMap& roads, EditorTool* roadTool)
+    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, WorldDocument& world, EditorTool* roadTool)
     {
         Input input(window);
 
@@ -32,9 +33,9 @@ namespace
         Sky sky;
         FreeCamera freeCamera;
 
-        if (!roads.roads.empty())
+        if (!world.roads.empty())
         {
-            const Road& first = roads.roads.front();
+            const Road& first = world.roads.front();
             const Vector3 focus = (first.points[0].position + first.points[1].position) * 0.5;
             const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
@@ -55,7 +56,7 @@ namespace
                 if (roadTool)
                 {
                     const bool wasPlanView = roadTool->IsPlanView();
-                    const EditorEvent result = roadTool->HandleEvent(window, renderer, event, roads, freeCamera);
+                    const EditorEvent result = roadTool->HandleEvent(window, renderer, event, world, freeCamera);
                     if (result == EditorEvent::Error)
                     {
                         return false;
@@ -117,11 +118,11 @@ namespace
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
 
             if ((!roadTool || !roadTool->IsPlanView()) &&
-                !DrawScene(renderer, view, roads, sky))
+                !DrawScene(renderer, view, world, sky))
             {
                 return false;
             }
-            if ((roadTool && !roadTool->Render(renderer, roads, freeCamera)) || !SDL_RenderPresent(renderer))
+            if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {
                 return false;
             }
@@ -134,7 +135,7 @@ namespace
     }
 }
 
-int RunApplication(ApplicationMode mode, const char* roadFile, EditorTool* roadTool)
+int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* roadTool)
 {
     const char* title = mode == ApplicationMode::Editor ? "Big Sky Country Editor" : "Big Sky Country";
     SDL_Window* window = nullptr;
@@ -153,9 +154,9 @@ int RunApplication(ApplicationMode mode, const char* roadFile, EditorTool* roadT
 
     if (success)
     {
-        RoadMap roads;
-        success = roads.Open(roadFile) && (!roadTool || roadTool->Initialize(window)) &&
-                  RunWindowLoop(window, renderer, mode, roads, roadTool);
+        WorldDocument world;
+        success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window)) &&
+                  RunWindowLoop(window, renderer, mode, world, roadTool);
     }
 
     if (!success)

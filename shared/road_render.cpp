@@ -141,9 +141,9 @@ namespace
     }
 }
 
-bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const RoadMap& map)
+bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const std::vector<Road>& roads)
 {
-    if (map.roads.empty())
+    if (roads.empty())
     {
         return true;
     }
@@ -162,7 +162,7 @@ bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const Road
     // SDL_RenderGeometry draws in submission order. Paint belongs above all pavement.
     for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
     {
-        for (const Road& road : map.roads)
+        for (const Road& road : roads)
         {
             AppendRoad(road, layer, transform, focal, viewport, vertices);
         }

@@ -2,6 +2,8 @@
 
 #include "road.hpp"
 
+#include <string>
+
 // Editable tool state. Camera, view, hover and generated geometry stay out of history.
 struct RoadEditorState
 {
@@ -29,8 +31,8 @@ public:
     bool CanUndo() const { return cursor != 0; }
     bool CanRedo() const { return cursor < actions.size(); }
     bool Record(int roadIndex, EditSnapshot before, EditSnapshot after);
-    Result Undo(RoadMap& map, RoadEditorState& editor);
-    Result Redo(RoadMap& map, RoadEditorState& editor);
+    Result Undo(std::vector<Road>& roads, RoadEditorState& editor);
+    Result Redo(std::vector<Road>& roads, RoadEditorState& editor);
 
 private:
     struct Action
@@ -39,7 +41,7 @@ private:
         EditSnapshot before;
         EditSnapshot after;
     };
-    static Result Restore(RoadMap& map, RoadEditorState& editor, int index,
+    static Result Restore(std::vector<Road>& roads, RoadEditorState& editor, int index,
                           const EditSnapshot& from, const EditSnapshot& to);
     std::vector<Action> actions;
     std::size_t cursor = 0; // Number of applied actions.

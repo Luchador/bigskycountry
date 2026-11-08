@@ -5,7 +5,6 @@
 #include <array>
 #include <cstddef>
 #include <optional>
-#include <string>
 #include <vector>
 
 enum class ThreeLaneLayout
@@ -61,15 +60,4 @@ struct Road
 
 private:
     void BuildStripesAndOutline(const std::vector<Vector3>& samples);
-};
-
-class RoadMap
-{
-public:
-    std::vector<Road> roads;
-    bool Open(const char* documentPath);
-    bool Save() const;
-
-private:
-    std::string path;
 };
