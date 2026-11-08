@@ -101,8 +101,7 @@ void Sky::Resize(int newWidth, int newHeight)
         for (int x = 0; x <= columns; ++x)
         {
             const int i = y * (columns + 1) + x;
-            vertices[i].position = {static_cast<float>(static_cast<double>(width) * x / columns),
-                                    static_cast<float>(static_cast<double>(height) * y / rows)};
+            vertices[i].position.x = static_cast<float>(static_cast<double>(width) * x / columns);
             if (x < columns && y < rows)
             {
                 const int below = i + columns + 1;
@@ -138,18 +137,41 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     const double halfY = height * 0.5 / focal;
     const Vector3 topLeft = camera.ViewRay(-halfX, halfY);
     const Vector3 stepX = (camera.ViewRay(halfX, halfY) - topLeft) * (1.0 / columns);
-    const Vector3 stepY = (camera.ViewRay(-halfX, -halfY) - topLeft) * (1.0 / rows);
-    for (int y = 0; y <= rows; ++y)
+    const Vector3 topToBottom = camera.ViewRay(-halfX, -halfY) - topLeft;
+
+    // With a roll-free camera all rays on one screen row have the same vertical component.
+    // Pin a row to the zero crossing so the brightest sky color always lands on the horizon.
+    const double horizon = std::clamp(-topLeft.y / topToBottom.y, 0.0, 1.0);
+    const int horizonRow = rows / 2;
+    // When the horizon leaves the view, draw only the half of the mesh that has area.
+    const int firstRow = horizon == 0.0 ? horizonRow : 0;
+    const int lastRow = horizon == 1.0 ? horizonRow : rows;
+    for (int y = firstRow; y <= lastRow; ++y)
     {
-        const Vector3 left = topLeft + stepY * y;
+        // Quadratic spacing concentrates samples where the gradient changes fastest.
+        double rowFraction;
+        if (y <= horizonRow)
+        {
+            const double t = static_cast<double>(horizonRow - y) / horizonRow;
+            rowFraction = horizon * (1.0 - t * t);
+        }
+        else
+        {
+            const double t = static_cast<double>(y - horizonRow) / (rows - horizonRow);
+            rowFraction = horizon + (1.0 - horizon) * t * t;
+        }
+        const Vector3 left = topLeft + topToBottom * rowFraction;
         for (int x = 0; x <= columns; ++x)
         {
-            vertices[y * (columns + 1) + x].color = SampleSky(colors, horizontalSun, Math::Normalize(left + stepX * x));
+            SDL_Vertex& vertex = vertices[y * (columns + 1) + x];
+            vertex.position.y = static_cast<float>(height * rowFraction);
+            vertex.color = SampleSky(colors, horizontalSun, Math::Normalize(left + stepX * x));
         }
     }
 
+    const int indicesPerRow = 6 * columns;
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
            SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()),
-                              indices.data(), static_cast<int>(indices.size()));
+                              indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow);
 }
