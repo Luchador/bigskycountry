@@ -214,8 +214,10 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         }
     }
 
+    const SDL_Rect viewport{0, 0, width, height};
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
            SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) && // Draw sky mesh
-           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height}, SampleSky(colors, horizontalSun, sunDirection)); // Draw sun
+           sun.Draw(renderer, camera, sunDirection, viewport, SampleSky(colors, horizontalSun, sunDirection)) && // Draw sun
+           moon.Draw(renderer, camera, Moon::Direction(sunDirection), viewport); // Draw full moon
 }

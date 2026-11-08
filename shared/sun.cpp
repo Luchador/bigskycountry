@@ -1,7 +1,6 @@
 #include "sun.hpp"
-#include "free_camera.hpp"
+#include "sky_disc.hpp"
 #include "texture_loader.hpp"
-#include "view_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,32 +37,6 @@ namespace
         const double cot2 = cot * cot;
 
         return cot * (58.1 + cot2 * (-0.07 + 0.000086 * cot2));
-    }
-
-    // The project's assets directory is optional in a fresh checkout.
-    SDL_Texture* MakeFallback(SDL_Renderer* renderer, SDL_Rect& bounds)
-    {
-        constexpr int size = 64;
-        std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(SDL_CreateSurface(size, size, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
-
-        if (!surface)
-        {
-            return nullptr;
-        }
-
-        for (int y = 0; y < size; ++y)
-        {
-            auto* pixel = static_cast<Uint8*>(surface->pixels) + y * surface->pitch;
-            for (int x = 0; x < size; ++x, pixel += 4)
-            {
-                const double radius = std::hypot(x + 0.5 - size * 0.5, y + 0.5 - size * 0.5);
-                pixel[0] = pixel[1] = pixel[2] = 255;
-                pixel[3] = static_cast<Uint8>(255 * std::clamp(size * 0.5 + 0.5 - radius, 0.0, 1.0));
-            }
-        }
-
-        bounds = {0, 0, size, size};
-        return SDL_CreateTextureFromSurface(renderer, surface.get());
     }
 }
 
@@ -102,7 +75,7 @@ bool Sun::Load(SDL_Renderer* renderer)
     if (!texture)
     {
         SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using a built-in sun disc: %s", SDL_GetError());
-        texture.reset(MakeFallback(renderer, discBounds));
+        texture.reset(SkyDisc::MakeFallback(renderer, discBounds));
     }
     if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) ||
         !discShader.Initialize(renderer, texture.get()))
@@ -120,62 +93,13 @@ bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 directi
         return false;
     }
 
-    const Vector3 right = (direction.x == 0.0 && direction.z == 0.0) ? Vector3{1.0, 0.0, 0.0} : Math::Normalize(Math::Cross({0.0, 1.0, 0.0}, direction));
-    const Vector3 up = Math::Cross(direction, right);
-    // Scale the bright disc to the requested angle while retaining its original soft fringe.
-    const double unitsPerTexel = 2.0 * std::tan(angularDiameter * 0.5) / std::max(discBounds.w, discBounds.h);
-    const double cx = discBounds.x + 0.5 * discBounds.w, cy = discBounds.y + 0.5 * discBounds.h;
-    const double left = -cx * unitsPerTexel, rightEdge = (texture->w - cx) * unitsPerTexel;
-    const double top = cy * unitsPerTexel;
-
-    // A point on the sprite has world height direction.y + y * up.y. Cut the sprite at height zero.
-    if (direction.y + top * up.y <= 0.0)
-    {
-        return true;
-    }
-
-    double bottom = (cy - texture->h) * unitsPerTexel;
-
-    if (direction.y + bottom * up.y < 0.0)
-    {
-        bottom = -direction.y / up.y;
-    }
-
-    const Vector3 center = camera.WorldDirectionToView(direction);
-    const Vector3 u = camera.WorldDirectionToView(right), v = camera.WorldDirectionToView(up);
-    ViewGeometry::Polygon quad{};
-    quad.points[0] = center + u * left + v * top;
-    quad.points[1] = center + u * rightEdge + v * top;
-    quad.points[2] = center + u * rightEdge + v * bottom;
-    quad.points[3] = center + u * left + v * bottom;
-    quad.count = 4;
-    const double focal = std::min(viewport.w, viewport.h) * 0.5;
-
-    for (Vector3 normal : ViewGeometry::SidePlanes(focal, viewport))
-    {
-        quad = ViewGeometry::Clip(quad, normal, 0.0);
-        if (quad.count < 3)
-        {
-            return true;
-        }
-    }
-
-    std::array<SDL_Vertex, 8> vertices{};
     const SDL_FColor tint = Tint(std::asin(std::clamp(direction.y, -1.0, 1.0)));
     // Budget disc emission against the unbrightened SDR sky. The aureole is already
     // in the framebuffer and is intentionally excluded from this calculation.
     const SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g),
                               std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
 
-    for (int i = 0; i < quad.count; ++i)
-    {
-        const Vector3 p = quad.points[i];
-        const float tx = static_cast<float>((cx + Math::Dot(p, u) / unitsPerTexel) / texture->w);
-        const float ty = static_cast<float>((cy - Math::Dot(p, v) / unitsPerTexel) / texture->h);
-        vertices[i] = {ViewGeometry::ScreenPoint(p, focal, viewport), emission,
-                       {std::clamp(tx, 0.0f, 1.0f), std::clamp(ty, 0.0f, 1.0f)}};
-    }
-
-    constexpr int fan[] = {0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7};
-    return discShader.Draw(renderer, texture.get(), vertices.data(), quad.count, fan, 3 * (quad.count - 2));
+    const SkyDisc::Mesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, emission);
+    return mesh.count == 0 || discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count,
+                                               mesh.fan, 3 * (mesh.count - 2));
 }

@@ -83,23 +83,28 @@ namespace
         return true;
     }
 
-    SDL_Texture* CreateMask(SDL_Renderer* renderer, SDL_Surface* source, SDL_Rect& bounds)
+    enum class DiscOpacity { SourceAlpha, BrightnessTimesAlpha };
+
+    SDL_Texture* CreateDiscTexture(SDL_Renderer* renderer, SDL_Surface* source, SDL_Rect& bounds, DiscOpacity opacity)
     {
-        Surface mask(SDL_ConvertSurface(source, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
-        if (!mask)
+        Surface rgba(SDL_ConvertSurface(source, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
+        if (!rgba)
         {
             return nullptr;
         }
 
-        int left = mask->w, top = mask->h, right = -1, bottom = -1;
-        for (int y = 0; y < mask->h; ++y)
+        int left = rgba->w, top = rgba->h, right = -1, bottom = -1;
+        for (int y = 0; y < rgba->h; ++y)
         {
-            auto* pixel = static_cast<Uint8*>(mask->pixels) + static_cast<size_t>(y) * mask->pitch;
-            for (int x = 0; x < mask->w; ++x, pixel += 4)
+            auto* pixel = static_cast<Uint8*>(rgba->pixels) + static_cast<size_t>(y) * rgba->pitch;
+            for (int x = 0; x < rgba->w; ++x, pixel += 4)
             {
-                const int brightness = (54 * pixel[0] + 183 * pixel[1] + 19 * pixel[2] + 128) / 256;
-                pixel[3] = static_cast<Uint8>((brightness * pixel[3] + 127) / 255);
-                pixel[0] = pixel[1] = pixel[2] = 255;
+                if (opacity == DiscOpacity::BrightnessTimesAlpha)
+                {
+                    const int brightness = (54 * pixel[0] + 183 * pixel[1] + 19 * pixel[2] + 128) / 256;
+                    pixel[3] = static_cast<Uint8>((brightness * pixel[3] + 127) / 255);
+                    pixel[0] = pixel[1] = pixel[2] = 255;
+                }
                 if (pixel[3] >= 128)
                 {
                     left = std::min(left, x);
@@ -115,10 +120,10 @@ namespace
             return nullptr;
         }
         bounds = {left, top, right - left + 1, bottom - top + 1};
-        return SDL_CreateTextureFromSurface(renderer, mask.get());
+        return SDL_CreateTextureFromSurface(renderer, rgba.get());
     }
 
-    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data, SDL_Rect* maskBounds)
+    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data, SDL_Rect* discBounds, DiscOpacity opacity)
     {
         constexpr size_t headerSize = 18;
 
@@ -172,14 +177,14 @@ namespace
             return nullptr;
         }
 
-        if (maskBounds)
+        if (discBounds)
         {
-            return CreateMask(renderer, surface.get(), *maskBounds);
+            return CreateDiscTexture(renderer, surface.get(), *discBounds, opacity);
         }
         return SDL_CreateTextureFromSurface(renderer, surface.get());
     }
 
-    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* maskBounds)
+    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
     {
         if (!renderer || !relativePath)
         {
@@ -210,7 +215,7 @@ namespace
 
         if (file)
         {
-            texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size }, maskBounds);
+            texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size }, discBounds, opacity);
         }
 
         if (!texture)
@@ -225,10 +230,15 @@ namespace
 
 SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)
 {
-    return LoadTexture(renderer, relativePath, nullptr);
+    return LoadTexture(renderer, relativePath, nullptr, DiscOpacity::SourceAlpha);
+}
+
+SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds)
+{
+    return LoadTexture(renderer, relativePath, &alphaBounds, DiscOpacity::SourceAlpha);
 }
 
 SDL_Texture* TextureLoader::LoadMask(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& discBounds)
 {
-    return LoadTexture(renderer, relativePath, &discBounds);
+    return LoadTexture(renderer, relativePath, &discBounds, DiscOpacity::BrightnessTimesAlpha);
 }

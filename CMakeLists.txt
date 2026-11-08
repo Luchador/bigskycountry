@@ -15,6 +15,8 @@ add_library(BigSkyApplication STATIC
     shared/road_stripes.cpp
     shared/road_file.cpp
     shared/road_render.cpp
+    shared/sky_disc.cpp
+    shared/moon.cpp
     shared/sky.cpp
     shared/solar_aureole.cpp
     shared/sun.cpp

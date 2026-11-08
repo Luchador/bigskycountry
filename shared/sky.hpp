@@ -1,5 +1,6 @@
 #pragma once
 
+#include "moon.hpp"
 #include "sun.hpp"
 #include <SDL3/SDL.h>
 #include <vector>
@@ -14,6 +15,7 @@ public:
 
 private:
     Sun sun;
+    Moon moon;
     void UpdateGrid();
     std::vector<double> sampleX;
     std::vector<double> sampleY;
