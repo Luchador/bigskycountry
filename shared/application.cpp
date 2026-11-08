@@ -12,29 +12,15 @@ namespace
 {
     SDL_Renderer* CreateSceneRenderer(SDL_Window* window)
     {
-#ifdef BIGSKY_GPU_SUN
-        // Honor an explicitly selected driver, including software for headless use.
-        const char* driver = SDL_GetHint(SDL_HINT_RENDER_DRIVER);
-        if (!driver || !*driver)
-        {
-            if (SDL_Renderer* renderer = SDL_CreateGPURenderer(nullptr, window))
-            {
-                return renderer;
-            }
-            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "GPU renderer unavailable, using SDL fallback: %s", SDL_GetError());
-        }
-#endif
         return SDL_CreateRenderer(window, nullptr);
     }
 
     bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads, Sky& sky)
     {
-        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) &&
-               DrawWorldRoads(renderer, view, roads);
+        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) && DrawWorldRoads(renderer, view, roads);
     }
 
-    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode,
-                       RoadMap& roads, EditorTool* roadTool)
+    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, RoadMap& roads, EditorTool* roadTool)
     {
         Input input(window);
 
@@ -45,6 +31,7 @@ namespace
 
         Sky sky;
         FreeCamera freeCamera;
+
         if (!roads.roads.empty())
         {
             const Road& first = roads.roads.front();
@@ -52,6 +39,7 @@ namespace
             const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
         }
+
         const FreeCamera gameView = freeCamera;
         Uint64 previousTime = SDL_GetTicksNS();
         const bool vsyncEnabled = SDL_SetRenderVSync(renderer, 1);

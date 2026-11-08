@@ -54,4 +54,3 @@ add_custom_command(
 )
 target_sources(BigSkyApplication PRIVATE "${dxil}" "${spirv}")
 target_include_directories(BigSkyApplication PRIVATE "${output_dir}")
-target_compile_definitions(BigSkyApplication PRIVATE BIGSKY_GPU_SUN=1)

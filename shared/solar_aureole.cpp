@@ -11,6 +11,7 @@ namespace
     double SmoothStep(double lo, double hi, double x)
     {
         const double t = std::clamp((x - lo) / (hi - lo), 0.0, 1.0);
+
         return t * t * (3.0 - 2.0 * t);
     }
 
@@ -19,6 +20,7 @@ namespace
     {
         constexpr double peak = (1.0 - asymmetry) * (1.0 - asymmetry);
         const double ratio = peak / (peak + 2.0 * asymmetry * (1.0 - std::clamp(cosine, -1.0, 1.0)));
+
         return ratio * std::sqrt(ratio);
     }
 
@@ -35,21 +37,25 @@ namespace
     float AddScatteredLight(float base, float linearSun, float weight)
     {
         const float linearBase = ToLinear(base);
+
         if (linearSun <= linearBase)
         {
             return base;
         }
+
         // Use the available brightness headroom in the game's SDR sky palette.
         return ToDisplay(std::lerp(linearBase, linearSun, weight));
     }
 }
 
+// Constructor
 SolarAureole::SolarAureole(Vector3 sunDirection, SDL_FColor sunTint)
-    : direction(sunDirection),
-      linearTint{ToLinear(sunTint.r), ToLinear(sunTint.g), ToLinear(sunTint.b), 1.0f},
-      // Fade through twilight, reaching full strength about two degrees above the horizon.
-      strength(peakStrength * SmoothStep(-0.10, 0.04, sunDirection.y))
 {
+    direction = sunDirection;
+
+    linearTint = {ToLinear(sunTint.r), ToLinear(sunTint.g), ToLinear(sunTint.b), 1.0f};
+
+    strength = peakStrength * SmoothStep(-0.10, 0.04, sunDirection.y);
 }
 
 SDL_FColor SolarAureole::Brighten(SDL_FColor sky, Vector3 unitRay) const
@@ -62,6 +68,6 @@ SDL_FColor SolarAureole::Brighten(SDL_FColor sky, Vector3 unitRay) const
     }
 
     const float weight = static_cast<float>(visibility * RelativePhase(Math::Dot(unitRay, direction)));
-    return {AddScatteredLight(sky.r, linearTint.r, weight), AddScatteredLight(sky.g, linearTint.g, weight),
-            AddScatteredLight(sky.b, linearTint.b, weight), sky.a};
+
+    return {AddScatteredLight(sky.r, linearTint.r, weight), AddScatteredLight(sky.g, linearTint.g, weight), AddScatteredLight(sky.b, linearTint.b, weight), sky.a};
 }

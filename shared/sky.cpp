@@ -160,8 +160,10 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     const double horizon = std::clamp(-topLeft.y / topToBottom.y, 0.0, 1.0);
     const int baseColumns = std::clamp(static_cast<int>(std::ceil(width / 40.0)), 16, 96);
     const int baseRows = std::clamp(static_cast<int>(std::ceil(height / 28.0)), 16, 80);
+
     sampleX.clear();
     sampleY.clear();
+
     for (int x = 0; x <= baseColumns; ++x)
     {
         sampleX.push_back(static_cast<double>(width) * x / baseColumns);
@@ -170,6 +172,7 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     const int horizonRow = baseRows / 2;
     const int firstRow = horizon == 0.0 ? horizonRow : 0;
     const int lastRow = horizon == 1.0 ? horizonRow : baseRows;
+
     for (int y = firstRow; y <= lastRow; ++y)
     {
         // Quadratic spacing concentrates samples where the gradient changes fastest.
@@ -195,10 +198,13 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         AddSunSamples(sampleX, std::atan2(viewSun.x, viewSun.z), width, focal);
         AddSunSamples(sampleY, std::atan2(-viewSun.y, viewSun.z), height, focal);
     }
+
     UpdateGrid();
+
     for (int y = 0; y <= rows; ++y)
     {
         const Vector3 left = topLeft + topToBottom * (sampleY[y] / height);
+
         for (int x = 0; x <= columns; ++x)
         {
             const Vector3 ray = Math::Normalize(left + leftToRight * (sampleX[x] / width));
@@ -210,6 +216,6 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
 
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
-           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) &&
-           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height}, SampleSky(colors, horizontalSun, sunDirection));
+           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) && // Draw sky mesh
+           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height}, SampleSky(colors, horizontalSun, sunDirection)); // Draw sun
 }
