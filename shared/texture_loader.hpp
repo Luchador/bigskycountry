@@ -11,4 +11,8 @@ public:
     // Call on the main thread. The caller owns the result and releases it with
     // SDL_DestroyTexture. On failure, returns nullptr and sets SDL_GetError().
     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath);
+
+    // Turn brightness into opacity on a white texture, multiplying by any source alpha.
+    // discBounds encloses texels with at least half opacity, excluding the sprite's padding.
+    static SDL_Texture* LoadMask(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& discBounds);
 };

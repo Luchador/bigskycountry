@@ -16,6 +16,7 @@ add_library(BigSkyApplication STATIC
     shared/road_file.cpp
     shared/road_render.cpp
     shared/sky.cpp
+    shared/sun.cpp
     shared/application.cpp
     shared/free_camera.cpp
     shared/input.cpp

@@ -66,15 +66,6 @@ namespace
         return skyStops.back().colors;
     }
 
-    // Local solar time on an equinox. +X is east, +Y is up, and +Z is north.
-    Vector3 SunDirection(double minutes)
-    {
-        constexpr double latitude = Math::DegreesToRadians(38.0);
-        const double hourAngle = (minutes - 720.0) * (std::numbers::pi / 720.0);
-
-        return {-std::sin(hourAngle), std::cos(latitude) * std::cos(hourAngle), -std::sin(latitude) * std::cos(hourAngle)};
-    }
-
     SDL_FColor SampleSky(const Palette& colors, Vector3 horizontalSun, Vector3 ray)
     {
         const double facing = std::clamp(0.5 + 0.5 * Math::Dot(ray, horizontalSun), 0.0, 1.0);
@@ -137,9 +128,9 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         Resize(outputWidth, outputHeight);
     }
 
-    const Vector3 sun = SunDirection(timeOfDayMinutes);
-    const Palette colors = ColorsAt(std::asin(sun.y) * 180.0 / std::numbers::pi);
-    const Vector3 horizontalSun = Math::Normalize({sun.x, 0.0, sun.z});
+    const Vector3 sunDirection = Sun::Direction(timeOfDayMinutes);
+    const Palette colors = ColorsAt(std::asin(sunDirection.y) * 180.0 / std::numbers::pi);
+    const Vector3 horizontalSun = Math::Normalize({sunDirection.x, 0.0, sunDirection.z});
 
     // Match the road projection. View rays use camera orientation only, so the sky stays at infinity.
     const double focal = std::min(width, height) * 0.5;
@@ -187,5 +178,6 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
 
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
-           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow);
+           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow) &&
+           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height});
 }

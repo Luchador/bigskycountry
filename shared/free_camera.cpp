@@ -47,13 +47,17 @@ void FreeCamera::Update(const CameraInput& input, double elapsedSeconds)
 
 Vector3 FreeCamera::WorldToView(Vector3 point) const
 {
-    const Vector3 offset = point - position;
+    return WorldDirectionToView(point - position);
+}
+
+Vector3 FreeCamera::WorldDirectionToView(Vector3 direction) const
+{
     const Vector3 forward = Forward();
     const Vector3 right = Right();
 
     const Vector3 up = Math::Cross(forward, right);
 
-    return { Math::Dot(offset, right), Math::Dot(offset, up), Math::Dot(offset, forward) };
+    return { Math::Dot(direction, right), Math::Dot(direction, up), Math::Dot(direction, forward) };
 }
 
 Vector3 FreeCamera::ViewRay(double x, double y) const

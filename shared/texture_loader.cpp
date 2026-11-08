@@ -83,7 +83,42 @@ namespace
         return true;
     }
 
-    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data)
+    SDL_Texture* CreateMask(SDL_Renderer* renderer, SDL_Surface* source, SDL_Rect& bounds)
+    {
+        Surface mask(SDL_ConvertSurface(source, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
+        if (!mask)
+        {
+            return nullptr;
+        }
+
+        int left = mask->w, top = mask->h, right = -1, bottom = -1;
+        for (int y = 0; y < mask->h; ++y)
+        {
+            auto* pixel = static_cast<Uint8*>(mask->pixels) + static_cast<size_t>(y) * mask->pitch;
+            for (int x = 0; x < mask->w; ++x, pixel += 4)
+            {
+                const int brightness = (54 * pixel[0] + 183 * pixel[1] + 19 * pixel[2] + 128) / 256;
+                pixel[3] = static_cast<Uint8>((brightness * pixel[3] + 127) / 255);
+                pixel[0] = pixel[1] = pixel[2] = 255;
+                if (pixel[3] >= 128)
+                {
+                    left = std::min(left, x);
+                    right = std::max(right, x);
+                    top = std::min(top, y);
+                    bottom = std::max(bottom, y);
+                }
+            }
+        }
+        if (right < left)
+        {
+            SDL_SetError("Mask contains no pixels with at least half opacity");
+            return nullptr;
+        }
+        bounds = {left, top, right - left + 1, bottom - top + 1};
+        return SDL_CreateTextureFromSurface(renderer, mask.get());
+    }
+
+    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data, SDL_Rect* maskBounds)
     {
         constexpr size_t headerSize = 18;
 
@@ -137,49 +172,63 @@ namespace
             return nullptr;
         }
 
+        if (maskBounds)
+        {
+            return CreateMask(renderer, surface.get(), *maskBounds);
+        }
         return SDL_CreateTextureFromSurface(renderer, surface.get());
+    }
+
+    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* maskBounds)
+    {
+        if (!renderer || !relativePath)
+        {
+            SDL_SetError("A renderer and a texture path are required");
+            return nullptr;
+        }
+
+        std::string name(relativePath);
+        std::replace(name.begin(), name.end(), '\\', '/');
+
+        if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
+        {
+            SDL_SetError("Expected a path relative to assets/textures: '%s'", relativePath);
+            return nullptr;
+        }
+
+        const char* base = SDL_GetBasePath();
+
+        if (!base)
+        {
+            return nullptr;
+        }
+
+        const std::string path = std::string(base) + "assets/textures/" + name;
+        size_t size = 0;
+        std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
+        SDL_Texture* texture = nullptr;
+
+        if (file)
+        {
+            texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size }, maskBounds);
+        }
+
+        if (!texture)
+        {
+            const std::string reason = SDL_GetError();
+            SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
+        }
+
+        return texture;
     }
 }
 
 SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)
 {
-    if (!renderer || !relativePath)
-    {
-        SDL_SetError("A renderer and a texture path are required");
-        return nullptr;
-    }
+    return LoadTexture(renderer, relativePath, nullptr);
+}
 
-    std::string name(relativePath);
-    std::replace(name.begin(), name.end(), '\\', '/');
-
-    if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
-    {
-        SDL_SetError("Expected a path relative to assets/textures: '%s'", relativePath);
-        return nullptr;
-    }
-
-    const char* base = SDL_GetBasePath();
-
-    if (!base)
-    {
-        return nullptr;
-    }
-
-    const std::string path = std::string(base) + "assets/textures/" + name;
-    size_t size = 0;
-    std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
-    SDL_Texture* texture = nullptr;
-
-    if (file)
-    {
-        texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size });
-    }
-
-    if (!texture)
-    {
-        const std::string reason = SDL_GetError();
-        SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
-    }
-
-    return texture;
+SDL_Texture* TextureLoader::LoadMask(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& discBounds)
+{
+    return LoadTexture(renderer, relativePath, &discBounds);
 }
