@@ -1,3 +1,7 @@
+/**
+ * The sky is a flat grid of triangles covering the 3D viewport. The vertices are screen-positioned.
+ */
+
 #include "sky.hpp"
 #include "free_camera.hpp"
 
@@ -65,20 +69,22 @@ namespace
     // Local solar time on an equinox. +X is east, +Y is up, and +Z is north.
     Vector3 SunDirection(double minutes)
     {
-        constexpr double latitude = Math::DegreesToRadians(47.0);
+        constexpr double latitude = Math::DegreesToRadians(38.0);
         const double hourAngle = (minutes - 720.0) * (std::numbers::pi / 720.0);
-        return {-std::sin(hourAngle), std::cos(latitude) * std::cos(hourAngle),
-                -std::sin(latitude) * std::cos(hourAngle)};
+
+        return {-std::sin(hourAngle), std::cos(latitude) * std::cos(hourAngle), -std::sin(latitude) * std::cos(hourAngle)};
     }
 
     SDL_FColor SampleSky(const Palette& colors, Vector3 horizontalSun, Vector3 ray)
     {
         const double facing = std::clamp(0.5 + 0.5 * Math::Dot(ray, horizontalSun), 0.0, 1.0);
         const SDL_FColor horizon = Blend(colors.oppositeHorizon, colors.sunwardHorizon, facing * facing);
+
         if (ray.y >= 0.0)
         {
             return Blend(horizon, colors.zenith, std::sqrt(ray.y));
         }
+
         // Continue the horizon into haze below eye level until terrain covers it.
         const SDL_FColor haze = Blend(colors.oppositeHorizon, colors.zenith, 0.55);
         const double depth = std::min(-ray.y * 2.0, 1.0);
@@ -96,6 +102,7 @@ void Sky::Resize(int newWidth, int newHeight)
     vertices.resize((columns + 1) * (rows + 1));
     indices.clear();
     indices.reserve(6 * columns * rows);
+
     for (int y = 0; y <= rows; ++y)
     {
         for (int x = 0; x <= columns; ++x)
@@ -114,14 +121,17 @@ void Sky::Resize(int newWidth, int newHeight)
 bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
 {
     int outputWidth, outputHeight;
+
     if (!SDL_GetCurrentRenderOutputSize(renderer, &outputWidth, &outputHeight))
     {
         return false;
     }
+
     if (outputWidth <= 0 || outputHeight <= 0)
     {
         return true;
     }
+
     if (outputWidth != width || outputHeight != height)
     {
         Resize(outputWidth, outputHeight);
@@ -146,10 +156,12 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     // When the horizon leaves the view, draw only the half of the mesh that has area.
     const int firstRow = horizon == 0.0 ? horizonRow : 0;
     const int lastRow = horizon == 1.0 ? horizonRow : rows;
+
     for (int y = firstRow; y <= lastRow; ++y)
     {
         // Quadratic spacing concentrates samples where the gradient changes fastest.
         double rowFraction;
+    
         if (y <= horizonRow)
         {
             const double t = static_cast<double>(horizonRow - y) / horizonRow;
@@ -160,7 +172,9 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
             const double t = static_cast<double>(y - horizonRow) / (rows - horizonRow);
             rowFraction = horizon + (1.0 - horizon) * t * t;
         }
+
         const Vector3 left = topLeft + topToBottom * rowFraction;
+
         for (int x = 0; x <= columns; ++x)
         {
             SDL_Vertex& vertex = vertices[y * (columns + 1) + x];
@@ -170,8 +184,8 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     }
 
     const int indicesPerRow = 6 * columns;
+
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
-           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()),
-                              indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow);
+           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow);
 }
