@@ -58,6 +58,7 @@ Vector3 Sun::Direction(double minutes)
     const double elevation = std::asin(std::clamp(up, -1.0, 1.0));
     const double apparent = elevation + Math::DegreesToRadians(Refraction(elevation * 180.0 / std::numbers::pi) / 3600.0);
     const double horizontalScale = std::cos(apparent) / std::hypot(east, north);
+
     return {east * horizontalScale, std::sin(apparent), north * horizontalScale};
 }
 
@@ -66,23 +67,20 @@ SDL_FColor Sun::Tint(double elevationRadians)
     // Orange at the horizon, warm yellow low in the sky, white above 30 degrees.
     const float low = static_cast<float>(1.0 - std::clamp(elevationRadians / Math::DegreesToRadians(30.0), 0.0, 1.0));
     const float low2 = low * low;
+
     return {1.0f, 1.0f - 0.29f * low2 * low2, 1.0f - 0.74f * low2, 1.0f};
 }
 
 bool Sun::Load(SDL_Renderer* renderer)
 {
     texture.reset(TextureLoader::LoadMask(renderer, "world/sun.tga", discBounds));
-    if (!texture)
-    {
-        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using a built-in sun disc: %s", SDL_GetError());
-        texture.reset(SkyDisc::MakeFallback(renderer, discBounds));
-    }
-    if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) ||
-        !discShader.Initialize(renderer, texture.get()))
+
+    if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) || !discShader.Initialize(renderer, texture.get()))
     {
         texture.reset();
         return false;
     }
+
     return true;
 }
 
@@ -100,6 +98,6 @@ bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 directi
                               std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
 
     const SkyDisc::Mesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, emission);
-    return mesh.count == 0 || discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count,
-                                               mesh.fan, 3 * (mesh.count - 2));
+
+    return mesh.count == 0 || discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count, mesh.fan, 3 * (mesh.count - 2));
 }
