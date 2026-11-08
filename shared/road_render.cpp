@@ -2,12 +2,14 @@
 #include "free_camera.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
     constexpr SDL_FColor roadColor{0.43f, 0.43f, 0.43f, 1.0f};
     constexpr SDL_FColor yellowStripeColor{0.96f, 0.85f, 0.12f, 1.0f};
     constexpr SDL_FColor whiteStripeColor{0.9f, 0.9f, 0.9f, 1.0f};
+    constexpr SDL_FColor selectionColor{1.0f, 0.5f, 0.05f, 1.0f};
 
     struct Polygon
     {
@@ -47,13 +49,85 @@ namespace
         return result;
     }
 
+    std::array<Vector3, 4> SidePlanes(double focal, SDL_Rect viewport)
+    {
+        const double w = viewport.w * 0.5, h = viewport.h * 0.5;
+        return {{{focal, 0, w}, {-focal, 0, w}, {0, focal, h}, {0, -focal, h}}};
+    }
+
+    SDL_FPoint ScreenPoint(Vector3 v, double focal, SDL_Rect viewport)
+    {
+        return {static_cast<float>(viewport.x + viewport.w * 0.5 + v.x * focal / v.z),
+                static_cast<float>(viewport.y + viewport.h * 0.5 - v.y * focal / v.z)};
+    }
+
+    bool ClipLine(Vector3& a, Vector3& b, Vector3 normal, double offset)
+    {
+        const double da = Math::Dot(a, normal) - offset;
+        const double db = Math::Dot(b, normal) - offset;
+        if (da < 0.0 && db < 0.0)
+        {
+            return false;
+        }
+        if ((da < 0.0) != (db < 0.0))
+        {
+            const Vector3 cut = a + (b - a) * (da / (da - db));
+            if (da < 0.0)
+            {
+                a = cut;
+            }
+            else
+            {
+                b = cut;
+            }
+        }
+        return true;
+    }
+
+    template <typename ViewTransform>
+    void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport,
+                       std::vector<SDL_Vertex>& vertices)
+    {
+        if (road.outline.empty())
+        {
+            return;
+        }
+        const auto sides = SidePlanes(focal, viewport);
+        Vector3 previous = transform(road.outline.back());
+        for (Vector3 point : road.outline)
+        {
+            Vector3 a = previous;
+            previous = transform(point);
+            Vector3 b = previous;
+            if (!ClipLine(a, b, {0, 0, 1}, roadNearDepth) ||
+                !std::all_of(sides.begin(), sides.end(), [&](Vector3 side) { return ClipLine(a, b, side, 0.0); }))
+            {
+                continue;
+            }
+
+            const SDL_FPoint p = ScreenPoint(a, focal, viewport), q = ScreenPoint(b, focal, viewport);
+            const float dx = q.x - p.x, dy = q.y - p.y;
+            const float length = std::hypot(dx, dy);
+            if (length == 0.0f)
+            {
+                continue;
+            }
+            // Square caps overlap at the joins. The width stays three pixels at any zoom.
+            const float tx = 1.5f * dx / length, ty = 1.5f * dy / length;
+            const SDL_FPoint corners[] = {{p.x - tx - ty, p.y - ty + tx}, {p.x - tx + ty, p.y - ty - tx},
+                                          {q.x + tx + ty, q.y + ty - tx}, {q.x + tx - ty, q.y + ty + tx}};
+            for (int i : {0, 1, 2, 0, 2, 3})
+            {
+                vertices.push_back({corners[i], selectionColor, {}});
+            }
+        }
+    }
+
     template <typename ViewTransform>
     void AppendTriangles(const std::vector<Road::Triangle>& triangles, SDL_FColor color, ViewTransform transform,
                          double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
     {
-
-        const double halfWidth = viewport.w * 0.5, halfHeight = viewport.h * 0.5;
-        const Vector3 sides[] = {{focal, 0, halfWidth}, {-focal, 0, halfWidth}, {0, focal, halfHeight}, {0, -focal, halfHeight}};
+        const auto sides = SidePlanes(focal, viewport);
 
         for (const auto& triangle : triangles)
         {
@@ -64,7 +138,7 @@ namespace
                 p.points[p.count++] = transform(point);
             }
 
-            p = Clip(p, {0, 0, 1}, 0.1);
+            p = Clip(p, {0, 0, 1}, roadNearDepth);
 
             for (Vector3 side : sides)
             {
@@ -80,10 +154,7 @@ namespace
                 for (int index : {0, i - 1, i})
                 {
                     const Vector3 v = p.points[index];
-                    vertices.push_back({{static_cast<float>(viewport.x + halfWidth + v.x * focal / v.z),
-                                         static_cast<float>(viewport.y + halfHeight - v.y * focal / v.z)},
-                                        color,
-                                        {}});
+                    vertices.push_back({ScreenPoint(v, focal, viewport), color, {}});
                 }
             }
         }
@@ -96,6 +167,11 @@ namespace
         if (layer == RoadLayer::Pavement)
         {
             AppendTriangles(road.triangles, roadColor, transform, focal, viewport, vertices);
+            return;
+        }
+        if (layer == RoadLayer::Outline)
+        {
+            AppendOutline(road, transform, focal, viewport, vertices);
             return;
         }
         AppendTriangles(road.yellowStripes, yellowStripeColor, transform, focal, viewport, vertices);
@@ -136,6 +212,14 @@ bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const Road
         }
     }
 
+    return Submit(renderer, vertices);
+}
+
+bool DrawWorldRoadOutline(SDL_Renderer* renderer, const FreeCamera& camera, const Road& road, SDL_Rect viewport)
+{
+    std::vector<SDL_Vertex> vertices;
+    const double focal = std::min(viewport.w, viewport.h) * 0.5;
+    AppendOutline(road, [&](Vector3 p) { return camera.WorldToView(p); }, focal, viewport, vertices);
     return Submit(renderer, vertices);
 }
 

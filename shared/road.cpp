@@ -115,6 +115,7 @@ void Road::RotatePoint(std::size_t index, double heading)
 void Road::Rebuild()
 {
     triangles.clear();
+    outline.clear();
     whiteStripes.clear();
     yellowStripes.clear();
     if (points.size() < 2)
@@ -171,5 +172,5 @@ void Road::Rebuild()
         previousRight = bRight;
         havePrevious = true;
     }
-    BuildStripes(samples);
+    BuildStripesAndOutline(samples);
 }

@@ -7,7 +7,10 @@
 class RoadEditor : public EditorTool
 {
 public:
-    ToolResult Run(SDL_Window* window, SDL_Renderer* renderer, RoadMap& map, FreeCamera& camera) override;
+    bool IsPlanView() const override { return planView; }
+    EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
+                            RoadMap& map, FreeCamera& camera) override;
+    bool Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCamera& camera) override;
 
 private:
     enum class Drag
@@ -19,7 +22,7 @@ private:
     };
     enum class Action
     {
-        Back,
+        ChangeView,
         New,
         Finish,
         Cancel,
@@ -47,11 +50,17 @@ private:
     std::vector<Button> Buttons(const RoadMap& map) const;
     RoadStyle& Style(RoadMap& map);
     const Road* Selected(const RoadMap& map) const;
+    bool EditingDraft() const { return planView && drawing; }
     Vector3 ToWorld(float x, float y) const;
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
-    bool Render(SDL_Renderer* renderer, const RoadMap& map) const;
-    void Activate(Action action, RoadMap& map);
+    bool RenderPlan(SDL_Renderer* renderer, const RoadMap& map) const;
+    bool RenderToolbar(SDL_Renderer* renderer, const RoadMap& map) const;
+    void ChangeView(RoadMap& map, FreeCamera& camera);
+    void BeginDraft(RoadMap& map);
+    void PickWorldRoad(const RoadMap& map, const FreeCamera& camera);
+    void SelectAt(const RoadMap& map, Vector3 pos);
+    void Activate(Action action, RoadMap& map, FreeCamera& camera);
     void PressCanvas(RoadMap& map, float x, float y);
     void Motion(RoadMap& map, const SDL_MouseMotionEvent& motion);
     void Release(RoadMap& map);
@@ -64,11 +73,11 @@ private:
     int selected = -1;
     int point = -1;
     bool drawing = false;
-    bool back = false;
+    bool planView = false;
     bool edited = false;
     bool initialized = false;
     RoadStyle defaults;
-    Road draft;
+    std::optional<Road> draft;
     Drag drag = Drag::None;
     Vector3 grabOffset{};
     SDL_FPoint mouse{};

@@ -186,7 +186,7 @@ namespace
     }
 }
 
-void Road::BuildStripes(const std::vector<Vector3>& samples)
+void Road::BuildStripesAndOutline(const std::vector<Vector3>& samples)
 {
     const auto spans = MakeSpans(samples);
 
@@ -201,8 +201,24 @@ void Road::BuildStripes(const std::vector<Vector3>& samples)
     for (int side : {-1, 1})
     {
         // Place the white stripe wholly inside the travel edge, beside any shoulder.
-        const auto edge = OffsetPath(spans, side * halfTravelWidth);
+        auto edge = OffsetPath(spans, side * halfTravelWidth);
         PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
+
+        const double pavementWidth = side < 0 ? style.RightWidth() : style.LeftWidth();
+
+        if (pavementWidth > halfTravelWidth)
+        {
+            edge = OffsetPath(spans, side * pavementWidth);
+        }
+
+        if (side < 0)
+        {
+            outline.insert(outline.end(), edge.begin(), edge.end());
+        }
+        else
+        {
+            outline.insert(outline.end(), edge.rbegin(), edge.rend());
+        }
     }
 
     constexpr double halfLane = RoadStyle::laneWidth * 0.5;

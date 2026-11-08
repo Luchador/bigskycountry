@@ -50,6 +50,7 @@ struct Road
     RoadStyle style;
     std::vector<RoadPoint> points;
     std::vector<Triangle> triangles;
+    std::vector<Vector3> outline; // Closed pavement perimeter, including shoulders and end caps.
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 
@@ -58,7 +59,7 @@ struct Road
     void Rebuild();
 
 private:
-    void BuildStripes(const std::vector<Vector3>& samples);
+    void BuildStripesAndOutline(const std::vector<Vector3>& samples);
 };
 
 class RoadMap
