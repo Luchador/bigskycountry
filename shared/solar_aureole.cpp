@@ -1,0 +1,67 @@
+#include "solar_aureole.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace
+{
+    constexpr double asymmetry = 0.75;  // Higher values concentrate the glow closer to the disc.
+    constexpr double peakStrength = 0.45;
+
+    double SmoothStep(double lo, double hi, double x)
+    {
+        const double t = std::clamp((x - lo) / (hi - lo), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+
+    // Henyey-Greenstein divided by its value at zero angular separation.
+    double RelativePhase(double cosine)
+    {
+        constexpr double peak = (1.0 - asymmetry) * (1.0 - asymmetry);
+        const double ratio = peak / (peak + 2.0 * asymmetry * (1.0 - std::clamp(cosine, -1.0, 1.0)));
+        return ratio * std::sqrt(ratio);
+    }
+
+    float ToLinear(float c)
+    {
+        return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    }
+
+    float ToDisplay(float c)
+    {
+        return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+    }
+
+    float AddScatteredLight(float base, float linearSun, float weight)
+    {
+        const float linearBase = ToLinear(base);
+        if (linearSun <= linearBase)
+        {
+            return base;
+        }
+        // Use the available brightness headroom in the game's SDR sky palette.
+        return ToDisplay(std::lerp(linearBase, linearSun, weight));
+    }
+}
+
+SolarAureole::SolarAureole(Vector3 sunDirection, SDL_FColor sunTint)
+    : direction(sunDirection),
+      linearTint{ToLinear(sunTint.r), ToLinear(sunTint.g), ToLinear(sunTint.b), 1.0f},
+      // Fade through twilight, reaching full strength about two degrees above the horizon.
+      strength(peakStrength * SmoothStep(-0.10, 0.04, sunDirection.y))
+{
+}
+
+SDL_FColor SolarAureole::Brighten(SDL_FColor sky, Vector3 unitRay) const
+{
+    // Continue smoothly into the existing haze just below the horizon.
+    const double visibility = strength * SmoothStep(-0.07, 0.0, unitRay.y);
+    if (visibility == 0.0)
+    {
+        return sky;
+    }
+
+    const float weight = static_cast<float>(visibility * RelativePhase(Math::Dot(unitRay, direction)));
+    return {AddScatteredLight(sky.r, linearTint.r, weight), AddScatteredLight(sky.g, linearTint.g, weight),
+            AddScatteredLight(sky.b, linearTint.b, weight), sky.a};
+}

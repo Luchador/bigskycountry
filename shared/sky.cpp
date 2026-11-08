@@ -3,6 +3,7 @@
  */
 
 #include "sky.hpp"
+#include "solar_aureole.hpp"
 #include "free_camera.hpp"
 
 #include <algorithm>
@@ -81,55 +82,69 @@ namespace
         const double depth = std::min(-ray.y * 2.0, 1.0);
         return Blend(horizon, haze, depth * (2.0 - depth));
     }
+
+    // Place extra sample lines through the projected sun and its close surroundings.
+    // Their spacing is angular so it stays useful after resizes and near the field-of-view edges.
+    void AddSunSamples(std::vector<double>& samples, double centerAngle, int size, double focal)
+    {
+        constexpr std::array<double, 11> offsets = {-24, -16, -10, -6, -3, 0, 3, 6, 10, 16, 24};
+        const double halfFov = std::atan2(size * 0.5, focal);
+        for (double degrees : offsets)
+        {
+            const double angle = centerAngle + Math::DegreesToRadians(degrees);
+            if (angle > -halfFov && angle < halfFov)
+            {
+                samples.push_back(size * 0.5 + focal * std::tan(angle));
+            }
+        }
+        std::sort(samples.begin(), samples.end());
+        samples.erase(std::unique(samples.begin(), samples.end()), samples.end());
+    }
 }
 
-void Sky::Resize(int newWidth, int newHeight)
+void Sky::UpdateGrid()
 {
-    width = newWidth;
-    height = newHeight;
-    // Tessellate in screen space. SDL interpolates the sampled colors across each triangle.
-    columns = std::clamp(static_cast<int>(std::ceil(width / 40.0)), 16, 96);
-    rows = std::clamp(static_cast<int>(std::ceil(height / 28.0)), 16, 80);
+    const int newColumns = static_cast<int>(sampleX.size()) - 1;
+    const int newRows = static_cast<int>(sampleY.size()) - 1;
+    if (columns == newColumns && rows == newRows)
+    {
+        return;
+    }
+    columns = newColumns;
+    rows = newRows;
     vertices.resize((columns + 1) * (rows + 1));
     indices.clear();
     indices.reserve(6 * columns * rows);
 
-    for (int y = 0; y <= rows; ++y)
+    for (int y = 0; y < rows; ++y)
     {
-        for (int x = 0; x <= columns; ++x)
+        for (int x = 0; x < columns; ++x)
         {
             const int i = y * (columns + 1) + x;
-            vertices[i].position.x = static_cast<float>(static_cast<double>(width) * x / columns);
-            if (x < columns && y < rows)
-            {
-                const int below = i + columns + 1;
-                indices.insert(indices.end(), {i, i + 1, below, i + 1, below + 1, below});
-            }
+            const int below = i + columns + 1;
+            indices.insert(indices.end(), {i, i + 1, below, i + 1, below + 1, below});
         }
     }
 }
 
 bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
 {
-    int outputWidth, outputHeight;
+    int width, height;
 
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &outputWidth, &outputHeight))
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
     {
         return false;
     }
 
-    if (outputWidth <= 0 || outputHeight <= 0)
+    if (width <= 0 || height <= 0)
     {
         return true;
     }
 
-    if (outputWidth != width || outputHeight != height)
-    {
-        Resize(outputWidth, outputHeight);
-    }
-
     const Vector3 sunDirection = Sun::Direction(timeOfDayMinutes);
-    const Palette colors = ColorsAt(std::asin(sunDirection.y) * 180.0 / std::numbers::pi);
+    const double elevation = std::asin(std::clamp(sunDirection.y, -1.0, 1.0));
+    const Palette colors = ColorsAt(elevation * 180.0 / std::numbers::pi);
+    const SolarAureole aureole(sunDirection, Sun::Tint(elevation));
     const Vector3 horizontalSun = Math::Normalize({sunDirection.x, 0.0, sunDirection.z});
 
     // Match the road projection. View rays use camera orientation only, so the sky stays at infinity.
@@ -137,17 +152,24 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     const double halfX = width * 0.5 / focal;
     const double halfY = height * 0.5 / focal;
     const Vector3 topLeft = camera.ViewRay(-halfX, halfY);
-    const Vector3 stepX = (camera.ViewRay(halfX, halfY) - topLeft) * (1.0 / columns);
+    const Vector3 leftToRight = camera.ViewRay(halfX, halfY) - topLeft;
     const Vector3 topToBottom = camera.ViewRay(-halfX, -halfY) - topLeft;
 
     // With a roll-free camera all rays on one screen row have the same vertical component.
     // Pin a row to the zero crossing so the brightest sky color always lands on the horizon.
     const double horizon = std::clamp(-topLeft.y / topToBottom.y, 0.0, 1.0);
-    const int horizonRow = rows / 2;
-    // When the horizon leaves the view, draw only the half of the mesh that has area.
-    const int firstRow = horizon == 0.0 ? horizonRow : 0;
-    const int lastRow = horizon == 1.0 ? horizonRow : rows;
+    const int baseColumns = std::clamp(static_cast<int>(std::ceil(width / 40.0)), 16, 96);
+    const int baseRows = std::clamp(static_cast<int>(std::ceil(height / 28.0)), 16, 80);
+    sampleX.clear();
+    sampleY.clear();
+    for (int x = 0; x <= baseColumns; ++x)
+    {
+        sampleX.push_back(static_cast<double>(width) * x / baseColumns);
+    }
 
+    const int horizonRow = baseRows / 2;
+    const int firstRow = horizon == 0.0 ? horizonRow : 0;
+    const int lastRow = horizon == 1.0 ? horizonRow : baseRows;
     for (int y = firstRow; y <= lastRow; ++y)
     {
         // Quadratic spacing concentrates samples where the gradient changes fastest.
@@ -160,24 +182,34 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         }
         else
         {
-            const double t = static_cast<double>(y - horizonRow) / (rows - horizonRow);
+            const double t = static_cast<double>(y - horizonRow) / (baseRows - horizonRow);
             rowFraction = horizon + (1.0 - horizon) * t * t;
         }
 
-        const Vector3 left = topLeft + topToBottom * rowFraction;
+        sampleY.push_back(height * rowFraction);
+    }
 
+    if (aureole.Visible())
+    {
+        const Vector3 viewSun = camera.WorldDirectionToView(sunDirection);
+        AddSunSamples(sampleX, std::atan2(viewSun.x, viewSun.z), width, focal);
+        AddSunSamples(sampleY, std::atan2(-viewSun.y, viewSun.z), height, focal);
+    }
+    UpdateGrid();
+    for (int y = 0; y <= rows; ++y)
+    {
+        const Vector3 left = topLeft + topToBottom * (sampleY[y] / height);
         for (int x = 0; x <= columns; ++x)
         {
+            const Vector3 ray = Math::Normalize(left + leftToRight * (sampleX[x] / width));
             SDL_Vertex& vertex = vertices[y * (columns + 1) + x];
-            vertex.position.y = static_cast<float>(height * rowFraction);
-            vertex.color = SampleSky(colors, horizontalSun, Math::Normalize(left + stepX * x));
+            vertex.position = {static_cast<float>(sampleX[x]), static_cast<float>(sampleY[y])};
+            vertex.color = aureole.Brighten(SampleSky(colors, horizontalSun, ray), ray);
         }
     }
 
-    const int indicesPerRow = 6 * columns;
-
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
-           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data() + firstRow * indicesPerRow, (lastRow - firstRow) * indicesPerRow) &&
+           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) &&
            sun.Draw(renderer, camera, sunDirection, {0, 0, width, height});
 }

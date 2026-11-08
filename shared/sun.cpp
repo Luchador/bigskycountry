@@ -40,14 +40,6 @@ namespace
         return cot * (58.1 + cot2 * (-0.07 + 0.000086 * cot2));
     }
 
-    SDL_FColor SunTint(double elevationRadians)
-    {
-        // Orange at the horizon, warm yellow low in the sky, white above 30 degrees.
-        const float low = static_cast<float>(1.0 - std::clamp(elevationRadians / Math::DegreesToRadians(30.0), 0.0, 1.0));
-        const float low2 = low * low;
-        return {1.0f, 1.0f - 0.29f * low2 * low2, 1.0f - 0.74f * low2, 1.0f};
-    }
-
     // The project's assets directory is optional in a fresh checkout.
     SDL_Texture* MakeFallback(SDL_Renderer* renderer, SDL_Rect& bounds)
     {
@@ -94,6 +86,14 @@ Vector3 Sun::Direction(double minutes)
     const double apparent = elevation + Math::DegreesToRadians(Refraction(elevation * 180.0 / std::numbers::pi) / 3600.0);
     const double horizontalScale = std::cos(apparent) / std::hypot(east, north);
     return {east * horizontalScale, std::sin(apparent), north * horizontalScale};
+}
+
+SDL_FColor Sun::Tint(double elevationRadians)
+{
+    // Orange at the horizon, warm yellow low in the sky, white above 30 degrees.
+    const float low = static_cast<float>(1.0 - std::clamp(elevationRadians / Math::DegreesToRadians(30.0), 0.0, 1.0));
+    const float low2 = low * low;
+    return {1.0f, 1.0f - 0.29f * low2 * low2, 1.0f - 0.74f * low2, 1.0f};
 }
 
 bool Sun::Load(SDL_Renderer* renderer)
@@ -156,7 +156,7 @@ bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 directi
     }
 
     std::array<SDL_Vertex, 8> vertices{};
-    const SDL_FColor tint = SunTint(std::asin(std::clamp(direction.y, -1.0, 1.0)));
+    const SDL_FColor tint = Tint(std::asin(std::clamp(direction.y, -1.0, 1.0)));
 
     for (int i = 0; i < quad.count; ++i)
     {

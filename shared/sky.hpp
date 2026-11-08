@@ -14,11 +14,11 @@ public:
 
 private:
     Sun sun;
-    void Resize(int width, int height);
+    void UpdateGrid();
+    std::vector<double> sampleX;
+    std::vector<double> sampleY;
     std::vector<SDL_Vertex> vertices;
     std::vector<int> indices;
-    int width = 0;
-    int height = 0;
     int columns = 0;
     int rows = 0;
 };

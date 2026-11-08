@@ -11,6 +11,7 @@ class Sun
 public:
     // Local civil minutes since midnight. Returns an apparent direction in east/up/north axes.
     static Vector3 Direction(double minutes);
+    static SDL_FColor Tint(double elevationRadians);
     bool Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport);
 
 private:
