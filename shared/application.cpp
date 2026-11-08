@@ -10,6 +10,23 @@
 
 namespace
 {
+    SDL_Renderer* CreateSceneRenderer(SDL_Window* window)
+    {
+#ifdef BIGSKY_GPU_SUN
+        // Honor an explicitly selected driver, including software for headless use.
+        const char* driver = SDL_GetHint(SDL_HINT_RENDER_DRIVER);
+        if (!driver || !*driver)
+        {
+            if (SDL_Renderer* renderer = SDL_CreateGPURenderer(nullptr, window))
+            {
+                return renderer;
+            }
+            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "GPU renderer unavailable, using SDL fallback: %s", SDL_GetError());
+        }
+#endif
+        return SDL_CreateRenderer(window, nullptr);
+    }
+
     bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads, Sky& sky)
     {
         return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) &&
@@ -138,7 +155,12 @@ int RunApplication(ApplicationMode mode, const char* roadFile, EditorTool* roadT
 
     if (success)
     {
-        success = SDL_CreateWindowAndRenderer(title, 1920, 1080, SDL_WINDOW_RESIZABLE, &window, &renderer);
+        window = SDL_CreateWindow(title, 1920, 1080, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
+        if (window)
+        {
+            renderer = CreateSceneRenderer(window);
+        }
+        success = renderer && SDL_ShowWindow(window);
     }
 
     if (success)

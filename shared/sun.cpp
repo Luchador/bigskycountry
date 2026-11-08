@@ -104,11 +104,16 @@ bool Sun::Load(SDL_Renderer* renderer)
         SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using a built-in sun disc: %s", SDL_GetError());
         texture.reset(MakeFallback(renderer, discBounds));
     }
-    return texture && SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND) &&
-           SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR);
+    if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) ||
+        !discShader.Initialize(renderer, texture.get()))
+    {
+        texture.reset();
+        return false;
+    }
+    return true;
 }
 
-bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport)
+bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, SDL_FColor baseSkyAtSun)
 {
     if (!texture && !Load(renderer))
     {
@@ -157,16 +162,20 @@ bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 directi
 
     std::array<SDL_Vertex, 8> vertices{};
     const SDL_FColor tint = Tint(std::asin(std::clamp(direction.y, -1.0, 1.0)));
+    // Budget disc emission against the unbrightened SDR sky. The aureole is already
+    // in the framebuffer and is intentionally excluded from this calculation.
+    const SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g),
+                              std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
 
     for (int i = 0; i < quad.count; ++i)
     {
         const Vector3 p = quad.points[i];
         const float tx = static_cast<float>((cx + Math::Dot(p, u) / unitsPerTexel) / texture->w);
         const float ty = static_cast<float>((cy - Math::Dot(p, v) / unitsPerTexel) / texture->h);
-        vertices[i] = {ViewGeometry::ScreenPoint(p, focal, viewport), tint,
+        vertices[i] = {ViewGeometry::ScreenPoint(p, focal, viewport), emission,
                        {std::clamp(tx, 0.0f, 1.0f), std::clamp(ty, 0.0f, 1.0f)}};
     }
 
     constexpr int fan[] = {0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7};
-    return SDL_RenderGeometry(renderer, texture.get(), vertices.data(), quad.count, fan, 3 * (quad.count - 2));
+    return discShader.Draw(renderer, texture.get(), vertices.data(), quad.count, fan, 3 * (quad.count - 2));
 }

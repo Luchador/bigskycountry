@@ -211,5 +211,5 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
            SDL_RenderClear(renderer) &&
            SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) &&
-           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height});
+           sun.Draw(renderer, camera, sunDirection, {0, 0, width, height}, SampleSky(colors, horizontalSun, sunDirection));
 }

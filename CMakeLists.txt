@@ -18,6 +18,7 @@ add_library(BigSkyApplication STATIC
     shared/sky.cpp
     shared/solar_aureole.cpp
     shared/sun.cpp
+    shared/sun_shader.cpp
     shared/application.cpp
     shared/free_camera.cpp
     shared/input.cpp
@@ -28,6 +29,7 @@ add_library(BigSkyApplication STATIC
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
 target_include_directories(BigSkyApplication PUBLIC shared)
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
+include(cmake/sun_shader.cmake)
 
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
