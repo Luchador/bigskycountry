@@ -1,4 +1,5 @@
 #include "road_editor.hpp"
+#include "world_state.hpp"
 #include "road_render.hpp"
 #include "free_camera.hpp"
 
@@ -623,8 +624,11 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map, const FreeCa
     else
     {
         const Road* road = Selected(map);
+        const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
         if ((road && !DrawWorldRoadOutline(renderer, camera, *road, {0, 0, width, height})) ||
             !Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look", ink) ||
+            !SDL_RenderDebugTextFormat(renderer, panel + 12, 28, "Sky %02d:%02d   [ earlier   ] later",
+                                       minutes / 60, minutes % 60) ||
             !Text(renderer, panel + 12, static_cast<float>(height) - 20, status.c_str(), ink))
         {
             return false;
@@ -698,6 +702,14 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         Release(map);
         return EditorEvent::Pass;
+    }
+    if (!planView && event.type == SDL_EVENT_KEY_DOWN &&
+        !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)) &&
+        (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET))
+    {
+        const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
+        g_WorldState.SetTimeOfDayMinutes(minutes + (event.key.key == SDLK_RIGHTBRACKET ? 30 : -30));
+        return EditorEvent::Handled;
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {

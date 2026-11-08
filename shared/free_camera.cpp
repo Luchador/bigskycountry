@@ -56,11 +56,16 @@ Vector3 FreeCamera::WorldToView(Vector3 point) const
     return { Math::Dot(offset, right), Math::Dot(offset, up), Math::Dot(offset, forward) };
 }
 
-std::optional<Vector3> FreeCamera::PickGround(double x, double y, double nearDepth) const
+Vector3 FreeCamera::ViewRay(double x, double y) const
 {
     const Vector3 forward = Forward();
     const Vector3 right = Right();
-    const Vector3 direction = forward + right * x + Math::Cross(forward, right) * y;
+    return forward + right * x + Math::Cross(forward, right) * y;
+}
+
+std::optional<Vector3> FreeCamera::PickGround(double x, double y, double nearDepth) const
+{
+    const Vector3 direction = ViewRay(x, y);
     if (direction.y == 0.0)
     {
         return std::nullopt;

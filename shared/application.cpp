@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "road_render.hpp"
+#include "sky.hpp"
 #include "application.hpp"
 #include "free_camera.hpp"
 #include "input.hpp"
@@ -9,9 +10,9 @@
 
 namespace
 {
-    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads)
+    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const RoadMap& roads, Sky& sky)
     {
-        return SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255) && SDL_RenderClear(renderer) &&
+        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) &&
                DrawWorldRoads(renderer, view, roads);
     }
 
@@ -25,6 +26,7 @@ namespace
             return false;
         }
 
+        Sky sky;
         FreeCamera freeCamera;
         if (!roads.roads.empty())
         {
@@ -110,7 +112,7 @@ namespace
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
 
             if ((!roadTool || !roadTool->IsPlanView()) &&
-                !DrawScene(renderer, view, roads))
+                !DrawScene(renderer, view, roads, sky))
             {
                 return false;
             }
