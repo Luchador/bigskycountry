@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <utility>
 
 namespace
@@ -85,14 +84,15 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const RoadMap& map) const
 {
     const Road* current = drawing ? &draft : Selected(map);
     const RoadStyle& style = current ? current->style : defaults;
-    const float offset = style.lanes == 3 ? threeLanePanelHeight : 0.0f;
+    const int laneCount = style.GetLaneCount();
+    const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
     std::vector<Button> buttons{
         {Action::Back, {12, 44, 194, 28}, "Back to 3D   [R]"},
         {Action::New, {12, 84, 194, 28}, "New road", false, !drawing},
         {Action::Straight, {12, 148, 94, 28}, "Straight", !style.curved},
         {Action::Curve, {112, 148, 94, 28}, "Bezier", style.curved},
-        {Action::Fewer, {12, 210, 32, 28}, "-", false, style.lanes > 1},
-        {Action::More, {174, 210, 32, 28}, "+", false, style.lanes < std::numeric_limits<int>::max()},
+        {Action::Fewer, {12, 210, 32, 28}, "-", false, laneCount > 1},
+        {Action::More, {174, 210, 32, 28}, "+", false, laneCount < RoadStyle::maxLanes},
         {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder},
         {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
         {Action::Finish, {12, 350 + offset, 194, 28}, "Finish road  [Enter]", false, drawing && draft.points.size() >= 2},
@@ -100,7 +100,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const RoadMap& map) const
         {Action::Remove, {12, 424 + offset, 194, 28}, "Delete selected road", false, current && !drawing},
         {Action::Save, {12, 458 + offset, 194, 28}, "Save   [Ctrl+S]"}};
 
-    if (style.lanes == 3)
+    if (laneCount == 3)
     {
         buttons.push_back({Action::TwoNorthbound, {12, 268, 194, 26}, "2 north / 1 south",
                            style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound});
@@ -188,10 +188,10 @@ void RoadEditor::Activate(Action action, RoadMap& map)
         style.curved = true;
         break;
     case Action::Fewer:
-        --style.lanes;
+        style.SetLaneCount(style.GetLaneCount() - 1);
         break;
     case Action::More:
-        ++style.lanes;
+        style.SetLaneCount(style.GetLaneCount() + 1);
         break;
     case Action::TwoNorthbound:
         style.threeLaneLayout = ThreeLaneLayout::TwoNorthbound;
@@ -452,14 +452,22 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const RoadMap& map) const
     }
     const Road* current = drawing ? &draft : Selected(map);
     const RoadStyle& style = current ? current->style : defaults;
-    const float offset = style.lanes == 3 ? threeLanePanelHeight : 0.0f;
-    if (style.lanes == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
+    const int laneCount = style.GetLaneCount();
+    const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
+    if (laneCount == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
     {
         return false;
     }
+    if (laneCount > 3 && style.HasCenterTurnLane())
+    {
+        if (!SDL_RenderDebugTextFormat(renderer, 12, 243, "%d each way + center turn", laneCount / 2))
+        {
+            return false;
+        }
+    }
     if (!Text(renderer, 12, 132, "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
         !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
-        !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", style.lanes) ||
+        !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", laneCount) ||
         !SDL_RenderDebugTextFormat(renderer, 12, 320 + offset, "Width: %.0f m", style.LeftWidth() + style.RightWidth()))
     {
         return false;

@@ -51,10 +51,17 @@ bool RoadMap::Open(const char* documentPath)
     {
         Road road;
         auto& style = road.style;
+        int laneCount;
         if (token != "road" ||
-            !(file >> style.curved >> style.lanes >> style.leftShoulder >> style.rightShoulder) || style.lanes < 1)
+            !(file >> style.curved >> laneCount >> style.leftShoulder >> style.rightShoulder) || laneCount < 1)
         {
             return SDL_SetError("Invalid road settings: %s", filename.c_str());
+        }
+        style.SetLaneCount(laneCount);
+        if (laneCount > RoadStyle::maxLanes)
+        {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Road in '%s' uses %d lanes. Capped at %d.",
+                        filename.c_str(), laneCount, RoadStyle::maxLanes);
         }
         if (version == 2)
         {
@@ -106,7 +113,7 @@ bool RoadMap::Save() const
     for (const Road& road : roads)
     {
         const auto& style = road.style;
-        file << "road " << style.curved << ' ' << style.lanes << ' ' << style.leftShoulder << ' '
+        file << "road " << style.curved << ' ' << style.GetLaneCount() << ' ' << style.leftShoulder << ' '
              << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << '\n';
         for (const RoadPoint& point : road.points)
         {

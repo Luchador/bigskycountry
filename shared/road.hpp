@@ -19,14 +19,22 @@ struct RoadStyle
 {
     static constexpr double laneWidth = 5.0;
     static constexpr double shoulderWidth = 5.0;
-    int lanes = 2; // Total across both directions.
+    static constexpr int maxLanes = 10;
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = false;
+    bool divided = false;
+    double dividedGap = 4.0;
     ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
 
+    int GetLaneCount() const;
+    void SetLaneCount(int count);
+    bool HasCenterTurnLane() const;
     double LeftWidth() const;
     double RightWidth() const;
+
+private:
+    int lanes = 2; // Total across both directions, including any center turn lane.
 };
 
 struct RoadPoint

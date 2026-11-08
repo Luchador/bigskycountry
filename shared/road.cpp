@@ -28,6 +28,25 @@ namespace
     }
 }
 
+int RoadStyle::GetLaneCount() const
+{
+    return lanes;
+}
+
+void RoadStyle::SetLaneCount(int count)
+{
+    lanes = std::clamp(count, 1, maxLanes);
+}
+
+bool RoadStyle::HasCenterTurnLane() const
+{
+    if (lanes == 3)
+    {
+        return threeLaneLayout == ThreeLaneLayout::CenterTurn;
+    }
+    return lanes >= 5 && lanes % 2 == 1;
+}
+
 double RoadStyle::LeftWidth() const
 {
     return lanes * laneWidth * 0.5 + (leftShoulder ? shoulderWidth : 0.0);
