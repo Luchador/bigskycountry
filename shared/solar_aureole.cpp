@@ -34,28 +34,28 @@ namespace
         return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
     }
 
-    float AddScatteredLight(float base, float linearSun, float weight)
+    float AddScatteredLight(float base, float linearLight, float weight)
     {
         const float linearBase = ToLinear(base);
 
-        if (linearSun <= linearBase)
+        if (linearLight <= linearBase)
         {
             return base;
         }
 
         // Use the available brightness headroom in the game's SDR sky palette.
-        return ToDisplay(std::lerp(linearBase, linearSun, weight));
+        return ToDisplay(std::lerp(linearBase, linearLight, weight));
     }
 }
 
 // Constructor
-SolarAureole::SolarAureole(Vector3 sunDirection, SDL_FColor sunTint)
+SolarAureole::SolarAureole(Vector3 lightDirection, SDL_FColor lightTint, double relativeStrength)
 {
-    direction = sunDirection;
+    direction = lightDirection;
 
-    linearTint = {ToLinear(sunTint.r), ToLinear(sunTint.g), ToLinear(sunTint.b), 1.0f};
+    linearTint = {ToLinear(lightTint.r), ToLinear(lightTint.g), ToLinear(lightTint.b), 1.0f};
 
-    strength = peakStrength * SmoothStep(-0.10, 0.04, sunDirection.y);
+    strength = peakStrength * relativeStrength * SmoothStep(-0.10, 0.04, direction.y);
 }
 
 SDL_FColor SolarAureole::Brighten(SDL_FColor sky, Vector3 unitRay) const

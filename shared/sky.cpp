@@ -31,6 +31,9 @@ namespace
         return {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
     }
 
+    constexpr SDL_FColor lunarAureoleTint = Rgb(201, 215, 236);
+    constexpr double lunarAureoleStrengthScale = 0.5;
+
     // Display colors sampled as the sun climbs from below the horizon.
     constexpr std::array<SkyStop, 7> skyStops{{
         {-18.0, {Rgb( 6,  12,  29), Rgb( 21,  31,  52), Rgb( 21,  31,  52)}},
@@ -83,9 +86,9 @@ namespace
         return Blend(horizon, haze, depth * (2.0 - depth));
     }
 
-    // Place extra sample lines through the projected sun and its close surroundings.
+    // Place extra sample lines through the projected light source and its close surroundings.
     // Their spacing is angular so it stays useful after resizes and near the field-of-view edges.
-    void AddSunSamples(std::vector<double>& samples, double centerAngle, int size, double focal)
+    void AddAureoleSamples(std::vector<double>& samples, double centerAngle, int size, double focal)
     {
         constexpr std::array<double, 11> offsets = {-24, -16, -10, -6, -3, 0, 3, 6, 10, 16, 24};
         const double halfFov = std::atan2(size * 0.5, focal);
@@ -142,9 +145,11 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
     }
 
     const Vector3 sunDirection = Sun::Direction(timeOfDayMinutes);
+    const Vector3 moonDirection = Moon::Direction(sunDirection);
     const double elevation = std::asin(std::clamp(sunDirection.y, -1.0, 1.0));
     const Palette colors = ColorsAt(elevation * 180.0 / std::numbers::pi);
-    const SolarAureole aureole(sunDirection, Sun::Tint(elevation));
+    const SolarAureole solarAureole(sunDirection, Sun::Tint(elevation));
+    const SolarAureole lunarAureole(moonDirection, lunarAureoleTint, lunarAureoleStrengthScale);
     const Vector3 horizontalSun = Math::Normalize({sunDirection.x, 0.0, sunDirection.z});
 
     // Match the road projection. View rays use camera orientation only, so the sky stays at infinity.
@@ -192,12 +197,18 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         sampleY.push_back(height * rowFraction);
     }
 
-    if (aureole.Visible())
+    auto sampleAround = [&](const SolarAureole& aureole, Vector3 direction)
     {
-        const Vector3 viewSun = camera.WorldDirectionToView(sunDirection);
-        AddSunSamples(sampleX, std::atan2(viewSun.x, viewSun.z), width, focal);
-        AddSunSamples(sampleY, std::atan2(-viewSun.y, viewSun.z), height, focal);
-    }
+        if (solarAureole.Visible())
+        {
+            const Vector3 view = camera.WorldDirectionToView(direction);
+            AddAureoleSamples(sampleX, std::atan2(view.x, view.z), width, focal);
+            AddAureoleSamples(sampleY, std::atan2(-view.y, view.z), height, focal);
+        }
+    };
+
+    sampleAround(solarAureole, sunDirection);
+    sampleAround(lunarAureole, moonDirection);
 
     UpdateGrid();
 
@@ -210,7 +221,8 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
             const Vector3 ray = Math::Normalize(left + leftToRight * (sampleX[x] / width));
             SDL_Vertex& vertex = vertices[y * (columns + 1) + x];
             vertex.position = {static_cast<float>(sampleX[x]), static_cast<float>(sampleY[y])};
-            vertex.color = aureole.Brighten(SampleSky(colors, horizontalSun, ray), ray);
+            const SDL_FColor sunlitSky = solarAureole.Brighten(SampleSky(colors, horizontalSun, ray), ray);
+            vertex.color = lunarAureole.Brighten(sunlitSky, ray);
         }
     }
 
@@ -219,5 +231,5 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
            SDL_RenderClear(renderer) &&
            SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) && // Draw sky mesh
            sun.Draw(renderer, camera, sunDirection, viewport, SampleSky(colors, horizontalSun, sunDirection)) && // Draw sun
-           moon.Draw(renderer, camera, Moon::Direction(sunDirection), viewport); // Draw full moon
+           moon.Draw(renderer, camera, moonDirection, viewport); // Draw full moon
 }
