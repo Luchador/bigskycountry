@@ -1,4 +1,4 @@
-#include "road_depth.hpp"
+#include "world_renderer.hpp"
 #include "view_geometry.hpp"
 
 #include <algorithm>
@@ -8,9 +8,9 @@
 // SDL renderers without a GPU device still get the same depth and culling rules.
 namespace
 {
-    using Polygon = ViewGeometry::VertexPolygon<RoadDepthVertex>;
+    using Polygon = ViewGeometry::VertexPolygon<WorldDepthVertex>;
 
-    RoadDepthVertex Interpolate(const RoadDepthVertex& a, const RoadDepthVertex& b, double t)
+    WorldDepthVertex Interpolate(const WorldDepthVertex& a, const WorldDepthVertex& b, double t)
     {
         const float f = static_cast<float>(t);
         return {std::lerp(a.x, b.x, f), std::lerp(a.y, b.y, f), std::lerp(a.z, b.z, f), std::lerp(a.w, b.w, f),
@@ -38,7 +38,7 @@ namespace
         SDL_FColor color;
     };
 
-    ScreenVertex Project(const RoadDepthVertex& v, int width, int height)
+    ScreenVertex Project(const WorldDepthVertex& v, int width, int height)
     {
         const double invW = 1.0 / v.w;
 
@@ -56,7 +56,7 @@ namespace
     }
 }
 
-bool RoadDepthRenderer::DrawSoftware()
+bool WorldRenderer::DrawSoftware()
 {
     void* pixels;
     int pitch;

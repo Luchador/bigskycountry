@@ -1,5 +1,5 @@
 #include "road_render.hpp"
-#include "road_depth.hpp"
+#include "world_renderer.hpp"
 #include "free_camera.hpp"
 #include "view_geometry.hpp"
 
@@ -54,7 +54,7 @@ namespace
             Vector3 a = previous;
             previous = transform(point);
             Vector3 b = previous;
-            if (!ClipLine(a, b, {0, 0, 1}, roadNearDepth) ||
+            if (!ClipLine(a, b, {0, 0, 1}, worldNearDepth) ||
                 !std::all_of(sides.begin(), sides.end(), [&](Vector3 side) { return ClipLine(a, b, side, 0.0); }))
             {
                 continue;
@@ -97,7 +97,7 @@ namespace
                 p.points[p.count++] = transform(point);
             }
 
-            p = clip(p, {0, 0, 1}, roadNearDepth);
+            p = clip(p, {0, 0, 1}, worldNearDepth);
 
             for (Vector3 side : sides)
             {
@@ -179,80 +179,38 @@ namespace
     }
 }
 
-bool RoadDepthRenderer::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const std::vector<Road>& roads, const Road* selected)
+void WorldRenderer::SubmitRoad(const Road& road, bool selected)
 {
-    SDL_Rect viewport{};
-    if (!SDL_GetRenderViewport(renderer, &viewport))
+    const auto solid = [&](const std::vector<Road::Triangle>& triangles, SDL_FColor color)
     {
-        return false;
-    }
-    if (roads.empty() || viewport.w <= 0 || viewport.h <= 0)
-    {
-        return true;
-    }
-    viewport.x = viewport.y = 0;
-    const double focal = std::min(viewport.w, viewport.h) * 0.5;
-    const double scaleX = 2.0 * focal / viewport.w, scaleY = 2.0 * focal / viewport.h;
-    const auto transform = [&](Vector3 p) { return camera.WorldToView(p); };
-    vertices.clear();
-    const auto emit = [&](Vector3 point, SDL_FColor color)
-    {
-        const Vector3 v = transform(point);
-        vertices.push_back({static_cast<float>(scaleX * v.x), static_cast<float>(scaleY * v.y),
-                            static_cast<float>(roadNearDepth), static_cast<float>(v.z), color});
-    };
-    const auto emitSolid = [&](const std::vector<Road::Triangle>& mesh, SDL_FColor color)
-    {
-        for (const auto& triangle : mesh)
+        for (const auto& t : triangles)
         {
-            for (Vector3 p : triangle)
-            {
-                emit(p, color);
-            }
+            SubmitTriangle(t[0], t[1], t[2], color);
         }
     };
-
-    selectedStart = selectedEnd = 0;
-    for (const Road& road : roads)
+    const std::size_t start = vertices.size();
+    solid(road.triangles, roadColor);
+    for (const auto& triangle : road.edgeTriangles)
     {
-        const std::size_t start = vertices.size();
-        emitSolid(road.triangles, roadColor);
-        for (const auto& triangle : road.edgeTriangles)
-        {
-            for (const auto& v : triangle)
-            {
-                emit(v.position, v.color);
-            }
-        }
-        emitSolid(road.yellowStripes, yellowStripeColor);
-        emitSolid(road.whiteStripes, whiteStripeColor);
-        if (&road == selected)
-        {
-            selectedStart = start;
-            selectedEnd = vertices.size();
-        }
+        SubmitTriangle({triangle[0].position, triangle[1].position, triangle[2].position},
+                       {triangle[0].color, triangle[1].color, triangle[2].color});
     }
-    outlineStart = vertices.size();
-    if (vertices.empty())
+    solid(road.yellowStripes, yellowStripeColor);
+    solid(road.whiteStripes, whiteStripeColor);
+    if (selected && viewport.w > 0 && viewport.h > 0)
     {
-        return true;
-    }
-    if (selected)
-    {
-        // Keep the three-pixel editor stroke in screen space, with the depth
-        // of its original edge endpoints for occlusion by the road itself.
-        AppendOutline(*selected, transform, focal, viewport, [&](SDL_FPoint p, double depth)
+        selectedStart = start;
+        selectedEnd = vertices.size();
+        const auto transform = [&](Vector3 p) { return camera->WorldToView(p); };
+        AppendOutline(road, transform, focal, viewport, [&](SDL_FPoint p, double depth)
         {
             const double x = (2.0 * p.x / viewport.w - 1.0) * depth;
             const double y = (1.0 - 2.0 * p.y / viewport.h) * depth;
-            const double biased = std::min(depth, roadNearDepth * 1.0001);
-            vertices.push_back({static_cast<float>(x), static_cast<float>(y),
-                                static_cast<float>(biased), static_cast<float>(depth), selectionColor});
+            const double biased = std::min(depth, worldNearDepth * 1.0001);
+            outline.push_back({static_cast<float>(x), static_cast<float>(y),
+                               static_cast<float>(biased), static_cast<float>(depth), selectionColor});
         });
     }
-    const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
-    return PrepareTarget(renderer, viewport.w, viewport.h) && (device ? DrawGPU() : DrawSoftware()) &&
-           SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }
 
 // Draw a road in the Editor's 2D view

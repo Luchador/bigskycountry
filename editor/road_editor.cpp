@@ -2,6 +2,7 @@
 #include "world_state.hpp"
 #include "world_document.hpp"
 #include "road_render.hpp"
+#include "world_renderer.hpp"
 #include "free_camera.hpp"
 
 #include <algorithm>
@@ -55,6 +56,35 @@ namespace
     {
         return SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255) && SDL_RenderDebugText(renderer, x, y, text);
     }
+}
+
+bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
+{
+    if (!menu.Attach(window))
+    {
+        return false;
+    }
+    arrow = models.Load("editor/arrow.glb");
+    if (!arrow)
+    {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Road gizmo unavailable: %s", SDL_GetError());
+    }
+    return true;
+}
+
+void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world) const
+{
+    const Road* road = Selected(world);
+    if (!arrow || !road || road->points.empty())
+    {
+        return;
+    }
+    const std::size_t point = static_cast<std::size_t>(state.point);
+    const Vector3 origin = road->points[point < road->points.size() ? point : 0].position;
+    // The authored arrow points along +X. Rotate copies to the other world axes.
+    renderer.SubmitMesh({arrow, {origin}}, {1.0f, 0.18f, 0.14f, 1});
+    renderer.SubmitMesh({arrow, {origin, {0, 1, 0}, {-1, 0, 0}, {0, 0, 1}}}, {0.24f, 0.90f, 0.30f, 1});
+    renderer.SubmitMesh({arrow, {origin, {0, 0, 1}, {0, 1, 0}, {-1, 0, 0}}}, {0.22f, 0.48f, 1.0f, 1});
 }
 
 const Road* RoadEditor::Selected(const WorldDocument& world) const
@@ -701,7 +731,7 @@ void RoadEditor::PickWorldRoad(const WorldDocument& world, const FreeCamera& cam
     }
     const double x = (mouse.x - width * 0.5) / focal;
     const double y = (height * 0.5 - mouse.y) / focal;
-    if (const auto hit = camera.PickGround(x, y, roadNearDepth))
+    if (const auto hit = camera.PickGround(x, y, worldNearDepth))
     {
         SelectAt(world, *hit);
         if (state.selected >= 0)

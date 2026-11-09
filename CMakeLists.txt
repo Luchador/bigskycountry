@@ -10,14 +10,24 @@ FetchContent_Declare(SDL3
 )
 FetchContent_MakeAvailable(SDL3)
 
+# cgltf 1.15 (MIT); shared by model loading in the editor and game.
+FetchContent_Declare(cgltf
+    URL https://codeload.github.com/jkuhlmann/cgltf/tar.gz/360db1a95480fe102ae9c69b27c5d101167ff5ba
+    URL_HASH SHA256=445d135cf793232ae6a585ca1404e4ff28d4f4dbca070689034fe780370ac84a
+)
+FetchContent_MakeAvailable(cgltf)
+
 add_library(BigSkyApplication STATIC
+    shared/mesh.cpp
+    shared/mesh_import.cpp
+    shared/world_renderer.cpp
     shared/road.cpp
     shared/road_stripes.cpp
     shared/road_io.cpp
     shared/world_document.cpp
     shared/road_render.cpp
-    shared/road_depth.cpp
-    shared/road_depth_software.cpp
+    shared/world_renderer_gpu.cpp
+    shared/world_renderer_software.cpp
     shared/sky_disc.cpp
     shared/moon.cpp
     shared/sky.cpp
@@ -32,7 +42,7 @@ add_library(BigSkyApplication STATIC
     shared/world_state.cpp
 )
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
-target_include_directories(BigSkyApplication PUBLIC shared)
+target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cgltf_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 include(cmake/shaders.cmake)
 
@@ -52,13 +62,16 @@ endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
 # Both executables use the same runtime directory, including on multi-config builds.
-add_custom_target(BigSkyTextures
+add_custom_target(BigSkyAssets
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
     COMMAND "${CMAKE_COMMAND}"
-        "-DtextureSource=${CMAKE_CURRENT_SOURCE_DIR}/assets/textures"
-        "-DtextureDestination=$<TARGET_FILE_DIR:BigSkyCountry>/assets/textures"
-        "-DtextureManifest=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/BigSkyTextures-$<CONFIG>.list"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_textures.cmake"
+        "-DassetSource=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "-DassetDestination=$<TARGET_FILE_DIR:BigSkyCountry>/assets"
+        "-DmanifestDir=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles"
+        "-Dconfig=$<CONFIG>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_assets.cmake"
     VERBATIM
 )
-add_dependencies(BigSkyCountry BigSkyTextures)
-add_dependencies(BigSkyCountryEditor BigSkyTextures)
+add_dependencies(BigSkyCountry BigSkyAssets)
+add_dependencies(BigSkyCountryEditor BigSkyAssets)

@@ -3,13 +3,15 @@
 #include "application.hpp"
 #include "camera_toolbar.hpp"
 #include "edit_history.hpp"
+#include "mesh.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
 
 class RoadEditor : public EditorTool
 {
 public:
-    bool Initialize(SDL_Window* window) override { return menu.Attach(window); }
+    bool Initialize(SDL_Window* window, MeshAssets& models) override;
+    void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world) const override;
     const Road* Selected(const WorldDocument& world) const override;
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
@@ -82,6 +84,7 @@ private:
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
+    std::shared_ptr<const Mesh> arrow;
     CameraToolbar cameraToolbar;
     bool planView = false;
     bool dragChanged = false;

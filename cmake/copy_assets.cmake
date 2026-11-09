@@ -1,0 +1,27 @@
+foreach(kind IN ITEMS textures models)
+    set(source "${assetSource}/${kind}")
+    set(destination "${assetDestination}/${kind}")
+    if(kind STREQUAL "textures")
+        set(manifest "${manifestDir}/BigSkyTextures-${config}.list")
+    else()
+        set(manifest "${manifestDir}/BigSkyModels-${config}.list")
+    endif()
+    # file(COPY) preserves timestamps and skips files that are already up to date.
+    if(IS_DIRECTORY "${source}")
+        file(COPY "${source}/" DESTINATION "${destination}")
+    endif()
+
+    # If a source asset was renamed or deleted, retire only our previous copy.
+    if(EXISTS "${manifest}")
+        file(STRINGS "${manifest}" previousFiles ENCODING UTF-8)
+        foreach(relativePath IN LISTS previousFiles)
+            if(NOT EXISTS "${source}/${relativePath}")
+                file(REMOVE "${destination}/${relativePath}")
+            endif()
+        endforeach()
+    endif()
+
+    file(GLOB_RECURSE files LIST_DIRECTORIES false RELATIVE "${source}" "${source}/*")
+    list(JOIN files "\n" manifestContents)
+    file(WRITE "${manifest}" "${manifestContents}\n")
+endforeach()

@@ -6,6 +6,8 @@ union SDL_Event;
 class WorldDocument;
 struct Road;
 class FreeCamera;
+class MeshAssets;
+class WorldRenderer;
 
 enum class ApplicationMode
 {
@@ -19,7 +21,8 @@ class EditorTool
 {
 public:
     virtual ~EditorTool() = default;
-    virtual bool Initialize(SDL_Window* window) = 0;
+    virtual bool Initialize(SDL_Window* window, MeshAssets& models) = 0;
+    virtual void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world) const = 0;
     virtual const Road* Selected(const WorldDocument& world) const = 0;
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;

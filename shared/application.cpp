@@ -1,7 +1,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 
-#include "road_depth.hpp"
+#include "world_renderer.hpp"
 #include "sky.hpp"
 #include "application.hpp"
 #include "free_camera.hpp"
@@ -14,7 +14,7 @@ namespace
     SDL_Renderer* CreateSceneRenderer(SDL_Window* window)
     {
         // Prefer the GPU renderer when a driver hasn't been requested explicitly.
-#ifdef BIGSKY_ROAD_GPU
+#ifdef BIGSKY_WORLD_GPU
         if (!SDL_GetHint(SDL_HINT_RENDER_DRIVER))
         {
             if (SDL_Renderer* renderer = SDL_CreateRenderer(window, "gpu"))
@@ -36,7 +36,7 @@ namespace
         }
 
         Sky sky;
-        RoadDepthRenderer roadRenderer;
+        WorldRenderer worldRenderer;
         FreeCamera freeCamera;
 
         if (!world.roads.empty())
@@ -47,6 +47,20 @@ namespace
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
         }
 
+        if (world.roads.empty() && !world.meshes.empty())
+        {
+            const auto& first = world.meshes.front();
+            Vector3 lo = first.transform.Point(first.mesh->vertices.front().position), hi = lo;
+            for (const auto& vertex : first.mesh->vertices)
+            {
+                const Vector3 p = first.transform.Point(vertex.position);
+                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            }
+            const Vector3 focus = (lo + hi) * 0.5;
+            const double distance = std::max(1.0, Math::Length(hi - lo));
+            freeCamera.LookAt(focus + Vector3{0, distance * 0.5, -distance}, focus);
+        }
         const FreeCamera gameView = freeCamera;
         Uint64 previousTime = SDL_GetTicksNS();
         const bool vsyncEnabled = SDL_SetRenderVSync(renderer, 1);
@@ -136,11 +150,29 @@ namespace
             {
                 return false;
             }
-            if ((!roadTool || !roadTool->IsPlanView()) &&
-                (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) ||
-                 !roadRenderer.Draw(renderer, view, world.roads, roadTool ? roadTool->Selected(world) : nullptr)))
+            if (!roadTool || !roadTool->IsPlanView())
             {
-                return false;
+                if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) || !worldRenderer.Begin(renderer, view))
+                {
+                    return false;
+                }
+                const Road* selected = roadTool ? roadTool->Selected(world) : nullptr;
+                for (const Road& road : world.roads)
+                {
+                    worldRenderer.SubmitRoad(road, &road == selected);
+                }
+                for (const MeshInstance& instance : world.meshes)
+                {
+                    worldRenderer.SubmitMesh(instance);
+                }
+                if (roadTool)
+                {
+                    roadTool->SubmitGizmos(worldRenderer, world);
+                }
+                if (!worldRenderer.End())
+                {
+                    return false;
+                }
             }
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {
@@ -175,7 +207,7 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
     if (success)
     {
         WorldDocument world;
-        success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window)) &&
+        success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window, world.models)) &&
                   RunWindowLoop(window, renderer, mode, world, roadTool);
     }
 

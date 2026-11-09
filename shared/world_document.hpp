@@ -1,6 +1,7 @@
 #pragma once
 
 #include "road.hpp"
+#include "mesh.hpp"
 
 #include <array>
 #include <cstdint>
@@ -9,7 +10,9 @@
 class WorldDocument
 {
 public:
+    MeshAssets models;
     std::vector<Road> roads;
+    std::vector<MeshInstance> meshes;
 
     bool Open(const char* documentPath);
     bool Save() const;

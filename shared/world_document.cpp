@@ -16,6 +16,8 @@ namespace
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
+    constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
+    constexpr Uint32 meshVersion = 1;
 
     bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
     {
@@ -33,6 +35,50 @@ namespace
             input >> std::ws;
         }
         return true;
+    }
+
+    bool ReadMeshes(std::string payload, WorldDocument& world)
+    {
+        std::istringstream in(std::move(payload));
+        in.imbue(std::locale::classic());
+        in >> std::ws;
+        while (!in.eof())
+        {
+            std::string path;
+            MeshInstance instance;
+            auto& t = instance.transform;
+            if (!(in >> std::quoted(path) >> t.origin.x >> t.origin.y >> t.origin.z
+                     >> t.x.x >> t.x.y >> t.x.z >> t.y.x >> t.y.y >> t.y.z >> t.z.x >> t.z.y >> t.z.z) || !t.Valid())
+            {
+                return SDL_SetError("Invalid mesh instance transform or model path in MESH");
+            }
+            instance.mesh = world.models.Load(path);
+            if (!instance.mesh)
+            {
+                return false;
+            }
+            world.meshes.push_back(std::move(instance));
+            in >> std::ws;
+        }
+        return true;
+    }
+
+    bool WriteMeshes(std::ostream& out, const std::vector<MeshInstance>& meshes)
+    {
+        out.imbue(std::locale::classic());
+        out << std::setprecision(std::numeric_limits<double>::max_digits10);
+        for (const auto& instance : meshes)
+        {
+            const auto& t = instance.transform;
+            if (!instance.mesh || instance.mesh->assetPath.empty() || !t.Valid())
+            {
+                return SDL_SetError("Cannot save an invalid mesh instance");
+            }
+            out << std::quoted(instance.mesh->assetPath) << ' ' << t.origin.x << ' ' << t.origin.y << ' ' << t.origin.z
+                << ' ' << t.x.x << ' ' << t.x.y << ' ' << t.x.z << ' ' << t.y.x << ' ' << t.y.y << ' ' << t.y.z
+                << ' ' << t.z.x << ' ' << t.z.y << ' ' << t.z.z << '\n';
+        }
+        return out.good() || SDL_SetError("Could not serialize mesh instances");
     }
 
     bool WriteSection(SDL_IOStream* output, const Tag& tag, Uint32 version, const std::string& payload)
@@ -90,6 +136,7 @@ bool WorldDocument::Open(const char* documentPath)
     }
 
     bool sawRoads = false;
+    bool sawMeshes = false;
     for (Uint32 i = 0; i < sectionCount; ++i)
     {
         Section section;
@@ -106,6 +153,10 @@ bool WorldDocument::Open(const char* documentPath)
         if (section.tag == roadTag && (section.version < 1 || section.version > RoadIO::currentVersion))
         {
             return SDL_SetError("Unsupported ROAD version %u in '%s'", section.version, loaded.path.c_str());
+        }
+        if (section.tag == meshTag && (sawMeshes || section.version != meshVersion))
+        {
+            return SDL_SetError("Duplicate or unsupported MESH section in '%s'", loaded.path.c_str());
         }
         const Sint64 offset = SDL_TellIO(input.get());
         if (offset < 0 || offset > fileSize || size > static_cast<Uint64>(fileSize - offset) ||
@@ -125,6 +176,14 @@ bool WorldDocument::Open(const char* documentPath)
             if (!ReadRoads(std::move(section.payload), section.version, loaded.roads))
             {
                 return SDL_SetError("Invalid road record in '%s'", loaded.path.c_str());
+            }
+        }
+        else if (section.tag == meshTag)
+        {
+            sawMeshes = true;
+            if (!ReadMeshes(std::move(section.payload), loaded))
+            {
+                return false;
             }
         }
         else
@@ -150,7 +209,8 @@ bool WorldDocument::Save() const
     {
         return SDL_SetError("Open a world before saving it");
     }
-    if (otherSections.size() >= std::numeric_limits<Uint32>::max())
+    const Uint32 knownSections = meshes.empty() ? 1 : 2;
+    if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
     }
@@ -167,6 +227,11 @@ bool WorldDocument::Save() const
         }
     }
 
+    std::ostringstream meshData;
+    if (!WriteMeshes(meshData, meshes))
+    {
+        return false;
+    }
     SDL_Time now;
     if (!SDL_GetCurrentTime(&now))
     {
@@ -178,10 +243,11 @@ bool WorldDocument::Save() const
     {
         return false;
     }
-    const Uint32 count = static_cast<Uint32>(otherSections.size()) + 1;
+    const Uint32 count = static_cast<Uint32>(otherSections.size()) + knownSections;
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
-                    WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str());
+                    WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
+                    (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str()));
     for (const Section& section : otherSections)
     {
         if (!wroteAll)

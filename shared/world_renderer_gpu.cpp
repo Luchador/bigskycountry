@@ -1,17 +1,17 @@
-#include "road_depth.hpp"
+#include "world_renderer.hpp"
 
 #include <cstring>
 #include <limits>
 
-#ifdef BIGSKY_ROAD_GPU
-#include "road_vert_dxil.hpp"
-#include "road_vert_spirv.hpp"
-#include "road_frag_dxil.hpp"
-#include "road_frag_spirv.hpp"
+#ifdef BIGSKY_WORLD_GPU
+#include "world_vert_dxil.hpp"
+#include "world_vert_spirv.hpp"
+#include "world_frag_dxil.hpp"
+#include "world_frag_spirv.hpp"
 
 namespace
 {
-    SDL_GPUShader* CreateRoadShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage)
+    SDL_GPUShader* CreateWorldShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage)
     {
         const bool vertex = stage == SDL_GPU_SHADERSTAGE_VERTEX;
         SDL_GPUShaderCreateInfo info{};
@@ -21,18 +21,18 @@ namespace
         if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
         {
             info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-            info.code = vertex ? road_vert_spirv : road_frag_spirv;
-            info.code_size = vertex ? sizeof(road_vert_spirv) : sizeof(road_frag_spirv);
+            info.code = vertex ? world_vert_spirv : world_frag_spirv;
+            info.code_size = vertex ? sizeof(world_vert_spirv) : sizeof(world_frag_spirv);
         }
         else if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {
             info.format = SDL_GPU_SHADERFORMAT_DXIL;
-            info.code = vertex ? road_vert_dxil : road_frag_dxil;
-            info.code_size = vertex ? sizeof(road_vert_dxil) : sizeof(road_frag_dxil);
+            info.code = vertex ? world_vert_dxil : world_frag_dxil;
+            info.code_size = vertex ? sizeof(world_vert_dxil) : sizeof(world_frag_dxil);
         }
         else
         {
-            SDL_SetError("No supported road shader format on this GPU");
+            SDL_SetError("No supported world shader format on this GPU");
             return nullptr;
         }
         return SDL_CreateGPUShader(device, &info);
@@ -40,7 +40,7 @@ namespace
 }
 #endif
 
-RoadDepthRenderer::~RoadDepthRenderer()
+WorldRenderer::~WorldRenderer()
 {
     if (colorTarget)
     {
@@ -65,8 +65,8 @@ RoadDepthRenderer::~RoadDepthRenderer()
     }
 }
 
-#ifdef BIGSKY_ROAD_GPU
-bool RoadDepthRenderer::CreatePipelines()
+#ifdef BIGSKY_WORLD_GPU
+bool WorldRenderer::CreatePipelines()
 {
     for (auto format : {SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT})
     {
@@ -78,24 +78,24 @@ bool RoadDepthRenderer::CreatePipelines()
     }
     if (depthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
     {
-        return SDL_SetError("No supported depth-stencil format for road rendering");
+        return SDL_SetError("No supported depth-stencil format for world rendering");
     }
 
-    SDL_GPUShader* vs = CreateRoadShader(device, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX);
     if (!vs)
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateRoadShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
         return false;
     }
-    SDL_GPUVertexBufferDescription layout{0, sizeof(RoadDepthVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
+    SDL_GPUVertexBufferDescription layout{0, sizeof(WorldDepthVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
     SDL_GPUVertexAttribute attributes[] = {
         {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
-        {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(RoadDepthVertex, color)}
+        {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, color)}
     };
     SDL_GPUColorTargetDescription color{};
     color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
@@ -147,19 +147,19 @@ bool RoadDepthRenderer::CreatePipelines()
 }
 #endif
 
-bool RoadDepthRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
+bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
 {
     if (colorTarget && colorTarget->w == width && colorTarget->h == height)
     {
         return true;
     }
-#ifdef BIGSKY_ROAD_GPU
+#ifdef BIGSKY_WORLD_GPU
     if (!colorTarget && !device && SDL_strcmp(SDL_GetRendererName(renderer), "gpu") == 0)
     {
         device = SDL_GetGPURendererDevice(renderer);
         if (device && !CreatePipelines())
         {
-            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using software road depth buffer: %s", SDL_GetError());
+            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using software world depth buffer: %s", SDL_GetError());
             device = nullptr;
         }
     }
@@ -208,13 +208,13 @@ bool RoadDepthRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int hei
     return true;
 }
 
-bool RoadDepthRenderer::DrawGPU()
+bool WorldRenderer::DrawGPU()
 {
-    if (vertices.size() > std::numeric_limits<Uint32>::max() / sizeof(RoadDepthVertex))
+    if (vertices.size() > std::numeric_limits<Uint32>::max() / sizeof(WorldDepthVertex))
     {
-        return SDL_SetError("Road vertex buffer exceeds GPU buffer size limit");
+        return SDL_SetError("World vertex buffer exceeds GPU buffer size limit");
     }
-    const Uint32 bytes = static_cast<Uint32>(vertices.size() * sizeof(RoadDepthVertex));
+    const Uint32 bytes = static_cast<Uint32>(vertices.size() * sizeof(WorldDepthVertex));
     if (bytes > bufferBytes)
     {
         const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, bytes, 0};
@@ -261,7 +261,7 @@ bool RoadDepthRenderer::DrawGPU()
     depth.cycle = true;
     if (!color.texture)
     {
-        return SDL_SetError("Road color target has no GPU texture");
+        return SDL_SetError("World color target has no GPU texture");
     }
     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
     if (!commands)
