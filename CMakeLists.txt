@@ -59,6 +59,16 @@ add_executable(BigSkyCountryEditor WIN32
 )
 if(WIN32)
     enable_language(RC)
+    if(MSVC AND CMAKE_GENERATOR MATCHES "^Ninja" AND CMAKE_NINJA_CMCLDEPS_RC)
+        get_filename_component(cmake_bin_dir "${CMAKE_COMMAND}" DIRECTORY)
+        if(NOT EXISTS "${cmake_bin_dir}/cmcldeps.exe")
+            # Some CMake distributions package the Ninja RC dependency scanner separately.
+            # Compile the dialog directly and track its project header explicitly.
+            set(CMAKE_NINJA_CMCLDEPS_RC OFF)
+            set_property(SOURCE editor/panels.rc APPEND PROPERTY OBJECT_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/editor/panel_ids.h")
+        endif()
+    endif()
     target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/panels.rc)
     set_source_files_properties(editor/windows_panels.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
     target_include_directories(BigSkyCountryEditor PRIVATE editor)
