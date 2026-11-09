@@ -39,6 +39,9 @@ private:
         CenterTurn,
         Left,
         Right,
+        NoEdge,
+        Transition,
+        Curb,
         Remove
     };
     struct Button

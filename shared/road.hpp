@@ -1,6 +1,7 @@
 #pragma once
 
 #include "math.hpp"
+#include <SDL3/SDL_pixels.h>
 
 #include <array>
 #include <cstddef>
@@ -14,10 +15,20 @@ enum class ThreeLaneLayout
     CenterTurn = 2
 };
 
+enum class RoadEdge 
+{ 
+    None = 0, 
+    Transition = 1, 
+    Curb = 2 
+};
+
 struct RoadStyle
 {
     static constexpr double laneWidth = 5.0;
     static constexpr double shoulderWidth = 5.0;
+    static constexpr double stripWidth = 0.40;
+    static constexpr double curbHeight = 0.15;
+    static constexpr double curbTopWidth = 0.15;
     static constexpr int maxLanes = 10;
     bool leftShoulder = false;
     bool rightShoulder = false;
@@ -25,6 +36,7 @@ struct RoadStyle
     bool divided = false;
     double dividedGap = 4.0;
     ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
+    RoadEdge edge = RoadEdge::None;
 
     bool operator==(const RoadStyle&) const = default;
     int GetLaneCount() const;
@@ -32,6 +44,7 @@ struct RoadStyle
     bool HasCenterTurnLane() const;
     double LeftWidth() const;
     double RightWidth() const;
+    double EdgeWidth() const;
 
 private:
     int lanes = 2; // Total across both directions, including any center turn lane.
@@ -46,11 +59,17 @@ struct RoadPoint
 struct Road
 {
     using Triangle = std::array<Vector3, 3>;
+    struct EdgeVertex
+    {
+        Vector3 position;
+        SDL_FColor color;
+    };
 
     RoadStyle style;
     std::vector<RoadPoint> points;
     std::vector<Triangle> triangles;
-    std::vector<Vector3> outline; // Closed pavement perimeter, including shoulders and end caps.
+    std::vector<std::array<EdgeVertex, 3>> edgeTriangles;
+    std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 
@@ -59,5 +78,5 @@ struct Road
     void Rebuild();
 
 private:
-    void BuildStripesAndOutline(const std::vector<Vector3>& samples);
+    void BuildSurface(const std::vector<Vector3>& samples);
 };

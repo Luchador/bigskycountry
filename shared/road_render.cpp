@@ -13,7 +13,6 @@ namespace
     constexpr SDL_FColor selectionColor{1.0f, 0.5f, 0.05f, 1.0f};
 
     using ViewGeometry::Clip;
-    using ViewGeometry::Polygon;
     using ViewGeometry::ScreenPoint;
     using ViewGeometry::SidePlanes;
 
@@ -41,6 +40,7 @@ namespace
     }
 
     template <typename ViewTransform>
+
     void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport,
                        std::vector<SDL_Vertex>& vertices)
     {
@@ -79,22 +79,26 @@ namespace
         }
     }
 
-    template <typename ViewTransform>
-    void AppendTriangles(const std::vector<Road::Triangle>& triangles, SDL_FColor color, ViewTransform transform,
-                         double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
+    template<typename Vertex, typename Transform, typename ClipPlane, typename Emit>
+    void AppendMesh(const std::vector<std::array<Vertex, 3>>& triangles, Transform transform,
+                    ClipPlane clip, Emit emit, double focal, SDL_Rect viewport)
     {
+        if (triangles.empty())
+        {
+            return;
+        }
         const auto sides = SidePlanes(focal, viewport);
 
         for (const auto& triangle : triangles)
         {
-            Polygon p{};
+            ViewGeometry::VertexPolygon<Vertex> p{};
 
-            for (const Vector3& point : triangle)
+            for (const Vertex& point : triangle)
             {
                 p.points[p.count++] = transform(point);
             }
 
-            p = Clip(p, {0, 0, 1}, roadNearDepth);
+            p = clip(p, {0, 0, 1}, roadNearDepth);
 
             for (Vector3 side : sides)
             {
@@ -102,27 +106,59 @@ namespace
                 {
                     break;
                 }
-                p = Clip(p, side, 0.0);
+                p = clip(p, side, 0.0);
             }
 
             for (int i = 2; i < p.count; ++i)
             {
                 for (int index : {0, i - 1, i})
                 {
-                    const Vector3 v = p.points[index];
-                    vertices.push_back({ScreenPoint(v, focal, viewport), color, {}});
+                    emit(p.points[index]);
                 }
             }
         }
     }
 
+    template<typename ViewTransform>
+
+    void AppendTriangles(const std::vector<Road::Triangle>& triangles, SDL_FColor color, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
+    {
+        AppendMesh(triangles, transform, Clip, [&](Vector3 v)
+        {
+            vertices.push_back({ScreenPoint(v, focal, viewport), color, {}});
+        }, focal, viewport);
+    }
+
+    using EdgePolygon = ViewGeometry::VertexPolygon<Road::EdgeVertex>;
+
+    EdgePolygon ClipEdge(const EdgePolygon& input, Vector3 normal, double offset)
+    {
+        return ViewGeometry::ClipPolygon(input, [&](const Road::EdgeVertex& v)
+        {
+            return Math::Dot(v.position, normal) - offset;
+        }, [](const Road::EdgeVertex& a, const Road::EdgeVertex& b, double t)
+        {
+            const float f = static_cast<float>(t);
+            return Road::EdgeVertex{a.position + (b.position - a.position) * t,
+                                    {std::lerp(a.color.r, b.color.r, f), std::lerp(a.color.g, b.color.g, f),
+                                     std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)}};
+        });
+    }
+
     template <typename ViewTransform>
-    void AppendRoad(const Road& road, RoadLayer layer, ViewTransform transform, double focal, SDL_Rect viewport,
-                    std::vector<SDL_Vertex>& vertices)
+
+    void AppendRoad(const Road& road, RoadLayer layer, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
     {
         if (layer == RoadLayer::Pavement)
         {
             AppendTriangles(road.triangles, roadColor, transform, focal, viewport, vertices);
+            AppendMesh(road.edgeTriangles, [&](const Road::EdgeVertex& v)
+            {
+                return Road::EdgeVertex{transform(v.position), v.color};
+            }, ClipEdge, [&](const Road::EdgeVertex& v)
+            {
+                vertices.push_back({ScreenPoint(v.position, focal, viewport), v.color, {}});
+            }, focal, viewport);
             return;
         }
         if (layer == RoadLayer::Outline)

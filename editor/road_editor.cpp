@@ -93,7 +93,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
     const RoadStyle& style = current ? current->style : state.defaults;
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
-    const float removeY = (planView ? 424.0f : 350.0f) + offset;
+    const float removeY = (planView ? 472.0f : 398.0f) + offset;
 
     std::vector<Button> buttons{
         {Action::ChangeView, {12, 44, 194, 28}, planView ? "Back to 3D   [R]" : "Top-down view   [R]"},
@@ -104,13 +104,16 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
         {Action::More, {174, 210, 32, 28}, "+", false, laneCount < RoadStyle::maxLanes},
         {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder},
         {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
+        {Action::NoEdge, {12, 328 + offset, 46, 28}, "None", style.edge == RoadEdge::None},
+        {Action::Transition, {62, 328 + offset, 94, 28}, "Transition", style.edge == RoadEdge::Transition},
+        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb},
         {Action::Remove, {12, removeY, 194, 28}, "Delete selected road", false, current && !EditingDraft()}};
 
     if (planView)
     {
-        buttons.push_back({Action::Finish, {12, 350 + offset, 194, 28}, "Finish road  [Enter]", false,
+        buttons.push_back({Action::Finish, {12, 398 + offset, 194, 28}, "Finish road  [Enter]", false,
                            state.drawing && state.draft->points.size() >= 2});
-        buttons.push_back({Action::Cancel, {12, 384 + offset, 194, 28}, "Cancel draft [Esc]", false, state.drawing});
+        buttons.push_back({Action::Cancel, {12, 432 + offset, 194, 28}, "Cancel draft [Esc]", false, state.drawing});
     }
 
     if (laneCount == 3)
@@ -290,6 +293,15 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     case Action::Right:
         style.rightShoulder = !style.rightShoulder;
         break;
+    case Action::NoEdge:
+        style.edge = RoadEdge::None;
+        break;
+    case Action::Transition:
+        style.edge = RoadEdge::Transition;
+        break;
+    case Action::Curb:
+        style.edge = RoadEdge::Curb;
+        break;
     default:
         return;
     }
@@ -372,6 +384,14 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
         for (const auto& triangle : world.roads[i].triangles)
         {
             if (HitTriangle(pos, triangle))
+            {
+                state.selected = i;
+                return;
+            }
+        }
+        for (const auto& edge : world.roads[i].edgeTriangles)
+        {
+            if (HitTriangle(pos, {edge[0].position, edge[1].position, edge[2].position}))
             {
                 state.selected = i;
                 return;
@@ -590,8 +610,10 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
     }
     if (!Text(renderer, 12, 132, "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
         !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
+        !Text(renderer, 12, 312 + offset, "Road edges", muted) ||
         !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", laneCount) ||
-        !SDL_RenderDebugTextFormat(renderer, 12, 320 + offset, "Width: %.0f m", style.LeftWidth() + style.RightWidth()))
+        !SDL_RenderDebugTextFormat(renderer, 12, 368 + offset, "Width: %.2f m",
+                                   style.LeftWidth() + style.RightWidth() + 2.0 * style.EdgeWidth()))
     {
         return false;
     }

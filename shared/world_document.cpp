@@ -16,16 +16,15 @@ namespace
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
-    constexpr Uint32 roadVersion = 1;
 
-    bool ReadRoads(std::string payload, std::vector<Road>& roads)
+    bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
     {
         std::istringstream input(std::move(payload));
         input.imbue(std::locale::classic());
         input >> std::ws;
         while (!input.eof())
         {
-            Road road = RoadIO::ReadRoad(input);
+            Road road = RoadIO::ReadRoad(input, version);
             if (!input || road.points.size() < 2)
             {
                 return false;
@@ -104,7 +103,7 @@ bool WorldDocument::Open(const char* documentPath)
         {
             return SDL_SetError("Duplicate ROAD section in '%s'", loaded.path.c_str());
         }
-        if (section.tag == roadTag && section.version != roadVersion)
+        if (section.tag == roadTag && (section.version < 1 || section.version > RoadIO::currentVersion))
         {
             return SDL_SetError("Unsupported ROAD version %u in '%s'", section.version, loaded.path.c_str());
         }
@@ -123,7 +122,7 @@ bool WorldDocument::Open(const char* documentPath)
         if (section.tag == roadTag)
         {
             sawRoads = true;
-            if (!ReadRoads(std::move(section.payload), loaded.roads))
+            if (!ReadRoads(std::move(section.payload), section.version, loaded.roads))
             {
                 return SDL_SetError("Invalid road record in '%s'", loaded.path.c_str());
             }
@@ -182,7 +181,7 @@ bool WorldDocument::Save() const
     const Uint32 count = static_cast<Uint32>(otherSections.size()) + 1;
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
-                    WriteSection(output, roadTag, roadVersion, std::move(roadData).str());
+                    WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str());
     for (const Section& section : otherSections)
     {
         if (!wroteAll)

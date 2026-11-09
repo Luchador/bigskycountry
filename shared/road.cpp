@@ -9,8 +9,8 @@ namespace
     void SampleCubic(Vector3 a, Vector3 b, Vector3 c, Vector3 d, int depth, std::vector<Vector3>& samples)
     {
         const Vector3 chord = d - a;
-        const double error =
-            std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
+        const double error = std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
+
         if (error <= 0.1 || depth == 12)
         {
             samples.push_back(d);
@@ -44,6 +44,7 @@ bool RoadStyle::HasCenterTurnLane() const
     {
         return threeLaneLayout == ThreeLaneLayout::CenterTurn;
     }
+
     return lanes >= 5 && lanes % 2 == 1;
 }
 
@@ -57,9 +58,20 @@ double RoadStyle::RightWidth() const
     return lanes * laneWidth * 0.5 + (rightShoulder ? shoulderWidth : 0.0);
 }
 
+double RoadStyle::EdgeWidth() const
+{
+    switch (edge)
+    {
+        case RoadEdge::Transition: return stripWidth;
+        case RoadEdge::Curb: return stripWidth + curbTopWidth;
+        default: return 0.0;
+    }
+}
+
 Vector3 Road::Tangent(std::size_t index) const
 {
     const RoadPoint& point = points[index];
+
     if (style.curved && point.heading)
     {
         return {std::cos(*point.heading), 0.0, std::sin(*point.heading)};
@@ -67,19 +79,24 @@ Vector3 Road::Tangent(std::size_t index) const
 
     Vector3 incoming{};
     Vector3 outgoing{};
+
     if (index > 0)
     {
         incoming = Math::Normalize(point.position - points[index - 1].position);
     }
+
     if (index + 1 < points.size())
     {
         outgoing = Math::Normalize(points[index + 1].position - point.position);
     }
+
     const Vector3 sum = incoming + outgoing;
+
     if (Math::Length(sum) < 1.0e-8)
     {
         return Math::Length(outgoing) > 0.0 ? outgoing : Vector3{1.0, 0.0, 0.0};
     }
+
     return Math::Normalize(sum);
 }
 
@@ -100,11 +117,12 @@ void Road::RotatePoint(std::size_t index, double heading)
     const Vector3 pivot = points[index].position;
     const std::size_t first = index == 0 ? 0 : index - 1;
     const std::size_t last = std::min(index + 1, points.size() - 1);
+
     for (std::size_t i = first; i <= last; ++i)
     {
         const Vector3 offset = points[i].position - pivot;
-        points[i].position =
-            pivot + Vector3{cosine * offset.x - sine * offset.z, 0.0, sine * offset.x + cosine * offset.z};
+        points[i].position = pivot + Vector3{cosine * offset.x - sine * offset.z, 0.0, sine * offset.x + cosine * offset.z};
+
         if (points[i].heading)
         {
             *points[i].heading += delta;
@@ -115,19 +133,23 @@ void Road::RotatePoint(std::size_t index, double heading)
 void Road::Rebuild()
 {
     triangles.clear();
+    edgeTriangles.clear();
     outline.clear();
     whiteStripes.clear();
     yellowStripes.clear();
+
     if (points.size() < 2)
     {
         return;
     }
 
     std::vector<Vector3> samples{points.front().position};
+
     for (std::size_t i = 1; i < points.size(); ++i)
     {
         const Vector3 a = points[i - 1].position;
         const Vector3 b = points[i].position;
+
         if (style.curved)
         {
             const double arm = Math::Length(b - a) / 3.0;
@@ -139,38 +161,5 @@ void Road::Rebuild()
         }
     }
 
-    Vector3 previousLeft{}, previousRight{};
-    bool havePrevious = false;
-    const double leftWidth = style.LeftWidth();
-    const double rightWidth = style.RightWidth();
-    for (std::size_t i = 1; i < samples.size(); ++i)
-    {
-        const Vector3 a = samples[i - 1];
-        const Vector3 b = samples[i];
-        const Vector3 delta = b - a;
-        const double length = std::hypot(delta.x, delta.z);
-        if (length == 0.0)
-        {
-            continue;
-        }
-        const Vector3 left = {-delta.z / length, 0.0, delta.x / length};
-        const Vector3 aLeft = a + left * leftWidth, aRight = a - left * rightWidth;
-        const Vector3 bLeft = b + left * leftWidth, bRight = b - left * rightWidth;
-        if (havePrevious)
-        {
-            // Bevel the join without stretching the road at sharp turns.
-            triangles.push_back({a, previousLeft, aLeft});
-            triangles.push_back({a, previousRight, aRight});
-        }
-        // Both sides share an explicit center vertex with each bevel. This keeps
-        // the joins watertight even when the renderer rounds to pixel centers.
-        triangles.push_back({aLeft, a, b});
-        triangles.push_back({aLeft, b, bLeft});
-        triangles.push_back({a, aRight, bRight});
-        triangles.push_back({a, bRight, b});
-        previousLeft = bLeft;
-        previousRight = bRight;
-        havePrevious = true;
-    }
-    BuildStripesAndOutline(samples);
+    BuildSurface(samples);
 }

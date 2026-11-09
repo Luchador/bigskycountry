@@ -39,7 +39,8 @@ namespace
     }
 
     // A positive offset is left of the road in the direction its points were placed.
-    std::vector<Vector3> OffsetPath(const std::vector<Span>& spans, double offset)
+    template<typename Visit>
+    void VisitOffsetStations(const std::vector<Span>& spans, double offset, Visit visit)
     {
         // On an inside bend the offset lines intersect before/after the corner.
         // Record that trim distance; a negative entry requests a pavement-style bevel.
@@ -54,7 +55,7 @@ namespace
             trim[i] = divisor > 0.0 ? offset * turn / divisor : -1.0;
         }
 
-        std::vector<Vector3> path{spans.front().start + spans.front().left * offset};
+        visit(spans.front().start, spans.front().left);
 
         for (std::size_t i = 1; i < spans.size(); ++i)
         {
@@ -65,18 +66,155 @@ namespace
             if (trim[i] >= 0.0 && trim[i] + std::max(0.0, trim[i - 1]) <= a.length && trim[i] + std::max(0.0, trim[i + 1]) <= b.length)
             {
                 const double divisor = 1.0 + Math::Dot(a.left, b.left);
-                path.push_back(b.start + (a.left + b.left) * (offset / divisor));
+                visit(b.start, (a.left + b.left) * (1.0 / divisor));
             }
             else
             {
-                path.push_back(a.end + a.left * offset);
-                path.push_back(b.start + b.left * offset);
+                visit(a.end, a.left);
+                visit(b.start, b.left);
             }
         }
 
-        path.push_back(spans.back().end + spans.back().left * offset);
+        visit(spans.back().end, spans.back().left);
+    }
 
+    std::vector<Vector3> OffsetPath(const std::vector<Span>& spans, double offset)
+    {
+        std::vector<Vector3> path;
+        VisitOffsetStations(spans, offset, [&](Vector3 center, Vector3 normal)
+        {
+            path.push_back(center + normal * offset);
+        });
         return path;
+    }
+
+    void BuildPlainPavement(Road& road, const std::vector<Span>& spans)
+    {
+        Vector3 previousLeft{}, previousRight{};
+        bool havePrevious = false;
+        const double leftWidth = road.style.LeftWidth();
+        const double rightWidth = road.style.RightWidth();
+
+        for (const Span& span : spans)
+        {
+            const Vector3 a = span.start, b = span.end, left = span.left;
+            const Vector3 aLeft = a + left * leftWidth, aRight = a - left * rightWidth;
+            const Vector3 bLeft = b + left * leftWidth, bRight = b - left * rightWidth;
+
+            if (havePrevious)
+            {
+                // Bevel the join without stretching the road at sharp turns.
+                road.triangles.push_back({a, previousLeft, aLeft});
+                road.triangles.push_back({a, previousRight, aRight});
+            }
+
+            // Both sides share an explicit center vertex with each bevel. This keeps
+            // the joins watertight even when the renderer rounds to pixel centers.
+            road.triangles.push_back({aLeft, a, b});
+            road.triangles.push_back({aLeft, b, bLeft});
+            road.triangles.push_back({a, aRight, bRight});
+            road.triangles.push_back({a, bRight, b});
+            previousLeft = bLeft;
+            previousRight = bRight;
+            havePrevious = true;
+        }
+    }
+
+    void AppendBoundary(Road& road, int side, const std::vector<Vector3>& boundary)
+    {
+        if (side < 0)
+        {
+            road.outline.insert(road.outline.end(), boundary.begin(), boundary.end());
+        }
+        else
+        {
+            road.outline.insert(road.outline.end(), boundary.rbegin(), boundary.rend());
+        }
+    }
+
+    using EdgeProfile = std::array<Vector3, 4>;
+
+    void AddEdgeFace(Road& road, int side, const EdgeProfile& previous, const EdgeProfile& current,
+                     int face, SDL_FColor inner, SDL_FColor outer)
+    {
+        const Road::EdgeVertex a{previous[face], inner}, b{previous[face + 1], outer};
+        const Road::EdgeVertex c{current[face + 1], outer}, d{current[face], inner};
+        if (side > 0)
+        {
+            road.edgeTriangles.push_back({a, b, c});
+            road.edgeTriangles.push_back({a, c, d});
+        }
+        else
+        {
+            road.edgeTriangles.push_back({a, c, b});
+            road.edgeTriangles.push_back({a, d, c});
+        }
+    }
+
+    // Sweep half the pavement and its edge along the same stations. A bevel adds
+    // a second station at the corner, so all three curb faces turn together.
+    void BuildRoadSide(Road& road, const std::vector<Span>& spans, int side)
+    {
+        constexpr SDL_FColor red{1, 0, 0, 1}, black{0, 0, 0, 1};
+        constexpr SDL_FColor apron{0.69f, 0.69f, 0.69f, 1}, riser{0.56f, 0.56f, 0.56f, 1}, top{0.78f, 0.78f, 0.78f, 1};
+
+        const RoadEdge edge = road.style.edge;
+        const int faces = edge == RoadEdge::Curb ? 3 : 1;
+        const double pavement = side < 0 ? road.style.RightWidth() : road.style.LeftWidth();
+        Vector3 previousCenter{};
+        EdgeProfile previous{};
+        std::vector<Vector3> boundary;
+
+        VisitOffsetStations(spans, side * (pavement + road.style.EdgeWidth()), [&](Vector3 center, Vector3 normal)
+        {
+            const Vector3 outward = normal * side;
+            EdgeProfile profile{};
+            profile[0] = center + outward * pavement;
+            profile[1] = profile[0] + outward * RoadStyle::stripWidth;
+
+            if (edge == RoadEdge::Curb)
+            {
+                profile[2] = profile[1] + Vector3{0, RoadStyle::curbHeight, 0};
+                profile[3] = profile[2] + outward * RoadStyle::curbTopWidth;
+            }
+
+            if (boundary.empty())
+            {
+                // Follow the end profile up to the outer rim.
+                boundary.insert(boundary.end(), profile.begin(), profile.begin() + faces);
+            }
+            else
+            {
+                if (previousCenter.x != center.x || previousCenter.z != center.z)
+                {
+                    road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], previousCenter, center} : Road::Triangle{previousCenter, previous[0], center});
+                }
+
+                road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], center, profile[0]} : Road::Triangle{previous[0], profile[0], center});
+
+                if (edge == RoadEdge::Transition)
+                {
+                    AddEdgeFace(road, side, previous, profile, 0, red, black);
+                }
+                else
+                {
+                    AddEdgeFace(road, side, previous, profile, 0, apron, apron);
+                    AddEdgeFace(road, side, previous, profile, 1, riser, riser);
+                    AddEdgeFace(road, side, previous, profile, 2, top, top);
+                }
+            }
+
+            boundary.push_back(profile[faces]);
+            previous = profile;
+            previousCenter = center;
+        });
+
+        for (int i = faces - 1; i >= 0; --i)
+        {
+            boundary.push_back(previous[i]);
+        }
+
+        AppendBoundary(road, side, boundary);
     }
 
     // lo and hi are signed distances perpendicular to each span, in meters.
@@ -108,6 +246,7 @@ namespace
                 {
                     mesh.push_back({a, previousLo, aLo});
                 }
+
                 if (hi != 0.0)
                 {
                     mesh.push_back({a, previousHi, aHi});
@@ -186,7 +325,7 @@ namespace
     }
 }
 
-void Road::BuildStripesAndOutline(const std::vector<Vector3>& samples)
+void Road::BuildSurface(const std::vector<Vector3>& samples)
 {
     const auto spans = MakeSpans(samples);
 
@@ -198,26 +337,29 @@ void Road::BuildStripesAndOutline(const std::vector<Vector3>& samples)
     const int laneCount = style.GetLaneCount();
     const double halfTravelWidth = laneCount * RoadStyle::laneWidth * 0.5;
 
+    if (style.edge == RoadEdge::None)
+    {
+        BuildPlainPavement(*this, spans);
+    }
+
     for (int side : {-1, 1})
     {
         // Place the white stripe wholly inside the travel edge, beside any shoulder.
         auto edge = OffsetPath(spans, side * halfTravelWidth);
         PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
 
-        const double pavementWidth = side < 0 ? style.RightWidth() : style.LeftWidth();
-
-        if (pavementWidth > halfTravelWidth)
+        if (style.edge == RoadEdge::None)
         {
-            edge = OffsetPath(spans, side * pavementWidth);
-        }
-
-        if (side < 0)
-        {
-            outline.insert(outline.end(), edge.begin(), edge.end());
+            const double width = side < 0 ? style.RightWidth() : style.LeftWidth();
+            if (width != halfTravelWidth)
+            {
+                edge = OffsetPath(spans, side * width);
+            }
+            AppendBoundary(*this, side, edge);
         }
         else
         {
-            outline.insert(outline.end(), edge.rbegin(), edge.rend());
+            BuildRoadSide(*this, spans, side);
         }
     }
 
