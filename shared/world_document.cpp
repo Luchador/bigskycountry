@@ -23,6 +23,8 @@ namespace
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
+    constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
+    constexpr Uint32 terrainVersion = 1;
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
     bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
@@ -87,6 +89,29 @@ namespace
         return out.good() || SDL_SetError("Could not serialize mesh instances");
     }
 
+    bool ReadTerrain(std::string payload, WorldDocument& world)
+    {
+        std::istringstream in(std::move(payload));
+        in.imbue(std::locale::classic());
+        in >> std::ws;
+        while (!in.eof())
+        {
+            std::string path;
+            ObjectTransform t;
+            if (!(in >> std::quoted(path) >> t.position.x >> t.position.y >> t.position.z
+                     >> t.rotation.x >> t.rotation.y >> t.rotation.z))
+            {
+                return SDL_SetError("Invalid terrain chunk in TERR");
+            }
+            if (!world.PlaceTerrain(path, t))
+            {
+                return false;
+            }
+            in >> std::ws;
+        }
+        return true;
+    }
+
     bool WriteSection(SDL_IOStream* output, const Tag& tag, Uint32 version, const std::string& payload)
     {
         return SDL_WriteIO(output, tag.data(), tag.size()) == tag.size() &&
@@ -130,6 +155,22 @@ BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelP
         return nullptr;
     }
     return objects.emplace_back(std::move(object)).get();
+}
+
+TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform)
+{
+    auto chunk = std::make_unique<TerrainChunk>();
+    if (!chunk->SetTransform(transform))
+    {
+        return nullptr;
+    }
+    auto model = models.Load(modelPath);
+    if (!model)
+    {
+        return nullptr;
+    }
+    chunk->SetMesh(std::move(model));
+    return terrain.emplace_back(std::move(chunk)).get();
 }
 
 void WorldDocument::TickObjects(float deltaSeconds)
@@ -191,6 +232,7 @@ bool WorldDocument::Open(const char* documentPath)
     bool sawRoads = false;
     bool sawMeshes = false;
     bool sawObjects = false;
+    bool sawTerrain = false;
     for (Uint32 i = 0; i < sectionCount; ++i)
     {
         Section section;
@@ -216,6 +258,10 @@ bool WorldDocument::Open(const char* documentPath)
         {
             return SDL_SetError("Duplicate or unsupported OBJS section in '%s'", loaded.path.c_str());
         }
+        if (section.tag == terrainTag && (sawTerrain || section.version != terrainVersion))
+        {
+            return SDL_SetError("Duplicate or unsupported TERR section in '%s'", loaded.path.c_str());
+        }
         const Sint64 offset = SDL_TellIO(input.get());
         if (offset < 0 || offset > fileSize || size > static_cast<Uint64>(fileSize - offset) ||
             size > section.payload.max_size())
@@ -240,6 +286,14 @@ bool WorldDocument::Open(const char* documentPath)
         {
             sawMeshes = true;
             if (!ReadMeshes(std::move(section.payload), loaded))
+            {
+                return false;
+            }
+        }
+        else if (section.tag == terrainTag)
+        {
+            sawTerrain = true;
+            if (!ReadTerrain(std::move(section.payload), loaded))
             {
                 return false;
             }
@@ -275,7 +329,7 @@ bool WorldDocument::Save() const
     {
         return SDL_SetError("Open a world before saving it");
     }
-    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty();
+    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty();
     if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
@@ -303,6 +357,20 @@ bool WorldDocument::Save() const
     {
         return false;
     }
+    std::ostringstream terrainData;
+    terrainData.imbue(std::locale::classic());
+    terrainData << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const auto& chunk : terrain)
+    {
+        const auto& mesh = chunk->Instance().mesh;
+        const auto& t = chunk->GetTransform();
+        if (!mesh || mesh->assetPath.empty() ||
+            !(terrainData << std::quoted(mesh->assetPath) << ' ' << t.position.x << ' ' << t.position.y << ' ' << t.position.z
+                          << ' ' << t.rotation.x << ' ' << t.rotation.y << ' ' << t.rotation.z << '\n'))
+        {
+            return SDL_SetError("Cannot save terrain chunk");
+        }
+    }
     SDL_Time now;
     if (!SDL_GetCurrentTime(&now))
     {
@@ -319,7 +387,8 @@ bool WorldDocument::Save() const
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
-                    (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str()));
+                    (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str())) &&
+                    (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str()));
     for (const Section& section : otherSections)
     {
         if (!wroteAll)

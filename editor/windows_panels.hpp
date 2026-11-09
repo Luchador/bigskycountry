@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <memory>
+#include "transform_inspector.hpp"
 
 class ContentBrowser;
 class FreeCamera;
@@ -23,7 +24,8 @@ public:
     bool Command(const SDL_Event& event, RoadAction& action) const;
     bool HandleInput(const SDL_Event& event, FreeCamera& camera, GizmoSpace& space);
     SDL_Keymod TakePressModifiers();
-    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space);
+    std::optional<TransformEdit> TakeTransformEdit(const SDL_Event& event);
+    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space, const TransformFields& fields);
 
 private:
     struct Impl;

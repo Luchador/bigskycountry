@@ -46,9 +46,10 @@ namespace
             const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
         }
-        else if (!world.meshes.empty() || !world.Objects().empty())
+        else if (!world.meshes.empty() || !world.Objects().empty() || !world.Terrain().empty())
         {
-            const MeshInstance first = world.meshes.empty() ? world.Objects().front()->Instance() : world.meshes.front();
+            const MeshInstance& first = !world.meshes.empty() ? world.meshes.front() :
+                !world.Objects().empty() ? world.Objects().front()->Instance() : world.Terrain().front()->Instance();
             Vector3 lo = first.transform.Point(first.mesh->vertices.front().position), hi = lo;
             for (const auto& vertex : first.mesh->vertices)
             {

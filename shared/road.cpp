@@ -1,4 +1,5 @@
 #include "road.hpp"
+#include "mesh.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -112,6 +113,39 @@ Vector3 Road::Tangent(std::size_t index) const
     return Math::Normalize(sum);
 }
 
+std::array<Vector3, 3> Road::PointAxes(std::size_t point, bool includeRoll) const
+{
+    const Vector3 tangent = Tangent(point);
+    Vector3 heading = tangent;
+    const auto vertical = [](Vector3 v) { return std::hypot(v.x, v.z) < 1.0e-8; };
+    if (vertical(tangent))
+    {
+        const RoadPoint& pivot = points[point];
+        if (pivot.heading)
+        {
+            heading = {std::cos(*pivot.heading), 0, std::sin(*pivot.heading)};
+        }
+        else
+        {
+            // Vertical spans inherit the preceding heading. At the start, look ahead.
+            for (std::size_t i = point; i > 0 && vertical(heading); --i)
+            {
+                heading = pivot.position - points[i - 1].position;
+            }
+            for (std::size_t i = point + 1; i < points.size() && vertical(heading); ++i)
+            {
+                heading = points[i].position - pivot.position;
+            }
+        }
+    }
+    const Vector3 across = vertical(heading) ? Vector3{0, 0, 1} : Vector3{-heading.z, 0, heading.x};
+    const Vector3 up = Math::Normalize(Math::Cross(across, tangent));
+    const Vector3 side = Math::Cross(tangent, up);
+    const double roll = includeRoll ? points[point].roll : 0.0;
+    return {tangent, up * std::cos(roll) + side * std::sin(roll),
+            side * std::cos(roll) - up * std::sin(roll)};
+}
+
 void Road::RotatePoint(std::size_t index, double heading)
 {
     const Vector3 tangent = Tangent(index);
@@ -136,34 +170,37 @@ void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
         return v * cosine + Math::Cross(unitAxis, v) * sine + unitAxis * (Math::Dot(unitAxis, v) * (1.0 - cosine));
     };
 
+    const Vector3 rotatedUp = rotate(PointAxes(index)[1]);
     if (style.curved)
     {
         const Vector3 tangent = Tangent(index);
         const Vector3 rotated = rotate(tangent);
-    
+
         if (Math::Length(rotated - tangent) > 1.0e-12)
         {
             SetTangent(points[index], rotated);
         }
-    
-        return;
     }
-
-    // A straight span is defined by its endpoints. Pivot only the adjacent spans.
-    const Vector3 pivot = points[index].position;
-    const std::size_t first = index == 0 ? 0 : index - 1;
-    const std::size_t last = std::min(index + 1, points.size() - 1);
-
-    for (std::size_t i = first; i <= last; ++i)
+    else
     {
-        RoadPoint& point = points[i];
-        point.position = pivot + rotate(point.position - pivot);
+        // A straight span is defined by its endpoints. Pivot only the adjacent spans.
+        const Vector3 pivot = points[index].position;
+        const std::size_t first = index == 0 ? 0 : index - 1;
+        const std::size_t last = std::min(index + 1, points.size() - 1);
 
-        if (point.heading)
+        for (std::size_t i = first; i <= last; ++i)
         {
-            SetTangent(point, rotate(ManualTangent(point)));
+            RoadPoint& point = points[i];
+            point.position = pivot + rotate(point.position - pivot);
+
+            if (point.heading)
+            {
+                SetTangent(point, rotate(ManualTangent(point)));
+            }
         }
     }
+    const auto base = PointAxes(index, false);
+    points[index].roll = std::atan2(Math::Dot(rotatedUp, base[2]), Math::Dot(rotatedUp, base[1]));
 }
 
 std::span<const Vector3> Road::SegmentSamples(std::size_t segment) const
@@ -175,6 +212,48 @@ std::span<const Vector3> Road::SegmentSamples(std::size_t segment) const
 
     const std::size_t start = pointSamples[segment];
     return std::span<const Vector3>(centerline).subspan(start, pointSamples[segment + 1] - start + 1);
+}
+
+bool Road::SetPose(Vector3 position, Vector3 angles)
+{
+    if (points.empty() || !std::isfinite(Math::Length(angles)) || !std::isfinite(Math::Length(position)))
+    {
+        return false;
+    }
+    const Vector3 pivot = points.front().position;
+    const MeshTransform from = ObjectTransform{{}, rotation}.ToMeshTransform();
+    const MeshTransform to = ObjectTransform{{}, angles}.ToMeshTransform();
+    const auto rotate = [&](Vector3 v) { return to.Direction(from.Unrotate(v)); };
+    auto moved = points;
+    for (RoadPoint& point : moved)
+    {
+        const Vector3 offset = point.position - pivot;
+        point.position = angles == rotation ? point.position + (position - pivot) : position + rotate(offset);
+        if (!std::isfinite(Math::Length(point.position)))
+        {
+            return false;
+        }
+        if (point.heading && angles != rotation)
+        {
+            SetTangent(point, rotate(ManualTangent(point)));
+        }
+    }
+    moved.front().position = position;
+    std::vector<Vector3> up;
+    if (angles != rotation)
+    {
+        up.reserve(points.size());
+        for (std::size_t i = 0; i < points.size(); ++i) up.push_back(rotate(PointAxes(i)[1]));
+    }
+    points = std::move(moved);
+    for (std::size_t i = 0; i < up.size(); ++i)
+    {
+        const auto base = PointAxes(i, false);
+        points[i].roll = std::atan2(Math::Dot(up[i], base[2]), Math::Dot(up[i], base[1]));
+    }
+    rotation = angles;
+    Rebuild();
+    return true;
 }
 
 void Road::Rebuild()
@@ -213,7 +292,23 @@ void Road::Rebuild()
         pointSamples.push_back(centerline.size() - 1);
     }
 
-    BuildSurface(centerline);
+    // Sweep and wind the cross section in the road's own frame, including curbs and paint.
+    const bool rotated = rotation != Vector3{};
+    const MeshTransform frame = ObjectTransform{points.front().position, rotation}.ToMeshTransform();
+    if (rotated)
+    {
+        std::vector<Vector3> local;
+        local.reserve(centerline.size());
+        for (Vector3 sample : centerline)
+        {
+            local.push_back(frame.Unrotate(sample - frame.origin));
+        }
+        BuildSurface(local);
+    }
+    else
+    {
+        BuildSurface(centerline);
+    }
 
     // Bevels can turn either way. Give all top surfaces an upward normal once,
     // when the road changes. Vertical curb risers already face the pavement.
@@ -238,6 +333,31 @@ void Road::Rebuild()
         if (facesDown(triangle[0].position, triangle[1].position, triangle[2].position))
         {
             std::swap(triangle[1], triangle[2]);
+        }
+    }
+
+    if (rotated)
+    {
+        for (auto* mesh : {&triangles, &whiteStripes, &yellowStripes})
+        {
+            for (Triangle& triangle : *mesh)
+            {
+                for (Vector3& vertex : triangle)
+                {
+                    vertex = frame.Point(vertex);
+                }
+            }
+        }
+        for (auto& triangle : edgeTriangles)
+        {
+            for (EdgeVertex& vertex : triangle)
+            {
+                vertex.position = frame.Point(vertex.position);
+            }
+        }
+        for (Vector3& vertex : outline)
+        {
+            vertex = frame.Point(vertex);
         }
     }
 }

@@ -6,7 +6,7 @@
 
 class WorldDocument;
 
-enum class RoadPickKind { Empty, Road, Segment, Point };
+enum class RoadPickKind { Empty, Road, Segment, Point, Object, Terrain };
 
 struct RoadPick
 {
@@ -19,7 +19,6 @@ class RoadOverlay
 public:
     RoadOverlay();
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
-    static GizmoAxes PointAxes(const Road& road, int point);
     void Draw(WorldRenderer& renderer, const Road& road, int point, const std::set<int>& segments,
               const FreeCamera& camera, SDL_Rect scene) const;
     RoadPick Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected,

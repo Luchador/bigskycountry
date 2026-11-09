@@ -11,7 +11,7 @@ namespace
     constexpr double yellowPairOffset = (yellowGap + stripeWidth) * 0.5;
     constexpr double stripeHeight = 0.02;
     constexpr double dashLength = 3.0;
-    constexpr double gapLength = 9.0;
+    constexpr double gapLength = RoadStyle::dashPeriod - dashLength;
 
     struct Span
     {

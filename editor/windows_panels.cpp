@@ -7,6 +7,7 @@
 #include "road_action.hpp"
 #include "transform_space.hpp"
 #include <array>
+#include <deque>
 
 #include <windows.h>
 #include <commctrl.h>
@@ -124,6 +125,9 @@ struct WindowsPanels::Impl
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
     HACCEL shortcuts = nullptr;
     Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, spaceEvent = 0;
+    Uint32 transformEvent = 0;
+    std::optional<TransformFields> inspected;
+    std::deque<TransformEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     bool populating = false, populated = false;
@@ -183,6 +187,54 @@ struct WindowsPanels::Impl
         bool operator==(const Inspector&) const = default;
     };
     std::optional<Inspector> lastInspector;
+
+    void RestoreField(int id)
+    {
+        const int field = id - IDC_LOC_X;
+        if (inspected && field >= 0 && field < 9)
+        {
+            SetDlgItemTextW(road, id, Wide(inspected->Text(field)).c_str());
+            SendDlgItemMessageW(road, id, EM_SETMODIFY, FALSE, 0);
+        }
+    }
+
+    void SyncFields(const TransformFields& fields)
+    {
+        if (inspected && *inspected == fields) return;
+        const bool changedTarget = !inspected || inspected->target != fields.target;
+        inspected = fields;
+        if (changedTarget)
+        {
+            SetDlgItemTextW(road, IDC_TRANSFORM_TITLE, Wide("Transform - " + fields.Title()).c_str());
+        }
+        for (int field = 0; field < 9; ++field)
+        {
+            HWND control = GetDlgItem(road, IDC_LOC_X + field);
+            EnableWindow(control, fields.CanEdit(field));
+            if (changedTarget || control != GetFocus()) RestoreField(IDC_LOC_X + field);
+        }
+    }
+
+    void SubmitField(HWND control, int field)
+    {
+        if (inspected && inspected->CanEdit(field) && SendMessageW(control, EM_GETMODIFY, 0, 0))
+        {
+            wchar_t text[128]{};
+            GetWindowTextW(control, text, 128);
+            // Transform numbers use ASCII digits, sign, decimal point and exponent.
+            std::string input;
+            for (const wchar_t* ch = text; *ch; ++ch)
+            {
+                input += *ch <= 127 ? static_cast<char>(*ch) : '?';
+            }
+            pendingEdits.push_back({inspected->target, field, std::move(input)});
+            SDL_Event event{};
+            event.type = transformEvent;
+            event.user.windowID = SDL_GetWindowID(frameWindow);
+            if (!SDL_PushEvent(&event)) pendingEdits.pop_back();
+        }
+        SetFocus(frame);
+    }
 
     void Post(Uint32 type, int code) const
     {
@@ -428,11 +480,26 @@ struct WindowsPanels::Impl
         switch (msg)
         {
         case WM_COMMAND:
+            if (HIWORD(w) == EN_KILLFOCUS)
+            {
+                self->RestoreField(LOWORD(w));
+                return TRUE;
+            }
             if (l)
             {
                 self->Control(LOWORD(w), HIWORD(w));
             }
             return TRUE;
+        case WM_CTLCOLORSTATIC:
+        {
+            const int id = GetDlgCtrlID(reinterpret_cast<HWND>(l));
+            if (id < IDC_AXIS_X || id > IDC_AXIS_Z) return FALSE;
+            static constexpr COLORREF axisColors[] = {RGB(151, 52, 45), RGB(35, 107, 48), RGB(43, 81, 158)};
+            HDC dc = reinterpret_cast<HDC>(w);
+            SetTextColor(dc, axisColors[id - IDC_AXIS_X]);
+            SetBkColor(dc, GetSysColor(COLOR_3DFACE));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_3DFACE));
+        }
         case WM_HSCROLL:
             if (reinterpret_cast<HWND>(l) == GetDlgItem(hwnd, IDC_SPEED))
             {
@@ -581,6 +648,32 @@ struct WindowsPanels::Impl
             return false;
         }
 
+        const int field = GetDlgCtrlID(focus) - IDC_LOC_X;
+        if (IsChild(self.road, focus) && field >= 0 && field < 9 &&
+            msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
+        {
+            if (msg->message == WM_KEYDOWN)
+            {
+                if (msg->wParam == VK_RETURN)
+                {
+                    self.SubmitField(focus, field);
+                    return false;
+                }
+                if (msg->wParam == VK_ESCAPE)
+                {
+                    SetFocus(self.frame);
+                    return false;
+                }
+                if (msg->wParam == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    SendMessageW(focus, EM_SETSEL, 0, -1);
+                    return false;
+                }
+            }
+            TranslateMessage(msg);
+            DispatchMessageW(msg);
+            return false;
+        }
         if (focus != self.frame && msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (TranslateAcceleratorW(self.frame, self.shortcuts, msg))
@@ -617,7 +710,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
-    p.actions = SDL_RegisterEvents(5);
+    p.actions = SDL_RegisterEvents(6);
 
     if (!p.actions)
     {
@@ -628,6 +721,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.wheelEvent = p.actions + 2;
     p.pressEvent = p.actions + 3;
     p.spaceEvent = p.actions + 4;
+    p.transformEvent = p.actions + 5;
     WNDCLASSW wc{};
     wc.hInstance = module;
     wc.lpfnWndProc = ViewProc;
@@ -669,6 +763,10 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
+    for (int id = IDC_LOC_X; id <= IDC_SCALE_Z; ++id)
+    {
+        SendDlgItemMessageW(p.road, id, EM_SETLIMITTEXT, 120, 0);
+    }
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
     Choices(p.road, IDC_EDGE, {L"None", L"Transition strip", L"Curb"});
@@ -768,14 +866,23 @@ bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, Gizm
     return true;
 }
 
+std::optional<TransformEdit> WindowsPanels::TakeTransformEdit(const SDL_Event& event)
+{
+    if (event.type != impl->transformEvent || impl->pendingEdits.empty()) return {};
+    TransformEdit edit = std::move(impl->pendingEdits.front());
+    impl->pendingEdits.pop_front();
+    return edit;
+}
+
 SDL_Keymod WindowsPanels::TakePressModifiers()
 {
     return std::exchange(impl->pressModifiers, std::nullopt).value_or(SDL_GetModState());
 }
 
-void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space)
+void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space, const TransformFields& fields)
 {
     auto& p = *impl;
+    p.SyncFields(fields);
 
     if (space != p.displayedSpace)
     {

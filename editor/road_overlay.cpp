@@ -102,36 +102,6 @@ std::optional<GizmoPlacement> RoadOverlay::PointPlacement(Vector3 point, const F
     return placement;
 }
 
-GizmoAxes RoadOverlay::PointAxes(const Road& road, int point)
-{
-    const Vector3 tangent = road.Tangent(point);
-    Vector3 heading = tangent;
-    const auto vertical = [](Vector3 v) { return std::hypot(v.x, v.z) < 1.0e-8; };
-    if (vertical(tangent))
-    {
-        const RoadPoint& pivot = road.points[point];
-        if (road.style.curved && pivot.heading)
-        {
-            heading = {std::cos(*pivot.heading), 0, std::sin(*pivot.heading)};
-        }
-        else
-        {
-            // Vertical spans inherit the preceding heading. At the start, look ahead.
-            for (int i = point - 1; i >= 0 && vertical(heading); --i)
-            {
-                heading = pivot.position - road.points[i].position;
-            }
-            for (std::size_t i = point + 1; i < road.points.size() && vertical(heading); ++i)
-            {
-                heading = road.points[i].position - pivot.position;
-            }
-        }
-    }
-    const Vector3 across = vertical(heading) ? Vector3{0, 0, 1} : Vector3{-heading.z, 0, heading.x};
-    const Vector3 up = Math::Normalize(Math::Cross(across, tangent));
-    return {tangent, up, Math::Cross(tangent, up)};
-}
-
 RoadOverlay::RoadOverlay()
 {
     auto diamond = std::make_shared<Mesh>();
@@ -193,13 +163,18 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         }
     }
 
-    world.ForEachMesh([&](const MeshInstance& instance)
+    for (const auto& mesh : world.meshes)
     {
-        if (picker.TestMesh(instance))
-        {
-            hit = {};
-        }
-    });
+        if (picker.TestMesh(mesh)) hit = {};
+    }
+    for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+    {
+        if (picker.TestMesh(world.Terrain()[i]->Instance())) hit = {RoadPickKind::Terrain, i};
+    }
+    for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
+    {
+        if (picker.TestMesh(world.Objects()[i]->Instance())) hit = {RoadPickKind::Object, i};
+    }
 
     if (selected)
     {

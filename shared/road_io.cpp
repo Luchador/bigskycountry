@@ -61,16 +61,22 @@ namespace RoadIO
     void WriteRoad(std::ostream& out, const Road& road)
     {
         WriteStyle(out, road.style);
+        if (!std::isfinite(Math::Length(road.rotation)))
+        {
+            out.setstate(std::ios::failbit);
+            return;
+        }
+        out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z << '\n';
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
-            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch))
+            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll))
             {
                 out.setstate(std::ios::failbit);
                 return;
             }
             out << p.position.x << ' ' << p.position.y << ' ' << p.position.z << ' '
-                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << ' ' << p.pitch << '\n';
+                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << ' ' << p.pitch << ' ' << p.roll << '\n';
         }
     }
 
@@ -78,6 +84,12 @@ namespace RoadIO
     {
         Road road;
         ReadStyle(in, road.style, version);
+        if (version >= 4 && (!(in >> road.rotation.x >> road.rotation.y >> road.rotation.z) ||
+                             !std::isfinite(Math::Length(road.rotation))))
+        {
+            in.setstate(std::ios::failbit);
+            return road;
+        }
         std::int64_t count;
         if (!(in >> count) || count < 0)
         {
@@ -94,7 +106,8 @@ namespace RoadIO
             {
                 in >> p.pitch;
             }
-            if (!in || !ValidPoint(p.position, heading, p.pitch))
+            if (version >= 4) in >> p.roll;
+            if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll))
             {
                 in.setstate(std::ios::failbit);
                 break;

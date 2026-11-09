@@ -2,6 +2,7 @@
 
 #include "road.hpp"
 #include "bscobject.hpp"
+#include "terrain_chunk.hpp"
 
 #include <array>
 #include <cstdint>
@@ -19,6 +20,8 @@ public:
     // Returns a world-owned object, or nullptr with an SDL error and no object added.
     BSCObject* PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform = {});
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
+    TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
+    const std::vector<std::unique_ptr<TerrainChunk>>& Terrain() const { return terrain; }
     void TickObjects(float deltaSeconds);
 
     template<typename Visit>
@@ -27,6 +30,10 @@ public:
         for (const MeshInstance& instance : meshes)
         {
             visit(instance);
+        }
+        for (const auto& chunk : terrain)
+        {
+            visit(chunk->Instance());
         }
         for (const auto& object : objects)
         {
@@ -48,6 +55,7 @@ private:
         std::string payload;
     };
 
+    std::vector<std::unique_ptr<TerrainChunk>> terrain;
     std::vector<std::unique_ptr<BSCObject>> objects;
     std::string path;
     std::vector<Section> otherSections; // Copied verbatim when this build edits a world with newer data types.

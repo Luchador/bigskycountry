@@ -15,6 +15,9 @@ struct MeshTransform
     Vector3 x{1, 0, 0}, y{0, 1, 0}, z{0, 0, 1};
 
     Vector3 Point(Vector3 p) const { return origin + x * p.x + y * p.y + z * p.z; }
+    Vector3 Direction(Vector3 p) const { return x * p.x + y * p.y + z * p.z; }
+    // Inverse rotation for an orthonormal basis.
+    Vector3 Unrotate(Vector3 p) const { return {Math::Dot(p, x), Math::Dot(p, y), Math::Dot(p, z)}; }
     double Determinant() const { return Math::Dot(x, Math::Cross(y, z)); }
     bool Valid() const;
 };
@@ -38,6 +41,30 @@ struct MeshInstance
 {
     std::shared_ptr<const Mesh> mesh;
     MeshTransform transform;
+};
+
+struct ObjectTransform
+{
+    Vector3 position{};
+    Vector3 rotation{};       // Radians about X, Y, Z, applied in that order.
+    Vector3 scale{1, 1, 1};   // Along the object's local axes.
+
+    MeshTransform ToMeshTransform() const;
+    bool operator==(const ObjectTransform&) const = default;
+};
+
+class MeshPlacement
+{
+public:
+    const ObjectTransform& GetTransform() const { return transform; }
+    bool SetTransform(const ObjectTransform& value);
+    void SetMesh(std::shared_ptr<const Mesh> mesh);
+    bool IsLoaded() const { return instance.mesh != nullptr; }
+    const MeshInstance& Instance() const { return instance; }
+
+private:
+    ObjectTransform transform;
+    MeshInstance instance; // Updated on transform edits. Rendering and picking share this matrix.
 };
 
 class MeshAssets

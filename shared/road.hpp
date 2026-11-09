@@ -25,6 +25,7 @@ enum class RoadEdge
 
 struct RoadStyle
 {
+    static constexpr double dashPeriod = 12.0; // One painted dash plus its gap, in meters.
     static constexpr double laneWidth = 5.0;
     static constexpr double shoulderWidth = 5.0;
     static constexpr double stripWidth = 0.40;
@@ -56,6 +57,7 @@ struct RoadPoint
     Vector3 position;
     std::optional<double> heading; // Radians from +X toward +Z; empty follows the neighboring points.
     double pitch = 0.0; // Radians above the XZ plane for a manual tangent.
+    double roll = 0.0; // Radians about the tangent; orients the control point's local Y/Z axes.
 };
 
 struct Road
@@ -68,6 +70,7 @@ struct Road
     };
 
     RoadStyle style;
+    Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     std::vector<Triangle> triangles;
     std::vector<std::array<EdgeVertex, 3>> edgeTriangles;
@@ -78,8 +81,10 @@ struct Road
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
     Vector3 Tangent(std::size_t index) const;
+    std::array<Vector3, 3> PointAxes(std::size_t index, bool includeRoll = true) const;
     void RotatePoint(std::size_t index, double heading);
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
+    bool SetPose(Vector3 position, Vector3 angles);
     void Rebuild();
 
 private:

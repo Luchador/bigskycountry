@@ -7,6 +7,7 @@
 #endif
 #ifndef _WIN32
 #include "camera_toolbar.hpp"
+#include "sdl_transform_panel.hpp"
 #endif
 #include "content_browser.hpp"
 #include "edit_history.hpp"
@@ -21,6 +22,8 @@ public:
 #ifdef _WIN32
     SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
     bool ViewportFocused() const override { return panels.ViewportFocused(); }
+#else
+    bool ViewportFocused() const override { return !transformPanel.Focused(); }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
@@ -69,6 +72,7 @@ private:
     void BeginPointDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
+    void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
     void SelectAt(const WorldDocument& world, Vector3 pos);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
     void ChangeStyle(Action action, WorldDocument& world);
@@ -83,7 +87,9 @@ private:
     Vector3 center{};
     SDL_Rect scene{};
 #ifndef _WIN32
-    SDL_Rect browserPanel{}, roadPanel{};
+    SDL_Rect browserPanel{}, roadPanel{}, transformArea{};
+    SdlTransformPanel transformPanel;
+    int roadScroll = 0, roadScrollMax = 0;
 #endif
     RoadEditorState state;
     EditHistory history;

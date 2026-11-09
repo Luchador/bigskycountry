@@ -59,6 +59,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
     editor/road_editor.cpp
+    editor/transform_inspector.cpp
     editor/road_overlay.cpp
     editor/transform_gizmo.cpp
     editor/transform_space.cpp
@@ -88,7 +89,7 @@ if(WIN32)
     endif()
     target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32)
 else()
-    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp)
+    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp)
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 

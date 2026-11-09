@@ -1,5 +1,6 @@
 #include "edit_history.hpp"
 #include "road_io.hpp"
+#include "world_document.hpp"
 
 #include <iomanip>
 #include <limits>
@@ -27,7 +28,7 @@ namespace
     }
 }
 
-EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad) : segments(editor.segments)
+EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad) : meshSelection(editor.meshSelection), segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -57,10 +58,12 @@ bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after)
     return true;
 }
 
-EditHistory::Result EditHistory::Restore(std::vector<Road>& roads, RoadEditorState& editor, int index,
+EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& editor, int index,
                                          const EditSnapshot& from, const EditSnapshot& to)
 {
+    auto& roads = world.roads;
     RoadEditorState restored;
+    restored.meshSelection = to.meshSelection;
     restored.segments = to.segments;
     auto in = Reader(to.editorData);
     RoadIO::ReadStyle(in, restored.defaults);
@@ -90,30 +93,36 @@ EditHistory::Result EditHistory::Restore(std::vector<Road>& roads, RoadEditorSta
     {
         roads.erase(roads.begin() + index);
     }
+    if (to.meshTransform)
+    {
+        const auto target = to.meshSelection;
+        if (target.kind == SelectionKind::Object) world.Objects().at(target.index)->SetTransform(*to.meshTransform);
+        else world.Terrain().at(target.index)->SetTransform(*to.meshTransform);
+    }
     editor = std::move(restored);
-    return index < 0 ? Result::ToolChanged : Result::MapChanged;
+    return index < 0 && !to.meshTransform ? Result::ToolChanged : Result::MapChanged;
 }
 
-EditHistory::Result EditHistory::Undo(std::vector<Road>& roads, RoadEditorState& editor)
+EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& editor)
 {
     if (!CanUndo())
     {
         return Result::Unavailable;
     }
     const Action& action = actions[cursor - 1];
-    const Result result = Restore(roads, editor, action.roadIndex, action.after, action.before);
+    const Result result = Restore(world, editor, action.roadIndex, action.after, action.before);
     --cursor;
     return result;
 }
 
-EditHistory::Result EditHistory::Redo(std::vector<Road>& roads, RoadEditorState& editor)
+EditHistory::Result EditHistory::Redo(WorldDocument& world, RoadEditorState& editor)
 {
     if (!CanRedo())
     {
         return Result::Unavailable;
     }
     const Action& action = actions[cursor];
-    const Result result = Restore(roads, editor, action.roadIndex, action.before, action.after);
+    const Result result = Restore(world, editor, action.roadIndex, action.before, action.after);
     ++cursor;
     return result;
 }
