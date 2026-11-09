@@ -655,10 +655,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
     else
     {
-        const Road* road = Selected(world);
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
-        if ((road && !DrawWorldRoadOutline(renderer, camera, *road, {0, 0, width, height})) ||
-            !Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look | Wheel to change speed", ink) ||
+        if (!Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look | Wheel to change speed", ink) ||
             !SDL_RenderDebugTextFormat(renderer, panel + 12, 28, "Sky %02d:%02d CDT   [ earlier   ] later",
                                        minutes / 60, minutes % 60) ||
             !Text(renderer, panel + 12, static_cast<float>(height) - 20, status.c_str(), ink))

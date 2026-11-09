@@ -162,4 +162,28 @@ void Road::Rebuild()
     }
 
     BuildSurface(samples);
+
+    // Bevels can turn either way. Give all top surfaces an upward normal once,
+    // when the road changes. Vertical curb risers already face the pavement.
+    const auto facesDown = [](Vector3 a, Vector3 b, Vector3 c)
+    {
+        return (b.z - a.z) * (c.x - a.x) < (b.x - a.x) * (c.z - a.z);
+    };
+    for (auto* mesh : {&triangles, &whiteStripes, &yellowStripes})
+    {
+        for (Triangle& triangle : *mesh)
+        {
+            if (facesDown(triangle[0], triangle[1], triangle[2]))
+            {
+                std::swap(triangle[1], triangle[2]);
+            }
+        }
+    }
+    for (auto& triangle : edgeTriangles)
+    {
+        if (facesDown(triangle[0].position, triangle[1].position, triangle[2].position))
+        {
+            std::swap(triangle[1], triangle[2]);
+        }
+    }
 }

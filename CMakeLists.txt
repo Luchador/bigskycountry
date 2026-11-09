@@ -16,6 +16,8 @@ add_library(BigSkyApplication STATIC
     shared/road_io.cpp
     shared/world_document.cpp
     shared/road_render.cpp
+    shared/road_depth.cpp
+    shared/road_depth_software.cpp
     shared/sky_disc.cpp
     shared/moon.cpp
     shared/sky.cpp
@@ -32,7 +34,7 @@ add_library(BigSkyApplication STATIC
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
 target_include_directories(BigSkyApplication PUBLIC shared)
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
-include(cmake/sun_shader.cmake)
+include(cmake/shaders.cmake)
 
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)

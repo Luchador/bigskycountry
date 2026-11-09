@@ -1,7 +1,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 
-#include "road_render.hpp"
+#include "road_depth.hpp"
 #include "sky.hpp"
 #include "application.hpp"
 #include "free_camera.hpp"
@@ -13,12 +13,17 @@ namespace
 {
     SDL_Renderer* CreateSceneRenderer(SDL_Window* window)
     {
+        // Prefer the GPU renderer when a driver hasn't been requested explicitly.
+#ifdef BIGSKY_ROAD_GPU
+        if (!SDL_GetHint(SDL_HINT_RENDER_DRIVER))
+        {
+            if (SDL_Renderer* renderer = SDL_CreateRenderer(window, "gpu"))
+            {
+                return renderer;
+            }
+        }
+#endif
         return SDL_CreateRenderer(window, nullptr);
-    }
-
-    bool DrawScene(SDL_Renderer* renderer, const FreeCamera& view, const WorldDocument& world, Sky& sky)
-    {
-        return sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) && DrawWorldRoads(renderer, view, world.roads);
     }
 
     bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, WorldDocument& world, EditorTool* roadTool)
@@ -31,6 +36,7 @@ namespace
         }
 
         Sky sky;
+        RoadDepthRenderer roadRenderer;
         FreeCamera freeCamera;
 
         if (!world.roads.empty())
@@ -131,7 +137,8 @@ namespace
                 return false;
             }
             if ((!roadTool || !roadTool->IsPlanView()) &&
-                !DrawScene(renderer, view, world, sky))
+                (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) ||
+                 !roadRenderer.Draw(renderer, view, world.roads, roadTool ? roadTool->Selected(world) : nullptr)))
             {
                 return false;
             }

@@ -10,6 +10,7 @@ class RoadEditor : public EditorTool
 {
 public:
     bool Initialize(SDL_Window* window) override { return menu.Attach(window); }
+    const Road* Selected(const WorldDocument& world) const override;
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
@@ -55,7 +56,6 @@ private:
 
     std::vector<Button> Buttons(const WorldDocument& world) const;
     RoadStyle& Style(WorldDocument& world);
-    const Road* Selected(const WorldDocument& world) const;
     bool EditingDraft() const { return planView && state.drawing; }
     Vector3 ToWorld(float x, float y) const;
     SDL_FPoint ToScreen(Vector3 point) const;

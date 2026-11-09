@@ -4,6 +4,7 @@ struct SDL_Window;
 struct SDL_Renderer;
 union SDL_Event;
 class WorldDocument;
+struct Road;
 class FreeCamera;
 
 enum class ApplicationMode
@@ -19,6 +20,7 @@ class EditorTool
 public:
     virtual ~EditorTool() = default;
     virtual bool Initialize(SDL_Window* window) = 0;
+    virtual const Road* Selected(const WorldDocument& world) const = 0;
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;
     virtual EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,

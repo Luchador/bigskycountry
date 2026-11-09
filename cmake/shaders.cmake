@@ -22,7 +22,7 @@ if(NOT dxc)
     else()
         find_program(host_dxc NAMES dxc)
         if(NOT host_dxc)
-            message(STATUS "No host DXC found; using SDL additive blending for the sun")
+            message(STATUS "No host DXC found; using the software road depth buffer")
             return()
         endif()
         set(dxc "${host_dxc}")
@@ -39,18 +39,25 @@ if(NOT dxc)
     endif()
 endif()
 
-set(shader "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sun.frag.hlsl")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
-set(dxil "${output_dir}/sun_dxil.hpp")
-set(spirv "${output_dir}/sun_spirv.hpp")
-add_custom_command(
-    OUTPUT "${dxil}" "${spirv}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
-    COMMAND "${dxc}" -T ps_6_0 -E main -WX -O3 -Qstrip_debug -Qstrip_reflect -Fh "${dxil}" -Vn sunDxil "${shader}"
-    COMMAND "${dxc}" -spirv -T ps_6_0 -E main -WX -O3 -Fh "${spirv}" -Vn sunSpirv "${shader}"
-    DEPENDS "${shader}" "${dxc}"
-    COMMENT "Compiling the additive sun shader (DXIL and SPIR-V)"
-    VERBATIM
-)
-target_sources(BigSkyApplication PRIVATE "${dxil}" "${spirv}")
+function(bigsky_shader filename profile entry stem dxil_name spirv_name)
+    set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${filename}")
+    set(dxil "${output_dir}/${stem}_dxil.hpp")
+    set(spirv "${output_dir}/${stem}_spirv.hpp")
+    add_custom_command(
+        OUTPUT "${dxil}" "${spirv}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
+        COMMAND "${dxc}" -T "${profile}" -E "${entry}" -WX -O3 -Qstrip_debug -Qstrip_reflect -Fh "${dxil}" -Vn "${dxil_name}" "${source}"
+        COMMAND "${dxc}" -spirv -T "${profile}" -E "${entry}" -WX -O3 -Fh "${spirv}" -Vn "${spirv_name}" "${source}"
+        DEPENDS "${source}" "${dxc}"
+        COMMENT "Compiling ${filename} (${entry}, DXIL and SPIR-V)"
+        VERBATIM
+    )
+    target_sources(BigSkyApplication PRIVATE "${dxil}" "${spirv}")
+endfunction()
+
+bigsky_shader(sun.frag.hlsl ps_6_0 main sun sunDxil sunSpirv)
+bigsky_shader(road.hlsl vs_6_0 VSMain road_vert road_vert_dxil road_vert_spirv)
+bigsky_shader(road.hlsl ps_6_0 PSMain road_frag road_frag_dxil road_frag_spirv)
 target_include_directories(BigSkyApplication PRIVATE "${output_dir}")
+target_compile_definitions(BigSkyApplication PRIVATE BIGSKY_ROAD_GPU)

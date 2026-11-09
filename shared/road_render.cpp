@@ -1,4 +1,5 @@
 #include "road_render.hpp"
+#include "road_depth.hpp"
 #include "free_camera.hpp"
 #include "view_geometry.hpp"
 
@@ -39,10 +40,8 @@ namespace
         return true;
     }
 
-    template <typename ViewTransform>
-
-    void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport,
-                       std::vector<SDL_Vertex>& vertices)
+    template<typename ViewTransform, typename Emit>
+    void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport, Emit emit)
     {
         if (road.outline.empty())
         {
@@ -74,7 +73,7 @@ namespace
                                           {q.x + tx + ty, q.y + ty - tx}, {q.x + tx - ty, q.y + ty + tx}};
             for (int i : {0, 1, 2, 0, 2, 3})
             {
-                vertices.push_back({corners[i], selectionColor, {}});
+                emit(corners[i], i < 2 ? a.z : b.z);
             }
         }
     }
@@ -163,7 +162,10 @@ namespace
         }
         if (layer == RoadLayer::Outline)
         {
-            AppendOutline(road, transform, focal, viewport, vertices);
+            AppendOutline(road, transform, focal, viewport, [&](SDL_FPoint p, double)
+            {
+                vertices.push_back({p, selectionColor, {}});
+            });
             return;
         }
         AppendTriangles(road.yellowStripes, yellowStripeColor, transform, focal, viewport, vertices);
@@ -177,49 +179,80 @@ namespace
     }
 }
 
-bool DrawWorldRoads(SDL_Renderer* renderer, const FreeCamera& camera, const std::vector<Road>& roads)
+bool RoadDepthRenderer::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const std::vector<Road>& roads, const Road* selected)
 {
-    if (roads.empty())
-    {
-        return true;
-    }
-
     SDL_Rect viewport{};
-
     if (!SDL_GetRenderViewport(renderer, &viewport))
     {
         return false;
     }
-
-    // Geometry is submitted in viewport-local coordinates.
-    viewport.x = 0;
-    viewport.y = 0;
-    if (viewport.w == 0 || viewport.h == 0)
+    if (roads.empty() || viewport.w <= 0 || viewport.h <= 0)
     {
         return true;
     }
-    std::vector<SDL_Vertex> vertices;
-
-    const auto transform = [&](Vector3 p) { return camera.WorldToView(p); };
+    viewport.x = viewport.y = 0;
     const double focal = std::min(viewport.w, viewport.h) * 0.5;
-    // SDL_RenderGeometry draws in submission order. Paint belongs above all pavement.
-    for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
+    const double scaleX = 2.0 * focal / viewport.w, scaleY = 2.0 * focal / viewport.h;
+    const auto transform = [&](Vector3 p) { return camera.WorldToView(p); };
+    vertices.clear();
+    const auto emit = [&](Vector3 point, SDL_FColor color)
     {
-        for (const Road& road : roads)
+        const Vector3 v = transform(point);
+        vertices.push_back({static_cast<float>(scaleX * v.x), static_cast<float>(scaleY * v.y),
+                            static_cast<float>(roadNearDepth), static_cast<float>(v.z), color});
+    };
+    const auto emitSolid = [&](const std::vector<Road::Triangle>& mesh, SDL_FColor color)
+    {
+        for (const auto& triangle : mesh)
         {
-            AppendRoad(road, layer, transform, focal, viewport, vertices);
+            for (Vector3 p : triangle)
+            {
+                emit(p, color);
+            }
+        }
+    };
+
+    selectedStart = selectedEnd = 0;
+    for (const Road& road : roads)
+    {
+        const std::size_t start = vertices.size();
+        emitSolid(road.triangles, roadColor);
+        for (const auto& triangle : road.edgeTriangles)
+        {
+            for (const auto& v : triangle)
+            {
+                emit(v.position, v.color);
+            }
+        }
+        emitSolid(road.yellowStripes, yellowStripeColor);
+        emitSolid(road.whiteStripes, whiteStripeColor);
+        if (&road == selected)
+        {
+            selectedStart = start;
+            selectedEnd = vertices.size();
         }
     }
-
-    return Submit(renderer, vertices);
-}
-
-bool DrawWorldRoadOutline(SDL_Renderer* renderer, const FreeCamera& camera, const Road& road, SDL_Rect viewport)
-{
-    std::vector<SDL_Vertex> vertices;
-    const double focal = std::min(viewport.w, viewport.h) * 0.5;
-    AppendOutline(road, [&](Vector3 p) { return camera.WorldToView(p); }, focal, viewport, vertices);
-    return Submit(renderer, vertices);
+    outlineStart = vertices.size();
+    if (vertices.empty())
+    {
+        return true;
+    }
+    if (selected)
+    {
+        // Keep the three-pixel editor stroke in screen space, with the depth
+        // of its original edge endpoints for occlusion by the road itself.
+        AppendOutline(*selected, transform, focal, viewport, [&](SDL_FPoint p, double depth)
+        {
+            const double x = (2.0 * p.x / viewport.w - 1.0) * depth;
+            const double y = (1.0 - 2.0 * p.y / viewport.h) * depth;
+            const double biased = std::min(depth, roadNearDepth * 1.0001);
+            vertices.push_back({static_cast<float>(x), static_cast<float>(y),
+                                static_cast<float>(biased), static_cast<float>(depth), selectionColor});
+        });
+    }
+    const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
+    return PrepareTarget(renderer, viewport.w, viewport.h) && (device ? DrawGPU() : DrawSoftware()) &&
+           SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }
 
 // Draw a road in the Editor's 2D view
