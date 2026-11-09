@@ -17,6 +17,5 @@ enum class RoadAction
     Right,
     NoEdge,
     Transition,
-    Curb,
-    Remove
+    Curb
 };

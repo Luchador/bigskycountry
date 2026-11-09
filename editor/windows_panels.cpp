@@ -374,7 +374,6 @@ struct WindowsPanels::Impl
             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
             case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
             case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
-            case IDC_REMOVE: Post(actions, int(RoadAction::Remove)); return;
             case IDC_FEWER: Post(actions, int(RoadAction::Fewer)); return;
             case IDC_MORE: Post(actions, int(RoadAction::More)); return;
             case IDC_LEFT: Post(actions, int(RoadAction::Left)); return;
@@ -459,7 +458,6 @@ struct WindowsPanels::Impl
 
         EnableWindow(GetDlgItem(road, IDC_FINISH), data.canFinish);
         EnableWindow(GetDlgItem(road, IDC_CANCEL_DRAFT), data.drawing);
-        EnableWindow(GetDlgItem(road, IDC_REMOVE), data.selected >= 0 && !data.drawing);
     }
 
     static INT_PTR CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)

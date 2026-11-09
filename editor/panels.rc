@@ -73,5 +73,4 @@ BEGIN
     LTEXT "", IDC_POINT, 7, 283, 136, 12
     PUSHBUTTON "Finish road", IDC_FINISH, 7, 283, 66, 16
     PUSHBUTTON "Cancel draft", IDC_CANCEL_DRAFT, 77, 283, 66, 16
-    PUSHBUTTON "Delete selected road", IDC_REMOVE, 7, 303, 136, 16
 END

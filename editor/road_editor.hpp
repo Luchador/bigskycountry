@@ -76,7 +76,8 @@ private:
     void SelectAt(const WorldDocument& world, Vector3 pos);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
     void ChangeStyle(Action action, WorldDocument& world);
-    void PressCanvas(WorldDocument& world, float x, float y, bool shift);
+    void PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers);
+    void DeleteSelection(WorldDocument& world);
     void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);
     void Release(WorldDocument& world);
     bool Save(WorldDocument& world);

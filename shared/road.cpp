@@ -214,6 +214,37 @@ std::span<const Vector3> Road::SegmentSamples(std::size_t segment) const
     return std::span<const Vector3>(centerline).subspan(start, pointSamples[segment + 1] - start + 1);
 }
 
+Road Road::Section(std::size_t first, std::size_t last) const
+{
+    Road result;
+    result.style = style;
+    result.rotation = rotation;
+    result.points.assign(points.begin() + first, points.begin() + last + 1);
+    // An automatic tangent at a cut may depend on the neighbor we just removed.
+    // Keep the surviving Bézier span's original shape at that new endpoint.
+    const auto preserveTangent = [&](std::size_t source, std::size_t endpoint)
+    {
+        RoadPoint& p = result.points[endpoint];
+        const Vector3 tangent = Tangent(source);
+        if (!p.heading && Math::Length(tangent - result.Tangent(endpoint)) > 1.0e-12)
+        {
+            SetTangent(p, tangent);
+            if (tangent.x == 0.0 && tangent.z == 0.0)
+            {
+                const auto axes = PointAxes(source, false);
+                p.heading = std::atan2(-axes[2].x, axes[2].z);
+            }
+        }
+    };
+    if (style.curved)
+    {
+        if (first > 0) preserveTangent(first, 0);
+        if (last + 1 < points.size()) preserveTangent(last, last - first);
+    }
+    result.Rebuild();
+    return result;
+}
+
 bool Road::SetPose(Vector3 position, Vector3 angles)
 {
     if (points.empty() || !std::isfinite(Math::Length(angles)) || !std::isfinite(Math::Length(position)))

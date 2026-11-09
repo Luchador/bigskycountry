@@ -2,7 +2,9 @@
 #include "road_io.hpp"
 #include "world_document.hpp"
 
+#include <algorithm>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <locale>
 #include <sstream>
@@ -26,9 +28,61 @@ namespace
         in.exceptions(std::ios::failbit | std::ios::badbit);
         return in;
     }
+
+    void ReplaceRoadRange(std::vector<Road>& roads, int index, std::size_t count, std::vector<Road> replacements)
+    {
+        if (count == replacements.size())
+        {
+            std::move(replacements.begin(), replacements.end(), roads.begin() + index);
+            return;
+        }
+        roads.reserve(roads.size() - count + replacements.size());
+        const auto first = roads.begin() + index;
+        roads.erase(first, first + count);
+        roads.insert(roads.begin() + index, std::make_move_iterator(replacements.begin()),
+                     std::make_move_iterator(replacements.end()));
+    }
 }
 
-EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad) : meshSelection(editor.meshSelection), segments(editor.segments)
+void RoadEditorState::PickPoint(int roadIndex, int index, bool add, bool subtract)
+{
+    if (subtract)
+    {
+        if (roadIndex != selected || point < 0)
+        {
+            return;
+        }
+        if (index == point)
+        {
+            point = additionalPoints.empty() ? -1 : *additionalPoints.rbegin();
+            additionalPoints.erase(point);
+        }
+        else
+        {
+            additionalPoints.erase(index);
+        }
+        return;
+    }
+    if (!add || roadIndex != selected || point < 0)
+    {
+        SelectPoint(roadIndex, index);
+        return;
+    }
+    if (point != index)
+    {
+        additionalPoints.insert(point);
+        additionalPoints.erase(index);
+        point = index;
+    }
+}
+
+EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad)
+    : EditSnapshot(editor, affectedRoad ? std::span(affectedRoad, 1) : std::span<const Road>{})
+{
+}
+
+EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads)
+    : meshSelection(editor.meshSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -38,11 +92,11 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRo
         RoadIO::WriteRoad(out, *editor.draft);
     }
     editorData = std::move(out).str();
-    if (affectedRoad)
+    for (const Road& source : affectedRoads)
     {
         auto road = Writer();
-        RoadIO::WriteRoad(road, *affectedRoad);
-        roadData = std::move(road).str();
+        RoadIO::WriteRoad(road, source);
+        roadData.push_back(std::move(road).str());
     }
 }
 
@@ -58,6 +112,17 @@ bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after)
     return true;
 }
 
+void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& editor, std::vector<Road> replacements)
+{
+    const int index = editor.selected;
+    EditSnapshot before(editor, &world.roads.at(index));
+    const std::size_t count = replacements.size();
+    ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
+    editor.SelectPoint(count ? index : -1, -1);
+    EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
+    Record(index, std::move(before), std::move(after));
+}
+
 EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& editor, int index,
                                          const EditSnapshot& from, const EditSnapshot& to)
 {
@@ -65,6 +130,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     RoadEditorState restored;
     restored.meshSelection = to.meshSelection;
     restored.segments = to.segments;
+    restored.additionalPoints = to.additionalPoints;
     auto in = Reader(to.editorData);
     RoadIO::ReadStyle(in, restored.defaults);
     bool hasDraft;
@@ -74,24 +140,18 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         restored.draft = RoadIO::ReadRoad(in);
     }
 
-    // Insert/delete at the original index to preserve draw order and selection through replay.
-    if (to.roadData)
+    if (!to.roadData.empty() || !from.roadData.empty())
     {
-        auto payload = Reader(*to.roadData);
-        Road road = RoadIO::ReadRoad(payload);
-        road.Rebuild();
-        if (from.roadData)
+        std::vector<Road> replacements;
+        replacements.reserve(to.roadData.size());
+        for (const auto& record : to.roadData)
         {
-            roads.at(index) = std::move(road);
+            auto payload = Reader(record);
+            Road road = RoadIO::ReadRoad(payload);
+            road.Rebuild();
+            replacements.push_back(std::move(road));
         }
-        else
-        {
-            roads.insert(roads.begin() + index, std::move(road));
-        }
-    }
-    else if (from.roadData)
-    {
-        roads.erase(roads.begin() + index);
+        ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
     }
     if (to.meshTransform)
     {

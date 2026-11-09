@@ -1,5 +1,6 @@
 #include "road_overlay.hpp"
 #include "editor_colors.hpp"
+#include "edit_history.hpp"
 #include "free_camera.hpp"
 #include "view_geometry.hpp"
 #include "viewport_picker.hpp"
@@ -123,16 +124,16 @@ MeshInstance RoadOverlay::Marker(const GizmoPlacement& placement) const
     return {marker, {placement.origin, {r, 0, 0}, {0, r, 0}, {0, 0, r}}};
 }
 
-void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, int point, const std::set<int>& segments, const FreeCamera& camera, SDL_Rect scene) const
+void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
 {
     VisitSegmentTriangles(road, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)
     {
-        renderer.SubmitTriangle(a, b, c, segments.contains(i) ? EditorColors::amber : EditorColors::blue);
+        renderer.SubmitTriangle(a, b, c, selection.segments.contains(i) ? EditorColors::amber : EditorColors::blue);
     });
 
     VisitPoints(road, camera, scene, [&](int i, const GizmoPlacement& placement)
     {
-        renderer.SubmitMesh(Marker(placement), i == point ? EditorColors::amber : EditorColors::blue);
+        renderer.SubmitMesh(Marker(placement), selection.PointSelected(i) ? EditorColors::amber : EditorColors::blue);
     });
 }
 

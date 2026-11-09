@@ -93,7 +93,7 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
 {
     if (const Road* road = Selected(world))
     {
-        overlay.Draw(renderer, *road, state.point, state.segments, camera, scene);
+        overlay.Draw(renderer, *road, state, camera, scene);
         if (const auto placement = SelectedPointPlacement(road, camera))
         {
             gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
@@ -142,7 +142,6 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
     const RoadStyle& style = current ? current->style : state.defaults;
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
-    const float removeY = (planView ? 472.0f : 398.0f) + offset;
 
     std::vector<Button> buttons{
         {Action::ChangeView, {12, 44, 194, 28}, planView ? "Back to 3D   [R]" : "Top-down view   [R]"},
@@ -155,8 +154,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
         {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
         {Action::NoEdge, {12, 328 + offset, 46, 28}, "None", style.edge == RoadEdge::None},
         {Action::Transition, {62, 328 + offset, 94, 28}, "Transition", style.edge == RoadEdge::Transition},
-        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb},
-        {Action::Remove, {12, removeY, 194, 28}, "Delete selected road", false, current && !EditingDraft()}};
+        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb}};
 
     if (planView)
     {
@@ -294,16 +292,6 @@ void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camer
         Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
-    case Action::Remove:
-        if (state.selected >= 0 && !EditingDraft())
-        {
-            const int index = state.selected;
-            EditSnapshot before(state, &world.roads[index]);
-            world.roads.erase(world.roads.begin() + index);
-            state.SelectPoint(-1, -1);
-            Commit(world, index, std::move(before));
-        }
-        return;
     default:
         ChangeStyle(action, world);
         return;
@@ -371,10 +359,12 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     Commit(world, index, std::move(before), road);
 }
 
-void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, bool shift)
+void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers)
 {
     const Vector3 pos = ToWorld(x, y);
     const SDL_FPoint cursor{x, y};
+    const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    const bool subtract = (modifiers & SDL_KMOD_CTRL) != 0;
     if (state.drawing)
     {
         if (state.draft->points.empty() || Math::Length(pos - state.draft->points.back().position) > 0.05)
@@ -386,7 +376,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, bool shift)
         return;
     }
 
-    if (state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
+    if (!shift && !subtract && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
         dragStart.emplace(state, Selected(world));
         drag = Drag::Rotate;
@@ -396,7 +386,11 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, bool shift)
     auto grabPoint = [&](int roadIndex, int point)
     {
         const Road& road = world.roads[roadIndex];
-        state.SelectPoint(roadIndex, point);
+        state.PickPoint(roadIndex, point, shift, subtract);
+        if (subtract)
+        {
+            return;
+        }
         grabOffset = road.points[point].position - pos;
         BeginPointDrag(road, Drag::Move, shift);
     };
@@ -433,7 +427,10 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, bool shift)
             return;
         }
     }
-    SelectAt(world, pos);
+    if (state.point < 0 || (!shift && !subtract))
+    {
+        SelectAt(world, pos);
+    }
 }
 
 void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
@@ -489,6 +486,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
             if (inserted)
             {
                 road.points = originalPoints;
+                state.additionalPoints = dragStart->additionalPoints;
                 state.point = *extensionSource;
                 road.Rebuild();
                 dragChanged = false;
@@ -497,6 +495,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         }
         if (!inserted)
         {
+            state.additionalPoints.clear();
             state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
             road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
         }
@@ -639,7 +638,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
             {
                 continue;
             }
-            const bool selectedPoint = active && static_cast<int>(i) == state.point;
+            const bool selectedPoint = active && state.PointSelected(static_cast<int>(i));
             const float r = active ? 5.0f : 3.0f;
             if (!Fill(renderer, {pos.x - r - 1, pos.y - r - 1, 2 * r + 2, 2 * r + 2}, {30, 36, 40, 255}) ||
                 !Fill(renderer, {pos.x - r, pos.y - r, 2 * r, 2 * r},
@@ -801,7 +800,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
 #else
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const bool threeLanes = (current ? current->style : state.defaults).GetLaneCount() == 3;
-    const int contentHeight = (planView ? 510 : 464) + (threeLanes ? static_cast<int>(threeLanePanelHeight) : 0);
+    const int contentHeight = (planView ? 470 : 464) + (threeLanes ? static_cast<int>(threeLanePanelHeight) : 0);
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const SDL_Rect shifted{roadPanel.x, roadPanel.y - roadScroll, roadPanel.w, roadPanel.h + roadScroll};
@@ -848,7 +847,9 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene);
-    if (const auto placement = SelectedPointPlacement(selected, camera))
+    const auto placement = SelectedPointPlacement(selected, camera);
+    const bool addingAnotherPoint = shift && hit.kind == RoadPickKind::Point && hit.index != state.point;
+    if (placement && !subtract && !addingAnotherPoint)
     {
         gizmoDrag = gizmo.BeginDrag(picker, *placement);
         if (gizmoDrag)
@@ -858,8 +859,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         }
     }
 
-    // A modified click that misses every segment leaves the current set intact.
-    if (!state.segments.empty() && (shift || subtract) && (hit.kind == RoadPickKind::Road || hit.kind == RoadPickKind::Empty))
+    // Keep the current point or segment selection when a modified click misses it.
+    if ((!state.segments.empty() || state.point >= 0) && (shift || subtract) && (hit.kind == RoadPickKind::Road || hit.kind == RoadPickKind::Empty))
     {
         return;
     }
@@ -878,10 +879,11 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
             }
             state.segments.insert(hit.index);
             state.point = -1;
+            state.additionalPoints.clear();
         }
         break;
     case RoadPickKind::Point:
-        state.SelectPoint(state.selected, hit.index);
+        state.PickPoint(state.selected, hit.index, shift, subtract);
         break;
     case RoadPickKind::Road:
     {
@@ -900,6 +902,56 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         state.SelectPoint(-1, -1);
         break;
     }
+}
+
+void RoadEditor::DeleteSelection(WorldDocument& world)
+{
+    const Road* road = Selected(world);
+    if (!road || EditingDraft() || drag != Drag::None)
+    {
+        return;
+    }
+
+    std::vector<Road> remaining;
+    if (!state.segments.empty())
+    {
+        // Each uninterrupted run of surviving segments owns both of its end points.
+        const int segmentCount = static_cast<int>(road->points.size()) - 1;
+        int start = 0;
+        for (int deleted : state.segments)
+        {
+            if (start < deleted)
+            {
+                remaining.push_back(road->Section(start, deleted));
+            }
+            start = deleted + 1;
+        }
+        if (start < segmentCount)
+        {
+            remaining.push_back(road->Section(start, segmentCount));
+        }
+    }
+    else if (state.point >= 0)
+    {
+        Road connected;
+        connected.style = road->style;
+        connected.rotation = road->rotation;
+        for (int i = 0; i < static_cast<int>(road->points.size()); ++i)
+        {
+            if (!state.PointSelected(i))
+            {
+                connected.points.push_back(road->points[i]);
+            }
+        }
+        if (connected.points.size() >= 2)
+        {
+            connected.Rebuild();
+            remaining.push_back(std::move(connected));
+        }
+    }
+
+    history.ReplaceSelectedRoad(world, state, std::move(remaining));
+    Save(world);
 }
 
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit)
@@ -1028,10 +1080,16 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
+        if (event.key.key == SDLK_DELETE && ViewportFocused() && !SDL_GetWindowRelativeMouseMode(window))
+        {
+            DeleteSelection(world);
+            return EditorEvent::Handled;
+        }
         if ((DraggingGizmo() || extensionSource) && event.key.key == SDLK_ESCAPE)
         {
             Road& road = world.roads[state.selected];
             state.point = extensionSource.value_or(state.point);
+            state.additionalPoints = dragStart->additionalPoints;
             road.points = std::move(originalPoints);
             road.Rebuild();
             dragChanged = false;
@@ -1179,7 +1237,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #endif
             if (planView)
             {
-                PressCanvas(world, mouse.x, mouse.y, (modifiers & SDL_KMOD_SHIFT) != 0);
+                PressCanvas(world, mouse.x, mouse.y, modifiers);
             }
             else
             {

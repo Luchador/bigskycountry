@@ -85,6 +85,8 @@ struct Road
     void RotatePoint(std::size_t index, double heading);
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
     bool SetPose(Vector3 position, Vector3 angles);
+    // An independent run of surviving segments, including both endpoint control points.
+    Road Section(std::size_t first, std::size_t last) const;
     void Rebuild();
 
 private:
