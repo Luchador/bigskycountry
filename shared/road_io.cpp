@@ -16,10 +16,10 @@ namespace
                edge >= static_cast<int>(RoadEdge::None) && edge <= static_cast<int>(RoadEdge::Curb);
     }
 
-    bool ValidPoint(Vector3 position, double heading)
+    bool ValidPoint(Vector3 position, double heading, double pitch)
     {
         return std::isfinite(position.x) && std::isfinite(position.y) &&
-               std::isfinite(position.z) && std::isfinite(heading);
+               std::isfinite(position.z) && std::isfinite(heading) && std::isfinite(pitch);
     }
 }
 
@@ -64,13 +64,13 @@ namespace RoadIO
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
-            if (!ValidPoint(p.position, p.heading.value_or(0.0)))
+            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch))
             {
                 out.setstate(std::ios::failbit);
                 return;
             }
             out << p.position.x << ' ' << p.position.y << ' ' << p.position.z << ' '
-                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << '\n';
+                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << ' ' << p.pitch << '\n';
         }
     }
 
@@ -90,7 +90,11 @@ namespace RoadIO
             bool hasHeading;
             double heading;
             in >> p.position.x >> p.position.y >> p.position.z >> hasHeading >> heading;
-            if (!in || !ValidPoint(p.position, heading))
+            if (version >= 3)
+            {
+                in >> p.pitch;
+            }
+            if (!in || !ValidPoint(p.position, heading, p.pitch))
             {
                 in.setstate(std::ios::failbit);
                 break;

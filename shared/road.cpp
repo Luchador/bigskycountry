@@ -5,6 +5,18 @@
 
 namespace
 {
+    Vector3 ManualTangent(const RoadPoint& point)
+    {
+        const double horizontal = std::cos(point.pitch);
+        return {horizontal * std::cos(*point.heading), std::sin(point.pitch), horizontal * std::sin(*point.heading)};
+    }
+
+    void SetTangent(RoadPoint& point, Vector3 tangent)
+    {
+        point.heading = std::atan2(tangent.z, tangent.x);
+        point.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
+    }
+
     // Subdivide until the cubic deviates from its linear interpolation by at most 10 cm.
     void SampleCubic(Vector3 a, Vector3 b, Vector3 c, Vector3 d, int depth, std::vector<Vector3>& samples)
     {
@@ -74,7 +86,7 @@ Vector3 Road::Tangent(std::size_t index) const
 
     if (style.curved && point.heading)
     {
-        return {std::cos(*point.heading), 0.0, std::sin(*point.heading)};
+        return ManualTangent(point);
     }
 
     Vector3 incoming{};
@@ -102,30 +114,46 @@ Vector3 Road::Tangent(std::size_t index) const
 
 void Road::RotatePoint(std::size_t index, double heading)
 {
+    const Vector3 tangent = Tangent(index);
     if (style.curved)
     {
         points[index].heading = heading;
+        points[index].pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
+        return;
+    }
+    // Positive plan-view heading turns +X toward +Z, around negative Y.
+    RotatePoint(index, {0, -1, 0}, heading - std::atan2(tangent.z, tangent.x));
+}
+
+void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
+{
+    const double cosine = std::cos(angle), sine = std::sin(angle);
+    const auto rotate = [&](Vector3 v)
+    {
+        return v * cosine + Math::Cross(unitAxis, v) * sine + unitAxis * (Math::Dot(unitAxis, v) * (1.0 - cosine));
+    };
+    if (style.curved)
+    {
+        const Vector3 tangent = Tangent(index);
+        const Vector3 rotated = rotate(tangent);
+        if (Math::Length(rotated - tangent) > 1.0e-12)
+        {
+            SetTangent(points[index], rotated);
+        }
         return;
     }
 
-    // A straight span's direction is determined by its endpoints. Pivot its
-    // neighbors around this point; anchors farther down the road stay fixed.
-    const Vector3 axis = Tangent(index);
-    const double delta = heading - std::atan2(axis.z, axis.x);
-    const double cosine = std::cos(delta);
-    const double sine = std::sin(delta);
+    // A straight span is defined by its endpoints. Pivot only the adjacent spans.
     const Vector3 pivot = points[index].position;
     const std::size_t first = index == 0 ? 0 : index - 1;
     const std::size_t last = std::min(index + 1, points.size() - 1);
-
     for (std::size_t i = first; i <= last; ++i)
     {
-        const Vector3 offset = points[i].position - pivot;
-        points[i].position = pivot + Vector3{cosine * offset.x - sine * offset.z, 0.0, sine * offset.x + cosine * offset.z};
-
-        if (points[i].heading)
+        RoadPoint& point = points[i];
+        point.position = pivot + rotate(point.position - pivot);
+        if (point.heading)
         {
-            *points[i].heading += delta;
+            SetTangent(point, rotate(ManualTangent(point)));
         }
     }
 }

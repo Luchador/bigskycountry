@@ -104,7 +104,7 @@ namespace
                         return false;
                     }
 
-                    const char* title = input.IsCameraEnabled() ? "Big Sky Country (Debug Camera)" : "Big Sky Country";
+                    const char* title = "Big Sky Country";
 
                     if (!SDL_SetWindowTitle(window, title))
                     {
@@ -136,12 +136,13 @@ namespace
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
             }
 
-            if (input.IsCameraEnabled())
+            if (input.IsCameraEnabled() && (!roadTool || !roadTool->DraggingGizmo()))
             {
                 const double cameraElapsedSeconds = std::min(elapsedNanoseconds / 1.0e9, 0.1);
                 // Ctrl+S belongs to File > Save in the editor.
                 const bool allowBackward = !roadTool || !(SDL_GetModState() & SDL_KMOD_CTRL);
-                freeCamera.Update(input.ReadCameraInput(allowBackward), cameraElapsedSeconds);
+                const bool allowForwardAndUp = !roadTool || !roadTool->Selected(world) || SDL_GetWindowRelativeMouseMode(window);
+                freeCamera.Update(input.ReadCameraInput(allowBackward, allowForwardAndUp), cameraElapsedSeconds);
             }
 
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
@@ -150,30 +151,37 @@ namespace
             {
                 return false;
             }
+
             if (!roadTool || !roadTool->IsPlanView())
             {
                 if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) || !worldRenderer.Begin(renderer, view))
                 {
                     return false;
                 }
+
                 const Road* selected = roadTool ? roadTool->Selected(world) : nullptr;
+
                 for (const Road& road : world.roads)
                 {
                     worldRenderer.SubmitRoad(road, &road == selected);
                 }
+
                 for (const MeshInstance& instance : world.meshes)
                 {
                     worldRenderer.SubmitMesh(instance);
                 }
+
                 if (roadTool)
                 {
-                    roadTool->SubmitGizmos(worldRenderer, world);
+                    roadTool->SubmitGizmos(worldRenderer, world, view);
                 }
+
                 if (!worldRenderer.End())
                 {
                     return false;
                 }
             }
+
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {
                 return false;

@@ -65,27 +65,16 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
         return false;
     }
     browser.Refresh();
-    arrow = models.Load("editor/arrow.glb");
-    if (!arrow)
-    {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Road gizmo unavailable: %s", SDL_GetError());
-    }
+    gizmo.Load(models);
     return true;
 }
 
-void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world) const
+void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const
 {
-    const Road* road = Selected(world);
-    if (!arrow || !road || road->points.empty())
+    if (const Road* road = Selected(world))
     {
-        return;
+        gizmo.Draw(renderer, *road, state.point, camera, scene);
     }
-    const std::size_t point = static_cast<std::size_t>(state.point);
-    const Vector3 origin = road->points[point < road->points.size() ? point : 0].position;
-    // The authored arrow points along +X. Rotate copies to the other world axes.
-    renderer.SubmitMesh({arrow, {origin}}, {1.0f, 0.18f, 0.14f, 1});
-    renderer.SubmitMesh({arrow, {origin, {0, 1, 0}, {-1, 0, 0}, {0, 0, 1}}}, {0.24f, 0.90f, 0.30f, 1});
-    renderer.SubmitMesh({arrow, {origin, {0, 0, 1}, {0, 1, 0}, {-1, 0, 0}}}, {0.22f, 0.48f, 1.0f, 1});
 }
 
 const Road* RoadEditor::Selected(const WorldDocument& world) const
@@ -115,7 +104,11 @@ SDL_FPoint RoadEditor::ToScreen(Vector3 p) const
 
 SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
 {
-    return ToScreen(road.points[index].position + road.Tangent(index) * (handleLength / scale));
+    const Vector3 tangent = road.Tangent(index);
+    const double heading = std::hypot(tangent.x, tangent.z) > 1.0e-8
+        ? std::atan2(tangent.z, tangent.x) : road.points[index].heading.value_or(0.0);
+    const Vector3 direction{std::cos(heading), 0, std::sin(heading)};
+    return ToScreen(road.points[index].position + direction * (handleLength / scale));
 }
 
 std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) const
@@ -458,7 +451,7 @@ void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion
         else
         {
             const Vector3 offset = pos - anchor.position;
-            if (Math::Length(offset) * scale < 2.0)
+            if (std::hypot(offset.x, offset.z) * scale < 2.0)
             {
                 return;
             }
@@ -475,6 +468,8 @@ void RoadEditor::Release(WorldDocument& world)
     {
         Commit(world, state.selected, std::move(*dragStart), Selected(world));
     }
+    originalPoints.clear();
+    gizmoDrag.reset();
     dragStart.reset();
     dragChanged = false;
     drag = Drag::None;
@@ -641,6 +636,15 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
         return false;
     }
 
+    if (!planView && current && state.point >= 0)
+    {
+        if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, 255) ||
+            !SDL_RenderDebugTextFormat(renderer, 12, 444 + offset, "Point %d   Y: %.2f m",
+                                       state.point + 1, current->points[state.point].position.y))
+        {
+            return false;
+        }
+    }
     if (EditingDraft())
     {
         return Text(renderer, 14, 18, "Road editor | Draft", ink);
@@ -718,25 +722,71 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     }
 }
 
-void RoadEditor::PickWorldRoad(const WorldDocument& world, const FreeCamera& camera)
+void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera)
 {
-    state.selected = state.point = -1;
-    const double focal = std::min(scene.w, scene.h) * 0.5;
-    if (focal <= 0.0)
+    const GizmoPick hit = gizmo.Pick(world, state.selected, state.point, camera, scene, mouse);
+    switch (hit.kind)
+    {
+    case PickKind::Axis:
+    {
+        const Road& road = world.roads[state.selected];
+        originalPoints = road.points;
+        dragStart.emplace(state, &road);
+        gizmoDrag.emplace(gizmo.mode, hit.index, road.points[state.point].position, hit.position, camera, scene, mouse);
+        drag = Drag::Gizmo;
+        break;
+    }
+    case PickKind::Point:
+        state.point = hit.index;
+        break;
+    case PickKind::Road:
+    {
+        state.selected = hit.index;
+        state.drawing = false;
+        center = hit.position;
+        const auto& points = world.roads[hit.index].points;
+        const auto nearest = std::min_element(points.begin(), points.end(), [&](const RoadPoint& a, const RoadPoint& b)
+        {
+            return Math::Length(a.position - hit.position) < Math::Length(b.position - hit.position);
+        });
+        state.point = static_cast<int>(nearest - points.begin());
+        break;
+    }
+    case PickKind::Empty:
+        state.selected = state.point = -1;
+        break;
+    }
+}
+
+void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
+{
+    const auto amount = gizmoDrag->Amount(camera, scene, pointer);
+    if (!amount)
     {
         return;
     }
-    const double x = (mouse.x - scene.w * 0.5) / focal;
-    const double y = (scene.h * 0.5 - mouse.y) / focal;
-    if (const auto hit = camera.PickGround(x, y, worldNearDepth))
+    Road& road = world.roads[state.selected];
+    const std::size_t i = static_cast<std::size_t>(state.point);
+    if (gizmo.mode == GizmoMode::Translate)
     {
-        SelectAt(world, *hit);
-        if (state.selected >= 0)
+        const Vector3 pos = originalPoints[i].position + gizmoDrag->axis * *amount;
+        if ((i > 0 && Math::Length(pos - originalPoints[i - 1].position) < 0.05) ||
+            (i + 1 < originalPoints.size() && Math::Length(pos - originalPoints[i + 1].position) < 0.05))
         {
-            state.drawing = false;
-            center = *hit;
+            return;
+        }
+        road.points[i].position = pos;
+    }
+    else
+    {
+        road.points = originalPoints;
+        if (*amount != 0.0)
+        {
+            road.RotatePoint(i, gizmoDrag->axis, *amount);
         }
     }
+    road.Rebuild();
+    dragChanged = true;
 }
 
 EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
@@ -772,6 +822,25 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
+        if (DraggingGizmo() && event.key.key == SDLK_ESCAPE)
+        {
+            Road& road = world.roads[state.selected];
+            road.points = std::move(originalPoints);
+            road.Rebuild();
+            dragChanged = false;
+            Release(world);
+            return EditorEvent::Handled;
+        }
+        if (!planView && state.selected >= 0 && !SDL_GetWindowRelativeMouseMode(window) &&
+            !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+            (event.key.key == SDLK_W || event.key.key == SDLK_E))
+        {
+            if (!DraggingGizmo())
+            {
+                gizmo.mode = event.key.key == SDLK_W ? GizmoMode::Translate : GizmoMode::Rotate;
+            }
+            return EditorEvent::Handled;
+        }
         if (event.key.key == SDLK_ESCAPE && EditingDraft())
         {
             Activate(Action::Cancel, world, camera);
@@ -857,7 +926,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             return e.type == SDL_EVENT_MOUSE_WHEEL && !planView ? EditorEvent::Pass : EditorEvent::Handled;
         }
     }
-    if (!planView && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
+    if (!planView && !DraggingGizmo() && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         return EditorEvent::Pass;
     }
@@ -892,13 +961,24 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        e.motion.x = pointer.x;
-        Motion(world, e.motion);
+        if (DraggingGizmo())
+        {
+            MoveGizmo(world, camera, pointer);
+        }
+        else
+        {
+            e.motion.x = pointer.x;
+            Motion(world, e.motion);
+        }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if ((drag == Drag::Pan && e.button.button == SDL_BUTTON_RIGHT) ||
             (drag != Drag::Pan && e.button.button == SDL_BUTTON_LEFT))
         {
+            if (DraggingGizmo())
+            {
+                MoveGizmo(world, camera, pointer);
+            }
             Release(world);
         }
         break;

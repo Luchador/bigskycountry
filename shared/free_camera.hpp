@@ -14,6 +14,7 @@ class FreeCamera
         double GetSpeedFraction() const;
         void SetSpeedFraction(double fraction);
         void ScrollSpeed(double wheelSteps);
+        Vector3 GetPosition() const { return position; }
         Vector3 WorldToView(Vector3 point) const;
         Vector3 WorldDirectionToView(Vector3 direction) const;
         // World direction corresponding to the view-space ray (x, y, 1), without normalization.

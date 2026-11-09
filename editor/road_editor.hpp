@@ -4,7 +4,7 @@
 #include "camera_toolbar.hpp"
 #include "content_browser.hpp"
 #include "edit_history.hpp"
-#include "mesh.hpp"
+#include "road_gizmo.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
 
@@ -12,12 +12,12 @@ class RoadEditor : public EditorTool
 {
 public:
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
-    void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world) const override;
+    void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
+    bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
     const Road* Selected(const WorldDocument& world) const override;
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
-    EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
-                            WorldDocument& world, FreeCamera& camera) override;
+    EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;
     bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
 
 private:
@@ -26,7 +26,8 @@ private:
         None,
         Move,
         Rotate,
-        Pan
+        Pan,
+        Gizmo
     };
     enum class Action
     {
@@ -67,7 +68,8 @@ private:
     bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
-    void PickWorldRoad(const WorldDocument& world, const FreeCamera& camera);
+    void PickWorldRoad(WorldDocument& world, const FreeCamera& camera);
+    void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void SelectAt(const WorldDocument& world, Vector3 pos);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
     void ChangeStyle(Action action, WorldDocument& world);
@@ -84,7 +86,9 @@ private:
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
-    std::shared_ptr<const Mesh> arrow;
+    RoadGizmo gizmo;
+    std::optional<GizmoDrag> gizmoDrag;
+    std::vector<RoadPoint> originalPoints;
     CameraToolbar cameraToolbar;
     ContentBrowser browser;
     bool planView = false;

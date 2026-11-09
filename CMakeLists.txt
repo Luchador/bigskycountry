@@ -54,6 +54,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/camera_toolbar.cpp
     editor/content_browser.cpp
     editor/road_editor.cpp
+    editor/road_gizmo.cpp
     editor/editor_menu.cpp
     editor/edit_history.cpp
 )

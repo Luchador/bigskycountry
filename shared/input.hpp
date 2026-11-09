@@ -18,7 +18,7 @@ public:
 
     void BeginFrame();
     bool HandleEvent(const SDL_Event& event);
-    CameraInput ReadCameraInput(bool allowBackward = true) const;
+    CameraInput ReadCameraInput(bool allowBackward = true, bool allowForwardAndUp = true) const;
 
     bool SetCameraEnabled(bool enabled);
     bool IsCameraEnabled() const;

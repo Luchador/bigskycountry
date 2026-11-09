@@ -54,6 +54,7 @@ struct RoadPoint
 {
     Vector3 position;
     std::optional<double> heading; // Radians from +X toward +Z; empty follows the neighboring points.
+    double pitch = 0.0; // Radians above the XZ plane for a manual tangent.
 };
 
 struct Road
@@ -75,6 +76,7 @@ struct Road
 
     Vector3 Tangent(std::size_t index) const;
     void RotatePoint(std::size_t index, double heading);
+    void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
     void Rebuild();
 
 private:
