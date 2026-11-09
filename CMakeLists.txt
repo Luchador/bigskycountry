@@ -52,6 +52,7 @@ target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/camera_toolbar.cpp
+    editor/content_browser.cpp
     editor/road_editor.cpp
     editor/editor_menu.cpp
     editor/edit_history.cpp

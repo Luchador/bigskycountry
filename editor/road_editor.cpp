@@ -11,7 +11,7 @@
 
 namespace
 {
-    constexpr float panel = 218.0f;
+    constexpr int panelWidth = 218;
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
     constexpr float threeLanePanelHeight = 104.0f;
@@ -64,6 +64,7 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     {
         return false;
     }
+    browser.Refresh();
     arrow = models.Load("editor/arrow.glb");
     if (!arrow)
     {
@@ -104,12 +105,12 @@ RoadStyle& RoadEditor::Style(WorldDocument& world)
 
 Vector3 RoadEditor::ToWorld(float x, float y) const
 {
-    return {center.x + (x - (width + panel) * 0.5) / scale, 0.0, center.z - (y - height * 0.5) / scale};
+    return {center.x + (x - scene.w * 0.5) / scale, 0.0, center.z - (y - scene.h * 0.5) / scale};
 }
 
 SDL_FPoint RoadEditor::ToScreen(Vector3 p) const
 {
-    return {static_cast<float>((p.x - center.x) * scale + (width + panel) * 0.5), static_cast<float>((center.z - p.z) * scale + height * 0.5)};
+    return {static_cast<float>((p.x - center.x) * scale + scene.w * 0.5), static_cast<float>((center.z - p.z) * scale + scene.h * 0.5)};
 }
 
 SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
@@ -486,11 +487,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     {
         return false;
     }
-    const SDL_Rect canvas{static_cast<int>(panel), 0, std::max(0, width - static_cast<int>(panel)), height};
-    if (!SDL_SetRenderClipRect(renderer, &canvas))
-    {
-        return false;
-    }
+    const SDL_Rect canvas{0, 0, scene.w, scene.h};
     double spacing = std::pow(10.0, std::floor(std::log10(100.0 / scale)));
     if (spacing * scale < 35.0)
     {
@@ -502,16 +499,16 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     {
         return false;
     }
-    for (float x = panel + std::fmod(origin.x - panel, step); x < width; x += step)
+    for (float x = std::fmod(origin.x, step); x < scene.w; x += step)
     {
-        if (!SDL_RenderLine(renderer, x, 0, x, static_cast<float>(height)))
+        if (!SDL_RenderLine(renderer, x, 0, x, static_cast<float>(scene.h)))
         {
             return false;
         }
     }
-    for (float y = std::fmod(origin.y, step); y < height; y += step)
+    for (float y = std::fmod(origin.y, step); y < scene.h; y += step)
     {
-        if (!SDL_RenderLine(renderer, panel, y, static_cast<float>(width), y))
+        if (!SDL_RenderLine(renderer, 0, y, static_cast<float>(scene.w), y))
         {
             return false;
         }
@@ -521,7 +518,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     if (state.drawing && !state.draft->points.empty())
     {
         preview = state.draft;
-        if (mouse.x >= panel)
+        if (mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h)
         {
             preview->points.push_back({ToWorld(mouse.x, mouse.y), {}});
         }
@@ -555,7 +552,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         for (size_t i = 0; i < road.points.size(); ++i)
         {
             const SDL_FPoint pos = ToScreen(road.points[i].position);
-            if (pos.x < panel - 8 || pos.x > width + 8 || pos.y < -8 || pos.y > height + 8)
+            if (pos.x < -8 || pos.x > scene.w + 8 || pos.y < -8 || pos.y > scene.h + 8)
             {
                 continue;
             }
@@ -586,7 +583,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         const Road& road = world.roads[state.selected];
         const SDL_FPoint a = ToScreen(road.points[state.point].position);
         const SDL_FPoint b = Handle(road, state.point);
-        if (a.x > panel - 40 && a.x < width + 40 && a.y > -40 && a.y < height + 40)
+        if (a.x > -40 && a.x < scene.w + 40 && a.y > -40 && a.y < scene.h + 40)
         {
             if (!SDL_SetRenderDrawColor(renderer, amber.r, amber.g, amber.b, 255) ||
                 !SDL_RenderLine(renderer, a.x, a.y, b.x, b.y) || !Fill(renderer, {b.x - 4, b.y - 4, 8, 8}, amber))
@@ -595,21 +592,17 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
             }
         }
     }
-    const char* hint = state.drawing ? "Click to add points | Enter to finish | Esc to cancel"
-                               : "Drag a point to move | Drag its gold handle to rotate";
-    if (!Text(renderer, panel + 12, 12, hint, ink) ||
-        !Text(renderer, panel + 12, 28, "Wheel: zoom | Right drag: pan", muted) ||
-        !SDL_RenderDebugTextFormat(renderer, panel + 12, static_cast<float>(height) - 20,
+    if (!SDL_RenderDebugTextFormat(renderer, 12, static_cast<float>(scene.h) - 20,
                                    "Grid: %.0f m    Roads: %zu    %s", spacing, world.roads.size(), status.c_str()))
     {
         return false;
     }
-    return SDL_SetRenderClipRect(renderer, nullptr);
+    return true;
 }
 
 bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const
 {
-    if (!Fill(renderer, {0, 0, panel, static_cast<float>(height)}, {24, 32, 38, 255}))
+    if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h)}, {24, 32, 38, 255}))
     {
         return false;
     }
@@ -662,15 +655,18 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
 
 bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 {
-    int outputHeight;
-    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &outputHeight))
+    int width, height;
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height))
     {
         return false;
     }
-    const int top = std::min(CameraToolbar::height, outputHeight);
-    height = outputHeight - top;
-    const SDL_Rect content{0, top, width, height};
-    return SDL_SetRenderViewport(renderer, &content);
+    const int top = std::min(CameraToolbar::height, height);
+    const int right = std::min(panelWidth, width / 2);
+    const int left = std::min(panelWidth, (width - right) / 2);
+    browserPanel = {0, top, left, height - top};
+    roadPanel = {width - right, top, right, height - top};
+    scene = {left, top, width - left - right, height - top};
+    return SDL_SetRenderViewport(renderer, &scene);
 }
 
 bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
@@ -686,16 +682,17 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     else
     {
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
-        if (!Text(renderer, panel + 12, 12, "Click a road to select | Right drag to look | Wheel to change speed", ink) ||
-            !SDL_RenderDebugTextFormat(renderer, panel + 12, 28, "Sky %02d:%02d CDT   [ earlier   ] later",
+        if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) ||
+            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT   [ earlier   ] later",
                                        minutes / 60, minutes % 60) ||
-            !Text(renderer, panel + 12, static_cast<float>(height) - 20, status.c_str(), ink))
+            !Text(renderer, 12, static_cast<float>(scene.h) - 20, status.c_str(), ink))
         {
             return false;
         }
     }
-    return RenderRoadPanel(renderer, world) && SDL_SetRenderViewport(renderer, nullptr) &&
-           cameraToolbar.Draw(renderer, width, camera);
+    return SDL_SetRenderViewport(renderer, &browserPanel) && browser.Draw(renderer, browserPanel.w, browserPanel.h) &&
+           SDL_SetRenderViewport(renderer, &roadPanel) && RenderRoadPanel(renderer, world) &&
+           SDL_SetRenderViewport(renderer, nullptr) && cameraToolbar.Draw(renderer, roadPanel.x + roadPanel.w, camera);
 }
 
 void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
@@ -716,7 +713,7 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     }
     if (!planView && !world.roads.empty())
     {
-        const double distance = std::max(15.0, std::min(width - panel, static_cast<float>(height)) * 0.5 / scale);
+        const double distance = std::max(15.0, std::min(scene.w, scene.h) * 0.5 / scale);
         camera.LookAt(center + Vector3{0.0, distance, -distance}, center);
     }
 }
@@ -724,13 +721,13 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
 void RoadEditor::PickWorldRoad(const WorldDocument& world, const FreeCamera& camera)
 {
     state.selected = state.point = -1;
-    const double focal = std::min(width, height) * 0.5;
+    const double focal = std::min(scene.w, scene.h) * 0.5;
     if (focal <= 0.0)
     {
         return;
     }
-    const double x = (mouse.x - width * 0.5) / focal;
-    const double y = (height * 0.5 - mouse.y) / focal;
+    const double x = (mouse.x - scene.w * 0.5) / focal;
+    const double y = (scene.h * 0.5 - mouse.y) / focal;
     if (const auto hit = camera.PickGround(x, y, worldNearDepth))
     {
         SelectAt(world, *hit);
@@ -800,24 +797,72 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         return EditorEvent::Pass;
     }
 
-    SDL_Event e = event;
-    if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &e))
+    if (!SetContentViewport(renderer))
     {
         return EditorEvent::Error;
     }
-    if (e.type == SDL_EVENT_MOUSE_WHEEL && (!planView || e.wheel.mouse_y < 0))
+    // Convert window pixels once, relative to the full area under the toolbar.
+    const int windowWidth = roadPanel.x + roadPanel.w;
+    const SDL_Rect body{0, scene.y, windowWidth, scene.h};
+    SDL_Event e = event;
+    if (!SDL_SetRenderViewport(renderer, &body) || !SDL_ConvertEventToRenderCoordinates(renderer, &e))
     {
-        return EditorEvent::Pass; // Adjust the free camera, including over the bar in plan view.
+        return EditorEvent::Error;
     }
-    if (drag == Drag::None && cameraToolbar.HandlePointer(e, width, camera))
+    SDL_FPoint pointer;
+    switch (e.type)
     {
-        mouse = {-1, -1};
-        return EditorEvent::Handled;
+    case SDL_EVENT_MOUSE_WHEEL: pointer = {e.wheel.mouse_x, e.wheel.mouse_y}; break;
+    case SDL_EVENT_MOUSE_MOTION: pointer = {e.motion.x, e.motion.y}; break;
+    default: pointer = {e.button.x, e.button.y}; break;
+    }
+
+    if (drag == Drag::None)
+    {
+        if (e.type == SDL_EVENT_MOUSE_WHEEL && pointer.y < 0)
+        {
+            return EditorEvent::Pass; // The toolbar wheel adjusts free-camera speed.
+        }
+        if (cameraToolbar.HandlePointer(e, windowWidth, camera))
+        {
+            mouse = {-1, -1};
+            return EditorEvent::Handled;
+        }
+        if (pointer.y < 0 || pointer.y >= scene.h || pointer.x < 0 || pointer.x >= windowWidth)
+        {
+            mouse = {-1, -1};
+            return EditorEvent::Handled;
+        }
+        if (pointer.x < scene.x)
+        {
+            mouse = {-1, -1};
+            browser.HandlePointer(e, pointer, browserPanel.w, browserPanel.h);
+            return EditorEvent::Handled;
+        }
+        if (pointer.x >= roadPanel.x)
+        {
+            mouse = {-1, -1};
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
+            {
+                const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y};
+                for (const Button& button : Buttons(world))
+                {
+                    if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
+                    {
+                        Activate(button.action, world, camera);
+                        break;
+                    }
+                }
+            }
+            return e.type == SDL_EVENT_MOUSE_WHEEL && !planView ? EditorEvent::Pass : EditorEvent::Handled;
+        }
     }
     if (!planView && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         return EditorEvent::Pass;
     }
+
+    pointer.x -= scene.x;
     switch (e.type)
     {
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -825,22 +870,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             break;
         }
-        mouse = {e.button.x, e.button.y};
-        if (mouse.x < panel)
-        {
-            if (e.button.button == SDL_BUTTON_LEFT)
-            {
-                for (const Button& button : Buttons(world))
-                {
-                    if (button.enabled && SDL_PointInRectFloat(&mouse, &button.rect))
-                    {
-                        Activate(button.action, world, camera);
-                        break;
-                    }
-                }
-            }
-        }
-        else if (e.button.button == SDL_BUTTON_LEFT)
+        mouse = pointer;
+        if (e.button.button == SDL_BUTTON_LEFT)
         {
             if (planView)
             {
@@ -861,6 +892,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
+        e.motion.x = pointer.x;
         Motion(world, e.motion);
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -871,13 +903,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_WHEEL:
-        if (drag == Drag::None && e.wheel.mouse_x >= panel)
+        if (drag == Drag::None)
         {
-            const Vector3 before = ToWorld(e.wheel.mouse_x, e.wheel.mouse_y);
+            const Vector3 before = ToWorld(pointer.x, pointer.y);
             const float amount = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
             scale = std::clamp(scale * std::pow(1.25, amount), 0.02, 50.0);
-            center = center + (before - ToWorld(e.wheel.mouse_x, e.wheel.mouse_y));
-            mouse = {e.wheel.mouse_x, e.wheel.mouse_y};
+            center = center + (before - ToWorld(pointer.x, pointer.y));
+            mouse = pointer;
         }
         break;
     }

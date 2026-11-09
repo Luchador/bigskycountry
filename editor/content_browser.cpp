@@ -1,0 +1,317 @@
+#include "content_browser.hpp"
+#include "free_camera.hpp"
+#include "world_renderer.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <map>
+
+namespace
+{
+    constexpr float rowHeight = 24.0f;
+    constexpr int previewWidth = 194, previewHeight = 116;
+    constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
+    namespace fs = std::filesystem;
+
+    struct Layout
+    {
+        SDL_FRect refresh, image;
+        int listTop;
+
+        Layout(int w, int h)
+        {
+            const float buttonWidth = w >= 140 ? 62.0f : 24.0f;
+            refresh = {w - 10.0f - buttonWidth, 10, buttonWidth, 24};
+            const float width = static_cast<float>(std::max(0, w - 24));
+            const float height = std::min(width * previewHeight / previewWidth, static_cast<float>(h / 3));
+            image = {12, 44, width, height};
+            listTop = static_cast<int>(image.y + height) + 55;
+        }
+    };
+
+    bool Fill(SDL_Renderer* renderer, SDL_FRect rect, SDL_Color color)
+    {
+        return SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a) && SDL_RenderFillRect(renderer, &rect);
+    }
+
+    bool Text(SDL_Renderer* renderer, float x, float y, const std::string& text, SDL_Color color)
+    {
+        return SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a) &&
+               SDL_RenderDebugText(renderer, x, y, text.c_str());
+    }
+
+    std::string Utf8(const fs::path& path)
+    {
+        const auto bytes = path.generic_u8string();
+        return {bytes.begin(), bytes.end()};
+    }
+
+    bool DrawRefresh(SDL_Renderer* renderer, const SDL_FRect& rect)
+    {
+        if (!Fill(renderer, rect, {47, 59, 66, 255}))
+        {
+            return false;
+        }
+        if (rect.w >= 60)
+        {
+            return Text(renderer, rect.x + 3, rect.y + 8, "Refresh", ink);
+        }
+        const float x = rect.x + rect.w * 0.5f, y = rect.y + rect.h * 0.5f;
+        const SDL_FPoint arc[] = {{x+5,y+2}, {x+3,y+5}, {x-2,y+5}, {x-5,y+2}, {x-5,y-2},
+                                  {x-2,y-5}, {x+2,y-5}, {x+5,y-2}};
+        const SDL_FPoint head[] = {{x+5,y-6}, {x+5,y-2}, {x+1,y-2}};
+        return SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) &&
+               SDL_RenderLines(renderer, arc, SDL_arraysize(arc)) && SDL_RenderLines(renderer, head, SDL_arraysize(head));
+    }
+
+    SDL_Texture* MakePreview(SDL_Renderer* renderer, const std::shared_ptr<const Mesh>& mesh)
+    {
+        using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
+        using Renderer = std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)>;
+        Surface surface(SDL_CreateSurface(previewWidth, previewHeight, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
+        Renderer offscreen(surface ? SDL_CreateSoftwareRenderer(surface.get()) : nullptr, SDL_DestroyRenderer);
+        if (!offscreen)
+        {
+            return nullptr;
+        }
+
+        Vector3 lo = mesh->vertices.front().position, hi = lo;
+        for (const MeshVertex& v : mesh->vertices)
+        {
+            lo = {std::min(lo.x, v.position.x), std::min(lo.y, v.position.y), std::min(lo.z, v.position.z)};
+            hi = {std::max(hi.x, v.position.x), std::max(hi.y, v.position.y), std::max(hi.z, v.position.z)};
+        }
+        // Fit in preview space, so asset units and distance from the model origin do not affect framing.
+        const double size = Math::Length(hi - lo);
+        const double scale = size > 0 ? 2.0 / size : 1.0;
+        const Vector3 center = (lo + hi) * 0.5;
+        const Vector3 eye = Math::Normalize({0.6, 0.55, -1.25});
+        const Vector3 light = Math::Normalize({-0.5, 0.8, -0.65});
+        FreeCamera camera;
+        camera.LookAt(eye, {});
+        double distance = 0.0;
+        struct PreviewVertex { Vector3 p; SDL_FColor color; };
+        std::vector<PreviewVertex> vertices;
+        vertices.reserve(mesh->vertices.size());
+        for (const auto& v : mesh->vertices)
+        {
+            const Vector3 p = (v.position - center) * scale;
+            const Vector3 view = camera.WorldDirectionToView(p);
+            // Fit the actual projected vertices with a margin in both dimensions.
+            const double extent = std::max(std::abs(view.y), std::abs(view.x) * previewHeight / previewWidth);
+            distance = std::max(distance, std::max(worldNearDepth + 0.01, extent / 0.85) - view.z);
+            const float shade = 0.54f + 0.46f * static_cast<float>(std::max(0.0, Math::Dot(v.normal, light)));
+            vertices.push_back({p, {v.color.r * shade, v.color.g * shade, v.color.b * shade, 1}});
+        }
+        camera.LookAt(eye * distance, {});
+        WorldRenderer scene;
+        if (!SDL_SetRenderDrawColor(offscreen.get(), 17, 23, 28, 255) || !SDL_RenderClear(offscreen.get()) ||
+            !scene.Begin(offscreen.get(), camera))
+        {
+            return nullptr;
+        }
+        for (std::size_t i = 0; i < mesh->indices.size(); i += 3)
+        {
+            const auto& a = vertices[mesh->indices[i]];
+            const auto& b = vertices[mesh->indices[i + 1]];
+            const auto& c = vertices[mesh->indices[i + 2]];
+            scene.SubmitTriangle({a.p, b.p, c.p}, {a.color, b.color, c.color});
+        }
+        if (!scene.End() || !SDL_RenderPresent(offscreen.get()))
+        {
+            return nullptr;
+        }
+        return SDL_CreateTextureFromSurface(renderer, surface.get());
+    }
+}
+
+void ContentBrowser::Refresh()
+{
+    rows.clear();
+    scanStatus.clear();
+    previewDirty = true;
+    std::map<std::string, std::vector<std::string>> folders;
+    const char* base = SDL_GetBasePath();
+    std::error_code error;
+    if (base)
+    {
+        const std::string path = std::string(base) + "assets/models";
+        const fs::path root(std::u8string(path.begin(), path.end()));
+        fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error), end;
+        for (; !error && it != end; it.increment(error))
+        {
+            std::error_code statError;
+            if (it->is_regular_file(statError) && SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".glb") == 0)
+            {
+                const fs::path relative = it->path().lexically_relative(root);
+                folders[Utf8(relative.parent_path())].push_back(Utf8(relative.filename()));
+            }
+        }
+    }
+    if (!base || (error && error != std::errc::no_such_file_or_directory))
+    {
+        scanStatus = "Cannot read model folder";
+    }
+    for (auto& [folder, files] : folders)
+    {
+        std::sort(files.begin(), files.end());
+        if (!folder.empty())
+        {
+            rows.push_back({folder + "/", {}});
+        }
+        for (const std::string& file : files)
+        {
+            rows.push_back({file, folder.empty() ? file : folder + "/" + file});
+        }
+    }
+    if (selected.empty() || std::none_of(rows.begin(), rows.end(), [&](const Row& row) { return row.modelPath == selected; }))
+    {
+        const auto first = std::find_if(rows.begin(), rows.end(), [](const Row& row) { return !row.modelPath.empty(); });
+        selected = first == rows.end() ? std::string{} : first->modelPath;
+        scroll = 0;
+    }
+    if (rows.empty() && scanStatus.empty())
+    {
+        scanStatus = "No GLB models found";
+    }
+}
+
+void ContentBrowser::UpdatePreview(SDL_Renderer* renderer)
+{
+    if (preview)
+    {
+        SDL_DestroyTexture(preview);
+        preview = nullptr;
+    }
+    previewDirty = false;
+    previewStatus.clear();
+    if (selected.empty())
+    {
+        return;
+    }
+
+    MeshAssets assets;
+    const auto mesh = assets.Load(selected);
+    if (mesh)
+    {
+        preview = MakePreview(renderer, mesh);
+    }
+    if (!preview)
+    {
+        previewStatus = "Preview unavailable";
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Preview '%s': %s", selected.c_str(), SDL_GetError());
+        return;
+    }
+    triangleCount = mesh->indices.size() / 3;
+    previewStatus = std::to_string(mesh->vertices.size()) + " verts   " + std::to_string(triangleCount) + " tris";
+}
+
+void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
+{
+    const Layout layout(width, height);
+    if (event.type == SDL_EVENT_MOUSE_WHEEL)
+    {
+        const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+        const float limit = std::max(0.0f, rows.size() * rowHeight - std::max(0, height - layout.listTop));
+        scroll = std::clamp(scroll - steps * rowHeight * 2, 0.0f, limit);
+    }
+    if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT)
+    {
+        return;
+    }
+    if (SDL_PointInRectFloat(&local, &layout.refresh))
+    {
+        Refresh();
+    }
+    else if (local.y >= layout.listTop)
+    {
+        const auto index = static_cast<std::size_t>((local.y - layout.listTop + scroll) / rowHeight);
+        if (index < rows.size() && !rows[index].modelPath.empty() && selected != rows[index].modelPath)
+        {
+            selected = rows[index].modelPath;
+            previewDirty = true;
+        }
+    }
+}
+
+bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
+{
+    if (width <= 0 || height <= 0)
+    {
+        return true;
+    }
+    if (previewDirty)
+    {
+        UpdatePreview(renderer);
+    }
+    const Layout layout(width, height);
+    if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, {24, 32, 38, 255}) ||
+        (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Models", ink)) ||
+        !DrawRefresh(renderer, layout.refresh) ||
+        !Fill(renderer, layout.image, {17, 23, 28, 255}))
+    {
+        return false;
+    }
+    if (preview)
+    {
+        const float w = layout.image.h * previewWidth / previewHeight;
+        const SDL_FRect image{layout.image.x + (layout.image.w - w) * 0.5f, layout.image.y, w, layout.image.h};
+        if (!SDL_RenderTexture(renderer, preview, nullptr, &image))
+        {
+            return false;
+        }
+    }
+    const std::string status = width < 190 && preview ? std::to_string(triangleCount) + " tris" : previewStatus;
+    const bool partial = !rows.empty() && !scanStatus.empty();
+    if (!Text(renderer, 12, layout.image.y + layout.image.h + 10, status, muted) ||
+        !Text(renderer, 12, static_cast<float>(layout.listTop - 19), partial ? scanStatus : "assets/models", muted))
+    {
+        return false;
+    }
+    if (rows.empty())
+    {
+        return Text(renderer, 12, static_cast<float>(layout.listTop + 8), scanStatus, muted);
+    }
+
+    const int listHeight = std::max(0, height - layout.listTop);
+    if (listHeight == 0)
+    {
+        return true;
+    }
+    SDL_Rect panel;
+    if (!SDL_GetRenderViewport(renderer, &panel))
+    {
+        return false;
+    }
+    const SDL_Rect list{panel.x, panel.y + layout.listTop, width, listHeight};
+    if (!SDL_SetRenderViewport(renderer, &list))
+    {
+        return false;
+    }
+    const float limit = std::max(0.0f, rows.size() * rowHeight - listHeight);
+    scroll = std::min(scroll, limit);
+    const auto first = static_cast<std::size_t>(scroll / rowHeight);
+    float y = first * rowHeight - scroll;
+    for (auto i = first; i < rows.size() && y < listHeight; ++i, y += rowHeight)
+    {
+        const Row& row = rows[i];
+        const bool folder = row.modelPath.empty();
+        if ((!folder && row.modelPath == selected &&
+             !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), rowHeight}, {45, 91, 94, 255})) ||
+            !Text(renderer, folder ? 12 : 22, y + 8, row.label, folder ? muted : ink))
+        {
+            return false;
+        }
+    }
+    if (limit > 0)
+    {
+        const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (rows.size() * rowHeight)));
+        const float top = (listHeight - thumb) * scroll / limit;
+        if (!Fill(renderer, {static_cast<float>(width - 4), top, 3, thumb}, {94, 111, 116, 255}))
+        {
+            return false;
+        }
+    }
+    return SDL_SetRenderViewport(renderer, &panel);
+}

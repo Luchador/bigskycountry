@@ -2,6 +2,7 @@
 
 #include "application.hpp"
 #include "camera_toolbar.hpp"
+#include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "mesh.hpp"
 #include "editor_menu.hpp"
@@ -79,13 +80,13 @@ private:
 
     double scale = 4.0; // pixels per meter
     Vector3 center{};
-    int width = 0;
-    int height = 0;
+    SDL_Rect scene{}, browserPanel{}, roadPanel{};
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
     std::shared_ptr<const Mesh> arrow;
     CameraToolbar cameraToolbar;
+    ContentBrowser browser;
     bool planView = false;
     bool dragChanged = false;
     bool saveFailed = false;
