@@ -1,7 +1,13 @@
 #pragma once
 
 #include "application.hpp"
+#include "road_action.hpp"
+#ifdef _WIN32
+#include "windows_panels.hpp"
+#endif
+#ifndef _WIN32
 #include "camera_toolbar.hpp"
+#endif
 #include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "road_gizmo.hpp"
@@ -11,6 +17,10 @@
 class RoadEditor : public EditorTool
 {
 public:
+#ifdef _WIN32
+    SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
+    bool ViewportFocused() const override { return panels.ViewportFocused(); }
+#endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
@@ -29,26 +39,8 @@ private:
         Pan,
         Gizmo
     };
-    enum class Action
-    {
-        ChangeView,
-        New,
-        Finish,
-        Cancel,
-        Straight,
-        Curve,
-        Fewer,
-        More,
-        TwoNorthbound,
-        TwoSouthbound,
-        CenterTurn,
-        Left,
-        Right,
-        NoEdge,
-        Transition,
-        Curb,
-        Remove
-    };
+    using Action = RoadAction;
+#ifndef _WIN32
     struct Button
     {
         Action action;
@@ -59,21 +51,26 @@ private:
     };
 
     std::vector<Button> Buttons(const WorldDocument& world) const;
+#endif
     RoadStyle& Style(WorldDocument& world);
     bool EditingDraft() const { return planView && state.drawing; }
     Vector3 ToWorld(float x, float y) const;
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
+#ifndef _WIN32
     bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
+#endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
-    void PickWorldRoad(WorldDocument& world, const FreeCamera& camera);
+    void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, bool shift);
+    void BeginPointDrag(const Road& road, Drag kind, bool shift);
+    void MovePoint(Road& road, Vector3 position);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void SelectAt(const WorldDocument& world, Vector3 pos);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
     void ChangeStyle(Action action, WorldDocument& world);
-    void PressCanvas(WorldDocument& world, float x, float y);
+    void PressCanvas(WorldDocument& world, float x, float y, bool shift);
     void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);
     void Release(WorldDocument& world);
     bool Save(WorldDocument& world);
@@ -82,15 +79,24 @@ private:
 
     double scale = 4.0; // pixels per meter
     Vector3 center{};
-    SDL_Rect scene{}, browserPanel{}, roadPanel{};
+    SDL_Rect scene{};
+#ifndef _WIN32
+    SDL_Rect browserPanel{}, roadPanel{};
+#endif
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
     RoadGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
     std::vector<RoadPoint> originalPoints;
+    std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.
+#ifndef _WIN32
     CameraToolbar cameraToolbar;
+#endif
     ContentBrowser browser;
+#ifdef _WIN32
+    WindowsPanels panels;
+#endif
     bool planView = false;
     bool dragChanged = false;
     bool saveFailed = false;

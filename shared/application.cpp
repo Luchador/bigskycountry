@@ -73,6 +73,10 @@ namespace
 
             while (SDL_PollEvent(&event))
             {
+                if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && SDL_GetWindowFromEvent(&event) == window)
+                {
+                    event.type = SDL_EVENT_QUIT;
+                }
                 if (roadTool)
                 {
                     const bool wasPlanView = roadTool->IsPlanView();
@@ -136,7 +140,7 @@ namespace
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
             }
 
-            if (input.IsCameraEnabled() && (!roadTool || !roadTool->DraggingGizmo()))
+            if (input.IsCameraEnabled() && (!roadTool || (roadTool->ViewportFocused() && !roadTool->DraggingGizmo())))
             {
                 const double cameraElapsedSeconds = std::min(elapsedNanoseconds / 1.0e9, 0.1);
                 // Ctrl+S belongs to File > Save in the editor.
@@ -199,6 +203,7 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
 {
     const char* title = mode == ApplicationMode::Editor ? "Big Sky Country Editor" : "Big Sky Country";
     SDL_Window* window = nullptr;
+    SDL_Window* renderWindow = nullptr;
     SDL_Renderer* renderer = nullptr;
     bool success = SDL_Init(SDL_INIT_VIDEO);
 
@@ -207,7 +212,11 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
         window = SDL_CreateWindow(title, 1920, 1080, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
         if (window)
         {
-            renderer = CreateSceneRenderer(window);
+            renderWindow = roadTool ? roadTool->CreateRenderWindow(window) : window;
+            if (renderWindow)
+            {
+                renderer = CreateSceneRenderer(renderWindow);
+            }
         }
         success = renderer && SDL_ShowWindow(window);
     }
@@ -228,6 +237,10 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
     }
 
     SDL_DestroyRenderer(renderer);
+    if (renderWindow && renderWindow != window)
+    {
+        SDL_DestroyWindow(renderWindow);
+    }
     SDL_DestroyWindow(window);
     SDL_Quit();
 

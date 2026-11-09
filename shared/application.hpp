@@ -21,6 +21,8 @@ class EditorTool
 {
 public:
     virtual ~EditorTool() = default;
+    virtual SDL_Window* CreateRenderWindow(SDL_Window* frame) { return frame; }
+    virtual bool ViewportFocused() const { return true; }
     virtual bool Initialize(SDL_Window* window, MeshAssets& models) = 0;
     virtual void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const = 0;
     virtual bool DraggingGizmo() const = 0;

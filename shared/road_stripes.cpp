@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace
 {
@@ -20,22 +21,42 @@ namespace
         double length;
     };
 
-    std::vector<Span> MakeSpans(const std::vector<Vector3>& samples)
+    constexpr Vector3 defaultLeft{0, 0, 1}; // A wholly vertical road has no horizontal heading.
+
+    template<typename Visit>
+    void VisitSpans(const std::vector<Vector3>& path, std::optional<Vector3> initialLeft, Visit visit)
     {
-        std::vector<Span> spans;
-
-        for (std::size_t i = 1; i < samples.size(); ++i)
+        // Use the preceding heading for vertical spans. If the whole path
+        // begins vertically, look ahead for its first horizontal heading.
+        Vector3 left = initialLeft.value_or(defaultLeft);
+        if (!initialLeft)
         {
-            const Vector3 delta = samples[i] - samples[i - 1];
-            const double length = std::hypot(delta.x, delta.z);
-
-            if (length > 0.0)
+            for (std::size_t i = 1; i < path.size(); ++i)
             {
-                spans.push_back({samples[i - 1], samples[i], {-delta.z / length, 0.0, delta.x / length}, length});
+                const Vector3 delta = path[i] - path[i - 1];
+                const double run = std::hypot(delta.x, delta.z);
+                if (run > 0.0)
+                {
+                    left = {-delta.z / run, 0, delta.x / run};
+                    break;
+                }
             }
         }
 
-        return spans;
+        for (std::size_t i = 1; i < path.size(); ++i)
+        {
+            const Vector3 delta = path[i] - path[i - 1];
+            const double run = std::hypot(delta.x, delta.z);
+            if (run > 0.0)
+            {
+                left = {-delta.z / run, 0, delta.x / run};
+            }
+            else if (delta.y == 0.0)
+            {
+                continue;
+            }
+            visit(Span{path[i - 1], path[i], left, run});
+        }
     }
 
     // A positive offset is left of the road in the direction its points were placed.
@@ -110,10 +131,10 @@ namespace
 
             // Both sides share an explicit center vertex with each bevel. This keeps
             // the joins watertight even when the renderer rounds to pixel centers.
-            road.triangles.push_back({aLeft, a, b});
-            road.triangles.push_back({aLeft, b, bLeft});
-            road.triangles.push_back({a, aRight, bRight});
-            road.triangles.push_back({a, bRight, b});
+            road.triangles.push_back({aLeft, b, a});
+            road.triangles.push_back({aLeft, bLeft, b});
+            road.triangles.push_back({a, bRight, aRight});
+            road.triangles.push_back({a, b, bRight});
             previousLeft = bLeft;
             previousRight = bRight;
             havePrevious = true;
@@ -185,12 +206,12 @@ namespace
             }
             else
             {
-                if (previousCenter.x != center.x || previousCenter.z != center.z)
+                if (previousCenter.x != center.x || previousCenter.y != center.y || previousCenter.z != center.z)
                 {
-                    road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], previousCenter, center} : Road::Triangle{previousCenter, previous[0], center});
+                    road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], center, previousCenter} : Road::Triangle{previousCenter, center, previous[0]});
                 }
 
-                road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], center, profile[0]} : Road::Triangle{previous[0], profile[0], center});
+                road.triangles.push_back(side > 0 ? Road::Triangle{previous[0], profile[0], center} : Road::Triangle{previous[0], center, profile[0]});
 
                 if (edge == RoadEdge::Transition)
                 {
@@ -218,25 +239,20 @@ namespace
     }
 
     // lo and hi are signed distances perpendicular to each span, in meters.
-    void PaintStrip(const std::vector<Vector3>& path, double lo, double hi, std::vector<Road::Triangle>& mesh)
+    void PaintStrip(const std::vector<Vector3>& path, double lo, double hi, std::vector<Road::Triangle>& mesh,
+                    std::optional<Vector3> initialLeft = {})
     {
-        const Vector3 lift{0.0, stripeHeight, 0.0};
         Vector3 previousLo{}, previousHi{};
         bool havePrevious = false;
 
-        for (std::size_t i = 1; i < path.size(); ++i)
+        VisitSpans(path, initialLeft, [&](const Span& span)
         {
-            const Vector3 a = path[i - 1] + lift;
-            const Vector3 b = path[i] + lift;
-            const Vector3 delta = b - a;
-            const double length = std::hypot(delta.x, delta.z);
-
-            if (length == 0.0)
-            {
-                continue;
-            }
-
-            const Vector3 left{-delta.z / length, 0.0, delta.x / length};
+            const Vector3 left = span.left;
+            // A vertical stripe needs a horizontal depth offset from its pavement.
+            const Vector3 up = span.length > 0.0 ? Vector3{0, 1, 0}
+                : Math::Cross(left, {0, span.end.y > span.start.y ? 1.0 : -1.0, 0});
+            const Vector3 a = span.start + up * stripeHeight;
+            const Vector3 b = span.end + up * stripeHeight;
             const Vector3 aLo = a + left * lo, aHi = a + left * hi;
             const Vector3 bLo = b + left * lo, bHi = b + left * hi;
 
@@ -258,7 +274,7 @@ namespace
             previousLo = bLo;
             previousHi = bHi;
             havePrevious = true;
-        }
+        });
     }
 
     void PaintDashes(const std::vector<Vector3>& path, std::vector<Road::Triangle>& mesh)
@@ -273,10 +289,15 @@ namespace
         double remaining = dashLength;
         std::vector<Vector3> dash{path.front()};
 
-        for (std::size_t i = 1; i < path.size(); ++i)
+        Vector3 dashLeft = defaultLeft;
+        VisitSpans(path, {}, [&](const Span& span)
         {
-            const Vector3 start = path[i - 1];
-            const Vector3 delta = path[i] - start;
+            const Vector3 start = span.start;
+            const Vector3 delta = span.end - start;
+            if (dash.size() == 1)
+            {
+                dashLeft = span.left;
+            }
             const double length = Math::Length(delta);
             double used = 0.0;
 
@@ -288,7 +309,7 @@ namespace
                 {
                     if (painting)
                     {
-                        dash.push_back(path[i]);
+                        dash.push_back(span.end);
                     }
                     remaining -= available;
                     break;
@@ -300,19 +321,20 @@ namespace
                 if (painting)
                 {
                     dash.push_back(boundary);
-                    PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
+                    PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
                     dash.clear();
                 }
                 else
                 {
+                    dashLeft = span.left;
                     dash.push_back(boundary);
                 }
 
                 painting = !painting;
                 remaining = painting ? dashLength : gapLength;
             }
-        }
-        PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
+        });
+        PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
     }
 
     void PaintDoubleYellow(const std::vector<Span>& spans, double boundary, std::vector<Road::Triangle>& mesh)
@@ -327,7 +349,8 @@ namespace
 
 void Road::BuildSurface(const std::vector<Vector3>& samples)
 {
-    const auto spans = MakeSpans(samples);
+    std::vector<Span> spans;
+    VisitSpans(samples, {}, [&](const Span& span) { spans.push_back(span); });
 
     if (spans.empty())
     {

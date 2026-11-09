@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,14 +13,22 @@ public:
     void HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
     bool Draw(SDL_Renderer* renderer, int width, int height);
 
-private:
     struct Row
     {
         std::string label;
         std::string modelPath; // Empty for a folder heading.
     };
 
-    void UpdatePreview(SDL_Renderer* renderer);
+    const std::vector<Row>& Rows() const { return rows; }
+    const std::string& Selected() const { return selected; }
+    const std::string& ScanStatus() const { return scanStatus; }
+    const std::string& PreviewStatus() const { return previewStatus; }
+    SDL_Surface* Preview() const { return surface.get(); }
+    void Select(const std::string& path);
+    bool UpdatePreview(); // Returns true when the selected model or its preview changed.
+
+private:
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{nullptr, SDL_DestroySurface};
     std::vector<Row> rows;
     std::string selected;
     std::string scanStatus;

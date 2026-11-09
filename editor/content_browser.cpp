@@ -14,6 +14,7 @@ namespace
     constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
     namespace fs = std::filesystem;
 
+#ifndef _WIN32
     struct Layout
     {
         SDL_FRect refresh, image;
@@ -41,12 +42,15 @@ namespace
                SDL_RenderDebugText(renderer, x, y, text.c_str());
     }
 
+#endif
+
     std::string Utf8(const fs::path& path)
     {
         const auto bytes = path.generic_u8string();
         return {bytes.begin(), bytes.end()};
     }
 
+#ifndef _WIN32
     bool DrawRefresh(SDL_Renderer* renderer, const SDL_FRect& rect)
     {
         if (!Fill(renderer, rect, {47, 59, 66, 255}))
@@ -65,11 +69,13 @@ namespace
                SDL_RenderLines(renderer, arc, SDL_arraysize(arc)) && SDL_RenderLines(renderer, head, SDL_arraysize(head));
     }
 
-    SDL_Texture* MakePreview(SDL_Renderer* renderer, const std::shared_ptr<const Mesh>& mesh)
+#endif
+
+    SDL_Surface* MakePreview(const std::shared_ptr<const Mesh>& mesh)
     {
         using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
         using Renderer = std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)>;
-        Surface surface(SDL_CreateSurface(previewWidth, previewHeight, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
+        Surface surface(SDL_CreateSurface(previewWidth, previewHeight, SDL_PIXELFORMAT_BGRA32), SDL_DestroySurface);
         Renderer offscreen(surface ? SDL_CreateSoftwareRenderer(surface.get()) : nullptr, SDL_DestroyRenderer);
         if (!offscreen)
         {
@@ -122,7 +128,7 @@ namespace
         {
             return nullptr;
         }
-        return SDL_CreateTextureFromSurface(renderer, surface.get());
+        return surface.release();
     }
 }
 
@@ -177,36 +183,47 @@ void ContentBrowser::Refresh()
     }
 }
 
-void ContentBrowser::UpdatePreview(SDL_Renderer* renderer)
+void ContentBrowser::Select(const std::string& path)
 {
-    if (preview)
+    if (selected != path)
     {
-        SDL_DestroyTexture(preview);
-        preview = nullptr;
+        selected = path;
+        previewDirty = true;
     }
-    previewDirty = false;
-    previewStatus.clear();
-    if (selected.empty())
-    {
-        return;
-    }
-
-    MeshAssets assets;
-    const auto mesh = assets.Load(selected);
-    if (mesh)
-    {
-        preview = MakePreview(renderer, mesh);
-    }
-    if (!preview)
-    {
-        previewStatus = "Preview unavailable";
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Preview '%s': %s", selected.c_str(), SDL_GetError());
-        return;
-    }
-    triangleCount = mesh->indices.size() / 3;
-    previewStatus = std::to_string(mesh->vertices.size()) + " verts   " + std::to_string(triangleCount) + " tris";
 }
 
+bool ContentBrowser::UpdatePreview()
+{
+    if (!previewDirty)
+    {
+        return false;
+    }
+    surface.reset();
+    previewDirty = false;
+    previewStatus.clear();
+    if (!selected.empty())
+    {
+        MeshAssets assets;
+        const auto mesh = assets.Load(selected);
+        if (mesh)
+        {
+            surface.reset(MakePreview(mesh));
+        }
+        if (surface)
+        {
+            triangleCount = mesh->indices.size() / 3;
+            previewStatus = std::to_string(mesh->vertices.size()) + " verts   " + std::to_string(triangleCount) + " tris";
+        }
+        else
+        {
+            previewStatus = "Preview unavailable";
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Preview '%s': %s", selected.c_str(), SDL_GetError());
+        }
+    }
+    return true;
+}
+
+#ifndef _WIN32
 void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
 {
     const Layout layout(width, height);
@@ -227,10 +244,9 @@ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int
     else if (local.y >= layout.listTop)
     {
         const auto index = static_cast<std::size_t>((local.y - layout.listTop + scroll) / rowHeight);
-        if (index < rows.size() && !rows[index].modelPath.empty() && selected != rows[index].modelPath)
+        if (index < rows.size() && !rows[index].modelPath.empty())
         {
-            selected = rows[index].modelPath;
-            previewDirty = true;
+            Select(rows[index].modelPath);
         }
     }
 }
@@ -241,9 +257,17 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     {
         return true;
     }
-    if (previewDirty)
+    if (UpdatePreview())
     {
-        UpdatePreview(renderer);
+        if (preview)
+        {
+            SDL_DestroyTexture(preview);
+        }
+        preview = surface ? SDL_CreateTextureFromSurface(renderer, surface.get()) : nullptr;
+        if (surface && !preview)
+        {
+            return false;
+        }
     }
     const Layout layout(width, height);
     if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, {24, 32, 38, 255}) ||
@@ -315,3 +339,4 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     }
     return SDL_SetRenderViewport(renderer, &panel);
 }
+#endif

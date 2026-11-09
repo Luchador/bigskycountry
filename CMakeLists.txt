@@ -51,7 +51,6 @@ target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
-    editor/camera_toolbar.cpp
     editor/content_browser.cpp
     editor/road_editor.cpp
     editor/road_gizmo.cpp
@@ -59,7 +58,18 @@ add_executable(BigSkyCountryEditor WIN32
     editor/edit_history.cpp
 )
 if(WIN32)
-    target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32)
+    enable_language(RC)
+    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/panels.rc)
+    set_source_files_properties(editor/windows_panels.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
+    target_include_directories(BigSkyCountryEditor PRIVATE editor)
+    if(MSVC)
+        target_sources(BigSkyCountryEditor PRIVATE editor/editor.manifest)
+    else()
+        target_compile_definitions(BigSkyCountryEditor PRIVATE BSC_EMBED_MANIFEST)
+    endif()
+    target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32)
+else()
+    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp)
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 

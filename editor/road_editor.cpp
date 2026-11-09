@@ -111,6 +111,7 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
     return ToScreen(road.points[index].position + direction * (handleLength / scale));
 }
 
+#ifndef _WIN32
 std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) const
 {
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
@@ -152,6 +153,8 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
 
     return buttons;
 }
+
+#endif
 
 bool RoadEditor::Save(WorldDocument& world)
 {
@@ -345,7 +348,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     Commit(world, index, std::move(before), road);
 }
 
-void RoadEditor::PressCanvas(WorldDocument& world, float x, float y)
+void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, bool shift)
 {
     const Vector3 pos = ToWorld(x, y);
     const SDL_FPoint cursor{x, y};
@@ -367,6 +370,22 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y)
         return;
     }
 
+    auto grabPoint = [&](int roadIndex, int point)
+    {
+        const Road& road = world.roads[roadIndex];
+        state.selected = roadIndex;
+        state.point = point;
+        grabOffset = road.points[point].position - pos;
+        BeginPointDrag(road, Drag::Move, shift);
+    };
+    // An elevated endpoint can project exactly onto the preceding point.
+    if (state.selected >= 0 && state.point >= 0 &&
+        Near(cursor, ToScreen(world.roads[state.selected].points[state.point].position)))
+    {
+        grabPoint(state.selected, state.point);
+        return;
+    }
+
     // Selected controls get priority where roads overlap.
     auto pickPoint = [&](int roadIndex)
     {
@@ -375,11 +394,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y)
         {
             if (Near(cursor, ToScreen(points[i].position)))
             {
-                state.selected = roadIndex;
-                state.point = static_cast<int>(i);
-                grabOffset = points[i].position - pos;
-                dragStart.emplace(state, Selected(world));
-                drag = Drag::Move;
+                grabPoint(roadIndex, static_cast<int>(i));
                 return true;
             }
         }
@@ -424,6 +439,58 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
     }
 }
 
+void RoadEditor::BeginPointDrag(const Road& road, Drag kind, bool shift)
+{
+    dragStart.emplace(state, &road);
+    drag = kind;
+    const bool translate = kind == Drag::Move || gizmo.mode == GizmoMode::Translate;
+    const bool endpoint = state.point == 0 || state.point + 1 == static_cast<int>(road.points.size());
+    if (translate && endpoint && shift)
+    {
+        extensionSource = state.point;
+    }
+    if (kind == Drag::Gizmo || extensionSource)
+    {
+        originalPoints = road.points;
+    }
+}
+
+void RoadEditor::MovePoint(Road& road, Vector3 position)
+{
+    constexpr double minSpacing = 0.05;
+    if (extensionSource)
+    {
+        const bool inserted = road.points.size() != originalPoints.size();
+        if (Math::Length(position - originalPoints[*extensionSource].position) < minSpacing)
+        {
+            // Returning to the starting point withdraws the preview.
+            if (inserted)
+            {
+                road.points = originalPoints;
+                state.point = *extensionSource;
+                road.Rebuild();
+                dragChanged = false;
+            }
+            return;
+        }
+        if (!inserted)
+        {
+            state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
+            road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
+        }
+    }
+    else if ((state.point > 0 && Math::Length(position - road.points[state.point - 1].position) < minSpacing) ||
+             (state.point + 1 < static_cast<int>(road.points.size()) &&
+              Math::Length(position - road.points[state.point + 1].position) < minSpacing))
+    {
+        return;
+    }
+
+    road.points[state.point].position = position;
+    road.Rebuild();
+    dragChanged = true;
+}
+
 void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
 {
     mouse = {motion.x, motion.y};
@@ -432,33 +499,20 @@ void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion
         center.x -= motion.xrel / scale;
         center.z += motion.yrel / scale;
     }
-    else if (drag == Drag::Move || drag == Drag::Rotate)
+    else if (drag == Drag::Move)
+    {
+        MovePoint(world.roads[state.selected], ToWorld(mouse.x, mouse.y) + grabOffset);
+    }
+    else if (drag == Drag::Rotate)
     {
         Road& road = world.roads[state.selected];
-        RoadPoint& anchor = road.points[state.point];
-        Vector3 pos = ToWorld(mouse.x, mouse.y);
-        if (drag == Drag::Move)
+        const Vector3 offset = ToWorld(mouse.x, mouse.y) - road.points[state.point].position;
+        if (std::hypot(offset.x, offset.z) * scale >= 2.0)
         {
-            pos = pos + grabOffset;
-            if ((state.point > 0 && Math::Length(pos - road.points[state.point - 1].position) < 0.05) ||
-                (state.point + 1 < static_cast<int>(road.points.size()) &&
-                 Math::Length(pos - road.points[state.point + 1].position) < 0.05))
-            {
-                return;
-            }
-            anchor.position = pos;
-        }
-        else
-        {
-            const Vector3 offset = pos - anchor.position;
-            if (std::hypot(offset.x, offset.z) * scale < 2.0)
-            {
-                return;
-            }
             road.RotatePoint(state.point, std::atan2(offset.z, offset.x));
+            road.Rebuild();
+            dragChanged = true;
         }
-        road.Rebuild();
-        dragChanged = true;
     }
 }
 
@@ -469,6 +523,7 @@ void RoadEditor::Release(WorldDocument& world)
         Commit(world, state.selected, std::move(*dragStart), Selected(world));
     }
     originalPoints.clear();
+    extensionSource.reset();
     gizmoDrag.reset();
     dragStart.reset();
     dragChanged = false;
@@ -595,6 +650,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     return true;
 }
 
+#ifndef _WIN32
 bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const
 {
     if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h)}, {24, 32, 38, 255}))
@@ -657,6 +713,8 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
     return Text(renderer, 14, 18, "Road editor", ink);
 }
 
+#endif
+
 bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 {
     int width, height;
@@ -664,12 +722,16 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
     {
         return false;
     }
+#ifdef _WIN32
+    scene = {0, 0, width, height};
+#else
     const int top = std::min(CameraToolbar::height, height);
     const int right = std::min(panelWidth, width / 2);
     const int left = std::min(panelWidth, (width - right) / 2);
     browserPanel = {0, top, left, height - top};
     roadPanel = {width - right, top, right, height - top};
     scene = {left, top, width - left - right, height - top};
+#endif
     return SDL_SetRenderViewport(renderer, &scene);
 }
 
@@ -694,9 +756,14 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
             return false;
         }
     }
+#ifdef _WIN32
+    panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera);
+    return true;
+#else
     return SDL_SetRenderViewport(renderer, &browserPanel) && browser.Draw(renderer, browserPanel.w, browserPanel.h) &&
            SDL_SetRenderViewport(renderer, &roadPanel) && RenderRoadPanel(renderer, world) &&
            SDL_SetRenderViewport(renderer, nullptr) && cameraToolbar.Draw(renderer, roadPanel.x + roadPanel.w, camera);
+#endif
 }
 
 void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
@@ -722,7 +789,7 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     }
 }
 
-void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera)
+void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, bool shift)
 {
     const GizmoPick hit = gizmo.Pick(world, state.selected, state.point, camera, scene, mouse);
     switch (hit.kind)
@@ -730,10 +797,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera)
     case PickKind::Axis:
     {
         const Road& road = world.roads[state.selected];
-        originalPoints = road.points;
-        dragStart.emplace(state, &road);
+        BeginPointDrag(road, Drag::Gizmo, shift);
         gizmoDrag.emplace(gizmo.mode, hit.index, road.points[state.point].position, hit.position, camera, scene, mouse);
-        drag = Drag::Gizmo;
         break;
     }
     case PickKind::Point:
@@ -766,24 +831,17 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         return;
     }
     Road& road = world.roads[state.selected];
-    const std::size_t i = static_cast<std::size_t>(state.point);
     if (gizmo.mode == GizmoMode::Translate)
     {
-        const Vector3 pos = originalPoints[i].position + gizmoDrag->axis * *amount;
-        if ((i > 0 && Math::Length(pos - originalPoints[i - 1].position) < 0.05) ||
-            (i + 1 < originalPoints.size() && Math::Length(pos - originalPoints[i + 1].position) < 0.05))
-        {
-            return;
-        }
-        road.points[i].position = pos;
+        const int source = extensionSource.value_or(state.point);
+        MovePoint(road, originalPoints[source].position + gizmoDrag->axis * amount.value());
+        return;
     }
-    else
+
+    road.points = originalPoints;
+    if (*amount != 0.0)
     {
-        road.points = originalPoints;
-        if (*amount != 0.0)
-        {
-            road.RotatePoint(i, gizmoDrag->axis, *amount);
-        }
+        road.RotatePoint(state.point, gizmoDrag->axis, *amount);
     }
     road.Rebuild();
     dragChanged = true;
@@ -802,13 +860,32 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         RunCommand(*command, world, camera);
         return EditorEvent::Handled;
     }
+#ifdef _WIN32
+    Action action;
+    if (panels.Command(event, action))
+    {
+        Release(world);
+        Activate(action, world, camera);
+        return EditorEvent::Handled;
+    }
+    if (panels.HandleInput(event, camera))
+    {
+        return EditorEvent::Handled;
+    }
+#endif
     if (SDL_GetWindowFromEvent(&event) != window)
     {
         return EditorEvent::Pass;
     }
+    if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE && drag == Drag::None)
+    {
+        mouse = {-1, -1};
+    }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
     {
+#ifndef _WIN32
         cameraToolbar.CancelDrag();
+#endif
         Release(world);
         return EditorEvent::Pass;
     }
@@ -822,9 +899,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
-        if (DraggingGizmo() && event.key.key == SDLK_ESCAPE)
+        if ((DraggingGizmo() || extensionSource) && event.key.key == SDLK_ESCAPE)
         {
             Road& road = world.roads[state.selected];
+            state.point = extensionSource.value_or(state.point);
             road.points = std::move(originalPoints);
             road.Rebuild();
             dragChanged = false;
@@ -870,14 +948,18 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         return EditorEvent::Error;
     }
+    SDL_Event e = event;
+#ifdef _WIN32
+    panels.ToViewport(window, e, scene);
+#else
     // Convert window pixels once, relative to the full area under the toolbar.
     const int windowWidth = roadPanel.x + roadPanel.w;
     const SDL_Rect body{0, scene.y, windowWidth, scene.h};
-    SDL_Event e = event;
     if (!SDL_SetRenderViewport(renderer, &body) || !SDL_ConvertEventToRenderCoordinates(renderer, &e))
     {
         return EditorEvent::Error;
     }
+#endif
     SDL_FPoint pointer;
     switch (e.type)
     {
@@ -888,6 +970,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 
     if (drag == Drag::None)
     {
+#ifdef _WIN32
+        if (pointer.x < 0 || pointer.y < 0 || pointer.x >= scene.w || pointer.y >= scene.h)
+        {
+            mouse = {-1, -1};
+            return EditorEvent::Handled;
+        }
+#else
         if (e.type == SDL_EVENT_MOUSE_WHEEL && pointer.y < 0)
         {
             return EditorEvent::Pass; // The toolbar wheel adjusts free-camera speed.
@@ -925,6 +1014,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             return e.type == SDL_EVENT_MOUSE_WHEEL && !planView ? EditorEvent::Pass : EditorEvent::Handled;
         }
+#endif
     }
     if (!planView && !DraggingGizmo() && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
@@ -942,13 +1032,18 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         mouse = pointer;
         if (e.button.button == SDL_BUTTON_LEFT)
         {
+#ifdef _WIN32
+            const bool shift = panels.TakePressShift();
+#else
+            const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+#endif
             if (planView)
             {
-                PressCanvas(world, mouse.x, mouse.y);
+                PressCanvas(world, mouse.x, mouse.y, shift);
             }
             else
             {
-                PickWorldRoad(world, camera);
+                PickWorldRoad(world, camera, shift);
             }
         }
         else if (!planView)
@@ -978,6 +1073,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (DraggingGizmo())
             {
                 MoveGizmo(world, camera, pointer);
+            }
+            else if (extensionSource)
+            {
+                MovePoint(world.roads[state.selected], ToWorld(pointer.x, pointer.y) + grabOffset);
             }
             Release(world);
         }
