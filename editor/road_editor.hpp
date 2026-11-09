@@ -63,7 +63,7 @@ private:
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
-    void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, bool shift);
+    void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginPointDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);

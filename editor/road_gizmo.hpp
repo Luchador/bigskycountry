@@ -3,13 +3,16 @@
 #include "mesh.hpp"
 #include "road.hpp"
 #include <optional>
+#include <set>
+
+#define ROAD_SPLINE_THICKNESS 1.5f
 
 class FreeCamera;
 class WorldDocument;
 class WorldRenderer;
 
 enum class GizmoMode { Translate, Rotate };
-enum class PickKind { Empty, Road, Point, Axis };
+enum class PickKind { Empty, Road, Segment, Point, Axis };
 
 struct GizmoPick
 {
@@ -23,7 +26,8 @@ class RoadGizmo
 {
 public:
     void Load(MeshAssets& assets);
-    void Draw(WorldRenderer& renderer, const Road& road, int point, const FreeCamera& camera, SDL_Rect scene) const;
+    void Draw(WorldRenderer& renderer, const Road& road, int point, const std::set<int>& segments,
+              const FreeCamera& camera, SDL_Rect scene) const;
     GizmoPick Pick(const WorldDocument& world, int road, int point, const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse) const;
     GizmoMode mode = GizmoMode::Translate;
 

@@ -41,6 +41,8 @@ Use **Tab** or **Shift+Tab** to move between the viewport and controls. Click th
 
 Click a road to show its control points, then click a point to select it. Press **W** for the translation arrows or **E** for the rotation rings. Drag a red (X), green (Y), or blue (Z) handle. The green arrow changes elevation. Rotating a Bézier point adjusts its tangent, while rotating a straight-road point pivots the neighboring spans around it. Release the mouse to save the edit, or press **Esc** during the drag to cancel. Each drag can be undone with **Ctrl+Z** and redone with **Ctrl+Y**.
 
+In the 3D viewport, each cyan spline between two consecutive control points represents one road segment. Click the spline to select that segment in amber. **Shift+click** adds a segment to the selection, and **Ctrl+click** removes just the clicked segment. Click a control point to resume point editing.
+
 The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`. Hold the right mouse button to fly the camera with its usual movement keys, including W and E.
 
 To extend either end of a road, select its endpoint, hold **Shift**, and drag a translation arrow. In the top-down road view, hold **Shift** and drag the endpoint itself. The original point stays in place and the new endpoint stays selected, ready for the next segment. Top-down extensions keep the endpoint's elevation. Release to save, or press **Esc** during the drag to cancel.

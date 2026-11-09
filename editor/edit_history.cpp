@@ -27,7 +27,7 @@ namespace
     }
 }
 
-EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad)
+EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad) : segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -61,6 +61,7 @@ EditHistory::Result EditHistory::Restore(std::vector<Road>& roads, RoadEditorSta
                                          const EditSnapshot& from, const EditSnapshot& to)
 {
     RoadEditorState restored;
+    restored.segments = to.segments;
     auto in = Reader(to.editorData);
     RoadIO::ReadStyle(in, restored.defaults);
     bool hasDraft;

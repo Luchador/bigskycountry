@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <vector>
 
 enum class ThreeLaneLayout
@@ -74,6 +75,8 @@ struct Road
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 
+    // Includes both endpoints; the span is valid until the road is rebuilt.
+    std::span<const Vector3> SegmentSamples(std::size_t segment) const;
     Vector3 Tangent(std::size_t index) const;
     void RotatePoint(std::size_t index, double heading);
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
@@ -81,4 +84,6 @@ struct Road
 
 private:
     void BuildSurface(const std::vector<Vector3>& samples);
+    std::vector<Vector3> centerline;
+    std::vector<std::size_t> pointSamples; // Centerline index of each control point.
 };

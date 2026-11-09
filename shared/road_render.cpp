@@ -17,29 +17,6 @@ namespace
     using ViewGeometry::ScreenPoint;
     using ViewGeometry::SidePlanes;
 
-    bool ClipLine(Vector3& a, Vector3& b, Vector3 normal, double offset)
-    {
-        const double da = Math::Dot(a, normal) - offset;
-        const double db = Math::Dot(b, normal) - offset;
-        if (da < 0.0 && db < 0.0)
-        {
-            return false;
-        }
-        if ((da < 0.0) != (db < 0.0))
-        {
-            const Vector3 cut = a + (b - a) * (da / (da - db));
-            if (da < 0.0)
-            {
-                a = cut;
-            }
-            else
-            {
-                b = cut;
-            }
-        }
-        return true;
-    }
-
     template<typename ViewTransform, typename Emit>
     void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport, Emit emit)
     {
@@ -54,26 +31,14 @@ namespace
             Vector3 a = previous;
             previous = transform(point);
             Vector3 b = previous;
-            if (!ClipLine(a, b, {0, 0, 1}, worldNearDepth) ||
-                !std::all_of(sides.begin(), sides.end(), [&](Vector3 side) { return ClipLine(a, b, side, 0.0); }))
+            const auto stroke = ViewGeometry::ProjectStroke(a, b, sides, focal, viewport, worldNearDepth, 1.5f);
+            if (!stroke)
             {
                 continue;
             }
-
-            const SDL_FPoint p = ScreenPoint(a, focal, viewport), q = ScreenPoint(b, focal, viewport);
-            const float dx = q.x - p.x, dy = q.y - p.y;
-            const float length = std::hypot(dx, dy);
-            if (length == 0.0f)
-            {
-                continue;
-            }
-            // Square caps overlap at the joins. The width stays three pixels at any zoom.
-            const float tx = 1.5f * dx / length, ty = 1.5f * dy / length;
-            const SDL_FPoint corners[] = {{p.x - tx - ty, p.y - ty + tx}, {p.x - tx + ty, p.y - ty - tx},
-                                          {q.x + tx + ty, q.y + ty - tx}, {q.x + tx - ty, q.y + ty + tx}};
             for (int i : {0, 1, 2, 0, 2, 3})
             {
-                emit(corners[i], i < 2 ? a.z : b.z);
+                emit(stroke->corners[i], i < 2 ? stroke->startDepth : stroke->endDepth);
             }
         }
     }

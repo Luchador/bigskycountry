@@ -2,7 +2,10 @@
 
 #include "math.hpp"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <optional>
 
 namespace ViewGeometry
 {
@@ -64,5 +67,59 @@ namespace ViewGeometry
     {
         return {static_cast<float>(viewport.x + viewport.w * 0.5 + v.x * focal / v.z),
                 static_cast<float>(viewport.y + viewport.h * 0.5 - v.y * focal / v.z)};
+    }
+
+    inline bool ClipLine(Vector3& a, Vector3& b, Vector3 normal, double offset)
+    {
+        const double da = Math::Dot(a, normal) - offset;
+        const double db = Math::Dot(b, normal) - offset;
+        if (da < 0.0 && db < 0.0)
+        {
+            return false;
+        }
+        if ((da < 0.0) != (db < 0.0))
+        {
+            const Vector3 cut = a + (b - a) * (da / (da - db));
+            if (da < 0.0)
+            {
+                a = cut;
+            }
+            else
+            {
+                b = cut;
+            }
+        }
+        return true;
+    }
+
+    struct ProjectedStroke
+    {
+        std::array<SDL_FPoint, 4> corners;
+        double startDepth, endDepth;
+    };
+
+    inline std::optional<ProjectedStroke> ProjectStroke(Vector3 a, Vector3 b, const std::array<Vector3, 4>& sides, double focal, SDL_Rect viewport, double nearDepth, float halfWidth)
+    {
+        if (!ClipLine(a, b, {0, 0, 1}, nearDepth) || !std::all_of(sides.begin(), sides.end(), [&](Vector3 side) { return ClipLine(a, b, side, 0.0); }))
+        {
+            return {};
+        }
+
+        const SDL_FPoint p = ScreenPoint(a, focal, viewport), q = ScreenPoint(b, focal, viewport);
+        const float dx = q.x - p.x, dy = q.y - p.y;
+        const float length = std::hypot(dx, dy);
+
+        if (length == 0.0f)
+        {
+            return {};
+        }
+
+        // Square caps overlap at the joins. The width stays constant on screen.
+        const float tx = halfWidth * dx / length, ty = halfWidth * dy / length;
+        ProjectedStroke stroke;
+        stroke.corners = {{{p.x - tx - ty, p.y - ty + tx}, {p.x - tx + ty, p.y - ty - tx}, {q.x + tx + ty, q.y + ty - tx}, {q.x + tx - ty, q.y + ty + tx}}};
+        stroke.startDepth = a.z;
+        stroke.endDepth = b.z;
+        return stroke;
     }
 }

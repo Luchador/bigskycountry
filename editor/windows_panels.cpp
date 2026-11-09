@@ -92,7 +92,7 @@ struct WindowsPanels::Impl
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
     HACCEL shortcuts = nullptr;
     Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0;
-    std::optional<bool> pressShift;
+    std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     bool populating = false, populated = false;
     int scroll = 0;
@@ -403,11 +403,12 @@ struct WindowsPanels::Impl
             self.Layout();
             return result;
         }
-        // Shift may already be held in a native control when the user clicks
+        // A modifier may already be held in a native control when the user clicks
         // the viewport. Queue the modifier immediately before SDL queues the click.
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
         {
-            self.Post(self.pressEvent, (w & MK_SHIFT) != 0);
+            self.Post(self.pressEvent, ((w & MK_SHIFT) ? SDL_KMOD_SHIFT : 0) |
+                                       ((w & MK_CONTROL) ? SDL_KMOD_CTRL : 0));
         }
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN)
         {
@@ -626,7 +627,7 @@ bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera)
 {
     if (event.type == impl->pressEvent)
     {
-        impl->pressShift = event.user.code != 0;
+        impl->pressModifiers = static_cast<SDL_Keymod>(event.user.code);
     }
     else if (event.type == impl->speedEvent)
     {
@@ -643,9 +644,9 @@ bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera)
     return true;
 }
 
-bool WindowsPanels::TakePressShift()
+SDL_Keymod WindowsPanels::TakePressModifiers()
 {
-    return std::exchange(impl->pressShift, std::nullopt).value_or((SDL_GetModState() & SDL_KMOD_SHIFT) != 0);
+    return std::exchange(impl->pressModifiers, std::nullopt).value_or(SDL_GetModState());
 }
 
 void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera)

@@ -2,6 +2,7 @@
 
 #include "road.hpp"
 
+#include <set>
 #include <string>
 
 // Editable tool state. Camera, view, hover and generated geometry stay out of history.
@@ -12,6 +13,14 @@ struct RoadEditorState
     int selected = -1;
     int point = -1;
     bool drawing = false;
+    std::set<int> segments; // Indices of selected spans in the active road.
+
+    void SelectPoint(int roadIndex, int pointIndex)
+    {
+        selected = roadIndex;
+        point = pointIndex;
+        segments.clear();
+    }
 };
 
 struct EditSnapshot
@@ -21,6 +30,7 @@ struct EditSnapshot
 
     std::string editorData;
     std::optional<std::string> roadData;
+    std::set<int> segments;
 };
 
 class EditHistory

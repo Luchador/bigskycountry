@@ -21,7 +21,7 @@ public:
     void ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Rect& scene) const;
     bool Command(const SDL_Event& event, RoadAction& action) const;
     bool HandleInput(const SDL_Event& event, FreeCamera& camera);
-    bool TakePressShift();
+    SDL_Keymod TakePressModifiers();
     void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera);
 
 private:

@@ -115,12 +115,14 @@ Vector3 Road::Tangent(std::size_t index) const
 void Road::RotatePoint(std::size_t index, double heading)
 {
     const Vector3 tangent = Tangent(index);
+
     if (style.curved)
     {
         points[index].heading = heading;
         points[index].pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
         return;
     }
+
     // Positive plan-view heading turns +X toward +Z, around negative Y.
     RotatePoint(index, {0, -1, 0}, heading - std::atan2(tangent.z, tangent.x));
 }
@@ -128,18 +130,22 @@ void Road::RotatePoint(std::size_t index, double heading)
 void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
 {
     const double cosine = std::cos(angle), sine = std::sin(angle);
+
     const auto rotate = [&](Vector3 v)
     {
         return v * cosine + Math::Cross(unitAxis, v) * sine + unitAxis * (Math::Dot(unitAxis, v) * (1.0 - cosine));
     };
+
     if (style.curved)
     {
         const Vector3 tangent = Tangent(index);
         const Vector3 rotated = rotate(tangent);
+    
         if (Math::Length(rotated - tangent) > 1.0e-12)
         {
             SetTangent(points[index], rotated);
         }
+    
         return;
     }
 
@@ -147,10 +153,12 @@ void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
     const Vector3 pivot = points[index].position;
     const std::size_t first = index == 0 ? 0 : index - 1;
     const std::size_t last = std::min(index + 1, points.size() - 1);
+
     for (std::size_t i = first; i <= last; ++i)
     {
         RoadPoint& point = points[i];
         point.position = pivot + rotate(point.position - pivot);
+
         if (point.heading)
         {
             SetTangent(point, rotate(ManualTangent(point)));
@@ -158,8 +166,21 @@ void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
     }
 }
 
+std::span<const Vector3> Road::SegmentSamples(std::size_t segment) const
+{
+    if (pointSamples.empty() || segment >= pointSamples.size() - 1)
+    {
+        return {};
+    }
+
+    const std::size_t start = pointSamples[segment];
+    return std::span<const Vector3>(centerline).subspan(start, pointSamples[segment + 1] - start + 1);
+}
+
 void Road::Rebuild()
 {
+    centerline.clear();
+    pointSamples.clear();
     triangles.clear();
     edgeTriangles.clear();
     outline.clear();
@@ -171,7 +192,8 @@ void Road::Rebuild()
         return;
     }
 
-    std::vector<Vector3> samples{points.front().position};
+    centerline.push_back(points.front().position);
+    pointSamples.push_back(0);
 
     for (std::size_t i = 1; i < points.size(); ++i)
     {
@@ -181,15 +203,17 @@ void Road::Rebuild()
         if (style.curved)
         {
             const double arm = Math::Length(b - a) / 3.0;
-            SampleCubic(a, a + Tangent(i - 1) * arm, b - Tangent(i) * arm, b, 0, samples);
+            SampleCubic(a, a + Tangent(i - 1) * arm, b - Tangent(i) * arm, b, 0, centerline);
         }
         else
         {
-            samples.push_back(b);
+            centerline.push_back(b);
         }
+
+        pointSamples.push_back(centerline.size() - 1);
     }
 
-    BuildSurface(samples);
+    BuildSurface(centerline);
 
     // Bevels can turn either way. Give all top surfaces an upward normal once,
     // when the road changes. Vertical curb risers already face the pavement.
@@ -197,6 +221,7 @@ void Road::Rebuild()
     {
         return (b.z - a.z) * (c.x - a.x) < (b.x - a.x) * (c.z - a.z);
     };
+
     for (auto* mesh : {&triangles, &whiteStripes, &yellowStripes})
     {
         for (Triangle& triangle : *mesh)
@@ -207,6 +232,7 @@ void Road::Rebuild()
             }
         }
     }
+
     for (auto& triangle : edgeTriangles)
     {
         if (facesDown(triangle[0].position, triangle[1].position, triangle[2].position))
