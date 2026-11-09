@@ -10,7 +10,8 @@
 #endif
 #include "content_browser.hpp"
 #include "edit_history.hpp"
-#include "road_gizmo.hpp"
+#include "road_overlay.hpp"
+#include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
 
@@ -63,6 +64,7 @@ private:
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
+    std::optional<GizmoPlacement> SelectedPointPlacement(const Road* road, const FreeCamera& camera) const;
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginPointDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
@@ -86,7 +88,8 @@ private:
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;
-    RoadGizmo gizmo;
+    RoadOverlay overlay;
+    TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
     std::vector<RoadPoint> originalPoints;
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.

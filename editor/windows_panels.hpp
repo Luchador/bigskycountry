@@ -8,6 +8,7 @@ class FreeCamera;
 struct RoadEditorState;
 struct Road;
 enum class RoadAction;
+enum class GizmoSpace;
 
 // The top-level SDL window receives viewport input. A separate sibling HWND
 // owns the swapchain so presenting a frame can never cover a native control.
@@ -20,9 +21,9 @@ public:
     bool ViewportFocused() const;
     void ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Rect& scene) const;
     bool Command(const SDL_Event& event, RoadAction& action) const;
-    bool HandleInput(const SDL_Event& event, FreeCamera& camera);
+    bool HandleInput(const SDL_Event& event, FreeCamera& camera, GizmoSpace& space);
     SDL_Keymod TakePressModifiers();
-    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera);
+    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space);
 
 private:
     struct Impl;

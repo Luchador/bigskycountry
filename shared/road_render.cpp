@@ -1,4 +1,5 @@
 #include "road_render.hpp"
+#include "editor_colors.hpp"
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
 #include "view_geometry.hpp"
@@ -11,7 +12,6 @@ namespace
     constexpr SDL_FColor roadColor{0.43f, 0.43f, 0.43f, 1.0f};
     constexpr SDL_FColor yellowStripeColor{0.96f, 0.85f, 0.12f, 1.0f};
     constexpr SDL_FColor whiteStripeColor{0.9f, 0.9f, 0.9f, 1.0f};
-    constexpr SDL_FColor selectionColor{1.0f, 0.5f, 0.05f, 1.0f};
 
     using ViewGeometry::Clip;
     using ViewGeometry::ScreenPoint;
@@ -129,7 +129,7 @@ namespace
         {
             AppendOutline(road, transform, focal, viewport, [&](SDL_FPoint p, double)
             {
-                vertices.push_back({p, selectionColor, {}});
+                vertices.push_back({p, EditorColors::orange, {}});
             });
             return;
         }
@@ -173,7 +173,7 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
             const double y = (1.0 - 2.0 * p.y / viewport.h) * depth;
             const double biased = std::min(depth, worldNearDepth * 1.0001);
             outline.push_back({static_cast<float>(x), static_cast<float>(y),
-                               static_cast<float>(biased), static_cast<float>(depth), selectionColor});
+                               static_cast<float>(biased), static_cast<float>(depth), EditorColors::orange});
         });
     }
 }

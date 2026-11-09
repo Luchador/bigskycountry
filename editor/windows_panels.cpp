@@ -5,6 +5,8 @@
 #include "menu_ids.h"
 #include "panel_ids.h"
 #include "road_action.hpp"
+#include "transform_space.hpp"
+#include <array>
 
 #include <windows.h>
 #include <commctrl.h>
@@ -45,6 +47,36 @@ namespace
         {
             SendDlgItemMessageW(dialog, id, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
         }
+    }
+
+    HBITMAP SpaceBitmap(GizmoSpace space, int size)
+    {
+        using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
+        Surface icon(LoadTransformSpaceIcon(space), SDL_DestroySurface);
+        if (!icon)
+        {
+            return nullptr;
+        }
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = size;
+        info.bmiHeader.biHeight = -size;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* pixels = nullptr;
+        HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        if (!bitmap)
+        {
+            return nullptr;
+        }
+        Surface target(SDL_CreateSurfaceFrom(size, size, SDL_PIXELFORMAT_BGRA32, pixels, 4 * size), SDL_DestroySurface);
+        if (!target || !SDL_BlitSurfaceScaled(icon.get(), nullptr, target.get(), nullptr, SDL_SCALEMODE_LINEAR))
+        {
+            DeleteObject(bitmap);
+            return nullptr;
+        }
+        return bitmap;
     }
 
     void DrawPreview(const DRAWITEMSTRUCT& draw, SDL_Surface* surface)
@@ -91,12 +123,56 @@ struct WindowsPanels::Impl
     SDL_Window* frameWindow = nullptr;
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
     HACCEL shortcuts = nullptr;
-    Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0;
+    Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, spaceEvent = 0;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     bool populating = false, populated = false;
     int scroll = 0;
     double lastSpeed = -1;
+    std::array<HBITMAP, 2> spaceIcons{};
+    int iconSize = 0;
+    GizmoSpace displayedSpace = GizmoSpace::World;
+
+    ~Impl()
+    {
+        for (HBITMAP icon : spaceIcons)
+        {
+            DeleteObject(icon);
+        }
+    }
+
+    void ShowSpace(GizmoSpace space)
+    {
+        displayedSpace = space;
+        HWND button = GetDlgItem(toolbar, IDC_TRANSFORM_SPACE);
+        HBITMAP icon = spaceIcons[static_cast<int>(space)];
+        LONG_PTR style = GetWindowLongPtrW(button, GWL_STYLE);
+        SetWindowLongPtrW(button, GWL_STYLE, icon ? style | BS_BITMAP : style & ~BS_BITMAP);
+        SetWindowTextW(button, space == GizmoSpace::World ? (icon ? L"World space" : L"World") :
+                                                            (icon ? L"Local space" : L"Local"));
+        SendMessageW(button, BM_SETIMAGE, IMAGE_BITMAP, reinterpret_cast<LPARAM>(icon));
+        RedrawWindow(button, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    }
+
+    void SizeSpaceButton(int side, int x, int y)
+    {
+        HWND button = GetDlgItem(toolbar, IDC_TRANSFORM_SPACE);
+        MoveWindow(button, x, y, side, side, TRUE);
+        const int size = std::max(1, side - 2 * y);
+        if (size == iconSize)
+        {
+            return;
+        }
+        iconSize = size;
+        SendMessageW(button, BM_SETIMAGE, IMAGE_BITMAP, 0);
+        for (GizmoSpace space : {GizmoSpace::World, GizmoSpace::Local})
+        {
+            HBITMAP& icon = spaceIcons[static_cast<int>(space)];
+            DeleteObject(icon);
+            icon = SpaceBitmap(space, size);
+        }
+        ShowSpace(displayedSpace);
+    }
 
     struct Inspector
     {
@@ -141,6 +217,9 @@ struct WindowsPanels::Impl
             const SIZE offset = DialogSize(toolbar, rightOffset, y), size = DialogSize(toolbar, w, height);
             MoveWindow(GetDlgItem(toolbar, id), rect.right - offset.cx, offset.cy, size.cx, size.cy, TRUE);
         };
+        const int insetY = DialogSize(toolbar, 0, 2).cy;
+        const int side = std::max(1, top - 2 * insetY);
+        SizeSpaceButton(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
         moveTool(IDC_SPEED_LABEL, 200, 7, 52, 12);
         moveTool(IDC_SPEED, 146, 3, 89, 19);
         moveTool(IDC_SPEED_VALUE, 54, 7, 50, 12);
@@ -237,6 +316,7 @@ struct WindowsPanels::Impl
         {
             switch (id)
             {
+            case IDC_TRANSFORM_SPACE: Post(spaceEvent, 0); SetFocus(frame); return;
             case IDC_REFRESH: browser->Refresh(); Populate(); return;
             case IDC_VIEW: Post(actions, int(RoadAction::ChangeView)); SetFocus(frame); return;
             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
@@ -276,6 +356,7 @@ struct WindowsPanels::Impl
         {
             return;
         }
+
         lastInspector = data;
         const int lanes = data.style.GetLaneCount();
         const std::wstring title = data.drawing ? L"Road editor | Draft" : data.selected >= 0 ?
@@ -288,16 +369,20 @@ struct WindowsPanels::Impl
         SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
         EnableWindow(GetDlgItem(road, IDC_FEWER), lanes > 1);
         EnableWindow(GetDlgItem(road, IDC_MORE), lanes < RoadStyle::maxLanes);
+
         for (int id : {IDC_LAYOUT_LABEL, IDC_LAYOUT})
         {
             ShowWindow(GetDlgItem(road, id), lanes == 3 ? SW_SHOWNA : SW_HIDE);
         }
+
         const bool centerTurn = lanes > 3 && data.style.HasCenterTurnLane();
+
         if (centerTurn)
         {
             const std::wstring detail = std::to_wstring(lanes / 2) + L" each way + center turn";
             SetDlgItemTextW(road, IDC_LANE_DETAIL, detail.c_str());
         }
+
         ShowWindow(GetDlgItem(road, IDC_LANE_DETAIL), centerTurn ? SW_SHOWNA : SW_HIDE);
         SendDlgItemMessageW(road, IDC_LAYOUT, CB_SETCURSEL, lanes == 3 ? int(data.style.threeLaneLayout) : -1, 0);
         CheckDlgButton(road, IDC_LEFT, data.style.leftShoulder ? BST_CHECKED : BST_UNCHECKED);
@@ -306,16 +391,20 @@ struct WindowsPanels::Impl
         wchar_t text[100];
         swprintf(text, 100, L"Width: %.2f m", data.style.LeftWidth() + data.style.RightWidth() + 2 * data.style.EdgeWidth());
         SetDlgItemTextW(road, IDC_WIDTH, text);
+
         if (data.point >= 0)
         {
             swprintf(text, 100, L"Point %d   Y: %.2f m", data.point + 1, data.elevation);
             SetDlgItemTextW(road, IDC_POINT, text);
         }
+
         ShowWindow(GetDlgItem(road, IDC_POINT), data.point >= 0 ? SW_SHOWNA : SW_HIDE);
+
         for (int id : {IDC_FINISH, IDC_CANCEL_DRAFT})
         {
             ShowWindow(GetDlgItem(road, id), data.plan ? SW_SHOWNA : SW_HIDE);
         }
+
         EnableWindow(GetDlgItem(road, IDC_FINISH), data.canFinish);
         EnableWindow(GetDlgItem(road, IDC_CANCEL_DRAFT), data.drawing);
         EnableWindow(GetDlgItem(road, IDC_REMOVE), data.selected >= 0 && !data.drawing);
@@ -328,11 +417,14 @@ struct WindowsPanels::Impl
             SetWindowLongPtrW(hwnd, DWLP_USER, l);
             return FALSE;
         }
+
         auto* self = reinterpret_cast<Impl*>(GetWindowLongPtrW(hwnd, DWLP_USER));
+
         if (!self)
         {
             return FALSE;
         }
+
         switch (msg)
         {
         case WM_COMMAND:
@@ -430,31 +522,38 @@ struct WindowsPanels::Impl
     {
         auto& self = *static_cast<Impl*>(data);
         HWND focus = GetFocus();
+
         if (focus != self.frame && !IsChild(self.frame, focus))
         {
             return true;
         }
+
         if (msg->message == WM_MOUSEWHEEL)
         {
             const POINT at{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
             HWND hover = WindowFromPoint(at);
+
             if (hover == self.toolbar || IsChild(self.toolbar, hover))
             {
                 self.Post(self.wheelEvent, GET_WHEEL_DELTA_WPARAM(msg->wParam));
                 return false;
             }
+
             // Wheel input follows the hovered viewport or tree even when a panel has keyboard focus.
             if ((hover == self.frame || hover == self.view) && msg->hwnd != self.frame)
             {
                 SendMessageW(self.frame, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
                 return false;
             }
+
             if (IsChild(self.road, hover) && msg->hwnd != hover && msg->hwnd != self.road)
             {
                 SendMessageW(self.road, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
                 return false;
             }
+
             HWND tree = GetDlgItem(self.models, IDC_MODELS);
+
             if (hover == tree && msg->hwnd != tree)
             {
                 SendMessageW(tree, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
@@ -481,6 +580,7 @@ struct WindowsPanels::Impl
             SetFocus(target);
             return false;
         }
+
         if (focus != self.frame && msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (TranslateAcceleratorW(self.frame, self.shortcuts, msg))
@@ -510,30 +610,36 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.frame = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(frame), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     const HINSTANCE module = GetModuleHandleW(nullptr);
     INITCOMMONCONTROLSEX common{sizeof(common), ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES};
+
     if (!p.frame || !InitCommonControlsEx(&common))
     {
         WinError("Cannot initialize editor controls");
         return nullptr;
     }
 
-    p.actions = SDL_RegisterEvents(4);
+    p.actions = SDL_RegisterEvents(5);
+
     if (!p.actions)
     {
         return nullptr;
     }
+
     p.speedEvent = p.actions + 1;
     p.wheelEvent = p.actions + 2;
     p.pressEvent = p.actions + 3;
+    p.spaceEvent = p.actions + 4;
     WNDCLASSW wc{};
     wc.hInstance = module;
     wc.lpfnWndProc = ViewProc;
     wc.lpszClassName = L"BigSkyEditorViewport";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+
     if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
     {
         WinError("Cannot register viewport");
         return nullptr;
     }
+
     SetWindowLongPtrW(p.frame, GWL_STYLE, GetWindowLongPtrW(p.frame, GWL_STYLE) | WS_CLIPCHILDREN);
     p.view = CreateWindowExW(WS_EX_NOPARENTNOTIFY, wc.lpszClassName, L"Viewport", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
                              0, 0, 1, 1, p.frame, nullptr, module, nullptr);
@@ -541,22 +647,28 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     {
         return CreateDialogParamW(module, MAKEINTRESOURCEW(resource), p.frame, Impl::DialogProc, reinterpret_cast<LPARAM>(&p));
     };
+
     p.toolbar = panel(IDD_TOOLBAR);
     p.models = panel(IDD_BROWSER);
     p.road = panel(IDD_ROAD);
+
     if (!p.view || !p.toolbar || !p.models || !p.road || !SetWindowSubclass(p.frame, Impl::FrameProc, 2, reinterpret_cast<DWORD_PTR>(&p)))
     {
         WinError("Cannot create editor panels");
         return nullptr;
     }
+
     ACCEL keys[] = {{FCONTROL | FVIRTKEY, 'S', BSC_FILE_SAVE}, {FCONTROL | FVIRTKEY, 'Z', BSC_EDIT_UNDO},
                     {FCONTROL | FVIRTKEY, 'Y', BSC_EDIT_REDO}};
+
     p.shortcuts = CreateAcceleratorTableW(keys, 3);
+
     if (!p.shortcuts)
     {
         WinError("Cannot create editor shortcuts");
         return nullptr;
     }
+
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
     Choices(p.road, IDC_EDGE, {L"None", L"Transition strip", L"Curb"});
@@ -567,16 +679,20 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.Layout();
     const SDL_PropertiesID props = SDL_CreateProperties();
     SDL_Window* result = nullptr;
+
     if (props && SDL_SetPointerProperty(props, SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER, p.view))
     {
         result = SDL_CreateWindowWithProperties(props);
     }
+
     SDL_DestroyProperties(props);
+
     if (result)
     {
         SDL_SetWindowsMessageHook(Impl::Filter, &p);
         SetFocus(p.frame);
     }
+
     return result;
 }
 
@@ -596,20 +712,22 @@ void WindowsPanels::ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Re
     SDL_GetWindowSize(frame, &width, &height);
     const float sx = float(scene.w) / std::max<LONG>(1, area.right), sy = float(scene.h) / std::max<LONG>(1, area.bottom);
     const float wx = float(client.right) / std::max(1, width), wy = float(client.bottom) / std::max(1, height);
+
     auto convert = [&](float& x, float& y)
     {
         x = (x * wx - origin.x) * sx;
         y = (y * wy - origin.y) * sy;
     };
+
     switch (event.type)
     {
-    case SDL_EVENT_MOUSE_MOTION:
-        convert(event.motion.x, event.motion.y);
-        event.motion.xrel *= sx * wx;
-        event.motion.yrel *= sy * wy;
-        break;
-    case SDL_EVENT_MOUSE_WHEEL: convert(event.wheel.mouse_x, event.wheel.mouse_y); break;
-    default: convert(event.button.x, event.button.y); break;
+        case SDL_EVENT_MOUSE_MOTION:
+            convert(event.motion.x, event.motion.y);
+            event.motion.xrel *= sx * wx;
+            event.motion.yrel *= sy * wy;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL: convert(event.wheel.mouse_x, event.wheel.mouse_y); break;
+        default: convert(event.button.x, event.button.y); break;
     }
 }
 
@@ -619,15 +737,21 @@ bool WindowsPanels::Command(const SDL_Event& event, RoadAction& action) const
     {
         return false;
     }
+
     action = static_cast<RoadAction>(event.user.code);
+
     return true;
 }
 
-bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera)
+bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, GizmoSpace& space)
 {
     if (event.type == impl->pressEvent)
     {
         impl->pressModifiers = static_cast<SDL_Keymod>(event.user.code);
+    }
+    else if (event.type == impl->spaceEvent)
+    {
+        space = OtherSpace(space);
     }
     else if (event.type == impl->speedEvent)
     {
@@ -649,30 +773,41 @@ SDL_Keymod WindowsPanels::TakePressModifiers()
     return std::exchange(impl->pressModifiers, std::nullopt).value_or(SDL_GetModState());
 }
 
-void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera)
+void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space)
 {
     auto& p = *impl;
+
+    if (space != p.displayedSpace)
+    {
+        p.ShowSpace(space);
+    }
+
     if (!p.populated)
     {
         p.Populate();
     }
+
     if (p.browser->UpdatePreview())
     {
         SetDlgItemTextW(p.models, IDC_PREVIEW_STATUS, Wide(p.browser->PreviewStatus()).c_str());
         InvalidateRect(GetDlgItem(p.models, IDC_PREVIEW), nullptr, FALSE);
     }
+
     const int point = !plan && current ? state.point : -1;
+
     p.UpdateInspector({current ? current->style : state.defaults, plan, plan && state.drawing,
                        state.draft.has_value(), plan && state.drawing && state.draft->points.size() >= 2,
                        state.selected, point, point >= 0 ? current->points[point].position.y : 0.0});
 
     const double speed = camera.GetMoveSpeed();
+
     if (p.lastSpeed != speed)
     {
         p.lastSpeed = speed;
         const int pos = static_cast<int>(std::lround(camera.GetSpeedFraction() * speedSteps));
         SendDlgItemMessageW(p.toolbar, IDC_SPEED, TBM_SETPOS, TRUE, pos);
         wchar_t text[48];
+
         if (speed >= 1000.0)
         {
             swprintf(text, 48, L"%.2f km/s", speed / 1000.0);
@@ -681,6 +816,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
         {
             swprintf(text, 48, speed < 10.0 ? L"%.2f m/s" : L"%.1f m/s", speed);
         }
+
         SetDlgItemTextW(p.toolbar, IDC_SPEED_VALUE, text);
     }
 }

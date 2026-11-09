@@ -52,27 +52,32 @@ namespace
                 {m[4], m[5], -m[6]}, {m[8], m[9], -m[10]}};
     }
 
-    bool AppendTriangles(const cgltf_primitive& p, size_t start, size_t vertexCount,
-                         bool mirrored, bool generateNormals, Mesh& mesh)
+    bool AppendTriangles(const cgltf_primitive& p, size_t start, size_t vertexCount, bool mirrored, bool generateNormals, Mesh& mesh)
     {
         const size_t count = p.indices ? p.indices->count : vertexCount;
         const bool list = p.type == cgltf_primitive_type_triangles;
+
         if (count < 3 || (list && count % 3))
         {
             return SDL_SetError("Incomplete triangle primitive");
         }
+
         for (size_t i = 2; i < count; i += list ? 3 : 1)
         {
             size_t corners[3]{p.type == cgltf_primitive_type_triangle_fan ? 0 : i - 2, i - 1, i};
+
             if (p.type == cgltf_primitive_type_triangle_strip && i % 2)
             {
                 std::swap(corners[0], corners[1]);
             }
+
             if (mirrored)
             {
                 std::swap(corners[1], corners[2]);
             }
+
             std::uint32_t tri[3];
+
             for (int j = 0; j < 3; ++j)
             {
                 size_t index = p.indices ? cgltf_accessor_read_index(p.indices, corners[j]) : corners[j];
@@ -82,7 +87,9 @@ namespace
                 }
                 tri[j] = static_cast<std::uint32_t>(start + index);
             }
+
             mesh.indices.insert(mesh.indices.end(), {tri[0], tri[1], tri[2]});
+
             if (generateNormals)
             {
                 const auto& v = mesh.vertices;
@@ -92,11 +99,13 @@ namespace
                     mesh.vertices[index].normal = mesh.vertices[index].normal + face;
                 }
             }
+
             if (p.material && p.material->double_sided)
             {
                 mesh.indices.insert(mesh.indices.end(), {tri[0], tri[2], tri[1]});
             }
         }
+
         return true;
     }
 
@@ -106,36 +115,43 @@ namespace
         {
             return SDL_SetError("Compressed and morph-target primitives are unsupported");
         }
-        if (p.type != cgltf_primitive_type_triangles && p.type != cgltf_primitive_type_triangle_strip &&
-            p.type != cgltf_primitive_type_triangle_fan)
+
+        if (p.type != cgltf_primitive_type_triangles && p.type != cgltf_primitive_type_triangle_strip && p.type != cgltf_primitive_type_triangle_fan)
         {
             return SDL_SetError("Expected a triangle mesh");
         }
+
         const auto* pos = cgltf_find_accessor(&p, cgltf_attribute_type_position, 0);
         const auto* normal = cgltf_find_accessor(&p, cgltf_attribute_type_normal, 0);
         const auto* uv = cgltf_find_accessor(&p, cgltf_attribute_type_texcoord, 0);
         const auto* color = cgltf_find_accessor(&p, cgltf_attribute_type_color, 0);
-        if (!pos || pos->type != cgltf_type_vec3 || (normal && normal->type != cgltf_type_vec3) ||
-            (uv && uv->type != cgltf_type_vec2) || (color && color->type != cgltf_type_vec3 && color->type != cgltf_type_vec4))
+
+        if (!pos || pos->type != cgltf_type_vec3 || (normal && normal->type != cgltf_type_vec3) || (uv && uv->type != cgltf_type_vec2) || (color && color->type != cgltf_type_vec3 && color->type != cgltf_type_vec4))
         {
             return SDL_SetError("Invalid mesh vertex attributes");
         }
+
         if (p.material && p.material->alpha_mode != cgltf_alpha_mode_opaque)
         {
             return SDL_SetError("The world mesh pass requires opaque materials");
         }
+
         const size_t start = mesh.vertices.size();
+
         if (pos->count > std::numeric_limits<std::uint32_t>::max() - start)
         {
             return SDL_SetError("Mesh has too many vertices");
         }
+
         const bool mirrored = transform.Determinant() < 0;
         const Vector3 nx = Math::Cross(transform.y, transform.z);
         const Vector3 ny = Math::Cross(transform.z, transform.x);
         const Vector3 nz = Math::Cross(transform.x, transform.y);
+
         for (size_t i = 0; i < pos->count; ++i)
         {
             float xyz[3], n[3]{}, st[2]{}, rgba[4]{1, 1, 1, 1};
+
             if (!cgltf_accessor_read_float(pos, i, xyz, 3) ||
                 (normal && !cgltf_accessor_read_float(normal, i, n, 3)) ||
                 (uv && !cgltf_accessor_read_float(uv, i, st, 2)) ||
@@ -143,11 +159,13 @@ namespace
             {
                 return SDL_SetError("Could not decode mesh vertices");
             }
+
             MeshVertex v;
             v.position = transform.Point({xyz[0], xyz[1], xyz[2]});
             // Inverse-transpose of the node's linear transform, up to a positive scalar.
             v.normal = Math::Normalize((nx * n[0] + ny * n[1] + nz * n[2]) * (mirrored ? -1.0 : 1.0));
             v.uv = {st[0], st[1]};
+
             if (p.material && p.material->has_pbr_metallic_roughness)
             {
                 const auto& factor = p.material->pbr_metallic_roughness.base_color_factor;
@@ -156,13 +174,14 @@ namespace
                     rgba[j] *= factor[j];
                 }
             }
+
             v.color = {rgba[0], rgba[1], rgba[2], 1};
-            if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) ||
-                !std::isfinite(st[0]) || !std::isfinite(st[1]) ||
-                !std::isfinite(rgba[0]) || !std::isfinite(rgba[1]) || !std::isfinite(rgba[2]))
+
+            if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) || !std::isfinite(st[0]) || !std::isfinite(st[1]) || !std::isfinite(rgba[0]) || !std::isfinite(rgba[1]) || !std::isfinite(rgba[2]))
             {
                 return SDL_SetError("Non-finite mesh vertex");
             }
+
             mesh.vertices.push_back(v);
         }
 
@@ -170,6 +189,7 @@ namespace
         {
             return false;
         }
+
         if (!normal)
         {
             for (size_t i = start; i < mesh.vertices.size(); ++i)
@@ -186,6 +206,7 @@ namespace
         {
             return SDL_SetError("Invalid mesh node transform");
         }
+
         for (size_t i = 0; i < source.primitives_count; ++i)
         {
             if (!ReadPrimitive(source.primitives[i], transform, mesh))
@@ -193,6 +214,7 @@ namespace
                 return false;
             }
         }
+
         return true;
     }
 
@@ -201,20 +223,24 @@ namespace
         cgltf_options options{};
         options.type = cgltf_file_type_glb;
         cgltf_data* parsed = nullptr;
+
         if (cgltf_parse(&options, bytes, size, &parsed) != cgltf_result_success)
         {
             return SDL_SetError("Invalid glTF 2.0 binary");
         }
+
         std::unique_ptr<cgltf_data, decltype(&cgltf_free)> data(parsed, cgltf_free);
+
         if (!CheckBuffers(*data))
         {
             return false;
         }
-        if (cgltf_load_buffers(&options, data.get(), nullptr) != cgltf_result_success ||
-            cgltf_validate(data.get()) != cgltf_result_success)
+
+        if (cgltf_load_buffers(&options, data.get(), nullptr) != cgltf_result_success || cgltf_validate(data.get()) != cgltf_result_success)
         {
             return SDL_SetError("Invalid GLB buffers or scene");
         }
+
         for (size_t i = 0; i < data->extensions_required_count; ++i)
         {
             const std::string_view name = data->extensions_required[i];
@@ -223,6 +249,7 @@ namespace
                 return SDL_SetError("Unsupported required glTF extension: %s", data->extensions_required[i]);
             }
         }
+
         std::vector<const cgltf_node*> pending;
         const auto* scene = data->scene ? data->scene : (data->scenes_count ? data->scenes : nullptr);
         if (scene)
@@ -284,31 +311,39 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
 {
     std::string name = relativePath;
     std::replace(name.begin(), name.end(), '\\', '/');
-    if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos ||
-        name.find('\0') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
+
+    if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos || name.find('\0') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
     {
         SDL_SetError("Expected a model path relative to assets/models");
         return nullptr;
     }
+
     const auto found = loaded.find(name);
+
     if (found != loaded.end())
     {
         return found->second;
     }
+
     const char* base = SDL_GetBasePath();
+
     if (!base)
     {
         return nullptr;
     }
+
     size_t size;
     std::unique_ptr<void, decltype(&SDL_free)> bytes(SDL_LoadFile((std::string(base) + "assets/models/" + name).c_str(), &size), SDL_free);
     auto mesh = std::make_shared<Mesh>();
+
     if (!bytes || !ImportGLB(bytes.get(), size, *mesh))
     {
         const std::string reason = SDL_GetError();
         SDL_SetError("Cannot load model '%s': %s", name.c_str(), reason.c_str());
+
         return nullptr;
     }
+
     mesh->assetPath = name;
     loaded.emplace(name, mesh);
     return mesh;
