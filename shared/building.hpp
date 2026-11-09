@@ -4,5 +4,6 @@
 
 class Building : public BSCObject
 {
-
+public:
+    ObjectType Type() const override { return ObjectType::Building; }
 };

@@ -18,6 +18,12 @@ FetchContent_Declare(cgltf
 FetchContent_MakeAvailable(cgltf)
 
 add_library(BigSkyApplication STATIC
+    shared/bscobject.cpp
+    shared/building.cpp
+    shared/character.cpp
+    shared/prop.cpp
+    shared/vehicle.cpp
+    shared/object_io.cpp
     shared/mesh.cpp
     shared/mesh_import.cpp
     shared/world_renderer.cpp

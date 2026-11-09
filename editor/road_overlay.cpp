@@ -193,13 +193,13 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         }
     }
 
-    for (const MeshInstance& instance : world.meshes)
+    world.ForEachMesh([&](const MeshInstance& instance)
     {
         if (picker.TestMesh(instance))
         {
             hit = {};
         }
-    }
+    });
 
     if (selected)
     {

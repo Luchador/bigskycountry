@@ -17,7 +17,7 @@ All framing integers are unsigned and little-endian. The file begins with the fo
 
 `ROAD` version 3 stores roads in draw order. Its payload is whitespace-separated text in the classic locale. Each road starts with lane count, curved flag, left and right shoulder flags, three-lane layout, divided flag, divided gap, and edge treatment (0 for none, 1 for a transition strip, 2 for a curb). Version 1 roads load with no edge treatment. Next comes the point count, then one record per point with X, Y, Z, a manual-tangent flag, heading, and pitch in radians. Versions 1 and 2 load with zero pitch for manual tangents. Flags are 0 or 1. The reader rebuilds the meshes from these records. An absent or empty `ROAD` section means the world has no roads.
 
-To add terrain or objects, give the new data its own tag and section version. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the world container or the known `ROAD` section.
+Future world data, such as terrain, can use its own section tag and version. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 
 ### Static mesh assets
 
@@ -30,6 +30,27 @@ A `MESH` version 1 section in a world file stores one instance per record. Write
 ```
 
 In C++, load the asset with `world.models.Load("props/barn.glb")`. On success, append a `MeshInstance` with that mesh and its transform to `world.meshes`. Instances share the imported geometry and save by asset path.
+
+### Placed objects
+
+`BSCObject` holds a transform, a shared mesh, health, and invincibility. `Building`, `Vehicle`, `Prop`, and `Character` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
+
+Place an object from C++ using a model path relative to `assets/models`. This example places a barn from `assets/models/buildings/barn.glb`.
+
+```cpp
+ObjectTransform placement;
+placement.position = {10.0, 2.0, 30.0};
+placement.rotation.y = Math::DegreesToRadians(90.0);
+BSCObject* barn = world.PlaceObject(ObjectType::Building, "buildings/barn.glb", placement);
+if (!barn)
+{
+    SDL_Log("Cannot place barn: %s", SDL_GetError());
+}
+```
+
+The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
+
+The optional `OBJS` version 1 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, and 4 for a character. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
 
 ### Editor controls on Windows
 

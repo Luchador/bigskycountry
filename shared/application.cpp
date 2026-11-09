@@ -46,10 +46,9 @@ namespace
             const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
         }
-
-        if (world.roads.empty() && !world.meshes.empty())
+        else if (!world.meshes.empty() || !world.Objects().empty())
         {
-            const auto& first = world.meshes.front();
+            const MeshInstance first = world.meshes.empty() ? world.Objects().front()->Instance() : world.meshes.front();
             Vector3 lo = first.transform.Point(first.mesh->vertices.front().position), hi = lo;
             for (const auto& vertex : first.mesh->vertices)
             {
@@ -138,6 +137,7 @@ namespace
             if (mode == ApplicationMode::Game)
             {
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
+                world.TickObjects(static_cast<float>(elapsedNanoseconds / 1.0e9));
             }
 
             if (input.IsCameraEnabled() && (!roadTool || (roadTool->ViewportFocused() && !roadTool->DraggingGizmo())))
@@ -170,10 +170,10 @@ namespace
                     worldRenderer.SubmitRoad(road, &road == selected);
                 }
 
-                for (const MeshInstance& instance : world.meshes)
+                world.ForEachMesh([&](const MeshInstance& instance)
                 {
                     worldRenderer.SubmitMesh(instance);
-                }
+                });
 
                 if (roadTool)
                 {

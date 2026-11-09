@@ -1,5 +1,10 @@
 #include "world_document.hpp"
 #include "road_io.hpp"
+#include "object_io.hpp"
+#include "building.hpp"
+#include "character.hpp"
+#include "prop.hpp"
+#include "vehicle.hpp"
 
 #include <SDL3/SDL.h>
 #include <filesystem>
@@ -18,6 +23,7 @@ namespace
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
+    constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
     bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
     {
@@ -89,6 +95,53 @@ namespace
     }
 }
 
+BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform)
+{
+    std::unique_ptr<BSCObject> object;
+    switch (type)
+    {
+    case ObjectType::Object:
+        object = std::make_unique<BSCObject>();
+        break;
+    case ObjectType::Building:
+        object = std::make_unique<Building>();
+        break;
+    case ObjectType::Vehicle:
+        object = std::make_unique<Vehicle>();
+        break;
+    case ObjectType::Prop:
+        object = std::make_unique<Prop>();
+        break;
+    case ObjectType::Character:
+        object = std::make_unique<Character>();
+        break;
+    default:
+        SDL_SetError("Unknown world object type %u", static_cast<unsigned>(type));
+        return nullptr;
+    }
+
+    if (!object->SetTransform(transform))
+    {
+        return nullptr;
+    }
+    object->SetMesh(models.Load(modelPath));
+    if (!object->IsLoaded())
+    {
+        return nullptr;
+    }
+    return objects.emplace_back(std::move(object)).get();
+}
+
+void WorldDocument::TickObjects(float deltaSeconds)
+{
+    // Objects placed during a tick begin updating on the following frame.
+    const std::size_t count = objects.size();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        objects[i]->Tick(deltaSeconds);
+    }
+}
+
 bool WorldDocument::Open(const char* documentPath)
 {
     WorldDocument loaded;
@@ -137,6 +190,7 @@ bool WorldDocument::Open(const char* documentPath)
 
     bool sawRoads = false;
     bool sawMeshes = false;
+    bool sawObjects = false;
     for (Uint32 i = 0; i < sectionCount; ++i)
     {
         Section section;
@@ -157,6 +211,10 @@ bool WorldDocument::Open(const char* documentPath)
         if (section.tag == meshTag && (sawMeshes || section.version != meshVersion))
         {
             return SDL_SetError("Duplicate or unsupported MESH section in '%s'", loaded.path.c_str());
+        }
+        if (section.tag == objectTag && (sawObjects || section.version != ObjectIO::currentVersion))
+        {
+            return SDL_SetError("Duplicate or unsupported OBJS section in '%s'", loaded.path.c_str());
         }
         const Sint64 offset = SDL_TellIO(input.get());
         if (offset < 0 || offset > fileSize || size > static_cast<Uint64>(fileSize - offset) ||
@@ -186,6 +244,14 @@ bool WorldDocument::Open(const char* documentPath)
                 return false;
             }
         }
+        else if (section.tag == objectTag)
+        {
+            sawObjects = true;
+            if (!ObjectIO::Read(std::move(section.payload), loaded))
+            {
+                return false;
+            }
+        }
         else
         {
             loaded.otherSections.push_back(std::move(section));
@@ -209,7 +275,7 @@ bool WorldDocument::Save() const
     {
         return SDL_SetError("Open a world before saving it");
     }
-    const Uint32 knownSections = meshes.empty() ? 1 : 2;
+    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty();
     if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
@@ -232,6 +298,11 @@ bool WorldDocument::Save() const
     {
         return false;
     }
+    std::ostringstream objectData;
+    if (!ObjectIO::Write(objectData, *this))
+    {
+        return false;
+    }
     SDL_Time now;
     if (!SDL_GetCurrentTime(&now))
     {
@@ -247,7 +318,8 @@ bool WorldDocument::Save() const
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
-                    (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str()));
+                    (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
+                    (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str()));
     for (const Section& section : otherSections)
     {
         if (!wroteAll)
