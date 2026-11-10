@@ -347,6 +347,22 @@ namespace
 }
 #endif
 
+#ifdef _WIN32
+bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY)
+{
+    constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Add New Material"};
+    HWND owner = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                   SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return false;
+    MenuBackground(menu, EditorTheme::chrome);
+    const bool chosen = Insert(menu, add) && TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                                             screenX, screenY, owner, nullptr) == add.id;
+    DestroyMenu(menu);
+    return chosen;
+}
+#endif
+
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene)
 {
 #ifdef _WIN32

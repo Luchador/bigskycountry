@@ -14,10 +14,15 @@ public:
     {
         std::string path; // UTF-8, relative to assets/textures.
         std::string name;
-        std::string folder;
+        bool material = false;
     };
 
     void Refresh();
+    const std::vector<std::string>& Folders() const { return folders; } // Relative paths, including the root ("").
+    const std::string& Folder() const { return folder; }
+    void SelectFolder(const std::string& path);
+    std::string NewMaterialName() const;
+    bool CreateMaterial(const std::string& name, std::string& createdPath, std::string& error);
     const std::vector<Item>& Items() const { return items; }
     const std::string& Status() const { return status; }
     SDL_Surface* Thumbnail(std::size_t index);
@@ -36,6 +41,9 @@ private:
 #endif
     };
 
+    void ReadFolder();
+    std::vector<std::string> folders;
+    std::string folder;
     std::string root;
     std::string status;
     std::vector<Item> items;

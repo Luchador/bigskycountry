@@ -2,6 +2,8 @@
 #include "windows_theme.hpp"
 #include "windows_outliner.hpp"
 #include "content_browser.hpp"
+#include "editor_menu.hpp"
+#include "windows_name_dialog.hpp"
 #include "edit_history.hpp"
 #include "free_camera.hpp"
 #include "menu_ids.h"
@@ -19,6 +21,7 @@
 #include <cwchar>
 #include <initializer_list>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -26,15 +29,18 @@ namespace
 {
     constexpr int speedSteps = 1000;
 
-    std::wstring Wide(const std::string& text)
+    using WindowsNameDialog::Wide;
+
+    HTREEITEM AddTreeItem(HWND tree, HTREEITEM parent, const std::string& label, LPARAM data)
     {
-        const int count = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-        std::wstring wide(count, L'\0');
-        if (count)
-        {
-            MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), count);
-        }
-        return wide;
+        std::wstring wide = Wide(label);
+        TVINSERTSTRUCTW node{};
+        node.hParent = parent;
+        node.hInsertAfter = TVI_LAST;
+        node.item.mask = TVIF_TEXT | TVIF_PARAM;
+        node.item.pszText = wide.data();
+        node.item.lParam = data;
+        return TreeView_InsertItem(tree, &node);
     }
 
     SIZE DialogSize(HWND dialog, int width, int height)
@@ -137,6 +143,7 @@ struct WindowsPanels::Impl
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     bool populating = false, populated = false, texturesPopulated = false;
+    std::set<std::string> collapsedTextureFolders;
     int scroll = 0;
     double lastSpeed = -1;
     std::array<HBITMAP, transformIcons.size()> icons{};
@@ -337,21 +344,55 @@ struct WindowsPanels::Impl
     {
         RECT panel{};
         GetClientRect(models, &panel);
-        auto fillToBottom = [&](int id, int top)
-        {
-            const SIZE inset = DialogSize(models, 7, top);
-            MoveWindow(GetDlgItem(models, id), inset.cx, inset.cy, panel.right - 2 * inset.cx,
-                       std::max<int>(1, panel.bottom - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
-        };
-        fillToBottom(IDC_MODELS, BROWSER_MODEL_LIST_TOP);
-        fillToBottom(IDC_TEXTURES, BROWSER_PAGE_TOP + (browser->Textures().Status().empty() ? 0 : 15));
+        const SIZE inset = DialogSize(models, 7, 6);
+        const int width = std::max<int>(1, panel.right - 2 * inset.cx);
+        const int bottom = panel.bottom - inset.cy;
+        const int modelTop = DialogSize(models, 0, BROWSER_MODEL_LIST_TOP).cy;
+        MoveWindow(GetDlgItem(models, IDC_MODELS), inset.cx, modelTop, width, std::max(1, bottom - modelTop), TRUE);
+
+        const int top = DialogSize(models, 0, BROWSER_PAGE_TOP).cy;
+        const int treeHeight = std::clamp((bottom - top) / 3, 1, static_cast<int>(DialogSize(models, 0, 92).cy));
+        MoveWindow(GetDlgItem(models, IDC_TEXTURE_FOLDERS), inset.cx, top, width, treeHeight, TRUE);
+        int listTop = top + treeHeight + inset.cy;
+        const int statusHeight = DialogSize(models, 0, 15).cy;
+        MoveWindow(GetDlgItem(models, IDC_TEXTURE_STATUS), inset.cx, listTop, width, statusHeight, TRUE);
+        if (!browser->Textures().Status().empty()) listTop += statusHeight;
+        MoveWindow(GetDlgItem(models, IDC_TEXTURES), inset.cx, listTop, width, std::max(1, bottom - listTop), TRUE);
         SendDlgItemMessageW(models, IDC_TEXTURES, LB_SETITEMHEIGHT, 0, DialogSize(models, 0, 38).cy);
     }
 
-    void PopulateTextures(const std::string& selected = {})
+    void PopulateTextureFolders()
+    {
+        const auto& catalog = browser->Textures();
+        HWND tree = GetDlgItem(models, IDC_TEXTURE_FOLDERS);
+        populating = true;
+        SendMessageW(tree, WM_SETREDRAW, FALSE, 0);
+        TreeView_DeleteAllItems(tree);
+        std::map<std::string, HTREEITEM> nodes;
+        for (std::size_t i = 0; i < catalog.Folders().size(); ++i)
+        {
+            const auto& folder = catalog.Folders()[i];
+            const auto slash = folder.rfind('/');
+            const auto parent = slash == std::string::npos ? std::string{} : folder.substr(0, slash);
+            const auto label = folder.empty() ? "Textures" : folder.substr(slash == std::string::npos ? 0 : slash + 1);
+            nodes[folder] = AddTreeItem(tree, folder.empty() ? TVI_ROOT : nodes.at(parent), label, i);
+        }
+        for (const auto& [path, node] : nodes)
+            if (!collapsedTextureFolders.contains(path)) TreeView_Expand(tree, node, TVE_EXPAND);
+        if (auto found = nodes.find(catalog.Folder()); found != nodes.end())
+        {
+            TreeView_SelectItem(tree, found->second);
+            TreeView_EnsureVisible(tree, found->second);
+        }
+        SendMessageW(tree, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(tree, nullptr, TRUE);
+        populating = false;
+    }
+
+    void PopulateTextures(const std::string& selected = {}, bool keepScroll = false)
     {
         HWND list = GetDlgItem(models, IDC_TEXTURES);
-        const LRESULT top = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
+        const LRESULT top = keepScroll ? SendMessageW(list, LB_GETTOPINDEX, 0, 0) : 0;
         SendMessageW(list, WM_SETREDRAW, FALSE, 0);
         SendMessageW(list, LB_RESETCONTENT, 0, 0);
         const auto& catalog = browser->Textures();
@@ -387,8 +428,10 @@ struct WindowsPanels::Impl
         {
             ShowWindow(GetDlgItem(models, id), showModels ? SW_SHOWNA : SW_HIDE);
         }
+        ShowWindow(GetDlgItem(models, IDC_TEXTURE_FOLDERS), showModels ? SW_HIDE : SW_SHOWNA);
         if (!showModels && !texturesPopulated)
         {
+            PopulateTextureFolders();
             PopulateTextures();
         }
         const bool hasStatus = !showModels && !browser->Textures().Status().empty();
@@ -411,8 +454,56 @@ struct WindowsPanels::Impl
         const auto& items = browser->Textures().Items();
         const std::string selected = static_cast<std::size_t>(index) < items.size() ? items[index].path : std::string{};
         browser->Refresh();
-        PopulateTextures(selected);
+        PopulateTextureFolders();
+        PopulateTextures(selected, true);
         ShowBrowserTab();
+    }
+
+    bool TextureContextMenu(HWND source, POINT at)
+    {
+        if (browser->ActiveTab() != ContentBrowser::Tab::Textures) return false;
+        HWND list = GetDlgItem(models, IDC_TEXTURES);
+        HWND tree = GetDlgItem(models, IDC_TEXTURE_FOLDERS);
+        POINT local = at;
+        ScreenToClient(source, &local);
+        if (source == list)
+        {
+            RECT client{}, row{};
+            GetClientRect(list, &client);
+            if (!PtInRect(&client, local)) return false;
+            const auto hit = SendMessageW(list, LB_ITEMFROMPOINT, 0, MAKELPARAM(local.x, local.y));
+            const int index = LOWORD(hit);
+            if (index < SendMessageW(list, LB_GETCOUNT, 0, 0) &&
+                SendMessageW(list, LB_GETITEMRECT, index, reinterpret_cast<LPARAM>(&row)) != LB_ERR &&
+                PtInRect(&row, local)) return false;
+        }
+        else if (source == tree)
+        {
+            TVHITTESTINFO hit{};
+            hit.pt = local;
+            if (TreeView_HitTest(tree, &hit)) return false;
+        }
+        else if (source != models || local.y < DialogSize(models, 0, BROWSER_PAGE_TOP).cy) return false;
+
+        if (EditorMenu::OpenMaterialMenu(frameWindow, at.x, at.y))
+        {
+            auto& catalog = browser->Textures();
+            std::string name = catalog.NewMaterialName();
+            while (auto input = WindowsNameDialog::Prompt(frame, L"Add New Material", name))
+            {
+                name = *input;
+                std::string created, error;
+                if (catalog.CreateMaterial(name, created, error))
+                {
+                    PopulateTextures(created);
+                    ShowBrowserTab();
+                    SetFocus(list);
+                    break;
+                }
+                MessageBoxW(frame, Wide(error).c_str(), L"Add New Material", MB_OK | MB_ICONWARNING);
+            }
+        }
+        return true;
     }
 
     void DrawTexture(const DRAWITEMSTRUCT& draw)
@@ -427,28 +518,28 @@ struct WindowsPanels::Impl
             RECT icon = draw.rcItem;
             InflateRect(&icon, -pad, -pad);
             icon.right = icon.left + icon.bottom - icon.top;
-            SDL_Surface* surface = catalog.Thumbnail(draw.itemData);
+            SDL_Surface* surface = item.material ? nullptr : catalog.Thumbnail(draw.itemData);
             DrawPreview(draw.hDC, icon, surface);
             SetBkMode(draw.hDC, TRANSPARENT);
             if (!surface)
             {
                 SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
-                DrawTextW(draw.hDC, L"?", -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                DrawTextW(draw.hDC, item.material ? L"M" : L"?", -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
             RECT label{icon.right + pad, icon.top, draw.rcItem.right - pad, icon.bottom};
-            if (!item.folder.empty())
+            if (item.material)
             {
                 label.bottom = (icon.top + icon.bottom) / 2;
             }
             constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
             SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
             DrawTextW(draw.hDC, Wide(item.name).c_str(), -1, &label, flags);
-            if (!item.folder.empty())
+            if (item.material)
             {
                 label.top = label.bottom;
                 label.bottom = icon.bottom;
                 SetTextColor(draw.hDC, WindowsTheme::Color(selected ? EditorTheme::text : EditorTheme::secondary));
-                DrawTextW(draw.hDC, Wide(item.folder).c_str(), -1, &label, flags);
+                DrawTextW(draw.hDC, L"Material", -1, &label, flags);
             }
         }
         if ((draw.itemState & (ODS_FOCUS | ODS_NOFOCUSRECT)) == ODS_FOCUS)
@@ -465,18 +556,6 @@ struct WindowsPanels::Impl
         SendMessageW(tree, WM_SETREDRAW, FALSE, 0);
         TreeView_DeleteAllItems(tree);
         std::map<std::string, HTREEITEM> folders;
-        auto add = [&](HTREEITEM parent, const std::string& label, LPARAM data)
-        {
-            std::wstring wide = Wide(label);
-            TVINSERTSTRUCTW node{};
-            node.hParent = parent;
-            node.hInsertAfter = TVI_LAST;
-            node.item.mask = TVIF_TEXT | TVIF_PARAM;
-            node.item.pszText = wide.data();
-            node.item.lParam = data;
-            return TreeView_InsertItem(tree, &node);
-        };
-
         HTREEITEM selected = nullptr;
         const auto& rows = browser->Rows();
         for (std::size_t i = 0; i < rows.size(); ++i)
@@ -493,12 +572,12 @@ struct WindowsPanels::Impl
                 auto [it, created] = folders.try_emplace(row.modelPath.substr(0, slash));
                 if (created)
                 {
-                    it->second = add(parent, row.modelPath.substr(start, slash - start), 0);
+                    it->second = AddTreeItem(tree, parent, row.modelPath.substr(start, slash - start), 0);
                 }
                 parent = it->second;
                 start = slash + 1;
             }
-            const HTREEITEM item = add(parent, row.label, static_cast<LPARAM>(i + 1));
+            const HTREEITEM item = AddTreeItem(tree, parent, row.label, static_cast<LPARAM>(i + 1));
             if (row.modelPath == browser->Selected())
             {
                 selected = item;
@@ -716,12 +795,39 @@ struct WindowsPanels::Impl
         case WM_CAPTURECHANGED:
             if (hwnd == self->models && !self->draggedModel.empty()) self->CancelModelDrag();
             return FALSE;
+        case WM_CONTEXTMENU:
+            return hwnd == self->models && self->TextureContextMenu(reinterpret_cast<HWND>(w),
+                                                                    {GET_X_LPARAM(l), GET_Y_LPARAM(l)});
         case WM_NOTIFY:
         {
             auto* header = reinterpret_cast<NMHDR*>(l);
             if (header->idFrom == IDC_BROWSER_TABS && header->code == TCN_SELCHANGE)
             {
                 self->ShowBrowserTab();
+                return TRUE;
+            }
+            if (header->idFrom == IDC_TEXTURE_FOLDERS && header->code == TVN_ITEMEXPANDEDW && !self->populating)
+            {
+                const auto& change = *reinterpret_cast<NMTREEVIEWW*>(l);
+                const auto index = static_cast<std::size_t>(change.itemNew.lParam);
+                const auto& folders = self->browser->Textures().Folders();
+                if (index < folders.size())
+                {
+                    if (change.action == TVE_COLLAPSE) self->collapsedTextureFolders.insert(folders[index]);
+                    else self->collapsedTextureFolders.erase(folders[index]);
+                }
+                return TRUE;
+            }
+            if (header->idFrom == IDC_TEXTURE_FOLDERS && header->code == TVN_SELCHANGEDW && !self->populating)
+            {
+                auto& catalog = self->browser->Textures();
+                const auto index = static_cast<std::size_t>(reinterpret_cast<NMTREEVIEWW*>(l)->itemNew.lParam);
+                if (index < catalog.Folders().size())
+                {
+                    catalog.SelectFolder(catalog.Folders()[index]);
+                    self->PopulateTextures();
+                    self->ShowBrowserTab();
+                }
                 return TRUE;
             }
             if (header->idFrom == IDC_MODELS && header->code == TVN_BEGINDRAGW &&
@@ -868,9 +974,9 @@ struct WindowsPanels::Impl
             }
 
             HWND assets = GetDlgItem(self.models, self.browser->ActiveTab() == ContentBrowser::Tab::Models ? IDC_MODELS : IDC_TEXTURES);
-            if (hover == assets && msg->hwnd != assets)
+            if ((hover == assets || hover == GetDlgItem(self.models, IDC_TEXTURE_FOLDERS)) && msg->hwnd != hover)
             {
-                SendMessageW(assets, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
+                SendMessageW(hover, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
                 return false;
             }
         }

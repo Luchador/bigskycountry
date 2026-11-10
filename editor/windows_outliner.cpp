@@ -1,59 +1,12 @@
 #include "windows_outliner.hpp"
 #include "windows_theme.hpp"
+#include "windows_name_dialog.hpp"
 #include "panel_ids.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <algorithm>
 
-namespace
-{
-    std::wstring Wide(const std::string& s)
-    {
-        int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-        std::wstring w(n, 0);
-        if (n)
-        {
-            MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-        }
-        return w;
-    }
-    struct NameEdit
-    {
-        std::wstring title, value;
-    };
-    INT_PTR CALLBACK NameDialog(HWND dlg, UINT msg, WPARAM w, LPARAM l)
-    {
-        if (msg == WM_INITDIALOG)
-        {
-            auto* edit = reinterpret_cast<NameEdit*>(l);
-            SetWindowLongPtrW(dlg, DWLP_USER, l);
-            WindowsTheme::ApplyDialog(dlg);
-            SetWindowTextW(dlg, edit->title.c_str());
-            SetDlgItemTextW(dlg, IDC_FOLDER_NAME, edit->value.c_str());
-            SendDlgItemMessageW(dlg, IDC_FOLDER_NAME, EM_SETLIMITTEXT, 255, 0);
-            SendDlgItemMessageW(dlg, IDC_FOLDER_NAME, EM_SETSEL, 0, -1);
-            return TRUE;
-        }
-        if (msg == WM_COMMAND && LOWORD(w) == IDOK)
-        {
-            wchar_t name[256]{};
-            GetDlgItemTextW(dlg, IDC_FOLDER_NAME, name, 256);
-            if (!*name)
-            {
-                return TRUE;
-            }
-            reinterpret_cast<NameEdit*>(GetWindowLongPtrW(dlg, DWLP_USER))->value = name;
-            EndDialog(dlg, IDOK);
-            return TRUE;
-        }
-        if (msg == WM_CLOSE || (msg == WM_COMMAND && LOWORD(w) == IDCANCEL))
-        {
-            EndDialog(dlg, IDCANCEL);
-            return TRUE;
-        }
-        return FALSE;
-    }
-} // namespace
+using WindowsNameDialog::Wide;
 
 HWND WindowsOutliner::Create(HWND frame, HINSTANCE module)
 {
@@ -240,17 +193,8 @@ void WindowsOutliner::Name(bool create)
             }
         }
     }
-    NameEdit edit{create ? L"New folder" : L"Rename folder", Wide(initial)};
-    if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_FOLDER_NAME), GetParent(panel), NameDialog,
-                        reinterpret_cast<LPARAM>(&edit)) == IDOK)
-    {
-        const int count = WideCharToMultiByte(CP_UTF8, 0, edit.value.data(), static_cast<int>(edit.value.size()),
-                                              nullptr, 0, nullptr, nullptr);
-        std::string text(count, 0);
-        WideCharToMultiByte(CP_UTF8, 0, edit.value.data(), static_cast<int>(edit.value.size()), text.data(), count,
-                            nullptr, nullptr);
-        Queue({create ? OutlineOp::Create : OutlineOp::Rename, target, {}, text});
-    }
+    if (auto text = WindowsNameDialog::Prompt(GetParent(panel), create ? L"New folder" : L"Rename folder", initial))
+        Queue({create ? OutlineOp::Create : OutlineOp::Rename, target, {}, *text});
     SetFocus(list);
 }
 

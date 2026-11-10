@@ -99,6 +99,9 @@ add_executable(BigSkyCountryEditor WIN32
     editor/editor_menu.cpp
     editor/edit_history.cpp
 )
+# Author material assets in the source project so a clean build preserves them.
+set_property(SOURCE editor/texture_catalog.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "BIGSKY_PROJECT_ASSETS=u8\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"")
 if(WIN32)
     enable_language(RC)
     if(MSVC AND CMAKE_GENERATOR MATCHES "^Ninja" AND CMAKE_NINJA_CMCLDEPS_RC)
@@ -111,8 +114,8 @@ if(WIN32)
                 "${CMAKE_CURRENT_SOURCE_DIR}/editor/panel_ids.h")
         endif()
     endif()
-    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_theme.cpp editor/panels.rc)
-    set_source_files_properties(editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_theme.cpp editor/editor_menu.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
+    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/panels.rc)
+    set_source_files_properties(editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/editor_menu.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
     target_include_directories(BigSkyCountryEditor PRIVATE editor)
     if(MSVC)
         target_sources(BigSkyCountryEditor PRIVATE editor/editor.manifest)

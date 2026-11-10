@@ -3,6 +3,9 @@
 #include "texture_catalog.hpp"
 #include <SDL3/SDL.h>
 #include <memory>
+#ifndef _WIN32
+#include <set>
+#endif
 #include <string>
 #include <vector>
 
@@ -18,6 +21,7 @@ public:
 #ifndef _WIN32
     // A model-row press selects the preview and returns the path available to drag.
     std::string HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
+    bool HandleMaterialPopup(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, SDL_Rect panel);
     bool Draw(SDL_Renderer* renderer, int width, int height);
 #endif
 
@@ -40,7 +44,16 @@ private:
     TextureCatalog textures;
     bool texturesScanned = false;
 #ifndef _WIN32
-    float textureScroll = 0;
+    void UpdateFolderRows();
+    std::set<std::string> collapsedFolders;
+    std::vector<std::size_t> folderRows;
+    bool DrawMaterialPopup(SDL_Renderer* renderer) const;
+    enum class MaterialPopup { Closed, Menu, Name };
+    MaterialPopup popup = MaterialPopup::Closed;
+    SDL_FRect popupBounds{};
+    bool replaceName = false;
+    std::string materialName, nameError;
+    float folderScroll = 0, textureScroll = 0;
     std::string selectedTexture;
 #endif
     std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{nullptr, SDL_DestroySurface};

@@ -178,6 +178,19 @@ namespace
         return surface.release();
     }
 
+    SDL_Surface* LoadTgaFile(const char* path, Sint64 maxSize)
+    {
+        size_t size = 0;
+        std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path, &size), SDL_free);
+        SDL_Surface* surface = file ? DecodeTga({static_cast<const Uint8*>(file.get()), size}, maxSize) : nullptr;
+        if (!surface)
+        {
+            const std::string reason = SDL_GetError();
+            SDL_SetError("Could not load texture '%s': %s", path, reason.c_str());
+        }
+        return surface;
+    }
+
     SDL_Surface* LoadTga(const char* relativePath, Sint64 maxSize)
     {
         if (!relativePath)
@@ -203,15 +216,7 @@ namespace
         }
 
         const std::string path = std::string(base) + "assets/textures/" + name;
-        size_t size = 0;
-        std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
-        SDL_Surface* surface = file ? DecodeTga({static_cast<const Uint8*>(file.get()), size}, maxSize) : nullptr;
-        if (!surface)
-        {
-            const std::string reason = SDL_GetError();
-            SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
-        }
-        return surface;
+        return LoadTgaFile(path.c_str(), maxSize);
     }
 
     SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
@@ -235,6 +240,11 @@ namespace
 SDL_Surface* TextureLoader::LoadTgaSurface(const char* relativePath)
 {
     return LoadTga(relativePath, 0);
+}
+
+SDL_Surface* TextureLoader::LoadTgaSurfaceFromFile(const char* path)
+{
+    return LoadTgaFile(path, 0);
 }
 
 SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)

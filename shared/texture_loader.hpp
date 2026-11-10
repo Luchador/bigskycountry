@@ -12,8 +12,10 @@ public:
     // SDL_DestroyTexture. On failure, returns nullptr and sets SDL_GetError().
     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath);
 
-    // Decode a world TGA into CPU pixels for editor previews. The caller owns the surface.
     static SDL_Surface* LoadTgaSurface(const char* relativePath);
+
+    // Decode a TGA at the supplied filesystem path for editor previews. The caller owns the surface.
+    static SDL_Surface* LoadTgaSurfaceFromFile(const char* path);
 
     // Preserve the image colors and return the bounds of texels with at least half opacity.
     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds);

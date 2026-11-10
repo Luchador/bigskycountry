@@ -8,6 +8,9 @@ enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, Create
 class EditorMenu
 {
 public:
+#ifdef _WIN32
+    static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY);
+#endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene);
 #ifndef _WIN32

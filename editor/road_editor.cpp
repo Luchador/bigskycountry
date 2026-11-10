@@ -1408,6 +1408,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifndef _WIN32
     if (SDL_GetWindowFromEvent(&event) == window)
     {
+        if (browser.HandleMaterialPopup(window, renderer, event, browserPanel)) return EditorEvent::Handled;
         if (!draggedModel.empty())
         {
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
