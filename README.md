@@ -120,4 +120,6 @@ Use **,** to move sky time 30 minutes earlier and **.** to move it 30 minutes la
 
 The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`.
 
+In the top-down road view, hold the **middle mouse button** and drag to measure straight-line distance in the XZ plane. The ruler shows meters and disappears when you release the button. You can measure while laying out a draft.
+
 To extend either end of a road, select its endpoint, hold **Shift**, and drag a translation arrow. In the top-down road view, hold **Shift** and drag the endpoint itself. The original point stays in place and the new endpoint stays selected, ready for the next segment. Top-down extensions keep the endpoint's elevation. Release to save, or press **Esc** during the drag to cancel.

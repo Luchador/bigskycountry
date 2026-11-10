@@ -722,7 +722,8 @@ struct WindowsPanels::Impl
             self.Post(self.pressEvent, ((w & MK_SHIFT) ? SDL_KMOD_SHIFT : 0) |
                                        ((w & MK_CONTROL) ? SDL_KMOD_CTRL : 0));
         }
-        if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN)
+        if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN ||
+            msg == WM_MBUTTONDOWN || msg == WM_MBUTTONDBLCLK)
         {
             SetFocus(hwnd);
         }

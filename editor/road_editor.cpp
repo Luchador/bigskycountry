@@ -612,7 +612,19 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
 void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
 {
     mouse = {motion.x, motion.y};
-    if (drag == Drag::Pan)
+    if (drag == Drag::Measure)
+    {
+        if (!(motion.state & SDL_BUTTON_MMASK))
+        {
+            Release(world);
+            return;
+        }
+        // Keep the moving end on the canvas when a captured drag crosses into a panel.
+        const float x = std::clamp(mouse.x, 0.0f, static_cast<float>(std::max(0, scene.w - 1)));
+        const float y = std::clamp(mouse.y, 0.0f, static_cast<float>(std::max(0, scene.h - 1)));
+        measureEnd = ToWorld(x, y);
+    }
+    else if (drag == Drag::Pan)
     {
         center.x -= motion.xrel / scale;
         center.z += motion.yrel / scale;
@@ -647,6 +659,46 @@ void RoadEditor::Release(WorldDocument& world)
     dragStart.reset();
     dragChanged = false;
     drag = Drag::None;
+}
+
+bool RoadEditor::DrawMeasurement(SDL_Renderer* renderer) const
+{
+    const SDL_FPoint a = ToScreen(measureStart), b = ToScreen(measureEnd);
+    if (!EditorTheme::SetColor(renderer, ink) || !SDL_RenderLine(renderer, a.x, a.y, b.x, b.y))
+    {
+        return false;
+    }
+
+    const float dx = b.x - a.x, dy = b.y - a.y;
+    const float length = std::hypot(dx, dy);
+    if (length > 0.0f)
+    {
+        constexpr float halfTick = 4.0f;
+        const SDL_FPoint tick{-dy / length * halfTick, dx / length * halfTick};
+        for (SDL_FPoint p : {a, b})
+        {
+            if (!SDL_RenderLine(renderer, p.x - tick.x, p.y - tick.y, p.x + tick.x, p.y + tick.y))
+            {
+                return false;
+            }
+        }
+    }
+
+    const double meters = std::hypot(measureEnd.x - measureStart.x, measureEnd.z - measureStart.z);
+    char label[64];
+    SDL_snprintf(label, sizeof(label), "%.3f m", meters);
+    constexpr float pad = 3.0f, glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+    const float width = static_cast<float>(SDL_strlen(label)) * glyph + 2 * pad;
+    const float height = glyph + 2 * pad;
+    const float x = (a.x + b.x - width) * 0.5f;
+    float y = (a.y + b.y - height) * 0.5f;
+    if (length < width + 8.0f)
+    {
+        y = std::min(a.y, b.y) - height - pad;
+    }
+    const SDL_FRect box{std::clamp(x, 0.0f, std::max(0.0f, scene.w - width)),
+                        std::clamp(y, 0.0f, std::max(0.0f, scene.h - height)), width, height};
+    return Fill(renderer, box, EditorTheme::preview) && Text(renderer, box.x + pad, box.y + pad, label, ink);
 }
 
 bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const
@@ -696,7 +748,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     if (state.drawing && !state.draft->points.empty())
     {
         preview = state.draft;
-        if (mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h)
+        if (drag != Drag::Measure && mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h)
         {
             preview->points.push_back({ToWorld(mouse.x, mouse.y), {}});
         }
@@ -780,7 +832,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         return false;
     }
 
-    return true;
+    return drag != Drag::Measure || DrawMeasurement(renderer);
 }
 
 #ifndef _WIN32
@@ -1360,6 +1412,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             DeleteSelection(world);
             return EditorEvent::Handled;
         }
+        if (drag == Drag::Measure && event.key.key == SDLK_ESCAPE)
+        {
+            Release(world);
+            return EditorEvent::Handled;
+        }
         if ((DraggingGizmo() || extensionSource) && event.key.key == SDLK_ESCAPE)
         {
             if (dragStart->meshTransform)
@@ -1547,6 +1604,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             return EditorEvent::Pass;
         }
+        else if (e.button.button == SDL_BUTTON_MIDDLE)
+        {
+            measureStart = ToWorld(pointer.x, pointer.y);
+            measureEnd = measureStart;
+            drag = Drag::Measure;
+        }
         else if (e.button.button == SDL_BUTTON_RIGHT)
         {
             drag = Drag::Pan;
@@ -1564,8 +1627,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if ((drag == Drag::Pan && e.button.button == SDL_BUTTON_RIGHT) ||
-            (drag != Drag::Pan && e.button.button == SDL_BUTTON_LEFT))
+    {
+        const auto button = drag == Drag::Measure ? SDL_BUTTON_MIDDLE :
+                            drag == Drag::Pan ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+        if (e.button.button == button)
         {
             if (DraggingGizmo())
             {
@@ -1578,6 +1643,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             Release(world);
         }
         break;
+    }
     case SDL_EVENT_MOUSE_WHEEL:
         if (drag == Drag::None)
         {

@@ -44,6 +44,7 @@ private:
         Move,
         Rotate,
         Pan,
+        Measure,
         Gizmo
     };
     using Action = RoadAction;
@@ -65,6 +66,7 @@ private:
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
+    bool DrawMeasurement(SDL_Renderer* renderer) const;
 #ifndef _WIN32
     bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
 #endif
@@ -130,6 +132,7 @@ private:
     std::optional<EditSnapshot> dragStart;
     bool initialized = false;
     Drag drag = Drag::None;
+    Vector3 measureStart{}, measureEnd{}; // World-space endpoints while Drag::Measure is active.
     Vector3 grabOffset{};
     SDL_FPoint mouse{};
     std::string status;
