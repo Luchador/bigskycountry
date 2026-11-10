@@ -140,6 +140,14 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         restored.draft = RoadIO::ReadRoad(in);
     }
 
+    if (to.addedTerrain && !world.PlaceTerrain(to.addedTerrain->modelPath, to.addedTerrain->transform))
+    {
+        return Result::Failed;
+    }
+    if (from.addedTerrain && !world.RemoveTerrain(from.meshSelection.index))
+    {
+        return Result::Failed;
+    }
     if (!to.roadData.empty() || !from.roadData.empty())
     {
         std::vector<Road> replacements;
@@ -160,7 +168,8 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         else world.Terrain().at(target.index)->SetTransform(*to.meshTransform);
     }
     editor = std::move(restored);
-    return index < 0 && !to.meshTransform ? Result::ToolChanged : Result::MapChanged;
+    const bool mapChanged = index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain;
+    return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 
 EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& editor)
@@ -171,7 +180,10 @@ EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& edi
     }
     const Action& action = actions[cursor - 1];
     const Result result = Restore(world, editor, action.roadIndex, action.after, action.before);
-    --cursor;
+    if (result != Result::Failed)
+    {
+        --cursor;
+    }
     return result;
 }
 
@@ -183,6 +195,9 @@ EditHistory::Result EditHistory::Redo(WorldDocument& world, RoadEditorState& edi
     }
     const Action& action = actions[cursor];
     const Result result = Restore(world, editor, action.roadIndex, action.before, action.after);
-    ++cursor;
+    if (result != Result::Failed)
+    {
+        ++cursor;
+    }
     return result;
 }

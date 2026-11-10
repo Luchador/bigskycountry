@@ -48,6 +48,13 @@ struct EditSnapshot
     EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads);
     TransformTarget meshSelection;
     std::optional<ObjectTransform> meshTransform;
+    struct TerrainPlacement
+    {
+        std::string modelPath;
+        ObjectTransform transform;
+        bool operator==(const TerrainPlacement&) const = default;
+    };
+    std::optional<TerrainPlacement> addedTerrain;
     bool operator==(const EditSnapshot&) const = default;
 
     std::string editorData;
@@ -59,7 +66,7 @@ struct EditSnapshot
 class EditHistory
 {
 public:
-    enum class Result { Unavailable, ToolChanged, MapChanged };
+    enum class Result { Unavailable, ToolChanged, MapChanged, Failed };
 
     bool CanUndo() const { return cursor != 0; }
     bool CanRedo() const { return cursor < actions.size(); }

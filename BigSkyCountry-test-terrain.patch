@@ -1,0 +1,463 @@
+diff --git a/.gitignore b/.gitignore
+index e4bb5a0289385ff8f0abe9515844fc33de602b12..7afc6da5fac8b0737dcd2c0d4be71e8a3ba3ba6c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,2 +1,8 @@
+ /build/
+-/assets/
+\ No newline at end of file
++# Track the small terrain fixture alongside its editor command.
++/assets/*
++!/assets/models/
++/assets/models/*
++!/assets/models/terrain/
++/assets/models/terrain/*
++!/assets/models/terrain/test_grid.glb
+diff --git a/README.md b/README.md
+index d9557dd97f73fd5ca09232aeacc07b558fa8184c..4816b6d3c98ac80f553b2dfd3ce535a05f840761 100644
+--- a/README.md
++++ b/README.md
+@@ -17,7 +17,7 @@ All framing integers are unsigned and little-endian. The file begins with the fo
+ 
+ `ROAD` version 4 stores roads in draw order. Its payload is whitespace-separated text in the classic locale. Each road starts with lane count, curved flag, left and right shoulder flags, three-lane layout, divided flag, divided gap, and edge treatment (0 for none, 1 for a transition strip, 2 for a curb). Version 1 roads load with no edge treatment. Version 4 adds the whole-road XYZ rotation (radians) after the style. Next comes the point count, then each point’s world XYZ, manual-tangent flag, heading, pitch, and (in version 4) roll. Older roads start with zero whole-road rotation and point roll. Versions 1 and 2 load with zero pitch for manual tangents. Flags are 0 or 1. The reader rebuilds the meshes from these records. An absent or empty `ROAD` section means the world has no roads.
+ 
+-Future world data, such as terrain, can use its own section tag and version. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
++Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
+ 
+ ### Static mesh assets
+ 
+@@ -54,6 +54,10 @@ The optional `OBJS` version 1 section stores one record per object. Each record
+ 
+ ### Terrain chunks
+ 
++Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.
++
++In the 3D editor, right-click and choose **Create → Test Terrain** to center a flat green chunk at the picked world position. The model at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Its 9 × 9 cells cover 45 × 45 m and form 162 upward-facing triangles. Each placement has its own position and rotation in the Transform panel. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
++
+ A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 1 section stores the quoted path, position XYZ in meters, and rotation XYZ in radians for each chunk. Chunks use the mesh’s authored scale.
+ 
+ ### Transform panel
+diff --git a/assets/models/terrain/test_grid.glb b/assets/models/terrain/test_grid.glb
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ca399efb6b8c5bba42caebbc116da49bcb289c7
+GIT binary patch
+literal 3844
+zcmb7@YjP7u6ooq>Z}U!glOTpif)PfNAJ|H4WDM8_V+Y$965@a?gi)0(QIg1`T&~Ij
+zsH`9>Nd9I4uokiamXPn<o+~MjAIVIeug_fd+|%7-uWu}0e=~&e)}9dNc7$+aX<>dV
+zDYshHc2e9*zN<D{wMIQDCWV1qvYky@m1@136mzL-CB^$&Nxku?DwkW`Ud?u%wvx?i
+z>xs>+mp6GSS+2I)nRd0=EZ6FZrfPz{Nsl-spUeD^0qf1$qa>R=ZPqqx?b>(gq;k96
+ztgSt3>v1dja$#w9d3IsmB9^b+n_5^{y!s%Q6!R>!R)18hXkLMsGNHBd1{1e!iC##T
+zAET$6Y+IRY&0E!Wd1IqiS!_I8e^RefCT^|Vs!laF8qMqFO1sh2eg_I;+1$X;C@2hP
+z^R}b-rqAJ^n%=}~`EBie?b+kUoUR?<+K=t(T(!R5=C}%DmkQnAS8CPo(>XTZ_NwU%
+zk00ANBB1x}d?81rU2d-H0}c+2jTE-Cto`3#j<b8;AN@bCll8ZF*8bP@L2ad6;Y+j{
+zzFAv~HfEctG&Y|$>eYIC`NyaHkqqYxBiW?Vcvffqd0UOula*^zgM6J${&b4>FBA#`
+z!`WQcMjd<k2dZgN!)kZeF)6R6|2e6^-@2b#e4l;&^ZmijN{2>Sbvv$fX=-wAa*;pq
+z?M&vEz7Vd=&hsDk`%9p4GKA+nex}F2eqmE=PNvtFy7kvReuiGUtY?qcv)4WMIW^Cf
+z_gs0;mG@lprP#;j^mxxzUDBn|bIreub<Oo$`I(-&=c?|x=1bjoeZTfD^K{93uDs`(
+ze;McKz2`mNb5-|TdCxV^vo4!cGHYIab*b*T@}6rx&B|y_kM~^FJy+gy&GW3w=9J8u
+z_gvLISKf2Yd)AAdTzn@N-^s;ya^*|GF4eRLUGkk=d?y#*$(2uY)!X+g@451xtI>1K
+zmx5h3r^kD)>Ygj_x#rVc<#?{V=W5hEUGko5zGP*q`+imTT>0md-8r7Cy6;z+o~u#6
+z>5}(cdCxUpvMF&+kDr<B);(AAJ=Z+Xx|FYH_nxb|=gNDo`BHbj?^kutmG@kE&y|nY
+z*w3%V<;H%lOlbV=*I#X<ZsQ-LyD!Ijzm3h~(>5~S#t?o=NA-9$-c@BnUj5RVjp`Tc
+z{Whv!{JmnM`srDjT2uNPqkLr|_OrS@$9}4-Uu7cpv$^&h`*rsgv$dw!Oa0O{+Ngf9
+z)^DTwrI|LWpPu9TUeU+)Z2j<^Uh-19-*kPi()H;#+b?}=zn!yIKi`wD#d~OUX}|JX
+zU;Mpdqx$LDznS{^*=Y2=X>Hyk*7aMz_0y>JX^i{retY%vGxoEI&v9?QChw)+()l*3
+zpPtk2Yu`GaMf_%d)>@zHzBgZ!_e$Tf^~tMWdY1g{=uGv^{ag7N``M@-_ZHV;^R1WO
+ziFzY^!2L$(LvO-9xD)MwJK-+$7Tg7QqqpI1xCgxh_rSgAUAPzSL+`<Ta6ft<?uQ?e
+z(icAB?h6OdPIv$wM7!WYcnIx=hu~qf2Ofq;&|Y{19!2}$QFsjPhsWS?^dUSBKPKfs
+z_=NjFIDrnr6EK4g!3;c!4#Sf$K}TQ$Pobmm6g-WN!PD>zIu6gkv*=@Z7Jf>~iSQZs
+ziEs{O;5pcjPQre89wqQR%%W2;3ooG4@B$n_XW#(5h|a=`Fo!;cIhZHqTqtm#3xlX1
+z4#FXH9uC1_l!e1^1YLk5@Ddt;m*6P62uI-<%E2*MM0r?*pOZ2ezTh4V<7fzu!wEDD
+zC*Wl?0x!c7x&%vb5{<%1cm<8YD{u-G;S{`zK8IJ~HB!dIb?)&njV9nUoI#i244g$J
+zI16u}Nq7U^L|5QVIESX-9K40D!dq}2U4!#*ft2a+CHHi=jb`9&xQJ%qB3wc@;1XO$
+zH{mk8gXZ8JxPorM6?hlT!@KYvT7dW9SESqyUvu9M_t7G}55GZ6@Ef>_mf<S=7Ttm0
+b!Ut#tK7bF=UHA}|(LGp(Yv?Pu1}ouDT82%+
+
+literal 0
+HcmV?d00001
+
+diff --git a/editor/edit_history.cpp b/editor/edit_history.cpp
+index e1f121525466c6639a58cca3ecd4824ca7f04d67..ca944b3c486fc0b7356ca0f9f193c104f8e41b55 100644
+--- a/editor/edit_history.cpp
++++ b/editor/edit_history.cpp
+@@ -140,6 +140,14 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState&
+         restored.draft = RoadIO::ReadRoad(in);
+     }
+ 
++    if (to.addedTerrain && !world.PlaceTerrain(to.addedTerrain->modelPath, to.addedTerrain->transform))
++    {
++        return Result::Failed;
++    }
++    if (from.addedTerrain && !world.RemoveTerrain(from.meshSelection.index))
++    {
++        return Result::Failed;
++    }
+     if (!to.roadData.empty() || !from.roadData.empty())
+     {
+         std::vector<Road> replacements;
+@@ -160,7 +168,8 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState&
+         else world.Terrain().at(target.index)->SetTransform(*to.meshTransform);
+     }
+     editor = std::move(restored);
+-    return index < 0 && !to.meshTransform ? Result::ToolChanged : Result::MapChanged;
++    const bool mapChanged = index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain;
++    return mapChanged ? Result::MapChanged : Result::ToolChanged;
+ }
+ 
+ EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& editor)
+@@ -171,7 +180,10 @@ EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& edi
+     }
+     const Action& action = actions[cursor - 1];
+     const Result result = Restore(world, editor, action.roadIndex, action.after, action.before);
+-    --cursor;
++    if (result != Result::Failed)
++    {
++        --cursor;
++    }
+     return result;
+ }
+ 
+@@ -183,6 +195,9 @@ EditHistory::Result EditHistory::Redo(WorldDocument& world, RoadEditorState& edi
+     }
+     const Action& action = actions[cursor];
+     const Result result = Restore(world, editor, action.roadIndex, action.before, action.after);
+-    ++cursor;
++    if (result != Result::Failed)
++    {
++        ++cursor;
++    }
+     return result;
+ }
+diff --git a/editor/edit_history.hpp b/editor/edit_history.hpp
+index 14d27f717d12c51ab6bae8dc3d86688b195dd712..d0decf4c7164164565df9dcf01e865a2fd025867 100644
+--- a/editor/edit_history.hpp
++++ b/editor/edit_history.hpp
+@@ -48,6 +48,13 @@ struct EditSnapshot
+     EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads);
+     TransformTarget meshSelection;
+     std::optional<ObjectTransform> meshTransform;
++    struct TerrainPlacement
++    {
++        std::string modelPath;
++        ObjectTransform transform;
++        bool operator==(const TerrainPlacement&) const = default;
++    };
++    std::optional<TerrainPlacement> addedTerrain;
+     bool operator==(const EditSnapshot&) const = default;
+ 
+     std::string editorData;
+@@ -59,7 +66,7 @@ struct EditSnapshot
+ class EditHistory
+ {
+ public:
+-    enum class Result { Unavailable, ToolChanged, MapChanged };
++    enum class Result { Unavailable, ToolChanged, MapChanged, Failed };
+ 
+     bool CanUndo() const { return cursor != 0; }
+     bool CanRedo() const { return cursor < actions.size(); }
+diff --git a/editor/editor_menu.cpp b/editor/editor_menu.cpp
+index ebf7c43b74e5739e5cdcdfb1eb54584a45acf12a..f1b18cdc42997b112fba3b857060e41cf4453864 100644
+--- a/editor/editor_menu.cpp
++++ b/editor/editor_menu.cpp
+@@ -1,6 +1,7 @@
+ #include "editor_menu.hpp"
+ 
+ #include <algorithm>
++#include <iterator>
+ 
+ #ifdef _WIN32
+ #include <windows.h>
+@@ -154,6 +155,21 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
+     return std::nullopt;
+ }
+ 
++#ifndef _WIN32
++namespace
++{
++    struct CreateItem
++    {
++        const char* label;
++        EditorCommand command;
++    };
++    constexpr CreateItem createItems[] = {{"Create Road", EditorCommand::CreateRoad},
++                                          {"Test Terrain", EditorCommand::CreateTestTerrain}};
++    constexpr int createItemCount = static_cast<int>(std::size(createItems));
++    constexpr float itemHeight = 26;
++}
++#endif
++
+ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene)
+ {
+ #ifdef _WIN32
+@@ -174,7 +190,8 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
+         return {};
+     }
+     UINT choice = 0;
+-    if (ClientToScreen(hwnd, &at) && AddSubmenu(root, L"Create", {{BSC_CREATE_ROAD, L"Create Road"}}))
++    if (ClientToScreen(hwnd, &at) && AddSubmenu(root, L"Create", {{BSC_CREATE_ROAD, L"Create Road"},
++                                                                {BSC_CREATE_TEST_TERRAIN, L"Test Terrain"}}))
+     {
+         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                   at.x, at.y, hwnd, nullptr);
+@@ -184,30 +201,36 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
+     {
+         return EditorCommand::CreateRoad;
+     }
++    if (choice == BSC_CREATE_TEST_TERRAIN)
++    {
++        return EditorCommand::CreateTestTerrain;
++    }
+ #else
+-    constexpr float itemHeight = 26;
+     rootItem = {0, 0, 104, itemHeight};
+-    roadItem = {0, 0, 120, itemHeight};
++    submenu = {0, 0, 120, itemHeight * createItemCount};
+     const auto fit = [](float start, float extent, int limit)
+     {
+         return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));
+     };
+     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
+     rootItem.y = fit(viewportPoint.y, itemHeight, scene.h);
+-    roadItem.x = rootItem.x + rootItem.w;
+-    roadItem.y = rootItem.y;
+-    if (roadItem.x + roadItem.w > scene.w)
++    submenu.x = rootItem.x + rootItem.w;
++    submenu.y = fit(rootItem.y, submenu.h, scene.h);
++    if (submenu.x + submenu.w > scene.w)
+     {
+-        if (rootItem.x >= roadItem.w)
++        if (rootItem.x >= submenu.w)
+         {
+-            roadItem.x = rootItem.x - roadItem.w;
++            submenu.x = rootItem.x - submenu.w;
+         }
+         else
+         {
+-            roadItem.x = fit(rootItem.x, roadItem.w, scene.w);
+-            roadItem.y += rootItem.y + 2 * itemHeight <= scene.h ? itemHeight : -itemHeight;
++            submenu.x = fit(rootItem.x, submenu.w, scene.w);
++            const float below = rootItem.y + itemHeight;
++            const float top = below + submenu.h <= scene.h ? below : rootItem.y - submenu.h;
++            submenu.y = fit(top, submenu.h, scene.h);
+         }
+     }
++    activeItem = 0;
+     popup = Popup::Create;
+ #endif
+     return {};
+@@ -235,18 +258,29 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
+         switch (event.key.key)
+         {
+         case SDLK_ESCAPE: popup = Popup::Closed; break;
+-        case SDLK_LEFT: popup = Popup::Create; break;
+-        case SDLK_RIGHT: popup = Popup::CreateRoad; break;
++        case SDLK_LEFT:
++            popup = Popup::Create;
++            activeItem = 0;
++            break;
++        case SDLK_UP:
++        case SDLK_DOWN:
++            if (popup == Popup::Submenu)
++            {
++                const int step = event.key.key == SDLK_DOWN ? 1 : -1;
++                activeItem = (activeItem + createItemCount + step) % createItemCount;
++            }
++            break;
++        case SDLK_RIGHT: popup = Popup::Submenu; break;
+         case SDLK_RETURN:
+         case SDLK_KP_ENTER:
+-            if (popup == Popup::CreateRoad)
++            if (popup == Popup::Submenu)
+             {
+-                command = EditorCommand::CreateRoad;
++                command = createItems[activeItem].command;
+                 popup = Popup::Closed;
+             }
+             else
+             {
+-                popup = Popup::CreateRoad;
++                popup = Popup::Submenu;
+             }
+             break;
+         }
+@@ -262,13 +296,16 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
+         {
+             if ((!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
+             {
+-                popup = Popup::CreateRoad;
++                popup = Popup::Submenu;
+                 return true;
+             }
+-            if (press && event.button.button == SDL_BUTTON_LEFT && popup == Popup::CreateRoad &&
+-                SDL_PointInRectFloat(&at, &roadItem))
++            if (popup == Popup::Submenu && SDL_PointInRectFloat(&at, &submenu))
+             {
+-                command = EditorCommand::CreateRoad;
++                activeItem = std::min(static_cast<int>((at.y - submenu.y) / itemHeight), createItemCount - 1);
++                if (press && event.button.button == SDL_BUTTON_LEFT)
++                {
++                    command = createItems[activeItem].command;
++                }
+             }
+         }
+         if (press)
+@@ -288,14 +325,34 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
+ 
+ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
+ {
+-    const auto item = [&](SDL_FRect rect, const char* label)
++    const auto item = [&](SDL_FRect rect, const char* label, bool active)
+     {
+-        return SDL_SetRenderDrawColor(renderer, 38, 43, 49, 255) && SDL_RenderFillRect(renderer, &rect) &&
++        return SDL_SetRenderDrawColor(renderer, active ? 58 : 38, active ? 75 : 43, active ? 88 : 49, 255) &&
++               SDL_RenderFillRect(renderer, &rect) &&
+                SDL_SetRenderDrawColor(renderer, 118, 127, 136, 255) && SDL_RenderRect(renderer, &rect) &&
+                SDL_SetRenderDrawColor(renderer, 235, 239, 244, 255) &&
+                SDL_RenderDebugText(renderer, rect.x + 8, rect.y + 9, label);
+     };
+-    return popup == Popup::Closed || (item(rootItem, "Create    >") &&
+-                                     (popup != Popup::CreateRoad || item(roadItem, "Create Road")));
++    if (popup == Popup::Closed)
++    {
++        return true;
++    }
++    if (!item(rootItem, "Create    >", false))
++    {
++        return false;
++    }
++    if (popup == Popup::Submenu)
++    {
++        SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
++        for (int i = 0; i < createItemCount; ++i)
++        {
++            if (!item(row, createItems[i].label, i == activeItem))
++            {
++                return false;
++            }
++            row.y += itemHeight;
++        }
++    }
++    return true;
+ }
+ #endif
+diff --git a/editor/editor_menu.hpp b/editor/editor_menu.hpp
+index d1c89e4a628b75670fb358ce885efc3651924fcb..a53597447cc52445667ee4b71017d9b7396b7fd8 100644
+--- a/editor/editor_menu.hpp
++++ b/editor/editor_menu.hpp
+@@ -3,7 +3,7 @@
+ #include <SDL3/SDL.h>
+ #include <optional>
+ 
+-enum class EditorCommand { Save, Undo, Redo, CreateRoad };
++enum class EditorCommand { Save, Undo, Redo, CreateRoad, CreateTestTerrain };
+ 
+ class EditorMenu
+ {
+@@ -25,8 +25,9 @@ private:
+     bool undoEnabled = false;
+     bool redoEnabled = false;
+ #else
+-    enum class Popup { Closed, Create, CreateRoad };
++    enum class Popup { Closed, Create, Submenu };
+     Popup popup = Popup::Closed;
+-    SDL_FRect rootItem{}, roadItem{};
++    SDL_FRect rootItem{}, submenu{};
++    int activeItem = 0;
+ #endif
+ };
+diff --git a/editor/menu_ids.h b/editor/menu_ids.h
+index 5666464403e2dd4cf0388d440280418c55709c7b..3e28afb5efa488e3dcb113cb751a6c4d90a8b526 100644
+--- a/editor/menu_ids.h
++++ b/editor/menu_ids.h
+@@ -2,3 +2,4 @@
+ #define BSC_EDIT_UNDO   102
+ #define BSC_EDIT_REDO   103
+ #define BSC_CREATE_ROAD 104
++#define BSC_CREATE_TEST_TERRAIN 105
+diff --git a/editor/road_editor.cpp b/editor/road_editor.cpp
+index ce8d032f76edf2352f112c91ba5d4edcb7f9595a..93a39cd26a2b9ced2868890e93316cade07aaf2f 100644
+--- a/editor/road_editor.cpp
++++ b/editor/road_editor.cpp
+@@ -218,6 +218,26 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
+         Commit(world, state.selected, std::move(before), &world.roads.back());
+         return;
+     }
++    if (command == EditorCommand::CreateTestTerrain)
++    {
++        constexpr char modelPath[] = "terrain/test_grid.glb";
++        const ObjectTransform transform{creationPoint};
++        EditSnapshot before(state);
++        if (!world.PlaceTerrain(modelPath, transform))
++        {
++            status = SDL_GetError();
++            SDL_Log("%s", status.c_str());
++            return;
++        }
++        state.drawing = false;
++        state.SelectPoint(-1, -1);
++        state.meshSelection = {SelectionKind::Terrain, static_cast<int>(world.Terrain().size()) - 1};
++        EditSnapshot after(state);
++        after.addedTerrain = EditSnapshot::TerrainPlacement{modelPath, transform};
++        history.Record(-1, std::move(before), std::move(after));
++        Save(world);
++        return;
++    }
+     if (command == EditorCommand::Save)
+     {
+         if (!saveFailed && EditingDraft())
+@@ -238,6 +258,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
+ 
+     const bool undo = command == EditorCommand::Undo;
+     const auto result = undo ? history.Undo(world, state) : history.Redo(world, state);
++    if (result == EditHistory::Result::Failed)
++    {
++        status = SDL_GetError();
++        return;
++    }
+     if (result != EditHistory::Result::Unavailable &&
+         (result != EditHistory::Result::MapChanged || Save(world)))
+     {
+diff --git a/examples/test-terrain.wld b/examples/test-terrain.wld
+new file mode 100644
+index 0000000000000000000000000000000000000000..59dabcd2c8a5f3240f7116037c07bf735e086044
+GIT binary patch
+literal 80
+zcmZ<?b`ED`U|?VZ;vj!V7ZxB510k+KK_EF5sDM&QYEe;QW}bdYYH>+?dQoPIUV2WF
+Kl7ayOasdF=VGcO}
+
+literal 0
+HcmV?d00001
+
+diff --git a/shared/world_document.cpp b/shared/world_document.cpp
+index 84ce7defdabb28f82483efbedfc1bdda025a4fcf..51d26b469caf9756f87b8412e4e9b4dfc6dd9be4 100644
+--- a/shared/world_document.cpp
++++ b/shared/world_document.cpp
+@@ -173,6 +173,16 @@ TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const Ob
+     return terrain.emplace_back(std::move(chunk)).get();
+ }
+ 
++bool WorldDocument::RemoveTerrain(std::size_t index)
++{
++    if (index >= terrain.size())
++    {
++        return SDL_SetError("Invalid terrain chunk index");
++    }
++    terrain.erase(terrain.begin() + index);
++    return true;
++}
++
+ void WorldDocument::TickObjects(float deltaSeconds)
+ {
+     // Objects placed during a tick begin updating on the following frame.
+diff --git a/shared/world_document.hpp b/shared/world_document.hpp
+index 606f6a6bce580ddaf9495db337e03d48bb5039cf..2333db483cf5e099b51ac299a50720f2961bc2e2 100644
+--- a/shared/world_document.hpp
++++ b/shared/world_document.hpp
+@@ -21,6 +21,7 @@ public:
+     BSCObject* PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform = {});
+     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
+     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
++    bool RemoveTerrain(std::size_t index);
+     const std::vector<std::unique_ptr<TerrainChunk>>& Terrain() const { return terrain; }
+     void TickObjects(float deltaSeconds);
+ 

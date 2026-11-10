@@ -173,6 +173,16 @@ TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const Ob
     return terrain.emplace_back(std::move(chunk)).get();
 }
 
+bool WorldDocument::RemoveTerrain(std::size_t index)
+{
+    if (index >= terrain.size())
+    {
+        return SDL_SetError("Invalid terrain chunk index");
+    }
+    terrain.erase(terrain.begin() + index);
+    return true;
+}
+
 void WorldDocument::TickObjects(float deltaSeconds)
 {
     // Objects placed during a tick begin updating on the following frame.

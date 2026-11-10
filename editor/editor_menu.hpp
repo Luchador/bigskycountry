@@ -3,7 +3,7 @@
 #include <SDL3/SDL.h>
 #include <optional>
 
-enum class EditorCommand { Save, Undo, Redo, CreateRoad };
+enum class EditorCommand { Save, Undo, Redo, CreateRoad, CreateTestTerrain };
 
 class EditorMenu
 {
@@ -25,8 +25,9 @@ private:
     bool undoEnabled = false;
     bool redoEnabled = false;
 #else
-    enum class Popup { Closed, Create, CreateRoad };
+    enum class Popup { Closed, Create, Submenu };
     Popup popup = Popup::Closed;
-    SDL_FRect rootItem{}, roadItem{};
+    SDL_FRect rootItem{}, submenu{};
+    int activeItem = 0;
 #endif
 };

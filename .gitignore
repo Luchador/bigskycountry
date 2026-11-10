@@ -1,2 +1,8 @@
 /build/
-/assets/
+# Track the small terrain fixture alongside its editor command.
+/assets/*
+!/assets/models/
+/assets/models/*
+!/assets/models/terrain/
+/assets/models/terrain/*
+!/assets/models/terrain/test_grid.glb

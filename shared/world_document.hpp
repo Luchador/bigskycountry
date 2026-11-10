@@ -21,6 +21,7 @@ public:
     BSCObject* PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform = {});
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
+    bool RemoveTerrain(std::size_t index);
     const std::vector<std::unique_ptr<TerrainChunk>>& Terrain() const { return terrain; }
     void TickObjects(float deltaSeconds);
 

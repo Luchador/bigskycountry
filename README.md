@@ -17,7 +17,7 @@ All framing integers are unsigned and little-endian. The file begins with the fo
 
 `ROAD` version 4 stores roads in draw order. Its payload is whitespace-separated text in the classic locale. Each road starts with lane count, curved flag, left and right shoulder flags, three-lane layout, divided flag, divided gap, and edge treatment (0 for none, 1 for a transition strip, 2 for a curb). Version 1 roads load with no edge treatment. Version 4 adds the whole-road XYZ rotation (radians) after the style. Next comes the point count, then each point’s world XYZ, manual-tangent flag, heading, pitch, and (in version 4) roll. Older roads start with zero whole-road rotation and point roll. Versions 1 and 2 load with zero pitch for manual tangents. Flags are 0 or 1. The reader rebuilds the meshes from these records. An absent or empty `ROAD` section means the world has no roads.
 
-Future world data, such as terrain, can use its own section tag and version. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
+Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 
 ### Static mesh assets
 
@@ -53,6 +53,10 @@ The world owns the returned object. Use `SetTransform` to edit its placement. A 
 The optional `OBJS` version 1 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, and 4 for a character. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
 
 ### Terrain chunks
+
+Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.
+
+In the 3D editor, right-click and choose **Create → Test Terrain** to center a flat green chunk at the picked world position. The model at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Its 9 × 9 cells cover 45 × 45 m and form 162 upward-facing triangles. Each placement has its own position and rotation in the Transform panel. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
 
 A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 1 section stores the quoted path, position XYZ in meters, and rotation XYZ in radians for each chunk. Chunks use the mesh’s authored scale.
 

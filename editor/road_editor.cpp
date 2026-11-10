@@ -218,6 +218,26 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
+    if (command == EditorCommand::CreateTestTerrain)
+    {
+        constexpr char modelPath[] = "terrain/test_grid.glb";
+        const ObjectTransform transform{creationPoint};
+        EditSnapshot before(state);
+        if (!world.PlaceTerrain(modelPath, transform))
+        {
+            status = SDL_GetError();
+            SDL_Log("%s", status.c_str());
+            return;
+        }
+        state.drawing = false;
+        state.SelectPoint(-1, -1);
+        state.meshSelection = {SelectionKind::Terrain, static_cast<int>(world.Terrain().size()) - 1};
+        EditSnapshot after(state);
+        after.addedTerrain = EditSnapshot::TerrainPlacement{modelPath, transform};
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+        return;
+    }
     if (command == EditorCommand::Save)
     {
         if (!saveFailed && EditingDraft())
@@ -238,6 +258,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
 
     const bool undo = command == EditorCommand::Undo;
     const auto result = undo ? history.Undo(world, state) : history.Redo(world, state);
+    if (result == EditHistory::Result::Failed)
+    {
+        status = SDL_GetError();
+        return;
+    }
     if (result != EditHistory::Result::Unavailable &&
         (result != EditHistory::Result::MapChanged || Save(world)))
     {
