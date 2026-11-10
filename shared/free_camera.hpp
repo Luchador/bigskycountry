@@ -20,7 +20,11 @@ class FreeCamera
         // World direction corresponding to the view-space ray (x, y, 1), without normalization.
         Vector3 ViewRay(double x, double y) const;
         // Intersect the view-space ray (x, y, 1) with the world ground plane.
-        std::optional<Vector3> PickGround(double x, double y, double nearDepth) const;
+        std::optional<Vector3> PickGround(double x, double y, double nearDepth) const
+        {
+            return PickGround(ViewRay(x, y), nearDepth);
+        }
+        std::optional<Vector3> PickGround(Vector3 worldRay, double nearDepth) const;
 
     private:
         Vector3 Forward() const;

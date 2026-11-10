@@ -203,6 +203,21 @@ void RoadEditor::Commit(WorldDocument& world, int roadIndex, EditSnapshot before
 void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera)
 {
     Release(world);
+    if (command == EditorCommand::CreateRoad)
+    {
+        constexpr double initialLength = 10.0; // meters along world X
+        EditSnapshot before(state);
+        Road road;
+        road.style = Style(world);
+        road.points = {{creationPoint, {}}, {creationPoint + Vector3{initialLength, 0, 0}, {}}};
+        road.Rebuild();
+        world.roads.push_back(std::move(road));
+        state.drawing = false;
+        state.SelectPoint(static_cast<int>(world.roads.size()) - 1, 1);
+        center = creationPoint;
+        Commit(world, state.selected, std::move(before), &world.roads.back());
+        return;
+    }
     if (command == EditorCommand::Save)
     {
         if (!saveFailed && EditingDraft())
@@ -227,6 +242,33 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         (result != EditHistory::Result::MapChanged || Save(world)))
     {
         status = undo ? "Undone" : "Redone";
+    }
+}
+
+void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
+{
+    auto& picker = rightClick->picker;
+    bool hitRoad = false;
+    for (const Road& road : world.roads)
+    {
+        if (picker.TestRoad(road))
+        {
+            hitRoad = true;
+        }
+    }
+    if (hitRoad)
+    {
+        creationPoint = picker.HitPosition();
+    }
+    else
+    {
+        constexpr double fallbackDistance = 20.0; // meters along a ray that misses the ground
+        creationPoint = camera.PickGround(picker.ray, worldNearDepth).value_or(
+            picker.eye + Math::Normalize(picker.ray) * fallbackDistance);
+    }
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene))
+    {
+        RunCommand(*command, world, camera);
     }
 }
 
@@ -798,6 +840,10 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.space, Inspect(world, state.Target()));
     return true;
 #else
+    if (!menu.DrawViewportMenu(renderer))
+    {
+        return false;
+    }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const bool threeLanes = (current ? current->style : state.defaults).GetLaneCount() == 3;
     const int contentHeight = (planView ? 470 : 464) + (threeLanes ? static_cast<int>(threeLanePanelHeight) : 0);
@@ -816,6 +862,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
 void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
 {
     Release(world);
+    rightClick.reset();
     planView = !planView;
     if (planView && !initialized)
     {
@@ -1018,9 +1065,54 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         Release(world);
         return EditorEvent::Pass;
     }
+    if (rightClick && SDL_GetWindowFromEvent(&event) == window)
+    {
+        if (event.type == SDL_EVENT_MOUSE_MOTION)
+        {
+            // Relative mode can warp the absolute cursor. Measure the drag in relative pixels.
+            rightClick->motion.x += event.motion.xrel;
+            rightClick->motion.y += event.motion.yrel;
+            constexpr float dragThreshold = 4.0f;
+            if (std::hypot(rightClick->motion.x, rightClick->motion.y) >= dragThreshold)
+            {
+                rightClick.reset();
+            }
+        }
+        else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
+        {
+            if (!planView && ViewportFocused() && SDL_GetWindowRelativeMouseMode(window) &&
+                camera.GetPosition() == rightClick->picker.eye)
+            {
+                if (!SDL_SetWindowRelativeMouseMode(window, false))
+                {
+                    return EditorEvent::Error;
+                }
+                SDL_WarpMouseInWindow(window, rightClick->windowPoint.x, rightClick->windowPoint.y);
+                OpenViewportMenu(world, camera);
+                rightClick.reset();
+                return EditorEvent::Handled;
+            }
+            rightClick.reset();
+        }
+        else if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ||
+                 event.type == SDL_EVENT_MOUSE_WHEEL || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                 event.type == SDL_EVENT_WINDOW_FOCUS_LOST || event.type == SDL_EVENT_WINDOW_RESIZED)
+        {
+            rightClick.reset();
+        }
+    }
 #ifndef _WIN32
     if (SDL_GetWindowFromEvent(&event) == window)
     {
+        std::optional<EditorCommand> command;
+        if (menu.HandleViewportMenu(renderer, scene, event, command))
+        {
+            if (command)
+            {
+                RunCommand(*command, world, camera);
+            }
+            return EditorEvent::Handled;
+        }
         std::optional<TransformEdit> edit;
         if (transformPanel.Key(window, event, edit))
         {
@@ -1246,6 +1338,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         else if (!planView)
         {
+            if (e.button.button == SDL_BUTTON_RIGHT)
+            {
+                rightClick.emplace(ViewportClick{{event.button.x, event.button.y}, ViewportPicker(camera, scene, pointer)});
+            }
             return EditorEvent::Pass;
         }
         else if (e.button.button == SDL_BUTTON_RIGHT)

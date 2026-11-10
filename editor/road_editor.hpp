@@ -12,6 +12,7 @@
 #include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
+#include "viewport_picker.hpp"
 #include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
@@ -66,6 +67,7 @@ private:
     bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
+    void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
     std::optional<GizmoPlacement> SelectedPointPlacement(const Road* road, const FreeCamera& camera) const;
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
@@ -92,6 +94,14 @@ private:
     SdlTransformPanel transformPanel;
     int roadScroll = 0, roadScrollMax = 0;
 #endif
+    struct ViewportClick
+    {
+        SDL_FPoint windowPoint;
+        ViewportPicker picker;
+        SDL_FPoint motion{};
+    };
+    std::optional<ViewportClick> rightClick;
+    Vector3 creationPoint{};
     RoadEditorState state;
     EditHistory history;
     EditorMenu menu;

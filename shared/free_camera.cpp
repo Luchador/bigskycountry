@@ -99,9 +99,8 @@ Vector3 FreeCamera::ViewRay(double x, double y) const
     return forward + right * x + Math::Cross(forward, right) * y;
 }
 
-std::optional<Vector3> FreeCamera::PickGround(double x, double y, double nearDepth) const
+std::optional<Vector3> FreeCamera::PickGround(Vector3 direction, double nearDepth) const
 {
-    const Vector3 direction = ViewRay(x, y);
     if (direction.y == 0.0)
     {
         return std::nullopt;

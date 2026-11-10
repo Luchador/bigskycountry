@@ -143,24 +143,9 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
 
     for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
     {
-        const Road& candidate = world.roads[i];
-        for (const auto* surface : {&candidate.triangles, &candidate.whiteStripes, &candidate.yellowStripes})
+        if (picker.TestRoad(world.roads[i]))
         {
-            for (const auto& t : *surface)
-            {
-                if (picker.TestTriangle(t[0], t[1], t[2]))
-                {
-                    hit = {RoadPickKind::Road, i};
-                }
-            }
-        }
-
-        for (const auto& t : candidate.edgeTriangles)
-        {
-            if (picker.TestTriangle(t[0].position, t[1].position, t[2].position))
-            {
-                hit = {RoadPickKind::Road, i};
-            }
+            hit = {RoadPickKind::Road, i};
         }
     }
 

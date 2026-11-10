@@ -1,5 +1,7 @@
 #include "editor_menu.hpp"
 
+#include <algorithm>
+
 #ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
@@ -151,3 +153,149 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
     }
     return std::nullopt;
 }
+
+std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene)
+{
+#ifdef _WIN32
+    SDL_Window* window = SDL_GetWindowFromID(windowID);
+    const HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                         SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+    RECT client{};
+    int width, height;
+    if (!GetClientRect(hwnd, &client) || !SDL_GetWindowSize(window, &width, &height) || width <= 0 || height <= 0)
+    {
+        return {};
+    }
+    POINT at{static_cast<LONG>(windowPoint.x * client.right / width),
+             static_cast<LONG>(windowPoint.y * client.bottom / height)};
+    HMENU root = CreatePopupMenu();
+    if (!root)
+    {
+        return {};
+    }
+    UINT choice = 0;
+    if (ClientToScreen(hwnd, &at) && AddSubmenu(root, L"Create", {{BSC_CREATE_ROAD, L"Create Road"}}))
+    {
+        choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                  at.x, at.y, hwnd, nullptr);
+    }
+    DestroyMenu(root);
+    if (choice == BSC_CREATE_ROAD)
+    {
+        return EditorCommand::CreateRoad;
+    }
+#else
+    constexpr float itemHeight = 26;
+    rootItem = {0, 0, 104, itemHeight};
+    roadItem = {0, 0, 120, itemHeight};
+    const auto fit = [](float start, float extent, int limit)
+    {
+        return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));
+    };
+    rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
+    rootItem.y = fit(viewportPoint.y, itemHeight, scene.h);
+    roadItem.x = rootItem.x + rootItem.w;
+    roadItem.y = rootItem.y;
+    if (roadItem.x + roadItem.w > scene.w)
+    {
+        if (rootItem.x >= roadItem.w)
+        {
+            roadItem.x = rootItem.x - roadItem.w;
+        }
+        else
+        {
+            roadItem.x = fit(rootItem.x, roadItem.w, scene.w);
+            roadItem.y += rootItem.y + 2 * itemHeight <= scene.h ? itemHeight : -itemHeight;
+        }
+    }
+    popup = Popup::Create;
+#endif
+    return {};
+}
+
+#ifndef _WIN32
+bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, const SDL_Event& event,
+                                    std::optional<EditorCommand>& command)
+{
+    if (popup == Popup::Closed)
+    {
+        return false;
+    }
+    switch (event.type)
+    {
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_RESIZED:
+        popup = Popup::Closed;
+        return false;
+    case SDL_EVENT_KEY_DOWN:
+        if (event.key.repeat)
+        {
+            return true;
+        }
+        switch (event.key.key)
+        {
+        case SDLK_ESCAPE: popup = Popup::Closed; break;
+        case SDLK_LEFT: popup = Popup::Create; break;
+        case SDLK_RIGHT: popup = Popup::CreateRoad; break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            if (popup == Popup::CreateRoad)
+            {
+                command = EditorCommand::CreateRoad;
+                popup = Popup::Closed;
+            }
+            else
+            {
+                popup = Popup::CreateRoad;
+            }
+            break;
+        }
+        return true;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    {
+        const bool press = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        SDL_FPoint at{};
+        if (SDL_SetRenderViewport(renderer, &scene) &&
+            SDL_RenderCoordinatesFromWindow(renderer, press ? event.button.x : event.motion.x,
+                                             press ? event.button.y : event.motion.y, &at.x, &at.y))
+        {
+            if ((!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
+            {
+                popup = Popup::CreateRoad;
+                return true;
+            }
+            if (press && event.button.button == SDL_BUTTON_LEFT && popup == Popup::CreateRoad &&
+                SDL_PointInRectFloat(&at, &roadItem))
+            {
+                command = EditorCommand::CreateRoad;
+            }
+        }
+        if (press)
+        {
+            popup = Popup::Closed;
+        }
+        return true;
+    }
+    case SDL_EVENT_KEY_UP:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_WHEEL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
+{
+    const auto item = [&](SDL_FRect rect, const char* label)
+    {
+        return SDL_SetRenderDrawColor(renderer, 38, 43, 49, 255) && SDL_RenderFillRect(renderer, &rect) &&
+               SDL_SetRenderDrawColor(renderer, 118, 127, 136, 255) && SDL_RenderRect(renderer, &rect) &&
+               SDL_SetRenderDrawColor(renderer, 235, 239, 244, 255) &&
+               SDL_RenderDebugText(renderer, rect.x + 8, rect.y + 9, label);
+    };
+    return popup == Popup::Closed || (item(rootItem, "Create    >") &&
+                                     (popup != Popup::CreateRoad || item(roadItem, "Create Road")));
+}
+#endif
