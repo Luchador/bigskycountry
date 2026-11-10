@@ -74,27 +74,38 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     return true;
 }
 
-std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const Road* road, const FreeCamera& camera) const
+std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const
 {
-    if (!road || road->points.empty() || state.point >= static_cast<int>(road->points.size()) || !state.segments.empty())
+    if (!state.segments.empty())
     {
         return {};
     }
-    if (state.point < 0)
+    const auto target = state.Target();
+    if (target.kind == SelectionKind::Point)
     {
-        auto placement = GizmoPlacement::At(road->points.front().position, camera, scene);
-        if (placement && gizmo.space == GizmoSpace::Local)
+        const Road* road = Selected(world);
+        if (!road || state.point >= static_cast<int>(road->points.size()))
         {
-            const auto frame = ObjectTransform{{}, road->rotation}.ToMeshTransform();
-            placement->localAxes = {frame.x, frame.y, frame.z};
+            return {};
+        }
+        const RoadPoint& point = road->points[state.point];
+        auto placement = RoadOverlay::PointPlacement(point.position, camera, scene);
+        if (placement && gizmo.settings.space == GizmoSpace::Local)
+        {
+            placement->localAxes = road->PointAxes(state.point);
         }
         return placement;
     }
-    const RoadPoint& point = road->points[state.point];
-    auto placement = RoadOverlay::PointPlacement(point.position, camera, scene);
-    if (placement && gizmo.space == GizmoSpace::Local)
+    const TransformFields fields = Inspect(world, target);
+    if (fields.target.kind == SelectionKind::None)
     {
-        placement->localAxes = road->PointAxes(state.point);
+        return {};
+    }
+    auto placement = GizmoPlacement::At(fields.value.position, camera, scene);
+    if (placement && gizmo.settings.space == GizmoSpace::Local)
+    {
+        const auto frame = ObjectTransform{{}, fields.value.rotation}.ToMeshTransform();
+        placement->localAxes = {frame.x, frame.y, frame.z};
     }
     return placement;
 }
@@ -104,10 +115,10 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     if (const Road* road = Selected(world))
     {
         overlay.Draw(renderer, *road, state, camera, scene);
-        if (const auto placement = SelectedGizmoPlacement(road, camera))
-        {
-            gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
-        }
+    }
+    if (const auto placement = SelectedGizmoPlacement(world, camera))
+    {
+        gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
     }
 }
 
@@ -273,6 +284,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         status = SDL_GetError();
         return;
     }
+    if (result == EditHistory::Result::MapChanged) outliner.Invalidate();
     if (result != EditHistory::Result::Unavailable &&
         (result != EditHistory::Result::MapChanged || Save(world)))
     {
@@ -554,7 +566,13 @@ void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 
 void RoadEditor::MovePoint(Road& road, Vector3 position)
 {
-    constexpr double minSpacing = 0.05;
+    if (road.points[state.point].position == position)
+    {
+        return;
+    }
+    // Allow the smallest snapped step while retaining the free-drag spacing guard.
+    const double minSpacing = drag == Drag::Gizmo && gizmo.settings.snapEnabled
+        ? std::min(0.05, gizmo.settings.StepMeters() * 0.5) : 0.05;
     if (extensionSource)
     {
         const bool inserted = road.points.size() != originalPoints.size();
@@ -619,7 +637,7 @@ void RoadEditor::Release(WorldDocument& world)
 {
     if (dragStart && dragChanged)
     {
-        Commit(world, state.selected, std::move(*dragStart), Selected(world));
+        CommitTransform(world, std::move(*dragStart));
     }
 
     originalPoints.clear();
@@ -843,9 +861,11 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
     const int right = std::min(322, width / 2);
     const int left = std::min(panelWidth, (width - right) / 2);
     browserPanel = {0, top, left, height - top};
-    const int transformHeight = std::min(height - top, SdlTransformPanel::height);
-    transformArea = {width - right, top, right, transformHeight};
-    roadPanel = {width - right, top + transformHeight, right, height - top - transformHeight};
+    const int outlineHeight = std::min(250, (height - top) / 3);
+    outlineArea = {width - right, top, right, outlineHeight};
+    const int transformHeight = std::min(height - top - outlineHeight, SdlTransformPanel::height);
+    transformArea = {width - right, top + outlineHeight, right, transformHeight};
+    roadPanel = {width - right, transformArea.y + transformHeight, right, height - transformArea.y - transformHeight};
     scene = {left, top, width - left - right, height - top};
 #endif
     return SDL_SetRenderViewport(renderer, &scene);
@@ -865,15 +885,27 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     {
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
         if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) ||
-            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT   [ earlier   ] later",
+            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT   , earlier   . later",
                                        minutes / 60, minutes % 60) ||
             !Text(renderer, 12, static_cast<float>(scene.h) - 20, status.c_str(), ink))
         {
             return false;
         }
     }
+    outliner.Update(world, state);
+    auto fields = Inspect(world, state.Target());
+    if (state.outlineSelection.size() > 1)
+        fields.selectionLabel = std::to_string(state.outlineSelection.size()) + " items selected";
+    else if (!state.outlineSelection.empty())
+    {
+        const auto key = *state.outlineSelection.begin();
+        if (key.kind == SceneKind::Mesh) fields.selectionLabel = "Static mesh " + std::to_string(key.index + 1);
+        if (key.kind == SceneKind::Folder) fields.selectionLabel = "Folder";
+        if (key.kind == SceneKind::World) fields.selectionLabel = "World";
+    }
 #ifdef _WIN32
-    panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.space, Inspect(world, state.Target()));
+    panels.SyncOutliner(outliner);
+    panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields);
     return true;
 #else
     if (!menu.DrawViewportMenu(renderer))
@@ -888,10 +920,11 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const SDL_Rect shifted{roadPanel.x, roadPanel.y - roadScroll, roadPanel.w, roadPanel.h + roadScroll};
     const SDL_Rect clip{0, roadScroll, roadPanel.w, roadPanel.h};
     return SDL_SetRenderViewport(renderer, &browserPanel) && browser.Draw(renderer, browserPanel.w, browserPanel.h) &&
-           SDL_SetRenderViewport(renderer, &transformArea) && transformPanel.Draw(renderer, transformArea.w, Inspect(world, state.Target())) &&
+           SDL_SetRenderViewport(renderer, &outlineArea) && outlinePanel.Draw(renderer, outliner, outlineArea.w, outlineArea.h) &&
+           SDL_SetRenderViewport(renderer, &transformArea) && transformPanel.Draw(renderer, transformArea.w, fields) &&
            SDL_SetRenderViewport(renderer, &shifted) && SDL_SetRenderClipRect(renderer, &clip) &&
            RenderRoadPanel(renderer, world) && SDL_SetRenderClipRect(renderer, nullptr) &&
-           SDL_SetRenderViewport(renderer, nullptr) && cameraToolbar.Draw(renderer, roadPanel.x + roadPanel.w, camera, gizmo.space);
+           SDL_SetRenderViewport(renderer, nullptr) && cameraToolbar.Draw(renderer, roadPanel.x + roadPanel.w, camera, gizmo.settings);
 #endif
 }
 
@@ -930,7 +963,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene);
-    const auto placement = SelectedGizmoPlacement(selected, camera);
+    const auto placement = SelectedGizmoPlacement(world, camera);
     // A marker at the road pivot must still be selectable when the handles overlap it.
     const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
     const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
@@ -939,7 +972,16 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         gizmoDrag = gizmo.BeginDrag(picker, *placement);
         if (gizmoDrag)
         {
-            BeginRoadDrag(*selected, Drag::Gizmo, shift);
+            if (selected)
+            {
+                BeginRoadDrag(*selected, Drag::Gizmo, shift);
+            }
+            else
+            {
+                dragStart.emplace(state);
+                dragStart->meshTransform = Inspect(world, state.meshSelection).value;
+                drag = Drag::Gizmo;
+            }
             return;
         }
     }
@@ -982,6 +1024,9 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         state.drawing = false;
         state.SelectPoint(-1, -1);
         state.meshSelection = {hit.kind == RoadPickKind::Object ? SelectionKind::Object : SelectionKind::Terrain, hit.index};
+        break;
+    case RoadPickKind::Mesh:
+        state.SelectRows({{SceneKind::Mesh, hit.index}});
         break;
     case RoadPickKind::Empty:
         state.SelectPoint(-1, -1);
@@ -1039,6 +1084,25 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
     Save(world);
 }
 
+void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
+{
+    Release(world);
+    if (outliner.Apply(cmd, world, state, history))
+    {
+        Save(world);
+    }
+    else if (cmd.op == OutlineOp::Create || cmd.op == OutlineOp::Rename)
+    {
+        const auto& folders = world.hierarchy.Folders();
+        const auto it = folders.find(cmd.target.index);
+        if (cmd.op == OutlineOp::Create || it == folders.end() || it->second.name != cmd.name)
+        {
+            status = "Use a unique, nonempty folder name (up to 255 UTF-8 bytes)";
+        }
+    }
+    outliner.Update(world, state);
+}
+
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
@@ -1059,29 +1123,39 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& e
         status = SDL_GetError();
         return;
     }
-    if (road)
+    CommitTransform(world, std::move(before));
+}
+
+void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
+{
+    if (before.meshTransform)
     {
-        Commit(world, state.selected, std::move(before), road);
+        EditSnapshot after(state);
+        after.meshTransform = Inspect(world, state.meshSelection).value;
+        if (history.Record(-1, std::move(before), std::move(after)))
+        {
+            Save(world);
+        }
     }
     else
     {
-        EditSnapshot after(state);
-        after.meshTransform = Inspect(world, edit.target).value;
-        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        Commit(world, state.selected, std::move(before), Selected(world));
     }
 }
 
 void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
 {
-    const auto amount = gizmoDrag->Amount(camera, scene, pointer);
+    mouse = pointer;
+    const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings);
     if (!amount)
     {
         return;
     }
-    Road& road = world.roads[state.selected];
     if (state.point < 0)
     {
-        const ObjectTransform start{originalPoints.front().position, originalRotation};
+        const bool mesh = dragStart->meshTransform.has_value();
+        const ObjectTransform start = mesh ? *dragStart->meshTransform
+                                           : ObjectTransform{originalPoints.front().position, originalRotation};
         ObjectTransform pose = start;
         if (gizmo.mode == GizmoMode::Translate)
         {
@@ -1091,6 +1165,15 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         {
             pose.Rotate(gizmoDrag->axis, *amount);
         }
+        if (mesh)
+        {
+            if (SetMeshTransform(world, state.meshSelection, pose))
+            {
+                dragChanged = pose != start;
+            }
+            return;
+        }
+        Road& road = world.roads[state.selected];
         if (pose.position == road.points.front().position && pose.rotation == road.rotation)
         {
             return;
@@ -1109,6 +1192,7 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         }
         return;
     }
+    Road& road = world.roads[state.selected];
     if (gizmo.mode == GizmoMode::Translate)
     {
         const int source = extensionSource.value_or(state.point);
@@ -1181,6 +1265,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             return EditorEvent::Handled;
         }
+        std::optional<OutlineCommand> outlineCommand;
+        if (outlinePanel.Key(window, event, outliner, outlineCommand))
+        {
+            if (outlineCommand) ApplyOutline(*outlineCommand, world);
+            return EditorEvent::Handled;
+        }
         std::optional<TransformEdit> edit;
         if (transformPanel.Key(window, event, edit))
         {
@@ -1197,6 +1287,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         return EditorEvent::Handled;
     }
 #ifdef _WIN32
+    if (const auto cmd = panels.TakeOutlineCommand(event))
+    {
+        ApplyOutline(*cmd, world);
+        return EditorEvent::Handled;
+    }
     if (const auto edit = panels.TakeTransformEdit(event))
     {
         ApplyInspectorEdit(world, *edit);
@@ -1209,7 +1304,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         Activate(action, world, camera);
         return EditorEvent::Handled;
     }
-    if (panels.HandleInput(event, camera, gizmo.space))
+    if (panels.HandleInput(event, camera, gizmo.settings))
     {
         return EditorEvent::Handled;
     }
@@ -1230,13 +1325,27 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         Release(world);
         return EditorEvent::Pass;
     }
-    if (!planView && event.type == SDL_EVENT_KEY_DOWN &&
-        !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)) &&
-        (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET))
+    if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
+        !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
     {
-        const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
-        g_WorldState.SetTimeOfDayMinutes(minutes + (event.key.key == SDLK_RIGHTBRACKET ? 30 : -30));
-        return EditorEvent::Handled;
+        if (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET)
+        {
+            if (!event.key.repeat)
+            {
+                gizmo.settings.ChangeStep(event.key.key == SDLK_RIGHTBRACKET ? 1 : -1);
+                if (DraggingGizmo() && gizmo.mode == GizmoMode::Translate)
+                {
+                    MoveGizmo(world, camera, mouse);
+                }
+            }
+            return EditorEvent::Handled;
+        }
+        if (!planView && (event.key.key == SDLK_COMMA || event.key.key == SDLK_PERIOD))
+        {
+            const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
+            g_WorldState.SetTimeOfDayMinutes(minutes + (event.key.key == SDLK_PERIOD ? 30 : -30));
+            return EditorEvent::Handled;
+        }
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
@@ -1247,17 +1356,24 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if ((DraggingGizmo() || extensionSource) && event.key.key == SDLK_ESCAPE)
         {
-            Road& road = world.roads[state.selected];
-            state.point = extensionSource.value_or(state.point);
-            state.additionalPoints = dragStart->additionalPoints;
-            road.points = std::move(originalPoints);
-            road.rotation = originalRotation;
-            road.Rebuild();
+            if (dragStart->meshTransform)
+            {
+                SetMeshTransform(world, state.meshSelection, *dragStart->meshTransform);
+            }
+            else
+            {
+                Road& road = world.roads[state.selected];
+                state.point = extensionSource.value_or(state.point);
+                state.additionalPoints = dragStart->additionalPoints;
+                road.points = std::move(originalPoints);
+                road.rotation = originalRotation;
+                road.Rebuild();
+            }
             dragChanged = false;
             Release(world);
             return EditorEvent::Handled;
         }
-        if (!planView && state.selected >= 0 && !SDL_GetWindowRelativeMouseMode(window) &&
+        if (!planView && state.Target().kind != SelectionKind::None && !SDL_GetWindowRelativeMouseMode(window) &&
             !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
             (event.key.key == SDLK_W || event.key.key == SDLK_E))
         {
@@ -1325,11 +1441,23 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             return EditorEvent::Handled;
         }
 #else
+        const SDL_FPoint localOutline{pointer.x - outlineArea.x, pointer.y};
+        if (outlinePanel.Tracking() || (localOutline.x >= 0 && localOutline.x < outlineArea.w &&
+                                       localOutline.y >= 0 && localOutline.y < outlineArea.h))
+        {
+            mouse = {-1,-1};
+            outliner.Update(world, state);
+            std::optional<OutlineCommand> cmd;
+            outlinePanel.Pointer(window, e, localOutline, outlineArea.w, outlineArea.h, outliner, cmd);
+            if (cmd) ApplyOutline(*cmd, world);
+            return EditorEvent::Handled;
+        }
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) outlinePanel.Blur(window);
         if (e.type == SDL_EVENT_MOUSE_WHEEL && pointer.y < 0)
         {
             return EditorEvent::Pass; // The toolbar wheel adjusts free-camera speed.
         }
-        if (cameraToolbar.HandlePointer(e, windowWidth, camera, gizmo.space))
+        if (cameraToolbar.HandlePointer(e, windowWidth, camera, gizmo.settings))
         {
             mouse = {-1, -1};
             return EditorEvent::Handled;
@@ -1348,7 +1476,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (pointer.x >= roadPanel.x)
         {
             mouse = {-1, -1};
-            if (e.type == SDL_EVENT_MOUSE_WHEEL && roadScrollMax > 0 && pointer.y >= transformArea.h)
+            if (e.type == SDL_EVENT_MOUSE_WHEEL && roadScrollMax > 0 && pointer.y >= outlineArea.h + transformArea.h)
             {
                 const float wheel = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                 roadScroll = std::clamp(roadScroll - static_cast<int>(wheel * 32), 0, roadScrollMax);
@@ -1356,12 +1484,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
             {
-                if (pointer.y < transformArea.h)
+                if (pointer.y < outlineArea.h + transformArea.h)
                 {
-                    transformPanel.Click(window, {pointer.x - transformArea.x, pointer.y}, transformArea.w, Inspect(world, state.Target()));
+                    transformPanel.Click(window, {pointer.x - transformArea.x, pointer.y - outlineArea.h}, transformArea.w, Inspect(world, state.Target()));
                     return EditorEvent::Handled;
                 }
-                const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y - transformArea.h + roadScroll};
+                const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y - outlineArea.h - transformArea.h + roadScroll};
                 for (const Button& button : Buttons(world))
                 {
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))

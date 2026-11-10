@@ -44,6 +44,29 @@ namespace
     }
 }
 
+std::set<SceneKey> RoadEditorState::SelectedRows() const
+{
+    if (!outlineSelection.empty()) return outlineSelection;
+    if (selected >= 0) return {{SceneKind::Road, selected}};
+    if (meshSelection.kind == SelectionKind::Object) return {{SceneKind::Object, meshSelection.index}};
+    if (meshSelection.kind == SelectionKind::Terrain) return {{SceneKind::Terrain, meshSelection.index}};
+    return {};
+}
+
+void RoadEditorState::SelectRows(const std::set<SceneKey>& keys)
+{
+    drawing = false;
+    SelectPoint(-1, -1);
+    if (keys.size() == 1)
+    {
+        const auto key = *keys.begin();
+        if (key.kind == SceneKind::Road) { selected = key.index; return; }
+        if (key.kind == SceneKind::Object) { meshSelection = {SelectionKind::Object, key.index}; return; }
+        if (key.kind == SceneKind::Terrain) { meshSelection = {SelectionKind::Terrain, key.index}; return; }
+    }
+    outlineSelection = keys;
+}
+
 void RoadEditorState::PickPoint(int roadIndex, int index, bool add, bool subtract)
 {
     if (subtract)
@@ -82,7 +105,7 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRo
 }
 
 EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads)
-    : meshSelection(editor.meshSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
+    : meshSelection(editor.meshSelection), outlineSelection(editor.outlineSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -116,10 +139,13 @@ void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& edi
 {
     const int index = editor.selected;
     EditSnapshot before(editor, &world.roads.at(index));
+    before.roadFolder = world.hierarchy.Parent({SceneKind::Road, index});
     const std::size_t count = replacements.size();
+    world.hierarchy.ReplaceRange(SceneKind::Road, index, 1, static_cast<int>(count), before.roadFolder);
     ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
     editor.SelectPoint(count ? index : -1, -1);
     EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
+    after.roadFolder = before.roadFolder;
     Record(index, std::move(before), std::move(after));
 }
 
@@ -129,6 +155,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     auto& roads = world.roads;
     RoadEditorState restored;
     restored.meshSelection = to.meshSelection;
+    restored.outlineSelection = to.outlineSelection;
     restored.segments = to.segments;
     restored.additionalPoints = to.additionalPoints;
     auto in = Reader(to.editorData);
@@ -159,16 +186,20 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
             road.Rebuild();
             replacements.push_back(std::move(road));
         }
+        if (from.roadData.size() != replacements.size())
+        {
+            world.hierarchy.ReplaceRange(SceneKind::Road, index, static_cast<int>(from.roadData.size()),
+                                         static_cast<int>(replacements.size()), to.roadFolder);
+        }
         ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
     }
-    if (to.meshTransform)
+    if (to.meshTransform && !SetMeshTransform(world, to.meshSelection, *to.meshTransform))
     {
-        const auto target = to.meshSelection;
-        if (target.kind == SelectionKind::Object) world.Objects().at(target.index)->SetTransform(*to.meshTransform);
-        else world.Terrain().at(target.index)->SetTransform(*to.meshTransform);
+        return Result::Failed;
     }
+    if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain;
+    const bool mapChanged = index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "road.hpp"
+#include "scene_hierarchy.hpp"
 #include "bscobject.hpp"
 #include "terrain_chunk.hpp"
 
@@ -13,6 +14,9 @@
 class WorldDocument
 {
 public:
+    SceneHierarchy hierarchy;
+    bool Contains(SceneKey key) const;
+    const std::string& Path() const { return path; }
     MeshAssets models;
     std::vector<Road> roads;
     std::vector<MeshInstance> meshes; // Static MESH placements, including arbitrary affine transforms.

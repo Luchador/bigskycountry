@@ -6,7 +6,7 @@
 class WorldDocument;
 struct RoadEditorState;
 
-enum class RoadPickKind { Empty, Road, Segment, Point, Object, Terrain };
+enum class RoadPickKind { Empty, Road, Segment, Point, Object, Terrain, Mesh };
 
 struct RoadPick
 {

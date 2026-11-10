@@ -30,6 +30,7 @@ add_library(BigSkyApplication STATIC
     shared/road.cpp
     shared/road_stripes.cpp
     shared/road_io.cpp
+    shared/scene_hierarchy.cpp
     shared/world_document.cpp
     shared/road_render.cpp
     shared/world_renderer_gpu.cpp
@@ -58,11 +59,12 @@ target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
+    editor/scene_outliner.cpp
     editor/road_editor.cpp
     editor/transform_inspector.cpp
     editor/road_overlay.cpp
     editor/transform_gizmo.cpp
-    editor/transform_space.cpp
+    editor/transform_settings.cpp
     editor/viewport_picker.cpp
     editor/editor_menu.cpp
     editor/edit_history.cpp
@@ -79,8 +81,8 @@ if(WIN32)
                 "${CMAKE_CURRENT_SOURCE_DIR}/editor/panel_ids.h")
         endif()
     endif()
-    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/panels.rc)
-    set_source_files_properties(editor/windows_panels.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
+    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/windows_outliner.cpp editor/panels.rc)
+    set_source_files_properties(editor/windows_panels.cpp editor/windows_outliner.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
     target_include_directories(BigSkyCountryEditor PRIVATE editor)
     if(MSVC)
         target_sources(BigSkyCountryEditor PRIVATE editor/editor.manifest)
@@ -89,7 +91,7 @@ if(WIN32)
     endif()
     target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32)
 else()
-    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp)
+    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 

@@ -2,12 +2,14 @@
 
 #include "application.hpp"
 #include "road_action.hpp"
+#include "scene_outliner.hpp"
 #ifdef _WIN32
 #include "windows_panels.hpp"
 #endif
 #ifndef _WIN32
 #include "camera_toolbar.hpp"
 #include "sdl_transform_panel.hpp"
+#include "sdl_outliner.hpp"
 #endif
 #include "content_browser.hpp"
 #include "edit_history.hpp"
@@ -24,7 +26,7 @@ public:
     SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
     bool ViewportFocused() const override { return panels.ViewportFocused(); }
 #else
-    bool ViewportFocused() const override { return !transformPanel.Focused(); }
+    bool ViewportFocused() const override { return !transformPanel.Focused() && !outlinePanel.Focused(); }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
@@ -69,11 +71,12 @@ private:
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
-    std::optional<GizmoPlacement> SelectedGizmoPlacement(const Road* road, const FreeCamera& camera) const;
+    std::optional<GizmoPlacement> SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const;
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
+    void ApplyOutline(const OutlineCommand& cmd, WorldDocument& world);
     void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
     void SelectAt(const WorldDocument& world, Vector3 pos);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
@@ -84,13 +87,15 @@ private:
     void Release(WorldDocument& world);
     bool Save(WorldDocument& world);
     void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
+    void CommitTransform(WorldDocument& world, EditSnapshot before);
     void Commit(WorldDocument& world, int roadIndex, EditSnapshot before, const Road* after = nullptr);
 
     double scale = 4.0; // pixels per meter
     Vector3 center{};
     SDL_Rect scene{};
 #ifndef _WIN32
-    SDL_Rect browserPanel{}, roadPanel{}, transformArea{};
+    SDL_Rect browserPanel{}, roadPanel{}, transformArea{}, outlineArea{};
+    SdlOutliner outlinePanel;
     SdlTransformPanel transformPanel;
     int roadScroll = 0, roadScrollMax = 0;
 #endif
@@ -104,6 +109,7 @@ private:
     Vector3 creationPoint{};
     RoadEditorState state;
     EditHistory history;
+    SceneOutliner outliner;
     EditorMenu menu;
     RoadOverlay overlay;
     TransformGizmo gizmo;

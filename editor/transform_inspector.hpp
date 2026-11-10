@@ -19,6 +19,7 @@ struct TransformFields
 {
     TransformTarget target;
     ObjectTransform value;
+    std::string selectionLabel;
     bool CanEdit(int field) const;
     double DisplayValue(int field) const;
     std::string Text(int field) const;
@@ -34,5 +35,6 @@ struct TransformEdit
 };
 
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
+bool SetMeshTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value);
 std::optional<double> ParseTransformValue(std::string_view text);

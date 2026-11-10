@@ -1,6 +1,7 @@
 #pragma once
 
 #include "road.hpp"
+#include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
 
 #include <set>
@@ -19,6 +20,9 @@ struct RoadEditorState
     std::set<int> segments; // Indices of selected spans in the active road.
 
     TransformTarget meshSelection;
+    std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
+    std::set<SceneKey> SelectedRows() const;
+    void SelectRows(const std::set<SceneKey>& keys);
     TransformTarget Target() const
     {
         if (selected < 0) return meshSelection;
@@ -39,6 +43,7 @@ struct RoadEditorState
         additionalPoints.clear();
         segments.clear();
         meshSelection = {};
+        outlineSelection.clear();
     }
 };
 
@@ -55,9 +60,12 @@ struct EditSnapshot
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
+    std::optional<SceneHierarchy> hierarchy;
+    std::set<SceneKey> outlineSelection;
     bool operator==(const EditSnapshot&) const = default;
 
     std::string editorData;
+    int roadFolder = 0; // All sections of a split inherit the original road's folder.
     std::vector<std::string> roadData; // Source records for one contiguous range.
     std::set<int> additionalPoints;
     std::set<int> segments;

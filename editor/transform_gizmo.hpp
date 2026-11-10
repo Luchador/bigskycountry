@@ -1,7 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
-#include "transform_space.hpp"
+#include "transform_settings.hpp"
 #include <array>
 #include <optional>
 
@@ -28,7 +28,7 @@ struct GizmoPlacement
 class GizmoDrag
 {
 public:
-    std::optional<double> Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse) const;
+    std::optional<double> Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings) const;
     Vector3 axis;
 
 private:
@@ -52,7 +52,7 @@ public:
     std::optional<GizmoDrag> BeginDrag(ViewportPicker& picker, const GizmoPlacement& placement) const;
 
     GizmoMode mode = GizmoMode::Translate;
-    GizmoSpace space = GizmoSpace::World;
+    TransformSettings settings;
 
 private:
     const GizmoAxes& Axes(const GizmoPlacement& placement) const;

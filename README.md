@@ -60,6 +60,14 @@ In the 3D editor, right-click and choose **Create → Test Terrain** to center a
 
 A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 1 section stores the quoted path, position XYZ in meters, and rotation XYZ in radians for each chunk. Chunks use the mesh’s authored scale.
 
+### Scene outliner
+
+The **Outliner** above Transform lists the world’s roads, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or terrain chunk in the list makes its transform available for editing.
+
+Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. You can also move a folder with its descendants. Multi-selection is for organizing entries.
+
+With a folder selected, **Delete** moves its contents to its parent and removes the folder. Folder edits save immediately and support **Ctrl+Z** and **Ctrl+Y**. The optional `OUTL` section in each `.wld` stores its hierarchy and folder assignments. Worlds without that section open with all entries at the root.
+
 ### Transform panel
 
 The Transform panel sits above the road inspector. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. The title identifies the selection. Locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
@@ -87,6 +95,10 @@ In the 3D viewport, each cyan spline between two consecutive control points repr
 With the viewport focused, **Delete** removes the selected road, segments, or control points. Deleting segments leaves a separate road for each continuous run of surviving segments. Deleting points reconnects the remaining points in order. A road is removed when it has fewer than two points left. Each deletion is saved immediately and can be undone or redone in one step.
 
 The globe/cube button to the left of the camera speed slider toggles the 3D transform space. The editor starts in world space (globe). In local space (cube), a road point’s red X axis follows its tangent, its green Y axis is perpendicular to the grade, and its blue Z axis runs across the road. Translation arrows and rotation rings both use the chosen axes.
+
+The grid button immediately left of the globe/cube toggles translation snapping. It starts off with **1 m** selected. With the viewport focused, **[** selects a smaller increment and **]** a larger one. The available increments are 1 cm, 10 cm, 1 m, 10 m, 100 m, and 1 km. The toolbar shows the current increment. A translation arrow measures signed steps from the drag's starting position along its world or local axis. This also applies when Shift-dragging a road endpoint to extend it. Placed objects and terrain chunks use the same gizmos. Rotation stays continuous, and typed Transform values keep their entered precision.
+
+Use **,** to move sky time 30 minutes earlier and **.** to move it 30 minutes later.
 
 The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`.
 

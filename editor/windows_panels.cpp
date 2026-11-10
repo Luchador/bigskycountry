@@ -1,11 +1,12 @@
 #include "windows_panels.hpp"
+#include "windows_outliner.hpp"
 #include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "free_camera.hpp"
 #include "menu_ids.h"
 #include "panel_ids.h"
 #include "road_action.hpp"
-#include "transform_space.hpp"
+#include "transform_settings.hpp"
 #include <array>
 #include <deque>
 
@@ -50,10 +51,10 @@ namespace
         }
     }
 
-    HBITMAP SpaceBitmap(GizmoSpace space, int size)
+    HBITMAP ToolbarBitmap(TransformIcon which, int size)
     {
         using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
-        Surface icon(LoadTransformSpaceIcon(space), SDL_DestroySurface);
+        Surface icon(LoadTransformIcon(which), SDL_DestroySurface);
         if (!icon)
         {
             return nullptr;
@@ -123,8 +124,9 @@ struct WindowsPanels::Impl
 {
     SDL_Window* frameWindow = nullptr;
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
+    WindowsOutliner outline;
     HACCEL shortcuts = nullptr;
-    Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, spaceEvent = 0;
+    Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, toolbarEvent = 0;
     Uint32 transformEvent = 0;
     std::optional<TransformFields> inspected;
     std::deque<TransformEdit> pendingEdits;
@@ -133,49 +135,65 @@ struct WindowsPanels::Impl
     bool populating = false, populated = false;
     int scroll = 0;
     double lastSpeed = -1;
-    std::array<HBITMAP, 2> spaceIcons{};
+    std::array<HBITMAP, transformIcons.size()> icons{};
     int iconSize = 0;
-    GizmoSpace displayedSpace = GizmoSpace::World;
+    TransformSettings displayedSettings;
 
     ~Impl()
     {
-        for (HBITMAP icon : spaceIcons)
+        for (HBITMAP icon : icons)
         {
             DeleteObject(icon);
         }
     }
 
-    void ShowSpace(GizmoSpace space)
+    void ShowButton(int id, TransformIcon which, const wchar_t* caption, const wchar_t* fallback)
     {
-        displayedSpace = space;
-        HWND button = GetDlgItem(toolbar, IDC_TRANSFORM_SPACE);
-        HBITMAP icon = spaceIcons[static_cast<int>(space)];
+        HWND button = GetDlgItem(toolbar, id);
+        HBITMAP icon = icons[static_cast<int>(which)];
         LONG_PTR style = GetWindowLongPtrW(button, GWL_STYLE);
         SetWindowLongPtrW(button, GWL_STYLE, icon ? style | BS_BITMAP : style & ~BS_BITMAP);
-        SetWindowTextW(button, space == GizmoSpace::World ? (icon ? L"World space" : L"World") :
-                                                            (icon ? L"Local space" : L"Local"));
+        SetWindowTextW(button, icon ? caption : fallback);
         SendMessageW(button, BM_SETIMAGE, IMAGE_BITMAP, reinterpret_cast<LPARAM>(icon));
-        RedrawWindow(button, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+        InvalidateRect(button, nullptr, TRUE);
     }
 
-    void SizeSpaceButton(int side, int x, int y)
+    void ShowSettings(const TransformSettings& settings)
     {
-        HWND button = GetDlgItem(toolbar, IDC_TRANSFORM_SPACE);
-        MoveWindow(button, x, y, side, side, TRUE);
+        displayedSettings = settings;
+        const bool world = settings.space == GizmoSpace::World;
+        ShowButton(IDC_TRANSFORM_SPACE, settings.SpaceIcon(), world ? L"World space" : L"Local space", world ? L"World" : L"Local");
+        ShowButton(IDC_SNAP_TO_GRID, settings.SnapIcon(), settings.snapEnabled ? L"Grid snap on" : L"Grid snap off",
+                   settings.snapEnabled ? L"On" : L"Off");
+        SetDlgItemTextW(toolbar, IDC_SNAP_STEP, Wide(settings.StepLabel()).c_str());
+    }
+
+    void SizeTransformButtons(int side, int spaceX, int y)
+    {
+        const int gap = DialogSize(toolbar, 3, 0).cx;
+        const int snapX = spaceX - side - gap;
+        MoveWindow(GetDlgItem(toolbar, IDC_TRANSFORM_SPACE), spaceX, y, side, side, TRUE);
+        MoveWindow(GetDlgItem(toolbar, IDC_SNAP_TO_GRID), snapX, y, side, side, TRUE);
+        const SIZE label = DialogSize(toolbar, 34, 12);
+        MoveWindow(GetDlgItem(toolbar, IDC_SNAP_STEP), snapX - gap - label.cx, DialogSize(toolbar, 0, 7).cy,
+                   label.cx, label.cy, TRUE);
         const int size = std::max(1, side - 2 * y);
         if (size == iconSize)
         {
             return;
         }
         iconSize = size;
-        SendMessageW(button, BM_SETIMAGE, IMAGE_BITMAP, 0);
-        for (GizmoSpace space : {GizmoSpace::World, GizmoSpace::Local})
+        for (int id : {IDC_TRANSFORM_SPACE, IDC_SNAP_TO_GRID})
         {
-            HBITMAP& icon = spaceIcons[static_cast<int>(space)];
-            DeleteObject(icon);
-            icon = SpaceBitmap(space, size);
+            SendDlgItemMessageW(toolbar, id, BM_SETIMAGE, IMAGE_BITMAP, 0);
         }
-        ShowSpace(displayedSpace);
+        for (TransformIcon which : transformIcons)
+        {
+            HBITMAP& icon = icons[static_cast<int>(which)];
+            DeleteObject(icon);
+            icon = ToolbarBitmap(which, size);
+        }
+        ShowSettings(displayedSettings);
     }
 
     struct Inspector
@@ -201,7 +219,7 @@ struct WindowsPanels::Impl
     void SyncFields(const TransformFields& fields)
     {
         if (inspected && *inspected == fields) return;
-        const bool changedTarget = !inspected || inspected->target != fields.target;
+        const bool changedTarget = !inspected || inspected->target != fields.target || inspected->selectionLabel != fields.selectionLabel;
         inspected = fields;
         if (changedTarget)
         {
@@ -261,7 +279,9 @@ struct WindowsPanels::Impl
         const int h = rect.bottom - top;
         MoveWindow(toolbar, 0, 0, rect.right, top, TRUE);
         MoveWindow(models, 0, top, left, h, TRUE);
-        MoveWindow(road, rect.right - right, top, right, h, TRUE);
+        const int outlineHeight = std::min<int>(h / 3, DialogSize(road, 0, 140).cy);
+        outline.Layout(rect.right - right, top, right, outlineHeight);
+        MoveWindow(road, rect.right - right, top + outlineHeight, right, h - outlineHeight, TRUE);
         MoveWindow(view, left, top, std::max<int>(1, rect.right - left - right), std::max(1, h), TRUE);
 
         auto moveTool = [&](int id, int rightOffset, int y, int w, int height)
@@ -271,7 +291,7 @@ struct WindowsPanels::Impl
         };
         const int insetY = DialogSize(toolbar, 0, 2).cy;
         const int side = std::max(1, top - 2 * insetY);
-        SizeSpaceButton(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
+        SizeTransformButtons(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
         moveTool(IDC_SPEED_LABEL, 200, 7, 52, 12);
         moveTool(IDC_SPEED, 146, 3, 89, 19);
         moveTool(IDC_SPEED_VALUE, 54, 7, 50, 12);
@@ -281,7 +301,7 @@ struct WindowsPanels::Impl
 
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, ROAD_PANEL_HEIGHT).cy - 1;
-        si.nPage = static_cast<UINT>(h);
+        si.nPage = static_cast<UINT>(h - outlineHeight);
         si.nPos = scroll;
         const int next = SetScrollInfo(road, SB_VERT, &si, TRUE);
         ScrollTo(next);
@@ -368,7 +388,8 @@ struct WindowsPanels::Impl
         {
             switch (id)
             {
-            case IDC_TRANSFORM_SPACE: Post(spaceEvent, 0); SetFocus(frame); return;
+            case IDC_TRANSFORM_SPACE:
+            case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
             case IDC_REFRESH: browser->Refresh(); Populate(); return;
             case IDC_VIEW: Post(actions, int(RoadAction::ChangeView)); SetFocus(frame); return;
             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
@@ -617,6 +638,13 @@ struct WindowsPanels::Impl
                 return false;
             }
 
+            HWND outlineList = GetDlgItem(self.outline.Window(), IDC_OUTLINE_LIST);
+            if (hover == outlineList && msg->hwnd != outlineList)
+            {
+                SendMessageW(outlineList, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
+                return false;
+            }
+
             HWND tree = GetDlgItem(self.models, IDC_MODELS);
 
             if (hover == tree && msg->hwnd != tree)
@@ -678,7 +706,7 @@ struct WindowsPanels::Impl
             {
                 return false;
             }
-            for (HWND panel : {self.toolbar, self.models, self.road})
+            for (HWND panel : {self.toolbar, self.models, self.outline.Window(), self.road})
             {
                 if ((panel == focus || IsChild(panel, focus)) && IsDialogMessageW(panel, msg))
                 {
@@ -700,7 +728,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.frameWindow = frame;
     p.frame = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(frame), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     const HINSTANCE module = GetModuleHandleW(nullptr);
-    INITCOMMONCONTROLSEX common{sizeof(common), ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES};
+    INITCOMMONCONTROLSEX common{sizeof(common), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES};
 
     if (!p.frame || !InitCommonControlsEx(&common))
     {
@@ -718,7 +746,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.speedEvent = p.actions + 1;
     p.wheelEvent = p.actions + 2;
     p.pressEvent = p.actions + 3;
-    p.spaceEvent = p.actions + 4;
+    p.toolbarEvent = p.actions + 4;
     p.transformEvent = p.actions + 5;
     WNDCLASSW wc{};
     wc.hInstance = module;
@@ -744,7 +772,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.models = panel(IDD_BROWSER);
     p.road = panel(IDD_ROAD);
 
-    if (!p.view || !p.toolbar || !p.models || !p.road || !SetWindowSubclass(p.frame, Impl::FrameProc, 2, reinterpret_cast<DWORD_PTR>(&p)))
+    if (!p.view || !p.toolbar || !p.models || !p.road || !p.outline.Create(p.frame, module) || !SetWindowSubclass(p.frame, Impl::FrameProc, 2, reinterpret_cast<DWORD_PTR>(&p)))
     {
         WinError("Cannot create editor panels");
         return nullptr;
@@ -790,6 +818,13 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     }
 
     return result;
+}
+
+void WindowsPanels::SyncOutliner(const SceneOutliner& model) { impl->outline.Sync(model); }
+
+std::optional<OutlineCommand> WindowsPanels::TakeOutlineCommand(const SDL_Event& event)
+{
+    return impl->outline.Take(event);
 }
 
 bool WindowsPanels::ViewportFocused() const
@@ -839,15 +874,22 @@ bool WindowsPanels::Command(const SDL_Event& event, RoadAction& action) const
     return true;
 }
 
-bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, GizmoSpace& space)
+bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings)
 {
     if (event.type == impl->pressEvent)
     {
         impl->pressModifiers = static_cast<SDL_Keymod>(event.user.code);
     }
-    else if (event.type == impl->spaceEvent)
+    else if (event.type == impl->toolbarEvent)
     {
-        space = OtherSpace(space);
+        if (event.user.code == IDC_SNAP_TO_GRID)
+        {
+            settings.snapEnabled = !settings.snapEnabled;
+        }
+        else
+        {
+            settings.ToggleSpace();
+        }
     }
     else if (event.type == impl->speedEvent)
     {
@@ -877,14 +919,14 @@ SDL_Keymod WindowsPanels::TakePressModifiers()
     return std::exchange(impl->pressModifiers, std::nullopt).value_or(SDL_GetModState());
 }
 
-void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, GizmoSpace space, const TransformFields& fields)
+void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields)
 {
     auto& p = *impl;
     p.SyncFields(fields);
 
-    if (space != p.displayedSpace)
+    if (settings != p.displayedSettings)
     {
-        p.ShowSpace(space);
+        p.ShowSettings(settings);
     }
 
     if (!p.populated)

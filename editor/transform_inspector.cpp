@@ -76,6 +76,7 @@ std::string TransformFields::Text(int field) const
 
 std::string TransformFields::Title() const
 {
+    if (!selectionLabel.empty()) return selectionLabel;
     const std::string n = std::to_string(target.index + 1);
     switch (target.kind)
     {
@@ -171,6 +172,20 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     return fields;
 }
 
+bool SetMeshTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform)
+{
+    const auto index = static_cast<std::size_t>(target.index);
+    if (target.kind == SelectionKind::Object && index < world.Objects().size())
+    {
+        return world.Objects()[index]->SetTransform(transform);
+    }
+    if (target.kind == SelectionKind::Terrain && index < world.Terrain().size())
+    {
+        return world.Terrain()[index]->SetTransform(transform);
+    }
+    return SDL_SetError("Invalid mesh selection");
+}
+
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value)
 {
     if (!fields.CanEdit(field) || !std::isfinite(value))
@@ -182,14 +197,9 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
     Component(Row(t, field), field % 3) = field >= 3 && field < 6 ? value / degrees : value;
     const TransformTarget target = fields.target;
 
-    if (target.kind == SelectionKind::Object)
+    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain)
     {
-        return world.Objects()[target.index]->SetTransform(t);
-    }
-
-    if (target.kind == SelectionKind::Terrain)
-    {
-        return world.Terrain()[target.index]->SetTransform(t);
+        return SetMeshTransform(world, target, t);
     }
 
     Road& road = world.roads[target.index];

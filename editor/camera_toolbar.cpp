@@ -9,24 +9,33 @@ namespace
     constexpr float margin = 12.0f;
     constexpr float valueWidth = 88.0f;
     constexpr float buttonSize = 32.0f;
-    constexpr int minWidthForValue = 162;
+    constexpr float buttonGap = 4.0f;
+    constexpr float stepLabelWidth = 52.0f;
+    constexpr float buttonsWidth = 2 * buttonSize + buttonGap + stepLabelWidth;
+    constexpr int minWidthForValue = 246;
 
     SDL_FRect Track(int width)
     {
         const float right = width - margin - (width >= minWidthForValue ? valueWidth : 0.0f);
-        const float left = std::max(margin + buttonSize + 8, right - 176.0f);
+        const float left = std::max(margin + buttonsWidth + 8, right - 176.0f);
         return {left, CameraToolbar::height * 0.5f - 2.0f, std::max(1.0f, right - left), 4.0f};
     }
 
     bool ShowSpeedLabel(SDL_FRect track)
     {
-        return track.x >= margin + buttonSize + 112.0f;
+        return track.x >= margin + buttonsWidth + 112.0f;
     }
 
     SDL_FRect SpaceButton(SDL_FRect track)
     {
         const float gap = ShowSpeedLabel(track) ? 112.0f : 8.0f;
         return {track.x - gap - buttonSize, (CameraToolbar::height - buttonSize) / 2, buttonSize, buttonSize};
+    }
+
+    SDL_FRect SnapButton(SDL_FRect space)
+    {
+        space.x -= buttonSize + buttonGap;
+        return space;
     }
 
     bool Fill(SDL_Renderer* renderer, SDL_FRect rect, SDL_Color color)
@@ -37,18 +46,18 @@ namespace
 
 void CameraToolbar::LoadIcons(SDL_Renderer* renderer)
 {
-    for (GizmoSpace space : {GizmoSpace::World, GizmoSpace::Local})
+    for (TransformIcon icon : transformIcons)
     {
-        SDL_Surface* surface = LoadTransformSpaceIcon(space);
+        SDL_Surface* surface = LoadTransformIcon(icon);
         if (surface)
         {
-            icons[static_cast<int>(space)] = SDL_CreateTextureFromSurface(renderer, surface);
+            icons[static_cast<int>(icon)] = SDL_CreateTextureFromSurface(renderer, surface);
             SDL_DestroySurface(surface);
         }
     }
 }
 
-bool CameraToolbar::Draw(SDL_Renderer* renderer, int width, const FreeCamera& camera, GizmoSpace space) const
+bool CameraToolbar::Draw(SDL_Renderer* renderer, int width, const FreeCamera& camera, const TransformSettings& settings) const
 {
     const float w = static_cast<float>(width);
     const SDL_FRect track = Track(width);
@@ -68,18 +77,22 @@ bool CameraToolbar::Draw(SDL_Renderer* renderer, int width, const FreeCamera& ca
     {
         return false;
     }
-    const SDL_FRect button = SpaceButton(track);
-    SDL_Texture* icon = icons[static_cast<int>(space)];
-    if (icon)
+    const auto drawButton = [&](SDL_FRect rect, Button button, TransformIcon icon, const char* fallback)
     {
-        const SDL_FRect image = {button.x + spacePressed, button.y + spacePressed, button.w, button.h};
-        if (!SDL_RenderTexture(renderer, icon, nullptr, &image))
+        if (auto* texture = icons[static_cast<int>(icon)])
         {
-            return false;
+            const float offset = pressed == button ? 1.0f : 0.0f;
+            rect.x += offset;
+            rect.y += offset;
+            return SDL_RenderTexture(renderer, texture, nullptr, &rect);
         }
-    }
-    else if (!SDL_RenderRect(renderer, &button) ||
-             !SDL_RenderDebugText(renderer, button.x + 12, button.y + 12, space == GizmoSpace::World ? "W" : "L"))
+        return SDL_RenderRect(renderer, &rect) &&
+               SDL_RenderDebugText(renderer, rect.x + 4, rect.y + 12, fallback);
+    };
+    const SDL_FRect space = SpaceButton(track), snap = SnapButton(space);
+    if (!drawButton(space, Button::Space, settings.SpaceIcon(), settings.space == GizmoSpace::World ? "W" : "L") ||
+        !drawButton(snap, Button::Snap, settings.SnapIcon(), settings.snapEnabled ? "On" : "Off") ||
+        !SDL_RenderDebugText(renderer, snap.x - stepLabelWidth, 14, settings.StepLabel()))
     {
         return false;
     }
@@ -100,14 +113,23 @@ bool CameraToolbar::Draw(SDL_Renderer* renderer, int width, const FreeCamera& ca
     return true;
 }
 
-bool CameraToolbar::HandlePointer(const SDL_Event& event, int width, FreeCamera& camera, GizmoSpace& space)
+bool CameraToolbar::HandlePointer(const SDL_Event& event, int width, FreeCamera& camera, TransformSettings& settings)
 {
     const SDL_FRect track = Track(width);
-    const auto onSpaceButton = [&](const SDL_MouseButtonEvent& pointer)
+    const auto buttonAt = [&](const SDL_MouseButtonEvent& pointer)
     {
         const SDL_FPoint pos{pointer.x, pointer.y + height};
         const SDL_FRect button = SpaceButton(track);
-        return SDL_PointInRectFloat(&pos, &button);
+        const SDL_FRect snap = SnapButton(button);
+        if (SDL_PointInRectFloat(&pos, &snap))
+        {
+            return Button::Snap;
+        }
+        if (SDL_PointInRectFloat(&pos, &button))
+        {
+            return Button::Space;
+        }
+        return Button::None;
     };
     const auto setSpeed = [&](float x)
     {
@@ -117,10 +139,13 @@ bool CameraToolbar::HandlePointer(const SDL_Event& event, int width, FreeCamera&
     switch (event.type)
     {
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        if (event.button.button == SDL_BUTTON_LEFT && onSpaceButton(event.button))
+        if (event.button.button == SDL_BUTTON_LEFT)
         {
-            spacePressed = true;
-            return true;
+            pressed = buttonAt(event.button);
+            if (pressed != Button::None)
+            {
+                return true;
+            }
         }
         if (event.button.y < 0)
         {
@@ -141,15 +166,22 @@ bool CameraToolbar::HandlePointer(const SDL_Event& event, int width, FreeCamera&
         {
             setSpeed(event.motion.x);
         }
-        return dragging || spacePressed || event.motion.y < 0;
+        return dragging || pressed != Button::None || event.motion.y < 0;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (spacePressed && event.button.button == SDL_BUTTON_LEFT)
+        if (pressed != Button::None && event.button.button == SDL_BUTTON_LEFT)
         {
-            spacePressed = false;
-            if (onSpaceButton(event.button))
+            if (buttonAt(event.button) == pressed)
             {
-                space = OtherSpace(space);
+                if (pressed == Button::Snap)
+                {
+                    settings.snapEnabled = !settings.snapEnabled;
+                }
+                else
+                {
+                    settings.ToggleSpace();
+                }
             }
+            pressed = Button::None;
             return true;
         }
         if (dragging && event.button.button == SDL_BUTTON_LEFT)

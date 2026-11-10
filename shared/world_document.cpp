@@ -25,6 +25,7 @@ namespace
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
     constexpr Uint32 terrainVersion = 1;
+    constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
     bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
@@ -179,8 +180,24 @@ bool WorldDocument::RemoveTerrain(std::size_t index)
     {
         return SDL_SetError("Invalid terrain chunk index");
     }
+    hierarchy.ReplaceRange(SceneKind::Terrain, static_cast<int>(index), 1, 0);
     terrain.erase(terrain.begin() + index);
     return true;
+}
+
+bool WorldDocument::Contains(SceneKey key) const
+{
+    const auto index = static_cast<std::size_t>(key.index);
+    switch (key.kind)
+    {
+    case SceneKind::World: return key.index == 0;
+    case SceneKind::Folder: return hierarchy.Folders().contains(key.index);
+    case SceneKind::Road: return index < roads.size();
+    case SceneKind::Terrain: return index < terrain.size();
+    case SceneKind::Object: return index < objects.size();
+    case SceneKind::Mesh: return index < meshes.size();
+    }
+    return false;
 }
 
 void WorldDocument::TickObjects(float deltaSeconds)
@@ -243,6 +260,7 @@ bool WorldDocument::Open(const char* documentPath)
     bool sawMeshes = false;
     bool sawObjects = false;
     bool sawTerrain = false;
+    bool sawOutliner = false;
     for (Uint32 i = 0; i < sectionCount; ++i)
     {
         Section section;
@@ -284,7 +302,17 @@ bool WorldDocument::Open(const char* documentPath)
             return SDL_SetError("Incomplete world section in '%s'", loaded.path.c_str());
         }
 
-        if (section.tag == roadTag)
+        if (section.tag == outlinerTag)
+        {
+            std::istringstream data(std::move(section.payload));
+            data.imbue(std::locale::classic());
+            if (sawOutliner || section.version != 1 || !loaded.hierarchy.Read(data))
+            {
+                return SDL_SetError("Invalid or unsupported OUTL section in '%s'", loaded.path.c_str());
+            }
+            sawOutliner = true;
+        }
+        else if (section.tag == roadTag)
         {
             sawRoads = true;
             if (!ReadRoads(std::move(section.payload), section.version, loaded.roads))
@@ -325,6 +353,10 @@ bool WorldDocument::Open(const char* documentPath)
     {
         return SDL_SetError("Unexpected data after the last section in '%s'", loaded.path.c_str());
     }
+    for (const auto& [key, parent] : loaded.hierarchy.Members())
+    {
+        if (!loaded.Contains(key)) return SDL_SetError("Missing OUTL entity in '%s'", loaded.path.c_str());
+    }
     for (Road& road : loaded.roads)
     {
         road.Rebuild();
@@ -339,7 +371,15 @@ bool WorldDocument::Save() const
     {
         return SDL_SetError("Open a world before saving it");
     }
-    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty();
+    for (const auto& [key, parent] : hierarchy.Members())
+    {
+        if (!Contains(key)) return SDL_SetError("Cannot save an outliner entry for a missing entity");
+    }
+    const bool hasOutliner = !hierarchy.Folders().empty();
+    std::ostringstream outlinerData;
+    outlinerData.imbue(std::locale::classic());
+    if (hasOutliner && !hierarchy.Write(outlinerData)) return SDL_SetError("Could not serialize the outliner");
+    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty() + hasOutliner;
     if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
@@ -398,7 +438,8 @@ bool WorldDocument::Save() const
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
                     (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str())) &&
-                    (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str()));
+                    (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str())) &&
+                    (!hasOutliner || WriteSection(output, outlinerTag, 1, std::move(outlinerData).str()));
     for (const Section& section : otherSections)
     {
         if (!wroteAll)

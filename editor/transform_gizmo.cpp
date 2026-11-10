@@ -59,7 +59,7 @@ void TransformGizmo::Load(MeshAssets& assets)
 
 const GizmoAxes& TransformGizmo::Axes(const GizmoPlacement& placement) const
 {
-    return space == GizmoSpace::Local ? placement.localAxes : worldAxes;
+    return settings.space == GizmoSpace::Local ? placement.localAxes : worldAxes;
 }
 
 MeshInstance TransformGizmo::Handle(const GizmoPlacement& placement, const GizmoAxes& axes, int axis) const
@@ -161,11 +161,12 @@ GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const
     }
 }
 
-std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse) const
+std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings) const
 {
     if (useScreen)
     {
-        return ((mouse.x - mouseStart.x) * screenDirection.x + (mouse.y - mouseStart.y) * screenDirection.y) * unitsPerPixel;
+        const double amount = ((mouse.x - mouseStart.x) * screenDirection.x + (mouse.y - mouseStart.y) * screenDirection.y) * unitsPerPixel;
+        return mode == GizmoMode::Translate ? settings.SnapDistance(amount) : amount;
     }
 
     const auto point = OnPlane(camera.GetPosition(), ViewportRay(camera, scene, mouse), origin, normal);
@@ -179,7 +180,7 @@ std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene
 
     if (mode == GizmoMode::Translate)
     {
-        return Math::Dot(current - start, axis);
+        return settings.SnapDistance(Math::Dot(current - start, axis));
     }
 
     return std::atan2(Math::Dot(axis, Math::Cross(start, current)), Math::Dot(start, current));
