@@ -172,11 +172,11 @@ struct WindowsPanels::Impl
     {
         const int gap = DialogSize(toolbar, 3, 0).cx;
         const int snapX = spaceX - side - gap;
-        MoveWindow(GetDlgItem(toolbar, IDC_TRANSFORM_SPACE), spaceX, y, side, side, TRUE);
-        MoveWindow(GetDlgItem(toolbar, IDC_SNAP_TO_GRID), snapX, y, side, side, TRUE);
+        MoveWindow(GetDlgItem(toolbar, IDC_TRANSFORM_SPACE), spaceX, y, side, side, FALSE);
+        MoveWindow(GetDlgItem(toolbar, IDC_SNAP_TO_GRID), snapX, y, side, side, FALSE);
         const SIZE label = DialogSize(toolbar, 34, 12);
         MoveWindow(GetDlgItem(toolbar, IDC_SNAP_STEP), snapX - gap - label.cx, DialogSize(toolbar, 0, 7).cy,
-                   label.cx, label.cy, TRUE);
+                   label.cx, label.cy, FALSE);
         const int size = std::max(1, side - 2 * y);
         if (size == iconSize)
         {
@@ -277,7 +277,7 @@ struct WindowsPanels::Impl
         const int top = std::min<int>(DialogSize(toolbar, 0, TOOLBAR_HEIGHT).cy, rect.bottom);
         const int left = DialogSize(models, BROWSER_WIDTH, 0).cx, right = DialogSize(road, ROAD_PANEL_WIDTH, 0).cx;
         const int h = rect.bottom - top;
-        MoveWindow(toolbar, 0, 0, rect.right, top, TRUE);
+        SetWindowPos(toolbar, nullptr, 0, 0, rect.right, top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
         MoveWindow(models, 0, top, left, h, TRUE);
         const int outlineHeight = std::min<int>(h / 3, DialogSize(road, 0, 140).cy);
         outline.Layout(rect.right - right, top, right, outlineHeight);
@@ -287,14 +287,18 @@ struct WindowsPanels::Impl
         auto moveTool = [&](int id, int rightOffset, int y, int w, int height)
         {
             const SIZE offset = DialogSize(toolbar, rightOffset, y), size = DialogSize(toolbar, w, height);
-            MoveWindow(GetDlgItem(toolbar, id), rect.right - offset.cx, offset.cy, size.cx, size.cy, TRUE);
+            MoveWindow(GetDlgItem(toolbar, id), rect.right - offset.cx, offset.cy, size.cx, size.cy, FALSE);
         };
         const int insetY = DialogSize(toolbar, 0, 2).cy;
         const int side = std::max(1, top - 2 * insetY);
-        SizeTransformButtons(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
         moveTool(IDC_SPEED_LABEL, 200, 7, 52, 12);
         moveTool(IDC_SPEED, 146, 3, 89, 19);
         moveTool(IDC_SPEED_VALUE, 54, 7, 50, 12);
+        SizeTransformButtons(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
+        // The controls have moved without repainting. Erase their old footprints and
+        // paint all six children at their final positions, even when the icon size is unchanged.
+        RedrawWindow(toolbar, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+
         const SIZE inset = DialogSize(models, 7, 124);
         MoveWindow(GetDlgItem(models, IDC_MODELS), inset.cx, inset.cy, left - 2 * inset.cx,
                    std::max<int>(1, h - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
