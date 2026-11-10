@@ -1,5 +1,6 @@
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
+#include "editor_colors.hpp"
 
 #include <algorithm>
 
@@ -18,6 +19,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
     vertices.clear();
     outline.clear();
     pavement.clear();
+    wireframeEnd = 0;
     selectedStart = selectedEnd = outlineStart = 0;
     return true;
 }
@@ -67,6 +69,19 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
     }
 }
 
+void WorldRenderer::WireframeSubmittedGeometry()
+{
+    // Reserve UVs in this pass for two barycentric coordinates. Clipping and
+    // perspective interpolation then preserve the edges of the original triangle.
+    constexpr SDL_FPoint corners[] = {{1, 0}, {0, 1}, {0, 0}};
+    wireframeEnd = vertices.size();
+    for (size_t i = 0; i < wireframeEnd; ++i)
+    {
+        vertices[i].uv = corners[i % 3];
+        vertices[i].color = EditorColors::wire;
+    }
+}
+
 bool WorldRenderer::End()
 {
     if (vertices.empty() || viewport.w <= 0 || viewport.h <= 0)
@@ -77,7 +92,7 @@ bool WorldRenderer::End()
     vertices.insert(vertices.end(), outline.begin(), outline.end());
     const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
     if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
-    drawAsphalt = !pavement.empty() && asphalt.Prepare(device);
+    drawAsphalt = wireframeEnd == 0 && !pavement.empty() && asphalt.Prepare(device);
     return (device ? DrawGPU() : DrawSoftware()) &&
            SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }

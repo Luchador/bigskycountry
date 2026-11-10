@@ -32,6 +32,8 @@ public:
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
     void SubmitRoad(const Road& road, bool selected);
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
+    // Mark the world triangles before submitting solid editor handles and overlays.
+    void WireframeSubmittedGeometry();
     bool End();
 
 private:
@@ -53,6 +55,7 @@ private:
     AsphaltMaterial asphalt;
     Vector3 pavementSun{};
     bool drawAsphalt = false;
+    std::size_t wireframeEnd = 0;
     std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
 
@@ -61,6 +64,7 @@ private:
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
     SDL_GPUGraphicsPipeline* asphaltPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* wireframePipeline = nullptr;
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;
     SDL_GPUBuffer* vertexBuffer = nullptr;
     SDL_GPUTransferBuffer* upload = nullptr;

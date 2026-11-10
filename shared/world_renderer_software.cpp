@@ -87,6 +87,7 @@ bool WorldRenderer::DrawSoftware()
     {
         while (range < pavement.size() && first >= pavement[range].end) ++range;
         const bool textured = drawAsphalt && range < pavement.size() && first >= pavement[range].first;
+        const bool wire = first < wireframeEnd;
         const bool outline = first >= outlineStart;
         const bool selected = first >= selectedStart && first < selectedEnd;
         Polygon p{};
@@ -126,6 +127,21 @@ bool WorldRenderer::DrawSoftware()
             const double ax = (b.y - c.y) * a.invW, ay = (c.x - b.x) * a.invW;
             const double bx = (c.y - a.y) * b.invW, by = (a.x - c.x) * b.invW;
             const double cx = (a.y - b.y) * c.invW, cy = (b.x - a.x) * c.invW;
+            // The UVs of a wire triangle encode its original edges, including
+            // after near-plane clipping has split it into several triangles.
+            auto edgeEquations = [&](double u, double v, double w) -> Vector3
+            {
+                const double x = u*a.uv.x + v*b.uv.x + w*c.uv.x;
+                const double y = u*a.uv.y + v*b.uv.y + w*c.uv.y;
+                return {x, y, u + v + w - x - y};
+            };
+            Vector3 threshold{};
+            if (wire)
+            {
+                const Vector3 dx = edgeEquations(ax, bx, cx), dy = edgeEquations(ay, by, cy);
+                constexpr double halfWidth = 1.0; // Pixels on either side of a shared edge.
+                threshold = Vector3{std::hypot(dx.x, dy.x), std::hypot(dx.y, dy.y), std::hypot(dx.z, dy.z)} * halfWidth;
+            }
             for (int y = top; y < bottom; ++y)
             {
                 auto* row = static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch;
@@ -152,6 +168,15 @@ bool WorldRenderer::DrawSoftware()
                     const double u = wa * a.invW, v = wb * b.invW, w = wc * c.invW;
                     const double sum = u + v + w;
                     Uint8* pixel = row + static_cast<std::size_t>(x) * 4;
+                    if (wire)
+                    {
+                        const Vector3 edges = edgeEquations(u, v, w);
+                        if (edges.x > threshold.x && edges.y > threshold.y && edges.z > threshold.z)
+                        {
+                            pixel[3] = 0;
+                            continue;
+                        }
+                    }
                     if (textured)
                     {
                         const double tu = (u*a.uv.x + v*b.uv.x + w*c.uv.x) / sum;

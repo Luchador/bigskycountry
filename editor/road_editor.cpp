@@ -224,6 +224,11 @@ void RoadEditor::Commit(WorldDocument& world, int roadIndex, EditSnapshot before
 
 void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera)
 {
+    if (command == EditorCommand::ToggleWireframe)
+    {
+        menu.ToggleWireframe();
+        return;
+    }
     Release(world);
     if (command == EditorCommand::CreateRoad)
     {
@@ -910,7 +915,7 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 #ifdef _WIN32
     scene = {0, 0, width, height};
 #else
-    const int top = std::min(CameraToolbar::height, height);
+    const int top = std::min(EditorMenu::barHeight + CameraToolbar::height, height);
     const int right = std::min(322, width / 2);
     const int left = std::min(panelWidth, (width - right) / 2);
     browserPanel = {0, top, left, height - top};
@@ -975,6 +980,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const int contentHeight = (planView ? 470 : 464) + (threeLanes ? static_cast<int>(threeLanePanelHeight) : 0);
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
+    const int width = roadPanel.x + roadPanel.w;
+    const SDL_Rect toolbar{0, EditorMenu::barHeight, width, CameraToolbar::height};
     const SDL_Rect shifted{roadPanel.x, roadPanel.y - roadScroll, roadPanel.w, roadPanel.h + roadScroll};
     const SDL_Rect clip{0, roadScroll, roadPanel.w, roadPanel.h};
     return SDL_SetRenderViewport(renderer, &browserPanel) && browser.Draw(renderer, browserPanel.w, browserPanel.h) &&
@@ -982,7 +989,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
            SDL_SetRenderViewport(renderer, &transformArea) && transformPanel.Draw(renderer, transformArea.w, fields) &&
            SDL_SetRenderViewport(renderer, &shifted) && SDL_SetRenderClipRect(renderer, &clip) &&
            RenderRoadPanel(renderer, world) && SDL_SetRenderClipRect(renderer, nullptr) &&
-           SDL_SetRenderViewport(renderer, nullptr) && cameraToolbar.Draw(renderer, roadPanel.x + roadPanel.w, camera, gizmo.settings);
+           SDL_SetRenderViewport(renderer, &toolbar) && cameraToolbar.Draw(renderer, width, camera, gizmo.settings) &&
+           SDL_SetRenderViewport(renderer, nullptr) && menu.DrawBar(renderer, width);
 #endif
 }
 
@@ -1315,7 +1323,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (SDL_GetWindowFromEvent(&event) == window)
     {
         std::optional<EditorCommand> command;
-        if (menu.HandleViewportMenu(renderer, scene, event, command))
+        if (menu.HandleViewportMenu(renderer, scene, event, command) ||
+            (drag == Drag::None && !SDL_GetWindowRelativeMouseMode(window) && menu.HandleBar(renderer, event, command)))
         {
             if (command)
             {

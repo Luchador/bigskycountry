@@ -175,6 +175,10 @@ namespace
 
                 if (roadTool)
                 {
+                    if (roadTool->WireframeEnabled())
+                    {
+                        worldRenderer.WireframeSubmittedGeometry();
+                    }
                     roadTool->SubmitGizmos(worldRenderer, world, view);
                 }
 

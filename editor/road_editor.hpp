@@ -32,6 +32,7 @@ public:
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
     const Road* Selected(const WorldDocument& world) const override;
+    bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;

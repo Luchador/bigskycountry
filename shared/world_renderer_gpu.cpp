@@ -9,6 +9,8 @@
 #include "world_vert_spirv.hpp"
 #include "world_frag_dxil.hpp"
 #include "world_frag_spirv.hpp"
+#include "wireframe_frag_dxil.hpp"
+#include "wireframe_frag_spirv.hpp"
 #include "asphalt_frag_dxil.hpp"
 #include "asphalt_frag_spirv.hpp"
 
@@ -67,6 +69,7 @@ WorldRenderer::~WorldRenderer()
         SDL_ReleaseGPUGraphicsPipeline(device, surfacePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
     }
 }
 
@@ -130,18 +133,29 @@ bool WorldRenderer::CreatePipelines()
                               SDL_GPU_STENCILOP_KEEP, SDL_GPU_COMPAREOP_ALWAYS};
     ds.back_stencil_state = ds.front_stencil_state;
     surfacePipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
+
+    const auto materialPipeline = [&](const char* entry, std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers) -> SDL_GPUGraphicsPipeline*
+    {
+        auto* shader = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, entry, dxil, spirv, samplers);
+        if (!shader) return nullptr;
+        auto material = pipeline;
+        material.fragment_shader = shader;
+        auto* result = SDL_CreateGPUGraphicsPipeline(device, &material);
+        SDL_ReleaseGPUShader(device, shader);
+        return result;
+    };
+
     if (surfacePipeline)
     {
-        if (auto* asphaltPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "AsphaltPS",
-                                              asphalt_frag_dxil, asphalt_frag_spirv, 3))
-        {
-            pipeline.fragment_shader = asphaltPS;
-            asphaltPipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
-            SDL_ReleaseGPUShader(device, asphaltPS);
-            pipeline.fragment_shader = ps;
-        }
+        asphaltPipeline = materialPipeline("AsphaltPS", asphalt_frag_dxil, asphalt_frag_spirv, 3);
     }
+
     if (asphaltPipeline)
+    {
+        wireframePipeline = materialPipeline("WireframePS", wireframe_frag_dxil, wireframe_frag_spirv, 0);
+    }
+
+    if (wireframePipeline)
     {
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
         ds.enable_depth_write = false;
@@ -151,10 +165,17 @@ bool WorldRenderer::CreatePipelines()
         ds.back_stencil_state = ds.front_stencil_state;
         outlinePipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
     }
+
     SDL_ReleaseGPUShader(device, vs);
     SDL_ReleaseGPUShader(device, ps);
+
     if (!outlinePipeline)
     {
+        if (wireframePipeline)
+        {
+            SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
+            wireframePipeline = nullptr;
+        }
         if (asphaltPipeline)
         {
             SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
@@ -171,6 +192,9 @@ bool WorldRenderer::CreatePipelines()
 }
 #endif
 
+/**
+ * This runs on first draw or when the viewport changes size and prepares one texture to hold the rendered world, and another for the depth buffer.
+ */
 bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
 {
     if (colorTarget && colorTarget->w == width && colorTarget->h == height)
@@ -188,17 +212,19 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         }
     }
 #endif
-    SDL_Texture* color = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
-                                           device ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING, width, height);
+    SDL_Texture* color = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, device ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING, width, height);
+
     if (!color)
     {
         return false;
     }
+
     if (!SDL_SetTextureBlendMode(color, SDL_BLENDMODE_BLEND) || !SDL_SetTextureScaleMode(color, SDL_SCALEMODE_NEAREST))
     {
         SDL_DestroyTexture(color);
         return false;
     }
+
     if (device)
     {
         SDL_GPUTextureCreateInfo info{};
@@ -209,26 +235,32 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         info.height = height;
         info.layer_count_or_depth = info.num_levels = 1;
         SDL_GPUTexture* depth = SDL_CreateGPUTexture(device, &info);
+
         if (!depth)
         {
             SDL_DestroyTexture(color);
             return false;
         }
+
         if (depthTarget)
         {
             SDL_ReleaseGPUTexture(device, depthTarget);
         }
+
         depthTarget = depth;
     }
     else
     {
         softwareDepth.resize(static_cast<std::size_t>(width) * height);
     }
+
     if (colorTarget)
     {
         SDL_DestroyTexture(colorTarget);
     }
+
     colorTarget = color;
+
     return true;
 }
 
@@ -238,43 +270,51 @@ bool WorldRenderer::DrawGPU()
     {
         return SDL_SetError("World vertex buffer exceeds GPU buffer size limit");
     }
+
     const Uint32 bytes = static_cast<Uint32>(vertices.size() * sizeof(WorldDepthVertex));
+
     if (bytes > bufferBytes)
     {
         const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, bytes, 0};
         SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(device, &bufferInfo);
+
         if (!buffer)
         {
             return false;
         }
+
         const SDL_GPUTransferBufferCreateInfo transferInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes, 0};
         SDL_GPUTransferBuffer* staging = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+
         if (!staging)
         {
             SDL_ReleaseGPUBuffer(device, buffer);
             return false;
         }
+
         if (vertexBuffer)
         {
             SDL_ReleaseGPUBuffer(device, vertexBuffer);
             SDL_ReleaseGPUTransferBuffer(device, upload);
         }
+
         vertexBuffer = buffer;
         upload = staging;
         bufferBytes = bytes;
     }
 
     void* mapped = SDL_MapGPUTransferBuffer(device, upload, true);
+
     if (!mapped)
     {
         return false;
     }
+
     std::memcpy(mapped, vertices.data(), bytes);
     SDL_UnmapGPUTransferBuffer(device, upload);
 
     SDL_GPUColorTargetInfo color{};
-    color.texture = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget),
-                                                SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    color.texture = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
     color.load_op = SDL_GPU_LOADOP_CLEAR; // Transparent pixels reveal the sky.
     color.store_op = SDL_GPU_STOREOP_STORE;
     color.cycle = true;
@@ -283,35 +323,44 @@ bool WorldRenderer::DrawGPU()
     depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_CLEAR; // Reversed depth clears to zero.
     depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     depth.cycle = true;
+
     if (!color.texture)
     {
         return SDL_SetError("World color target has no GPU texture");
     }
+
     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
+
     if (!commands)
     {
         return false;
     }
+
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+
     if (!copy)
     {
         SDL_CancelGPUCommandBuffer(commands);
         return false;
     }
+
     const SDL_GPUTransferBufferLocation src{upload, 0};
     const SDL_GPUBufferRegion dst{vertexBuffer, 0, bytes};
     SDL_UploadToGPUBuffer(copy, &src, &dst, true);
     SDL_EndGPUCopyPass(copy);
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
+
     if (!pass)
     {
         SDL_CancelGPUCommandBuffer(commands);
         return false;
     }
+
     SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
     const SDL_GPUBufferBinding binding{vertexBuffer, 0};
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+
     const auto draw = [&](std::size_t first, std::size_t end, Uint8 marker)
     {
         if (first < end)
@@ -320,14 +369,24 @@ bool WorldRenderer::DrawGPU()
             SDL_DrawGPUPrimitives(pass, static_cast<Uint32>(end - first), 1, static_cast<Uint32>(first), 0);
         }
     };
+
     const auto drawSurface = [&](size_t first, size_t end)
     {
         draw(first, std::min(end, selectedStart), 0);
         draw(std::max(first, selectedStart), std::min(end, selectedEnd), 1);
         draw(std::max(first, selectedEnd), end, 0);
     };
+
     size_t cursor = 0;
-    if (drawAsphalt)
+
+    if (wireframeEnd)
+    {
+        SDL_BindGPUGraphicsPipeline(pass, wireframePipeline);
+        drawSurface(0, wireframeEnd);
+        SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
+        cursor = wireframeEnd;
+    }
+    else if (drawAsphalt)
     {
         for (const auto& range : pavement)
         {
@@ -339,12 +398,16 @@ bool WorldRenderer::DrawGPU()
             cursor = range.end;
         }
     }
+
     drawSurface(cursor, outlineStart);
+
     if (outlineStart < vertices.size())
     {
         SDL_BindGPUGraphicsPipeline(pass, outlinePipeline);
         draw(outlineStart, vertices.size(), 1);
     }
+
     SDL_EndGPURenderPass(pass);
+
     return SDL_SubmitGPUCommandBuffer(commands);
 }

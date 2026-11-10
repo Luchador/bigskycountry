@@ -32,6 +32,18 @@ float4 PSMain(WorldFragment input) : SV_Target0
     return input.color;
 }
 
+// Multiplying by reciprocal clip W makes each component a linear screen-space
+// edge equation. Its gradient converts the threshold to pixels at any zoom.
+float4 WireframePS(WorldFragment input) : SV_Target0
+{
+    float3 edge = float3(input.uv, 1 - input.uv.x - input.uv.y) * input.position.w;
+    float3 dx = ddx(edge), dy = ddy(edge);
+    const float halfWidth = 1.0;
+    bool onEdge = any(edge * edge <= halfWidth * halfWidth * (dx * dx + dy * dy));
+    // Clear interiors to sky while writing depth and selection stencil as usual.
+    return float4(input.color.rgb, onEdge ? 1.0 : 0.0);
+}
+
 #ifdef __spirv__
 #define BSC_COMBINED [[vk::combinedImageSampler]]
 #else
