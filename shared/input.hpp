@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+enum class ApplicationMode;
+
 struct CameraInput
 {
     int forward = 0;
@@ -18,7 +20,7 @@ public:
 
     void BeginFrame();
     bool HandleEvent(const SDL_Event& event);
-    CameraInput ReadCameraInput(bool allowBackward = true, bool allowForwardAndUp = true) const;
+    CameraInput ReadCameraInput(ApplicationMode mode) const;
 
     bool SetCameraEnabled(bool enabled);
     bool IsCameraEnabled() const;

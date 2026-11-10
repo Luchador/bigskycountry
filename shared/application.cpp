@@ -144,10 +144,7 @@ namespace
             if (input.IsCameraEnabled() && (!roadTool || (roadTool->ViewportFocused() && !roadTool->DraggingGizmo())))
             {
                 const double cameraElapsedSeconds = std::min(elapsedNanoseconds / 1.0e9, 0.1);
-                // Ctrl+S belongs to File > Save in the editor.
-                const bool allowBackward = !roadTool || !(SDL_GetModState() & SDL_KMOD_CTRL);
-                const bool allowForwardAndUp = !roadTool || !roadTool->Selected(world) || SDL_GetWindowRelativeMouseMode(window);
-                freeCamera.Update(input.ReadCameraInput(allowBackward, allowForwardAndUp), cameraElapsedSeconds);
+                freeCamera.Update(input.ReadCameraInput(mode), cameraElapsedSeconds);
             }
 
             const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;

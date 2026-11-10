@@ -68,7 +68,7 @@ A whole road rotates about its first point. This moves its pavement, markings, e
 
 The content browser uses a native tree of the GLB files in `assets/models`. Select a model to preview it, or click **Refresh** after changing the folder. The road inspector uses checkboxes for shoulders and drop-downs for alignment, three-lane layout, and edges. Its changes use the editor’s existing undo and save commands. The toolbar’s camera-speed slider stays in sync with the viewport mouse wheel.
 
-Use **Tab** or **Shift+Tab** to move between the viewport and controls. Click the viewport to return to camera or road-point editing.
+Use **Tab** or **Shift+Tab** to move between the viewport and controls. In the 3D viewport, hold the **right mouse button** to look around and fly. **W/S** move forward and backward, **A/D** move left and right, and **Q/E** move down and up. Releasing the button stops keyboard movement immediately.
 
 ### Editing road control points
 
@@ -80,6 +80,6 @@ With the viewport focused, **Delete** removes the selected road, segments, or co
 
 The globe/cube button to the left of the camera speed slider toggles the 3D transform space. The editor starts in world space (globe). In local space (cube), a road point’s red X axis follows its tangent, its green Y axis is perpendicular to the grade, and its blue Z axis runs across the road. Translation arrows and rotation rings both use the chosen axes.
 
-The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`. Hold the right mouse button to fly the camera with its usual movement keys, including W and E.
+The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`.
 
 To extend either end of a road, select its endpoint, hold **Shift**, and drag a translation arrow. In the top-down road view, hold **Shift** and drag the endpoint itself. The original point stays in place and the new endpoint stays selected, ready for the next segment. Top-down extensions keep the endpoint's elevation. Release to save, or press **Esc** during the drag to cancel.

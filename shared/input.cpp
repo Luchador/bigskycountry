@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "application.hpp"
 
 // Constructor
 Input::Input(SDL_Window* window) : window(window)
@@ -70,7 +71,7 @@ bool Input::HandleEvent(const SDL_Event& event)
     return true;
 }
 
-CameraInput Input::ReadCameraInput(bool allowBackward, bool allowForwardAndUp) const
+CameraInput Input::ReadCameraInput(ApplicationMode mode) const
 {
     CameraInput input;
 
@@ -79,15 +80,22 @@ CameraInput Input::ReadCameraInput(bool allowBackward, bool allowForwardAndUp) c
         return input;
     }
 
-    const bool* keys = SDL_GetKeyboardState(nullptr);
-
-    // Opposing keys cancel each other out.
-    input.forward = (allowForwardAndUp && keys[SDL_SCANCODE_W]) - (allowBackward && keys[SDL_SCANCODE_S]);
-    input.right = keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A];
-    input.up = (allowForwardAndUp && keys[SDL_SCANCODE_E]) - keys[SDL_SCANCODE_Q];
-
     input.lookX = lookX;
     input.lookY = lookY;
+
+    if (mode == ApplicationMode::Editor && !SDL_GetWindowRelativeMouseMode(window))
+    {
+        return input;
+    }
+
+    const bool* keys = SDL_GetKeyboardState(nullptr);
+    // Ctrl+S belongs to File > Save in the editor.
+    const bool allowBackward = mode != ApplicationMode::Editor || !(SDL_GetModState() & SDL_KMOD_CTRL);
+
+    // Opposing keys cancel each other out.
+    input.forward = keys[SDL_SCANCODE_W] - (allowBackward && keys[SDL_SCANCODE_S]);
+    input.right = keys[SDL_SCANCODE_D] - keys[SDL_SCANCODE_A];
+    input.up = keys[SDL_SCANCODE_E] - keys[SDL_SCANCODE_Q];
 
     return input;
 }
