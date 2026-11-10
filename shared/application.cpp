@@ -79,6 +79,15 @@ namespace
                 }
                 if (roadTool)
                 {
+#ifdef _WIN32
+                    // Returning focus from a native child control can leave an SDL keystroke
+                    // without a window ID even though the editor frame has keyboard focus.
+                    if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
+                        event.key.windowID == 0 && roadTool->ViewportFocused())
+                    {
+                        event.key.windowID = SDL_GetWindowID(window);
+                    }
+#endif
                     const bool wasPlanView = roadTool->IsPlanView();
                     const EditorEvent result = roadTool->HandleEvent(window, renderer, event, world, freeCamera);
                     if (result == EditorEvent::Error)

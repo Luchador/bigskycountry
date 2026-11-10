@@ -16,7 +16,8 @@ public:
     TextureCatalog& Textures() { return textures; }
     void Refresh();
 #ifndef _WIN32
-    void HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
+    // A model-row press selects the preview and returns the path available to drag.
+    std::string HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
     bool Draw(SDL_Renderer* renderer, int width, int height);
 #endif
 

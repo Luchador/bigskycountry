@@ -119,6 +119,8 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     }
     if (const auto placement = SelectedGizmoPlacement(world, camera))
     {
+        // A building or other centered mesh can completely enclose its own handles.
+        if (state.meshSelection.kind == SelectionKind::Object) renderer.BeginForeground();
         gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
     }
 }
@@ -301,28 +303,45 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
 void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 {
     auto& picker = rightClick->picker;
-    bool hitRoad = false;
-    for (const Road& road : world.roads)
-    {
-        if (picker.TestRoad(road))
-        {
-            hitRoad = true;
-        }
-    }
-    if (hitRoad)
-    {
-        creationPoint = picker.HitPosition();
-    }
-    else
-    {
-        constexpr double fallbackDistance = 20.0; // meters along a ray that misses the ground
-        creationPoint = camera.PickGround(picker.ray, worldNearDepth).value_or(
-            picker.eye + Math::Normalize(picker.ray) * fallbackDistance);
-    }
+    for (const Road& road : world.roads) picker.TestRoad(road);
+    creationPoint = picker.PlacementPosition();
     if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene))
     {
         RunCommand(*command, world, camera);
     }
+}
+
+void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path)
+{
+    if (planView || drag != Drag::None || pointer.x < 0 || pointer.y < 0 || pointer.x >= scene.w || pointer.y >= scene.h)
+    {
+        return;
+    }
+    const auto mesh = world.models.Load(path);
+    if (!mesh)
+    {
+        status = SDL_GetError();
+        SDL_Log("Place prop: %s", status.c_str());
+        return;
+    }
+    ViewportPicker picker(camera, scene, pointer);
+    for (const Road& road : world.roads) picker.TestRoad(road);
+    for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
+
+    // Respect the model's authored pivot, including meshes centered above or below it.
+    double baseY = mesh->vertices[mesh->indices.front()].position.y;
+    for (auto i : mesh->indices) baseY = std::min(baseY, mesh->vertices[i].position.y);
+    const ObjectTransform transform{picker.PlacementPosition(baseY)};
+    const int index = static_cast<int>(world.Objects().size());
+    EditSnapshot before(state);
+    if (!world.PlaceObject(ObjectType::Prop, path, transform))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    state.SelectRows({{SceneKind::Object, index}});
+    history.Record(-1, std::move(before), EditSnapshot(state), EditHistory::ObjectEdit{index, 0, {}});
+    Save(world);
 }
 
 void RoadEditor::BeginDraft(WorldDocument& world)
@@ -971,6 +990,11 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields);
     return true;
 #else
+    if (!draggedModel.empty() && mouse.x >= 0 && mouse.y >= 0 && mouse.x < scene.w && mouse.y < scene.h &&
+        !Text(renderer, mouse.x + 14, mouse.y + 14, draggedModel.c_str(), ink))
+    {
+        return false;
+    }
     if (!menu.DrawViewportMenu(renderer))
     {
         return false;
@@ -1035,7 +1059,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
     if (placement && !subtract && !pickPoint && !addSegment)
     {
-        gizmoDrag = gizmo.BeginDrag(picker, *placement);
+        ViewportPicker handles(camera, scene, mouse);
+        gizmoDrag = gizmo.BeginDrag(state.meshSelection.kind == SelectionKind::Object ? handles : picker, *placement);
         if (gizmoDrag)
         {
             if (selected)
@@ -1102,8 +1127,25 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
 
 void RoadEditor::DeleteSelection(WorldDocument& world)
 {
+    if (EditingDraft() || drag != Drag::None) return;
+    if (state.meshSelection.kind == SelectionKind::Object)
+    {
+        const int index = state.meshSelection.index;
+        const int folder = world.hierarchy.Parent({SceneKind::Object, index});
+        EditSnapshot before(state);
+        auto object = world.TakeObject(index);
+        if (!object)
+        {
+            status = SDL_GetError();
+            return;
+        }
+        state.SelectRows({});
+        history.Record(-1, std::move(before), EditSnapshot(state), EditHistory::ObjectEdit{index, folder, std::move(object)});
+        Save(world);
+        return;
+    }
     const Road* road = Selected(world);
-    if (!road || EditingDraft() || drag != Drag::None)
+    if (!road)
     {
         return;
     }
@@ -1153,7 +1195,11 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
 void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 {
     Release(world);
-    if (outliner.Apply(cmd, world, state, history))
+    if (cmd.op == OutlineOp::Remove && cmd.target.kind == SceneKind::Object)
+    {
+        if (state.meshSelection == TransformTarget{SelectionKind::Object, cmd.target.index}) DeleteSelection(world);
+    }
+    else if (outliner.Apply(cmd, world, state, history))
     {
         Save(world);
     }
@@ -1322,6 +1368,35 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifndef _WIN32
     if (SDL_GetWindowFromEvent(&event) == window)
     {
+        if (!draggedModel.empty())
+        {
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
+            {
+                SDL_Event release = event;
+                if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &release))
+                    return EditorEvent::Error;
+                if (std::hypot(event.button.x - modelPress.x, event.button.y - modelPress.y) >= 4.0f)
+                    PlaceProp(world, camera, {release.button.x, release.button.y}, draggedModel);
+                draggedModel.clear();
+                return EditorEvent::Handled;
+            }
+            if (event.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                SDL_Event motion = event;
+                if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &motion))
+                    return EditorEvent::Error;
+                mouse = {motion.motion.x, motion.motion.y};
+                if (!(motion.motion.state & SDL_BUTTON_LMASK)) draggedModel.clear();
+                return EditorEvent::Handled;
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.key.key == SDLK_ESCAPE) draggedModel.clear();
+                return EditorEvent::Handled;
+            }
+            if (event.type == SDL_EVENT_MOUSE_WHEEL) return EditorEvent::Handled;
+            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) draggedModel.clear();
+        }
         std::optional<EditorCommand> command;
         if (menu.HandleViewportMenu(renderer, scene, event, command) ||
             (drag == Drag::None && !SDL_GetWindowRelativeMouseMode(window) && menu.HandleBar(renderer, event, command)))
@@ -1354,6 +1429,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         return EditorEvent::Handled;
     }
 #ifdef _WIN32
+    if (const auto drop = panels.TakeModelDrop(event))
+    {
+        if (!SetContentViewport(renderer)) return EditorEvent::Error;
+        PlaceProp(world, camera, {drop->viewportFraction.x * scene.w, drop->viewportFraction.y * scene.h}, drop->path);
+        return EditorEvent::Handled;
+    }
     if (const auto cmd = panels.TakeOutlineCommand(event))
     {
         ApplyOutline(*cmd, world);
@@ -1542,7 +1623,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (pointer.x < scene.x)
         {
             mouse = {-1, -1};
-            browser.HandlePointer(e, pointer, browserPanel.w, browserPanel.h);
+            auto path = browser.HandlePointer(e, pointer, browserPanel.w, browserPanel.h);
+            if (!planView && !path.empty())
+            {
+                draggedModel = std::move(path);
+                modelPress = {event.button.x, event.button.y};
+            }
             return EditorEvent::Handled;
         }
         if (pointer.x >= roadPanel.x)

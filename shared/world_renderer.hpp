@@ -34,6 +34,8 @@ public:
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();
+    // Subsequent solid editor handles depth-test against each other in front of the world.
+    void BeginForeground() { foregroundStart = vertices.size(); }
     bool End();
 
 private:
@@ -55,7 +57,7 @@ private:
     AsphaltMaterial asphalt;
     Vector3 pavementSun{};
     bool drawAsphalt = false;
-    std::size_t wireframeEnd = 0;
+    std::size_t wireframeEnd = 0, foregroundStart = 0;
     std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
 

@@ -250,7 +250,7 @@ bool ContentBrowser::UpdatePreview()
 }
 
 #ifndef _WIN32
-void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
+std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
 {
     const Layout layout(width, height);
     const bool models = tab == Tab::Models;
@@ -266,7 +266,7 @@ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int
     }
     if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT)
     {
-        return;
+        return {};
     }
     if (SDL_PointInRectFloat(&local, &layout.refresh))
     {
@@ -290,8 +290,10 @@ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int
         else if (models && index < count && !rows[index].modelPath.empty())
         {
             Select(rows[index].modelPath);
+            return rows[index].modelPath;
         }
     }
+    return {};
 }
 
 bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)

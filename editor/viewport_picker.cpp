@@ -58,6 +58,19 @@ bool ViewportPicker::TestTriangle(Vector3 a, Vector3 b, Vector3 c)
     return false;
 }
 
+Vector3 ViewportPicker::PlacementPosition(double modelBaseY) const
+{
+    auto surface = depth < std::numeric_limits<double>::infinity()
+        ? std::optional{HitPosition()} : camera.PickGround(ray, worldNearDepth);
+    if (surface)
+    {
+        surface->y -= modelBaseY;
+        return *surface;
+    }
+    constexpr double fallbackDistance = 20.0;
+    return eye + Math::Normalize(ray) * fallbackDistance;
+}
+
 bool ViewportPicker::TestRoad(const Road& road)
 {
     const double previous = depth;

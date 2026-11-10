@@ -389,7 +389,11 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
             }
             if (vk == VK_DELETE)
             {
-                remove();
+                const auto selected = s.Selected();
+                if (selected.size() == 1 && selected.begin()->kind == SceneKind::Object)
+                    s.Queue({OutlineOp::Remove, *selected.begin()});
+                else
+                    remove();
             }
             if (vk == VK_F2)
             {

@@ -123,14 +123,14 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> 
     }
 }
 
-bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after)
+bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object)
 {
-    if (before == after)
+    if (!object && before == after)
     {
         return false;
     }
     actions.erase(actions.begin() + cursor, actions.end());
-    actions.push_back({roadIndex, std::move(before), std::move(after)});
+    actions.push_back({roadIndex, std::move(before), std::move(after), std::move(object)});
     cursor = actions.size();
     return true;
 }
@@ -149,9 +149,11 @@ void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& edi
     Record(index, std::move(before), std::move(after));
 }
 
-EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& editor, int index,
-                                         const EditSnapshot& from, const EditSnapshot& to)
+EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& editor, Action& action, bool undo)
 {
+    const int index = action.roadIndex;
+    const EditSnapshot& from = undo ? action.after : action.before;
+    const EditSnapshot& to = undo ? action.before : action.after;
     auto& roads = world.roads;
     RoadEditorState restored;
     restored.meshSelection = to.meshSelection;
@@ -167,6 +169,19 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         restored.draft = RoadIO::ReadRoad(in);
     }
 
+    if (action.object)
+    {
+        auto& edit = *action.object;
+        if (edit.removed)
+        {
+            if (!world.InsertObject(edit.index, std::move(edit.removed), edit.folder)) return Result::Failed;
+        }
+        else
+        {
+            edit.removed = world.TakeObject(edit.index);
+            if (!edit.removed) return Result::Failed;
+        }
+    }
     if (to.addedTerrain && !world.PlaceTerrain(to.addedTerrain->modelPath, to.addedTerrain->transform))
     {
         return Result::Failed;
@@ -199,7 +214,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.hierarchy;
+    const bool mapChanged = action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 
@@ -209,8 +224,7 @@ EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& edi
     {
         return Result::Unavailable;
     }
-    const Action& action = actions[cursor - 1];
-    const Result result = Restore(world, editor, action.roadIndex, action.after, action.before);
+    const Result result = Restore(world, editor, actions[cursor - 1], true);
     if (result != Result::Failed)
     {
         --cursor;
@@ -224,8 +238,7 @@ EditHistory::Result EditHistory::Redo(WorldDocument& world, RoadEditorState& edi
     {
         return Result::Unavailable;
     }
-    const Action& action = actions[cursor];
-    const Result result = Restore(world, editor, action.roadIndex, action.before, action.after);
+    const Result result = Restore(world, editor, actions[cursor], false);
     if (result != Result::Failed)
     {
         ++cursor;

@@ -129,7 +129,9 @@ struct WindowsPanels::Impl
     WindowsOutliner outline;
     HACCEL shortcuts = nullptr;
     Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, toolbarEvent = 0;
-    Uint32 transformEvent = 0;
+    Uint32 transformEvent = 0, modelDropEvent = 0;
+    std::string draggedModel;
+    std::deque<ModelDrop> modelDrops;
     std::optional<TransformFields> inspected;
     std::deque<TransformEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
@@ -256,7 +258,7 @@ struct WindowsPanels::Impl
         SetFocus(frame);
     }
 
-    void Post(Uint32 type, int code) const
+    bool Post(Uint32 type, int code) const
     {
         SDL_Event event{};
         event.type = type;
@@ -265,7 +267,9 @@ struct WindowsPanels::Impl
         if (!SDL_PushEvent(&event))
         {
             SDL_Log("Editor control: %s", SDL_GetError());
+            return false;
         }
+        return true;
     }
 
     void Layout()
@@ -613,6 +617,26 @@ struct WindowsPanels::Impl
         EnableWindow(GetDlgItem(road, IDC_CANCEL_DRAFT), data.drawing);
     }
 
+    std::optional<SDL_FPoint> ModelDropPoint(POINT p) const
+    {
+        if (!lastInspector || lastInspector->plan) return {};
+        ClientToScreen(models, &p);
+        const HWND under = WindowFromPoint(p);
+        if (under != frame && under != view) return {};
+        ScreenToClient(view, &p);
+        RECT rect{};
+        GetClientRect(view, &rect);
+        if (!PtInRect(&rect, p)) return {};
+        return SDL_FPoint{float(p.x) / rect.right, float(p.y) / rect.bottom};
+    }
+
+    void CancelModelDrag()
+    {
+        draggedModel.clear();
+        if (GetCapture() == models) ReleaseCapture();
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+    }
+
     static INT_PTR CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
     {
         if (msg == WM_INITDIALOG)
@@ -648,12 +672,52 @@ struct WindowsPanels::Impl
                 self->Post(self->speedEvent, static_cast<int>(SendDlgItemMessageW(hwnd, IDC_SPEED, TBM_GETPOS, 0, 0)));
             }
             return TRUE;
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONUP:
+            if (hwnd == self->models && !self->draggedModel.empty())
+            {
+                const auto point = self->ModelDropPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
+                if (msg == WM_MOUSEMOVE)
+                {
+                    SetCursor(LoadCursorW(nullptr, point ? IDC_CROSS : IDC_NO));
+                }
+                else
+                {
+                    if (point)
+                    {
+                        self->modelDrops.push_back({std::move(self->draggedModel), *point});
+                        if (!self->Post(self->modelDropEvent, 0)) self->modelDrops.pop_back();
+                    }
+                    self->CancelModelDrag();
+                    if (point) SetFocus(self->frame);
+                }
+                return TRUE;
+            }
+            return FALSE;
+        case WM_RBUTTONDOWN:
+        case WM_CANCELMODE:
+        case WM_CAPTURECHANGED:
+            if (hwnd == self->models && !self->draggedModel.empty()) self->CancelModelDrag();
+            return FALSE;
         case WM_NOTIFY:
         {
             auto* header = reinterpret_cast<NMHDR*>(l);
             if (header->idFrom == IDC_BROWSER_TABS && header->code == TCN_SELCHANGE)
             {
                 self->ShowBrowserTab();
+                return TRUE;
+            }
+            if (header->idFrom == IDC_MODELS && header->code == TVN_BEGINDRAGW &&
+                self->lastInspector && !self->lastInspector->plan)
+            {
+                const LPARAM item = reinterpret_cast<NMTREEVIEWW*>(l)->itemNew.lParam;
+                const auto& rows = self->browser->Rows();
+                if (item > 0 && static_cast<std::size_t>(item) <= rows.size())
+                {
+                    self->draggedModel = rows[item - 1].modelPath;
+                    SetCapture(hwnd);
+                    SetCursor(LoadCursorW(nullptr, IDC_NO));
+                }
                 return TRUE;
             }
             if (header->idFrom == IDC_MODELS && header->code == TVN_SELCHANGEDW && !self->populating)
@@ -715,6 +779,7 @@ struct WindowsPanels::Impl
             self.Layout();
             return result;
         }
+        if (msg == WM_ACTIVATEAPP && !w && !self.draggedModel.empty()) self.CancelModelDrag();
         // A modifier may already be held in a native control when the user clicks
         // the viewport. Queue the modifier immediately before SDL queues the click.
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
@@ -749,6 +814,11 @@ struct WindowsPanels::Impl
             return true;
         }
 
+        if (!self.draggedModel.empty() && msg->message == WM_KEYDOWN && msg->wParam == VK_ESCAPE)
+        {
+            self.CancelModelDrag();
+            return false;
+        }
         if (msg->message == WM_MOUSEWHEEL)
         {
             const POINT at{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
@@ -870,7 +940,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
-    p.actions = SDL_RegisterEvents(6);
+    p.actions = SDL_RegisterEvents(7);
 
     if (!p.actions)
     {
@@ -882,6 +952,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.pressEvent = p.actions + 3;
     p.toolbarEvent = p.actions + 4;
     p.transformEvent = p.actions + 5;
+    p.modelDropEvent = p.actions + 6;
     WNDCLASSW wc{};
     wc.hInstance = module;
     wc.lpfnWndProc = ViewProc;
@@ -971,6 +1042,14 @@ void WindowsPanels::SyncOutliner(const SceneOutliner& model) { impl->outline.Syn
 std::optional<OutlineCommand> WindowsPanels::TakeOutlineCommand(const SDL_Event& event)
 {
     return impl->outline.Take(event);
+}
+
+std::optional<WindowsPanels::ModelDrop> WindowsPanels::TakeModelDrop(const SDL_Event& event)
+{
+    if (event.type != impl->modelDropEvent || impl->modelDrops.empty()) return {};
+    auto drop = std::move(impl->modelDrops.front());
+    impl->modelDrops.pop_front();
+    return drop;
 }
 
 bool WindowsPanels::ViewportFocused() const

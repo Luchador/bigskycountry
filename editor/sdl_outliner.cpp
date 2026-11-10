@@ -180,7 +180,8 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
     {
         StartName(window, false, m);
     }
-    if (!e.key.repeat && k == SDLK_DELETE && Folder(m))
+    if (!e.key.repeat && k == SDLK_DELETE && m.Selection().size() == 1 &&
+        (Folder(m) || m.Selection().begin()->kind == SceneKind::Object))
     {
         cmd = OutlineCommand{OutlineOp::Remove, *m.Selection().begin()};
     }

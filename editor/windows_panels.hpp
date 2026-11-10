@@ -21,6 +21,12 @@ public:
     SDL_Window* Create(SDL_Window* frame, ContentBrowser& browser);
     bool ViewportFocused() const;
     void ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Rect& scene) const;
+    struct ModelDrop
+    {
+        std::string path;
+        SDL_FPoint viewportFraction;
+    };
+    std::optional<ModelDrop> TakeModelDrop(const SDL_Event& event);
     bool Command(const SDL_Event& event, RoadAction& action) const;
     bool HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings);
     SDL_Keymod TakePressModifiers();

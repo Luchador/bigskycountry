@@ -1,6 +1,7 @@
 #pragma once
 
 #include "road.hpp"
+#include "bscobject.hpp"
 #include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
 
@@ -78,7 +79,13 @@ public:
 
     bool CanUndo() const { return cursor != 0; }
     bool CanRedo() const { return cursor < actions.size(); }
-    bool Record(int roadIndex, EditSnapshot before, EditSnapshot after);
+    struct ObjectEdit
+    {
+        int index, folder;
+        // Exactly one owner: the world while placed, this record while removed.
+        std::unique_ptr<BSCObject> removed;
+    };
+    bool Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object = {});
     void ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& editor, std::vector<Road> replacements);
     Result Undo(WorldDocument& world, RoadEditorState& editor);
     Result Redo(WorldDocument& world, RoadEditorState& editor);
@@ -89,9 +96,9 @@ private:
         int roadIndex; // -1 for a tool or draft edit.
         EditSnapshot before;
         EditSnapshot after;
+        std::optional<ObjectEdit> object;
     };
-    static Result Restore(WorldDocument& world, RoadEditorState& editor, int index,
-                          const EditSnapshot& from, const EditSnapshot& to);
+    static Result Restore(WorldDocument& world, RoadEditorState& editor, Action& action, bool undo);
     std::vector<Action> actions;
     std::size_t cursor = 0; // Number of applied actions.
 };

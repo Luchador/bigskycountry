@@ -18,6 +18,8 @@ public:
     ViewportPicker(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse);
     bool TestTriangle(Vector3 a, Vector3 b, Vector3 c);
     bool TestRoad(const Road& road);
+    // Place the model base on the nearest tested surface or ground, or its pivot on the ray.
+    Vector3 PlacementPosition(double modelBaseY = 0.0) const;
     bool TestMesh(const MeshInstance& instance);
     // Valid after a successful test.
     Vector3 HitPosition() const { return eye + ray * depth; }

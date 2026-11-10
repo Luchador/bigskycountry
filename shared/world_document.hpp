@@ -23,6 +23,9 @@ public:
 
     // Returns a world-owned object, or nullptr with an SDL error and no object added.
     BSCObject* PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform = {});
+    // Transfer ownership to/from editor history while keeping outliner indices in sync.
+    std::unique_ptr<BSCObject> TakeObject(int index);
+    bool InsertObject(int index, std::unique_ptr<BSCObject>&& object, int folder);
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
     bool RemoveTerrain(std::size_t index);

@@ -401,13 +401,28 @@ bool WorldRenderer::DrawGPU()
 
     drawSurface(cursor, outlineStart);
 
-    if (outlineStart < vertices.size())
+    if (outlineStart < foregroundStart)
     {
         SDL_BindGPUGraphicsPipeline(pass, outlinePipeline);
-        draw(outlineStart, vertices.size(), 1);
+        draw(outlineStart, foregroundStart, 1);
     }
 
     SDL_EndGPURenderPass(pass);
-
+    if (foregroundStart < vertices.size())
+    {
+        // Keep the scene color and start a fresh depth buffer for the gizmo.
+        color.load_op = SDL_GPU_LOADOP_LOAD;
+        color.cycle = false;
+        pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
+        if (!pass)
+        {
+            SDL_CancelGPUCommandBuffer(commands);
+            return false;
+        }
+        SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
+        SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+        draw(foregroundStart, vertices.size(), 0);
+        SDL_EndGPURenderPass(pass);
+    }
     return SDL_SubmitGPUCommandBuffer(commands);
 }

@@ -88,7 +88,8 @@ bool WorldRenderer::DrawSoftware()
         while (range < pavement.size() && first >= pavement[range].end) ++range;
         const bool textured = drawAsphalt && range < pavement.size() && first >= pavement[range].first;
         const bool wire = first < wireframeEnd;
-        const bool outline = first >= outlineStart;
+        if (first == foregroundStart) std::fill(softwareDepth.begin(), softwareDepth.end(), Sample{});
+        const bool outline = first >= outlineStart && first < foregroundStart;
         const bool selected = first >= selectedStart && first < selectedEnd;
         Polygon p{};
         p.count = 3;

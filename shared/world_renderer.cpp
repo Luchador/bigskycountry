@@ -3,6 +3,7 @@
 #include "editor_colors.hpp"
 
 #include <algorithm>
+#include <limits>
 
 bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
 {
@@ -20,6 +21,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
     outline.clear();
     pavement.clear();
     wireframeEnd = 0;
+    foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedStart = selectedEnd = outlineStart = 0;
     return true;
 }
@@ -88,8 +90,9 @@ bool WorldRenderer::End()
     {
         return true;
     }
-    outlineStart = vertices.size();
-    vertices.insert(vertices.end(), outline.begin(), outline.end());
+    outlineStart = std::min(foregroundStart, vertices.size());
+    vertices.insert(vertices.begin() + outlineStart, outline.begin(), outline.end());
+    foregroundStart = outlineStart + outline.size();
     const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
     if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
     drawAsphalt = wireframeEnd == 0 && !pavement.empty() && asphalt.Prepare(device);

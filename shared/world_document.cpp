@@ -158,6 +158,31 @@ BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelP
     return objects.emplace_back(std::move(object)).get();
 }
 
+std::unique_ptr<BSCObject> WorldDocument::TakeObject(int index)
+{
+    if (index < 0 || static_cast<std::size_t>(index) >= objects.size())
+    {
+        SDL_SetError("Invalid object index");
+        return {};
+    }
+    hierarchy.ReplaceRange(SceneKind::Object, index, 1, 0);
+    auto object = std::move(objects[index]);
+    objects.erase(objects.begin() + index);
+    return object;
+}
+
+bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object, int folder)
+{
+    if (!object || index < 0 || static_cast<std::size_t>(index) > objects.size())
+    {
+        return SDL_SetError("Invalid object insertion");
+    }
+    objects.reserve(objects.size() + 1);
+    hierarchy.ReplaceRange(SceneKind::Object, index, 0, 1, folder);
+    objects.insert(objects.begin() + index, std::move(object));
+    return true;
+}
+
 TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform)
 {
     auto chunk = std::make_unique<TerrainChunk>();
