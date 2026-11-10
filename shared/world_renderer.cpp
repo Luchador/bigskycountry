@@ -17,6 +17,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
     scaleY = viewport.h > 0 ? 2.0 * focal / viewport.h : 0.0;
     vertices.clear();
     outline.clear();
+    pavement.clear();
     selectedStart = selectedEnd = outlineStart = 0;
     return true;
 }
@@ -75,6 +76,8 @@ bool WorldRenderer::End()
     outlineStart = vertices.size();
     vertices.insert(vertices.end(), outline.begin(), outline.end());
     const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
-    return PrepareTarget(renderer, viewport.w, viewport.h) && (device ? DrawGPU() : DrawSoftware()) &&
+    if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
+    drawAsphalt = !pavement.empty() && asphalt.Prepare(device);
+    return (device ? DrawGPU() : DrawSoftware()) &&
            SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }

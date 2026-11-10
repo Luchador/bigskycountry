@@ -17,7 +17,16 @@ FetchContent_Declare(cgltf
 )
 FetchContent_MakeAvailable(cgltf)
 
+# Decode the same DDS blocks on devices using the software world renderer.
+FetchContent_Declare(bcdec
+    URL https://codeload.github.com/iOrange/bcdec/tar.gz/80859ed3b7afb1c527a2a99d70c61457bea72d0c
+    URL_HASH SHA256=c54b589fd1db768994c8bb4bbe9dbd658fb9401ce56cb7a1c544cb1ca2c0a033
+    SOURCE_SUBDIR header_only)
+FetchContent_MakeAvailable(bcdec)
+
 add_library(BigSkyApplication STATIC
+    shared/dds_texture.cpp
+    shared/asphalt_material.cpp
     shared/bscobject.cpp
     shared/building.cpp
     shared/character.cpp
@@ -49,7 +58,7 @@ add_library(BigSkyApplication STATIC
     shared/world_state.cpp
 )
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
-target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cgltf_SOURCE_DIR}")
+target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 include(cmake/shaders.cmake)
 
@@ -62,7 +71,14 @@ set(SDLIMAGE_VENDORED OFF)
 set(SDLIMAGE_PNG_LIBPNG OFF)
 set(SDLIMAGE_AVIF OFF)
 set(SDLIMAGE_WEBP OFF)
-set(SDLIMAGE_TIF OFF)
+set(SDLIMAGE_TIF ON)
+if(WIN32)
+    set(SDLIMAGE_BACKEND_WIC ON)
+    set(SDLIMAGE_BACKEND_STB OFF)
+elseif(NOT APPLE)
+    find_package(TIFF REQUIRED)
+    set(SDLIMAGE_TIF_SHARED OFF)
+endif()
 FetchContent_Declare(SDL3_image
     URL https://codeload.github.com/libsdl-org/SDL_image/tar.gz/ad58ecfc27a1bd09e510ceff8bbbdb1094806476
     URL_HASH SHA256=29fa60ea0432997c4ae61358a8e8fcb3638520d123a590fc9f42558967239cd2
@@ -110,11 +126,14 @@ endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::SDL3_image-static)
 
 # Both executables use the same runtime directory, including on multi-config builds.
+include(cmake/textures.cmake)
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bcdec_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/bcdec.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
     COMMAND "${CMAKE_COMMAND}"
+        "-DtextureCache=${texture_cache}"
         "-DassetSource=${CMAKE_CURRENT_SOURCE_DIR}/assets"
         "-DassetDestination=$<TARGET_FILE_DIR:BigSkyCountry>/assets"
         "-DmanifestDir=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles"
@@ -122,5 +141,6 @@ add_custom_target(BigSkyAssets
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_assets.cmake"
     VERBATIM
 )
+add_dependencies(BigSkyAssets BigSkyTextures)
 add_dependencies(BigSkyCountry BigSkyAssets)
 add_dependencies(BigSkyCountryEditor BigSkyAssets)

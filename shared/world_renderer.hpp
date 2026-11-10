@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "asphalt_material.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
@@ -13,6 +14,8 @@ struct WorldDepthVertex
 {
     float x, y, z, w;
     SDL_FColor color;
+    SDL_FPoint uv{};
+    PavementLighting lighting{};
 };
 
 class WorldRenderer
@@ -45,6 +48,11 @@ private:
     std::vector<WorldDepthVertex> vertices;
     std::vector<WorldDepthVertex> projectedMesh;
     std::vector<WorldDepthVertex> outline;
+    struct PavementRange { size_t first, end; };
+    std::vector<PavementRange> pavement;
+    AsphaltMaterial asphalt;
+    Vector3 pavementSun{};
+    bool drawAsphalt = false;
     std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
 
@@ -52,6 +60,7 @@ private:
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* asphaltPipeline = nullptr;
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;
     SDL_GPUBuffer* vertexBuffer = nullptr;
     SDL_GPUTransferBuffer* upload = nullptr;

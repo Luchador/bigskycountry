@@ -2,33 +2,37 @@
 
 #include <cstring>
 #include <limits>
+#include <span>
 
 #ifdef BIGSKY_WORLD_GPU
 #include "world_vert_dxil.hpp"
 #include "world_vert_spirv.hpp"
 #include "world_frag_dxil.hpp"
 #include "world_frag_spirv.hpp"
+#include "asphalt_frag_dxil.hpp"
+#include "asphalt_frag_spirv.hpp"
 
 namespace
 {
-    SDL_GPUShader* CreateWorldShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage)
+    SDL_GPUShader* CreateWorldShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage, const char* entry,
+                                     std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers = 0)
     {
-        const bool vertex = stage == SDL_GPU_SHADERSTAGE_VERTEX;
         SDL_GPUShaderCreateInfo info{};
         info.stage = stage;
-        info.entrypoint = vertex ? "VSMain" : "PSMain";
+        info.entrypoint = entry;
+        info.num_samplers = samplers;
         const auto formats = SDL_GetGPUShaderFormats(device);
         if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
         {
             info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-            info.code = vertex ? world_vert_spirv : world_frag_spirv;
-            info.code_size = vertex ? sizeof(world_vert_spirv) : sizeof(world_frag_spirv);
+            info.code = spirv.data();
+            info.code_size = spirv.size();
         }
         else if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {
             info.format = SDL_GPU_SHADERFORMAT_DXIL;
-            info.code = vertex ? world_vert_dxil : world_frag_dxil;
-            info.code_size = vertex ? sizeof(world_vert_dxil) : sizeof(world_frag_dxil);
+            info.code = dxil.data();
+            info.code_size = dxil.size();
         }
         else
         {
@@ -62,6 +66,7 @@ WorldRenderer::~WorldRenderer()
     {
         SDL_ReleaseGPUGraphicsPipeline(device, surfacePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
     }
 }
 
@@ -81,12 +86,12 @@ bool WorldRenderer::CreatePipelines()
         return SDL_SetError("No supported depth-stencil format for world rendering");
     }
 
-    SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "VSMain", world_vert_dxil, world_vert_spirv);
     if (!vs)
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
@@ -95,14 +100,17 @@ bool WorldRenderer::CreatePipelines()
     SDL_GPUVertexBufferDescription layout{0, sizeof(WorldDepthVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
     SDL_GPUVertexAttribute attributes[] = {
         {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
-        {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, color)}
+        {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, color)},
+        {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(WorldDepthVertex, uv)},
+        {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(PavementLighting, light)},
+        {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(PavementLighting, view)}
     };
     SDL_GPUColorTargetDescription color{};
     color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
     SDL_GPUGraphicsPipelineCreateInfo pipeline{};
     pipeline.vertex_shader = vs;
     pipeline.fragment_shader = ps;
-    pipeline.vertex_input_state = {&layout, 1, attributes, 2};
+    pipeline.vertex_input_state = {&layout, 1, attributes, SDL_arraysize(attributes)};
     pipeline.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipeline.target_info.color_target_descriptions = &color;
     pipeline.target_info.num_color_targets = 1;
@@ -124,6 +132,17 @@ bool WorldRenderer::CreatePipelines()
     surfacePipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
     if (surfacePipeline)
     {
+        if (auto* asphaltPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "AsphaltPS",
+                                              asphalt_frag_dxil, asphalt_frag_spirv, 3))
+        {
+            pipeline.fragment_shader = asphaltPS;
+            asphaltPipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
+            SDL_ReleaseGPUShader(device, asphaltPS);
+            pipeline.fragment_shader = ps;
+        }
+    }
+    if (asphaltPipeline)
+    {
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
         ds.enable_depth_write = false;
         ds.write_mask = 0;
@@ -136,6 +155,11 @@ bool WorldRenderer::CreatePipelines()
     SDL_ReleaseGPUShader(device, ps);
     if (!outlinePipeline)
     {
+        if (asphaltPipeline)
+        {
+            SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
+            asphaltPipeline = nullptr;
+        }
         if (surfacePipeline)
         {
             SDL_ReleaseGPUGraphicsPipeline(device, surfacePipeline);
@@ -296,9 +320,26 @@ bool WorldRenderer::DrawGPU()
             SDL_DrawGPUPrimitives(pass, static_cast<Uint32>(end - first), 1, static_cast<Uint32>(first), 0);
         }
     };
-    draw(0, selectedStart, 0);
-    draw(selectedStart, selectedEnd, 1);
-    draw(selectedEnd, outlineStart, 0);
+    const auto drawSurface = [&](size_t first, size_t end)
+    {
+        draw(first, std::min(end, selectedStart), 0);
+        draw(std::max(first, selectedStart), std::min(end, selectedEnd), 1);
+        draw(std::max(first, selectedEnd), end, 0);
+    };
+    size_t cursor = 0;
+    if (drawAsphalt)
+    {
+        for (const auto& range : pavement)
+        {
+            drawSurface(cursor, range.first);
+            SDL_BindGPUGraphicsPipeline(pass, asphaltPipeline);
+            asphalt.Bind(pass);
+            drawSurface(range.first, range.end);
+            SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
+            cursor = range.end;
+        }
+    }
+    drawSurface(cursor, outlineStart);
     if (outlineStart < vertices.size())
     {
         SDL_BindGPUGraphicsPipeline(pass, outlinePipeline);

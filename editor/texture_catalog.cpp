@@ -22,7 +22,7 @@ namespace
         static constexpr const char* extensions[] = {
             ".bmp", ".cur", ".gif", ".ico", ".jpeg", ".jpg", ".jpe", ".lbm", ".iff",
             ".pcx", ".png", ".apng", ".pnm", ".pbm", ".pgm", ".ppm", ".qoi", ".svg",
-            ".tga", ".xcf", ".xpm", ".xv"
+            ".tga", ".tif", ".tiff", ".xcf", ".xpm", ".xv"
         };
         const std::string ext = Utf8(path.extension());
         return std::any_of(std::begin(extensions), std::end(extensions),
@@ -41,7 +41,10 @@ namespace
         }
         if (!source)
         {
-            source.reset(IMG_Load((root + path).c_str()));
+            const std::string file = root + path;
+            // Keep PNG thumbnails in straight alpha on every platform.
+            const bool png = extension && (SDL_strcasecmp(extension, ".png") == 0 || SDL_strcasecmp(extension, ".apng") == 0);
+            source.reset(png ? SDL_LoadPNG(file.c_str()) : IMG_Load(file.c_str()));
         }
         Surface thumb(nullptr, SDL_DestroySurface);
         if (!source || source->w <= 0 || source->h <= 0)
@@ -75,7 +78,10 @@ namespace
         {
             source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_BGRA32));
         }
-        if (!source || !SDL_SetSurfaceBlendMode(source.get(), SDL_BLENDMODE_BLEND) ||
+        // libtiff's RGBA reader and Windows Imaging Component return associated alpha.
+        const bool tiff = extension && (SDL_strcasecmp(extension, ".tif") == 0 || SDL_strcasecmp(extension, ".tiff") == 0);
+        const SDL_BlendMode blend = tiff ? SDL_BLENDMODE_BLEND_PREMULTIPLIED : SDL_BLENDMODE_BLEND;
+        if (!source || !SDL_SetSurfaceBlendMode(source.get(), blend) ||
             !SDL_BlitSurfaceScaled(source.get(), nullptr, thumb.get(), &image, SDL_SCALEMODE_LINEAR))
         {
             thumb.reset();

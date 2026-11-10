@@ -1,5 +1,21 @@
 My project Big Sky Country
 
+## Material textures
+
+Put the asphalt sources in `assets/textures/roads/` as `asphalt01_basecolor.tif`, `asphalt01_normal.tif`, and `asphalt01_roughness.tif`. The game and 3D editor share this material across pavement and shoulders. One tile covers 4 m on level pavement. The normal map uses red and green for tangent-space X and Y. The Textures tab shows the original source images.
+
+The build recursively converts TIFF, PNG, TGA, JPEG, and BMP images under `assets/textures` into DDS files with a full mip chain. Filename matching ignores case and reads the suffix immediately before the extension.
+
+| Filename stem | DDS format | Channels |
+| --- | --- | --- |
+| Ends in `_basecolor` | BC7 sRGB | RGB and alpha |
+| Ends in `_normal` | BC5 linear | Red and green |
+| Any other name | BC4 linear | Red |
+
+Runtime materials use `assets/cooked/textures/` beside the executable, with the source folder structure. A development build also stages original images for the editor and existing sky/UI loaders. Rerun the build after adding or editing a material texture.
+
+On Windows, CMake fetches a pinned DirectXTex `texconv` automatically. An existing host executable can be supplied with `-DBIGSKY_TEXCONV=...`. On Linux, install the libtiff development package and run `python3 -m pip install -r tools/texture-requirements.txt` in the Python environment used by CMake.
+
 ## World saves
 
 The editor and game open `world.wld` in the SDL per-user data directory by default. On Windows the path is `%APPDATA%\BigSkyCountry\BigSkyCountry\world.wld`. To work on a different world, pass its path as the first argument to both executables.

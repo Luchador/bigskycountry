@@ -13,9 +13,15 @@ namespace
     WorldDepthVertex Interpolate(const WorldDepthVertex& a, const WorldDepthVertex& b, double t)
     {
         const float f = static_cast<float>(t);
+        auto lighting = a.lighting;
+        for (size_t i = 0; i < lighting.view.size(); ++i)
+        {
+            lighting.view[i] = std::lerp(a.lighting.view[i], b.lighting.view[i], f);
+        }
         return {std::lerp(a.x, b.x, f), std::lerp(a.y, b.y, f), std::lerp(a.z, b.z, f), std::lerp(a.w, b.w, f),
                 {std::lerp(a.color.r, b.color.r, f), std::lerp(a.color.g, b.color.g, f),
-                 std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)}};
+                 std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)},
+                {std::lerp(a.uv.x, b.uv.x, f), std::lerp(a.uv.y, b.uv.y, f)}, lighting};
     }
 
     template<typename Distance>
@@ -36,13 +42,15 @@ namespace
     {
         double x, y, depth, invW;
         SDL_FColor color;
+        SDL_FPoint uv;
+        std::array<float, 3> view;
     };
 
     ScreenVertex Project(const WorldDepthVertex& v, int width, int height)
     {
         const double invW = 1.0 / v.w;
 
-        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color};
+        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color, v.uv, v.lighting.view};
     }
 
     double Edge(const ScreenVertex& a, const ScreenVertex& b, double x, double y)
@@ -74,8 +82,11 @@ bool WorldRenderer::DrawSoftware()
         std::memset(static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch, 0, static_cast<std::size_t>(width) * 4);
     }
 
+    size_t range = 0;
     for (std::size_t first = 0; first < vertices.size(); first += 3)
     {
+        while (range < pavement.size() && first >= pavement[range].end) ++range;
+        const bool textured = drawAsphalt && range < pavement.size() && first >= pavement[range].first;
         const bool outline = first >= outlineStart;
         const bool selected = first >= selectedStart && first < selectedEnd;
         Polygon p{};
@@ -110,6 +121,11 @@ bool WorldRenderer::DrawSoftware()
             const int top = std::max(0, static_cast<int>(std::floor(std::min({a.y, b.y, c.y}))));
             const int bottom = std::min(height, static_cast<int>(std::ceil(std::max({a.y, b.y, c.y}))));
 
+            // Derivatives of the three perspective weights. They give the UV
+            // footprint of a screen pixel for mip selection, including clipped spans.
+            const double ax = (b.y - c.y) * a.invW, ay = (c.x - b.x) * a.invW;
+            const double bx = (c.y - a.y) * b.invW, by = (a.x - c.x) * b.invW;
+            const double cx = (a.y - b.y) * c.invW, cy = (b.x - a.x) * c.invW;
             for (int y = top; y < bottom; ++y)
             {
                 auto* row = static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch;
@@ -136,6 +152,28 @@ bool WorldRenderer::DrawSoftware()
                     const double u = wa * a.invW, v = wb * b.invW, w = wc * c.invW;
                     const double sum = u + v + w;
                     Uint8* pixel = row + static_cast<std::size_t>(x) * 4;
+                    if (textured)
+                    {
+                        const double tu = (u*a.uv.x + v*b.uv.x + w*c.uv.x) / sum;
+                        const double tv = (u*a.uv.y + v*b.uv.y + w*c.uv.y) / sum;
+                        const auto gradient = [&](double da, double db, double dc)
+                        {
+                            return std::hypot(da*(a.uv.x-tu) + db*(b.uv.x-tu) + dc*(c.uv.x-tu),
+                                              da*(a.uv.y-tv) + db*(b.uv.y-tv) + dc*(c.uv.y-tv)) / sum;
+                        };
+                        const float footprint = static_cast<float>(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
+                        auto lighting = vertices[first].lighting;
+                        for (size_t j = 0; j < lighting.view.size(); ++j)
+                        {
+                            lighting.view[j] = static_cast<float>((u*a.view[j] + v*b.view[j] + w*c.view[j]) / sum);
+                        }
+                        const auto color = asphalt.Shade(float(tu), float(tv), footprint, lighting);
+                        pixel[0] = Channel(color.r);
+                        pixel[1] = Channel(color.g);
+                        pixel[2] = Channel(color.b);
+                        pixel[3] = 255;
+                        continue;
+                    }
                     pixel[0] = Channel((u * a.color.r + v * b.color.r + w * c.color.r) / sum);
                     pixel[1] = Channel((u * a.color.g + v * b.color.g + w * c.color.g) / sum);
                     pixel[2] = Channel((u * a.color.b + v * b.color.b + w * c.color.b) / sum);

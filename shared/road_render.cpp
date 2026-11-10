@@ -2,6 +2,8 @@
 #include "editor_colors.hpp"
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
+#include "sun.hpp"
+#include "world_state.hpp"
 #include "view_geometry.hpp"
 
 #include <algorithm>
@@ -154,7 +156,44 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
         }
     };
     const std::size_t start = vertices.size();
-    solid(road.triangles, roadColor);
+    if (!road.triangles.empty())
+    {
+        // Project the aggregate in road-local meters. Adjacent coplanar triangles
+        // share UVs, and moving or rotating the road carries the material with it.
+        const Vector3 origin = road.points.empty() ? road.triangles.front()[0] : road.points.front().position;
+        const auto frame = ObjectTransform{origin, road.rotation}.ToMeshTransform();
+        if (pavement.empty())
+        {
+            pavementSun = Sun::Direction(g_WorldState.GetTimeOfDayMinutes());
+        }
+        for (const auto& t : road.triangles)
+        {
+            const Vector3 normal = Math::Normalize(Math::Cross(t[1] - t[0], t[2] - t[0]));
+            const Vector3 local = frame.Unrotate(normal);
+            Vector3 u = frame.x, v = frame.z;
+            if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = frame.y;
+            else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
+            Vector3 tangent = Math::Normalize(Math::Cross(normal, v));
+            if (Math::Dot(tangent, u) < 0) tangent = tangent * -1;
+            Vector3 bitangent = Math::Cross(normal, tangent);
+            if (Math::Dot(bitangent, v) < 0) bitangent = bitangent * -1;
+            const auto toTangent = [&](Vector3 d) -> std::array<float, 3>
+            {
+                return {float(Math::Dot(d, tangent)), float(Math::Dot(d, bitangent)), float(Math::Dot(d, normal))};
+            };
+            const auto light = toTangent(pavementSun);
+            for (Vector3 p : t)
+            {
+                auto vertex = WorldToClip(p, roadColor);
+                const Vector3 offset = p - frame.origin;
+                vertex.uv = {float(Math::Dot(offset, u) / AsphaltMaterial::tileMeters),
+                             float(Math::Dot(offset, v) / AsphaltMaterial::tileMeters)};
+                vertex.lighting = {light, toTangent(camera->GetPosition() - p)};
+                vertices.push_back(vertex);
+            }
+        }
+        pavement.push_back({start, vertices.size()});
+    }
     for (const auto& triangle : road.edgeTriangles)
     {
         SubmitTriangle({triangle[0].position, triangle[1].position, triangle[2].position},
