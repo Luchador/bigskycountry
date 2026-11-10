@@ -163,18 +163,12 @@ void Road::RotatePoint(std::size_t index, double heading)
 
 void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
 {
-    const double cosine = std::cos(angle), sine = std::sin(angle);
-
-    const auto rotate = [&](Vector3 v)
-    {
-        return v * cosine + Math::Cross(unitAxis, v) * sine + unitAxis * (Math::Dot(unitAxis, v) * (1.0 - cosine));
-    };
-
-    const Vector3 rotatedUp = rotate(PointAxes(index)[1]);
+    const MeshTransform turn = MeshTransform::AxisRotation(unitAxis, angle);
+    const Vector3 rotatedUp = turn.Direction(PointAxes(index)[1]);
     if (style.curved)
     {
         const Vector3 tangent = Tangent(index);
-        const Vector3 rotated = rotate(tangent);
+        const Vector3 rotated = turn.Direction(tangent);
 
         if (Math::Length(rotated - tangent) > 1.0e-12)
         {
@@ -191,11 +185,11 @@ void Road::RotatePoint(std::size_t index, Vector3 unitAxis, double angle)
         for (std::size_t i = first; i <= last; ++i)
         {
             RoadPoint& point = points[i];
-            point.position = pivot + rotate(point.position - pivot);
+            point.position = pivot + turn.Direction(point.position - pivot);
 
             if (point.heading)
             {
-                SetTangent(point, rotate(ManualTangent(point)));
+                SetTangent(point, turn.Direction(ManualTangent(point)));
             }
         }
     }

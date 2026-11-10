@@ -1,7 +1,18 @@
 #include "mesh.hpp"
 
 #include <cmath>
+#include <numbers>
 #include <utility>
+
+MeshTransform MeshTransform::AxisRotation(Vector3 unitAxis, double radians)
+{
+    const double cosine = std::cos(radians), sine = std::sin(radians);
+    const auto rotate = [&](Vector3 v)
+    {
+        return v * cosine + Math::Cross(unitAxis, v) * sine + unitAxis * (Math::Dot(unitAxis, v) * (1.0 - cosine));
+    };
+    return {{}, rotate({1, 0, 0}), rotate({0, 1, 0}), rotate({0, 0, 1})};
+}
 
 bool MeshTransform::Valid() const
 {
@@ -25,6 +36,38 @@ MeshTransform ObjectTransform::ToMeshTransform() const
     const Vector3 y{-sz, cz, 0};
     const Vector3 z{cz * sy, sz * sy, cy};
     return {position, x * scale.x, (y * cx + z * sx) * scale.y, (z * cx - y * sx) * scale.z};
+}
+
+void ObjectTransform::Rotate(Vector3 unitAxis, double radians)
+{
+    if (radians == 0.0)
+    {
+        return;
+    }
+    const MeshTransform basis = ObjectTransform{{}, rotation}.ToMeshTransform();
+    const MeshTransform turn = MeshTransform::AxisRotation(unitAxis, radians);
+    const Vector3 x = turn.Direction(basis.x);
+    const Vector3 y = turn.Direction(basis.y);
+    const Vector3 z = turn.Direction(basis.z);
+
+    // Recover the same Rz * Ry * Rx representation used by ToMeshTransform.
+    const double horizontal = std::hypot(x.x, x.y);
+    const double pitch = std::atan2(-x.z, horizontal);
+    constexpr double pi = std::numbers::pi;
+    const auto difference = [&](Vector3 angles)
+    {
+        return Vector3{std::remainder(angles.x - rotation.x, 2 * pi),
+                       std::remainder(angles.y - rotation.y, 2 * pi),
+                       std::remainder(angles.z - rotation.z, 2 * pi)};
+    };
+    // At a Y pole, X and Z are coupled. Keep the previous Z angle there.
+    const double heading = horizontal > 1.0e-12 ? std::atan2(x.y, x.x) : rotation.z;
+    const Vector3 headingY{-std::sin(heading), std::cos(heading), 0};
+    const double roll = std::atan2(-Math::Dot(headingY, z), Math::Dot(headingY, y));
+    // Choose the equivalent angles closest to the starting inspector values.
+    const Vector3 a = difference({roll, pitch, heading});
+    const Vector3 b = difference({roll + pi, pi - pitch, heading + pi});
+    rotation = rotation + (Math::Dot(a, a) <= Math::Dot(b, b) ? a : b);
 }
 
 bool MeshPlacement::SetTransform(const ObjectTransform& value)

@@ -69,9 +69,9 @@ private:
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
-    std::optional<GizmoPlacement> SelectedPointPlacement(const Road* road, const FreeCamera& camera) const;
+    std::optional<GizmoPlacement> SelectedGizmoPlacement(const Road* road, const FreeCamera& camera) const;
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
-    void BeginPointDrag(const Road& road, Drag kind, bool shift);
+    void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
@@ -109,6 +109,7 @@ private:
     TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
     std::vector<RoadPoint> originalPoints;
+    Vector3 originalRotation{};
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.
 #ifndef _WIN32
     CameraToolbar cameraToolbar;

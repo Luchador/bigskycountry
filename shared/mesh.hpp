@@ -14,6 +14,7 @@ struct MeshTransform
     Vector3 origin{};
     Vector3 x{1, 0, 0}, y{0, 1, 0}, z{0, 0, 1};
 
+    static MeshTransform AxisRotation(Vector3 unitAxis, double radians);
     Vector3 Point(Vector3 p) const { return origin + x * p.x + y * p.y + z * p.z; }
     Vector3 Direction(Vector3 p) const { return x * p.x + y * p.y + z * p.z; }
     // Inverse rotation for an orthonormal basis.
@@ -50,6 +51,8 @@ struct ObjectTransform
     Vector3 scale{1, 1, 1};   // Along the object's local axes.
 
     MeshTransform ToMeshTransform() const;
+    // Compose a world-space rotation about this transform's own origin.
+    void Rotate(Vector3 unitAxis, double radians);
     bool operator==(const ObjectTransform&) const = default;
 };
 

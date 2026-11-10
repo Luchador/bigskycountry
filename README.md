@@ -66,7 +66,9 @@ The Transform panel sits above the road inspector. Click the pavement to select 
 
 Type a value in one axis field and press **Enter** to apply it. **Esc** or leaving the field discards uncommitted text. Each change saves the world and supports **Ctrl+Z** and **Ctrl+Y**. The other axes keep their full precision.
 
-A whole road rotates about its first point. This moves its pavement, markings, edges, and control points together. For a control point, X is roll about the tangent, Y is yaw about world up, and Z is pitch above the horizontal. Point roll sets the orientation of its local editing axes. A straight point’s yaw and pitch pivot its neighboring spans. A Bézier point’s yaw and pitch set its tangent. When a segment is highlighted, the panel shows its owning road.
+With a whole road selected, press **W** for translation arrows or **E** for rotation rings. Drag a handle to move or rotate the pavement, markings, edges, and control points together. The first control point is the pivot for both the gizmo and the Transform panel. In local space the handles follow the road’s stored rotation.
+
+For a control point, X is roll about the tangent, Y is yaw about world up, and Z is pitch above the horizontal. Point roll sets the orientation of its local editing axes. A straight point’s yaw and pitch pivot its neighboring spans. A Bézier point’s yaw and pitch set its tangent. When a segment is highlighted, the panel shows its owning road.
 
 ### Editor controls on Windows
 
