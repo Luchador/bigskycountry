@@ -102,7 +102,7 @@ struct Road
     void Rebuild();
 
 private:
-    void BuildSurface(const std::vector<Vector3>& samples);
+    void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents);
     std::vector<Vector3> centerline;
     std::vector<std::size_t> pointSamples; // Centerline index of each control point.
 };

@@ -55,14 +55,37 @@ namespace
             {
                 continue;
             }
-            visit(Span{path[i - 1], path[i], left, run});
+            visit(Span{path[i - 1], path[i], left, run}, i);
         }
+    }
+
+    struct RoadPath
+    {
+        std::vector<Span> spans;
+        std::vector<Vector3> curveLeft; // One horizontal cross-section axis per Bézier station.
+    };
+
+    Vector3 CurveLeft(Vector3 tangent, Vector3 fallback)
+    {
+        const double run = std::hypot(tangent.x, tangent.z);
+        if (run <= 1e-8 * std::abs(tangent.y)) return fallback;
+        return {-tangent.z / run, 0, tangent.x / run};
     }
 
     // A positive offset is left of the road in the direction its points were placed.
     template<typename Visit>
-    void VisitOffsetStations(const std::vector<Span>& spans, double offset, Visit visit)
+    void VisitOffsetStations(const RoadPath& path, double offset, Visit visit)
     {
+        const auto& spans = path.spans;
+        if (!path.curveLeft.empty())
+        {
+            // A sampled spline is smooth here. Sweeping both sides from its tangent
+            // gives one cross section at this elevation for every part of the road.
+            visit(spans.front().start, path.curveLeft.front());
+            for (std::size_t i = 0; i < spans.size(); ++i) visit(spans[i].end, path.curveLeft[i + 1]);
+            return;
+        }
+
         // On an inside bend the offset lines intersect before/after the corner.
         // Record that trim distance; a negative entry requests a pavement-style bevel.
         std::vector<double> trim(spans.size() + 1, 0.0);
@@ -99,14 +122,26 @@ namespace
         visit(spans.back().end, spans.back().left);
     }
 
-    std::vector<Vector3> OffsetPath(const std::vector<Span>& spans, double offset)
+    struct MarkingPath
     {
-        std::vector<Vector3> path;
-        VisitOffsetStations(spans, offset, [&](Vector3 center, Vector3 normal)
+        std::vector<Vector3> points;
+        std::vector<Vector3> curveLeft;
+
+        void Append(Vector3 center, Vector3 left, double offset, bool curved)
         {
-            path.push_back(center + normal * offset);
+            points.push_back(center + left * offset);
+            if (curved) curveLeft.push_back(left);
+        }
+    };
+
+    MarkingPath OffsetPath(const RoadPath& path, double offset)
+    {
+        MarkingPath marking;
+        VisitOffsetStations(path, offset, [&](Vector3 center, Vector3 normal)
+        {
+            marking.Append(center, normal, offset, !path.curveLeft.empty());
         });
-        return path;
+        return marking;
     }
 
     void AppendBoundary(Road& road, int side, const std::vector<Vector3>& boundary)
@@ -175,11 +210,11 @@ namespace
                   [&](const Road::Triangle& t) { road.whiteStripes.push_back(t); });
     }
 
-    void PaintDashes(const std::vector<Vector3>& path, std::vector<Road::Triangle>& mesh);
+    void PaintDashes(const MarkingPath& path, std::vector<Road::Triangle>& mesh);
 
     // Use the same cross sections for pavement, its outline and any edge treatment.
     // Adjacent spans then meet at the same elevation along the entire join.
-    void BuildRoadSide(Road& road, const std::vector<Span>& spans, int side, bool hasGradedBend)
+    void BuildRoadSide(Road& road, const RoadPath& path, int side, bool hasGradedBend)
     {
         constexpr SDL_FColor red{1, 0, 0, 1}, black{0, 0, 0, 1};
         constexpr SDL_FColor apron{0.69f, 0.69f, 0.69f, 1}, riser{0.56f, 0.56f, 0.56f, 1}, top{0.78f, 0.78f, 0.78f, 1};
@@ -206,19 +241,19 @@ namespace
                 if (offset < pavement) pavementCuts.push_back(offset);
             }
         }
-        // Divided markings use the pavement's actual miter/bevel stations on each side.
-        std::vector<std::vector<Vector3>> dividers(road.style.IsDivided() ? lanes / 2 - 1 : 0);
+        // Divided markings follow the same cross sections as their carriageway.
+        std::vector<MarkingPath> dividers(road.style.IsDivided() ? lanes / 2 - 1 : 0);
         CrossSection last{};
         EdgeProfile previous{};
         std::vector<Vector3> boundary;
 
-        VisitOffsetStations(spans, side * (pavement + road.style.EdgeWidth()), [&](Vector3 center, Vector3 normal)
+        VisitOffsetStations(path, side * (pavement + road.style.EdgeWidth()), [&](Vector3 center, Vector3 normal)
         {
             const Vector3 outward = normal * side;
             const CrossSection current{center, outward};
             for (std::size_t i = 0; i < dividers.size(); ++i)
             {
-                dividers[i].push_back(current.At(halfGap + (i + 1) * RoadStyle::laneWidth));
+                dividers[i].Append(center, normal, side * (halfGap + (i + 1) * RoadStyle::laneWidth), !path.curveLeft.empty());
             }
             EdgeProfile profile{};
             profile[0] = current.At(pavement);
@@ -286,28 +321,29 @@ namespace
         }
 
         AppendBoundary(road, side, boundary);
-        for (const auto& path : dividers) PaintDashes(path, road.whiteStripes);
+        for (const auto& divider : dividers) PaintDashes(divider, road.whiteStripes);
     }
 
     // lo and hi are signed distances perpendicular to each span, in meters.
-    void PaintStrip(const std::vector<Vector3>& path, double lo, double hi, std::vector<Road::Triangle>& mesh,
+    void PaintStrip(const MarkingPath& path, double lo, double hi, std::vector<Road::Triangle>& mesh,
                     std::optional<Vector3> initialLeft = {})
     {
         Vector3 previousLo{}, previousHi{};
         bool havePrevious = false;
 
-        VisitSpans(path, initialLeft, [&](const Span& span)
+        VisitSpans(path.points, initialLeft, [&](const Span& span, std::size_t i)
         {
-            const Vector3 left = span.left;
+            const Vector3 leftA = path.curveLeft.empty() ? span.left : path.curveLeft[i - 1];
+            const Vector3 leftB = path.curveLeft.empty() ? span.left : path.curveLeft[i];
             // A vertical stripe needs a horizontal depth offset from its pavement.
             const Vector3 up = span.length > 0.0 ? Vector3{0, 1, 0}
-                : Math::Cross(left, {0, span.end.y > span.start.y ? 1.0 : -1.0, 0});
+                : Math::Cross(leftA, {0, span.end.y > span.start.y ? 1.0 : -1.0, 0});
             const Vector3 a = span.start + up * stripeHeight;
             const Vector3 b = span.end + up * stripeHeight;
-            const Vector3 aLo = a + left * lo, aHi = a + left * hi;
-            const Vector3 bLo = b + left * lo, bHi = b + left * hi;
+            const Vector3 aLo = a + leftA * lo, aHi = a + leftA * hi;
+            const Vector3 bLo = b + leftB * lo, bHi = b + leftB * hi;
 
-            if (havePrevious)
+            if (havePrevious && path.curveLeft.empty())
             {
                 if (lo != 0.0)
                 {
@@ -328,9 +364,9 @@ namespace
         });
     }
 
-    void PaintDashes(const std::vector<Vector3>& path, std::vector<Road::Triangle>& mesh)
+    void PaintDashes(const MarkingPath& path, std::vector<Road::Triangle>& mesh)
     {
-        if (path.empty())
+        if (path.points.empty())
         {
             return;
         }
@@ -338,18 +374,30 @@ namespace
         // Carry the unfinished dash or gap into the next span of this divider.
         bool painting = true;
         double remaining = dashLength;
-        std::vector<Vector3> dash{path.front()};
+        MarkingPath dash;
+        dash.points.push_back(path.points.front());
+        if (!path.curveLeft.empty()) dash.curveLeft.push_back(path.curveLeft.front());
 
         Vector3 dashLeft = defaultLeft;
-        VisitSpans(path, {}, [&](const Span& span)
+        VisitSpans(path.points, {}, [&](const Span& span, std::size_t i)
         {
             const Vector3 start = span.start;
             const Vector3 delta = span.end - start;
-            if (dash.size() == 1)
+            if (dash.points.size() == 1)
             {
                 dashLeft = span.left;
             }
             const double length = Math::Length(delta);
+            const auto addPoint = [&](Vector3 point, double fraction)
+            {
+                dash.points.push_back(point);
+                if (!path.curveLeft.empty())
+                {
+                    // Interpolate both stripe edges when a dash ends between stations.
+                    const Vector3 a = path.curveLeft[i - 1], b = path.curveLeft[i];
+                    dash.curveLeft.push_back(fraction == 1.0 ? b : a + (b - a) * fraction);
+                }
+            };
             double used = 0.0;
 
             while (used < length)
@@ -360,25 +408,27 @@ namespace
                 {
                     if (painting)
                     {
-                        dash.push_back(span.end);
+                        addPoint(span.end, 1.0);
                     }
                     remaining -= available;
                     break;
                 }
 
                 used += remaining;
-                const Vector3 boundary = start + delta * (used / length);
+                const double fraction = used / length;
+                const Vector3 boundary = used == length ? span.end : start + delta * fraction;
 
                 if (painting)
                 {
-                    dash.push_back(boundary);
+                    addPoint(boundary, fraction);
                     PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
-                    dash.clear();
+                    dash.points.clear();
+                    dash.curveLeft.clear();
                 }
                 else
                 {
                     dashLeft = span.left;
-                    dash.push_back(boundary);
+                    addPoint(boundary, fraction);
                 }
 
                 painting = !painting;
@@ -388,21 +438,29 @@ namespace
         PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
     }
 
-    void PaintDoubleYellow(const std::vector<Span>& spans, double boundary, std::vector<Road::Triangle>& mesh)
+    void PaintDoubleYellow(const RoadPath& path, double boundary, std::vector<Road::Triangle>& mesh)
     {
         for (int side : {-1, 1})
         {
-            const auto stripe = OffsetPath(spans, boundary + side * yellowPairOffset);
+            const auto stripe = OffsetPath(path, boundary + side * yellowPairOffset);
             PaintStrip(stripe, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
         }
     }
 }
 
-void Road::BuildSurface(const std::vector<Vector3>& samples)
+void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents)
 {
-    std::vector<Span> spans;
-    VisitSpans(samples, {}, [&](const Span& span) { spans.push_back(span); });
-
+    RoadPath path;
+    VisitSpans(samples, {}, [&](const Span& span, std::size_t end)
+    {
+        if (!tangents.empty())
+        {
+            if (path.spans.empty()) path.curveLeft.push_back(CurveLeft(tangents[end - 1], span.left));
+            path.curveLeft.push_back(CurveLeft(tangents[end], path.curveLeft.back()));
+        }
+        path.spans.push_back(span);
+    });
+    const auto& spans = path.spans;
     if (spans.empty())
     {
         return;
@@ -417,11 +475,11 @@ void Road::BuildSurface(const std::vector<Vector3>& samples)
 
     for (int side : {-1, 1})
     {
-        BuildRoadSide(*this, spans, side, hasGradedBend);
+        BuildRoadSide(*this, path, side, hasGradedBend);
         if (!style.IsDivided())
         {
             // Place the white stripe wholly inside the travel edge, beside any shoulder.
-            const auto edge = OffsetPath(spans, side * halfTravelWidth);
+            const auto edge = OffsetPath(path, side * halfTravelWidth);
             PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
         }
     }
@@ -434,9 +492,9 @@ void Road::BuildSurface(const std::vector<Vector3>& samples)
     {
         for (int side : {-1, 1})
         {
-            const auto solid = OffsetPath(spans, side * (halfLane + yellowPairOffset));
+            const auto solid = OffsetPath(path, side * (halfLane + yellowPairOffset));
             PaintStrip(solid, -stripeWidth * 0.5, stripeWidth * 0.5, yellowStripes);
-            const auto dashed = OffsetPath(spans, side * (halfLane - yellowPairOffset));
+            const auto dashed = OffsetPath(path, side * (halfLane - yellowPairOffset));
             PaintDashes(dashed, yellowStripes);
         }
     }
@@ -448,15 +506,15 @@ void Road::BuildSurface(const std::vector<Vector3>& samples)
         const bool twoNorthbound = style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound;
         // Traffic keeps right. Positive offsets are left of the authored path.
         const double boundary = (twoNorthbound == northFollowsPoints) ? halfLane : -halfLane;
-        PaintDoubleYellow(spans, boundary, yellowStripes);
-        PaintDashes(OffsetPath(spans, -boundary), whiteStripes);
+        PaintDoubleYellow(path, boundary, yellowStripes);
+        PaintDashes(OffsetPath(path, -boundary), whiteStripes);
         return;
     }
     else
     {
         if(laneCount != 1)
         {
-            PaintDoubleYellow(spans, 0.0, yellowStripes);
+            PaintDoubleYellow(path, 0.0, yellowStripes);
         }
     }
 
@@ -468,7 +526,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples)
     {
         for (int lane = 1; lane < lanesPerDirection; ++lane)
         {
-            const auto divider = OffsetPath(spans, side * (throughLaneStart + lane * RoadStyle::laneWidth));
+            const auto divider = OffsetPath(path, side * (throughLaneStart + lane * RoadStyle::laneWidth));
             PaintDashes(divider, whiteStripes);
         }
     }

@@ -19,7 +19,8 @@ namespace
     }
 
     // Subdivide until the cubic deviates from its linear interpolation by at most 10 cm.
-    void SampleCubic(Vector3 a, Vector3 b, Vector3 c, Vector3 d, int depth, std::vector<Vector3>& samples)
+    void SampleCubic(Vector3 a, Vector3 b, Vector3 c, Vector3 d, int depth, std::vector<Vector3>& samples,
+                     std::vector<Vector3>& tangents)
     {
         const Vector3 chord = d - a;
         const double error = std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
@@ -27,6 +28,8 @@ namespace
         if (error <= 0.1 || depth == 12)
         {
             samples.push_back(d);
+            // The derivative at this subcurve's endpoint is parallel to its last control-polygon edge.
+            tangents.push_back(d - c);
             return;
         }
 
@@ -36,8 +39,8 @@ namespace
         const Vector3 abc = (ab + bc) * 0.5;
         const Vector3 bcd = (bc + cd) * 0.5;
         const Vector3 middle = (abc + bcd) * 0.5;
-        SampleCubic(a, ab, abc, middle, depth + 1, samples);
-        SampleCubic(middle, bcd, cd, d, depth + 1, samples);
+        SampleCubic(a, ab, abc, middle, depth + 1, samples, tangents);
+        SampleCubic(middle, bcd, cd, d, depth + 1, samples, tangents);
     }
 }
 
@@ -302,6 +305,8 @@ void Road::Rebuild()
         return;
     }
 
+    std::vector<Vector3> tangents;
+    if (style.curved) tangents.push_back(Tangent(0));
     centerline.push_back(points.front().position);
     pointSamples.push_back(0);
 
@@ -313,7 +318,10 @@ void Road::Rebuild()
         if (style.curved)
         {
             const double arm = Math::Length(b - a) / 3.0;
-            SampleCubic(a, a + Tangent(i - 1) * arm, b - Tangent(i) * arm, b, 0, centerline);
+            const Vector3 endTangent = Tangent(i);
+            SampleCubic(a, a + Tangent(i - 1) * arm, b - endTangent * arm, b, 0, centerline, tangents);
+            // Preserve the authored direction even when a segment has zero length.
+            tangents.back() = endTangent;
         }
         else
         {
@@ -334,11 +342,12 @@ void Road::Rebuild()
         {
             local.push_back(frame.Unrotate(sample - frame.origin));
         }
-        BuildSurface(local);
+        for (Vector3& tangent : tangents) tangent = frame.Unrotate(tangent);
+        BuildSurface(local, tangents);
     }
     else
     {
-        BuildSurface(centerline);
+        BuildSurface(centerline, tangents);
     }
 
     // Bevels can turn either way. Give all top surfaces an upward normal once,
