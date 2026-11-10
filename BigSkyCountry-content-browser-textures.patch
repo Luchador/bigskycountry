@@ -1,0 +1,1030 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8c423d01c54a57b64ae1da54e5d05ddb1ae37162..b2dad041aed515206e295ae96c71c4c09d1ac114 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -56,9 +56,23 @@ include(cmake/shaders.cmake)
+ add_executable(BigSkyCountry WIN32 game/main.cpp)
+ target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
+ 
++# SDL_image 3.4.0 for editor thumbnails. Use its built-in decoders to avoid extra runtime DLLs.
++set(BUILD_SHARED_LIBS OFF)
++set(SDLIMAGE_VENDORED OFF)
++set(SDLIMAGE_PNG_LIBPNG OFF)
++set(SDLIMAGE_AVIF OFF)
++set(SDLIMAGE_WEBP OFF)
++set(SDLIMAGE_TIF OFF)
++FetchContent_Declare(SDL3_image
++    URL https://codeload.github.com/libsdl-org/SDL_image/tar.gz/ad58ecfc27a1bd09e510ceff8bbbdb1094806476
++    URL_HASH SHA256=29fa60ea0432997c4ae61358a8e8fcb3638520d123a590fc9f42558967239cd2
++)
++FetchContent_MakeAvailable(SDL3_image)
++
+ add_executable(BigSkyCountryEditor WIN32
+     editor/main.cpp
+     editor/content_browser.cpp
++    editor/texture_catalog.cpp
+     editor/scene_outliner.cpp
+     editor/road_editor.cpp
+     editor/transform_inspector.cpp
+@@ -93,11 +107,12 @@ if(WIN32)
+ else()
+     target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
+ endif()
+-target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
++target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::SDL3_image-static)
+ 
+ # Both executables use the same runtime directory, including on multi-config builds.
+ add_custom_target(BigSkyAssets
+     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
++    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
+     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
+     COMMAND "${CMAKE_COMMAND}"
+         "-DassetSource=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+diff --git a/editor/content_browser.cpp b/editor/content_browser.cpp
+index e72b7bc9879e13c66a276c5551394d45beb22d67..b0e32c78040d640b7b6e022e74e29e0a009c8341 100644
+--- a/editor/content_browser.cpp
++++ b/editor/content_browser.cpp
+@@ -14,11 +14,20 @@ namespace
+     constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
+     namespace fs = std::filesystem;
+ 
++    std::string Utf8(const fs::path& path)
++    {
++        const auto bytes = path.generic_u8string();
++        return {bytes.begin(), bytes.end()};
++    }
++
+ #ifndef _WIN32
++    constexpr float textureRowHeight = 64.0f;
++
+     struct Layout
+     {
+-        SDL_FRect refresh, image;
++        SDL_FRect refresh, modelsTab, texturesTab, image;
+         int listTop;
++        static constexpr int pageTop = 70;
+ 
+         Layout(int w, int h)
+         {
+@@ -26,8 +35,11 @@ namespace
+             refresh = {w - 10.0f - buttonWidth, 10, buttonWidth, 24};
+             const float width = static_cast<float>(std::max(0, w - 24));
+             const float height = std::min(width * previewHeight / previewWidth, static_cast<float>(h / 3));
+-            image = {12, 44, width, height};
+-            listTop = static_cast<int>(image.y + height) + 55;
++            const float tabWidth = width / 2;
++            modelsTab = {12, 40, tabWidth, 24};
++            texturesTab = {12 + tabWidth, 40, tabWidth, 24};
++            image = {12, pageTop, width, height};
++            listTop = static_cast<int>(image.y + height) + 32;
+         }
+     };
+ 
+@@ -42,15 +54,6 @@ namespace
+                SDL_RenderDebugText(renderer, x, y, text.c_str());
+     }
+ 
+-#endif
+-
+-    std::string Utf8(const fs::path& path)
+-    {
+-        const auto bytes = path.generic_u8string();
+-        return {bytes.begin(), bytes.end()};
+-    }
+-
+-#ifndef _WIN32
+     bool DrawRefresh(SDL_Renderer* renderer, const SDL_FRect& rect)
+     {
+         if (!Fill(renderer, rect, {47, 59, 66, 255}))
+@@ -132,8 +135,30 @@ namespace
+     }
+ }
+ 
++void ContentBrowser::SetTab(Tab next)
++{
++    tab = next;
++    if (tab == Tab::Textures && !texturesScanned)
++    {
++        Refresh();
++    }
++}
++
+ void ContentBrowser::Refresh()
+ {
++    if (tab == Tab::Textures)
++    {
++        textures.Refresh();
++#ifndef _WIN32
++        if (std::none_of(textures.Items().begin(), textures.Items().end(),
++                         [&](const TextureCatalog::Item& item) { return item.path == selectedTexture; }))
++        {
++            selectedTexture.clear();
++        }
++#endif
++        texturesScanned = true;
++        return;
++    }
+     rows.clear();
+     scanStatus.clear();
+     previewDirty = true;
+@@ -227,11 +252,16 @@ bool ContentBrowser::UpdatePreview()
+ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
+ {
+     const Layout layout(width, height);
++    const bool models = tab == Tab::Models;
++    const int top = models ? layout.listTop : Layout::pageTop + (textures.Status().empty() ? 0 : 24);
++    const float step = models ? rowHeight : textureRowHeight;
++    float& offset = models ? scroll : textureScroll;
++    const auto count = models ? rows.size() : textures.Items().size();
+     if (event.type == SDL_EVENT_MOUSE_WHEEL)
+     {
+         const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+-        const float limit = std::max(0.0f, rows.size() * rowHeight - std::max(0, height - layout.listTop));
+-        scroll = std::clamp(scroll - steps * rowHeight * 2, 0.0f, limit);
++        const float limit = std::max(0.0f, count * step - std::max(0, height - top));
++        offset = std::clamp(offset - steps * step * 2, 0.0f, limit);
+     }
+     if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT)
+     {
+@@ -241,10 +271,22 @@ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int
+     {
+         Refresh();
+     }
+-    else if (local.y >= layout.listTop)
++    else if (SDL_PointInRectFloat(&local, &layout.modelsTab))
++    {
++        SetTab(Tab::Models);
++    }
++    else if (SDL_PointInRectFloat(&local, &layout.texturesTab))
++    {
++        SetTab(Tab::Textures);
++    }
++    else if (local.y >= top)
+     {
+-        const auto index = static_cast<std::size_t>((local.y - layout.listTop + scroll) / rowHeight);
+-        if (index < rows.size() && !rows[index].modelPath.empty())
++        const auto index = static_cast<std::size_t>((local.y - top + offset) / step);
++        if (!models && index < count)
++        {
++            selectedTexture = textures.Items()[index].path;
++        }
++        else if (models && index < count && !rows[index].modelPath.empty())
+         {
+             Select(rows[index].modelPath);
+         }
+@@ -257,7 +299,8 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
+     {
+         return true;
+     }
+-    if (UpdatePreview())
++    const bool models = tab == Tab::Models;
++    if (models && UpdatePreview())
+     {
+         if (preview)
+         {
+@@ -271,34 +314,56 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
+     }
+     const Layout layout(width, height);
+     if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, {24, 32, 38, 255}) ||
+-        (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Models", ink)) ||
+-        !DrawRefresh(renderer, layout.refresh) ||
+-        !Fill(renderer, layout.image, {17, 23, 28, 255}))
++        (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Content", ink)) ||
++        !DrawRefresh(renderer, layout.refresh))
+     {
+         return false;
+     }
+-    if (preview)
++    auto drawTab = [&](const SDL_FRect& rect, const char* label, bool active)
++    {
++        const auto color = active ? SDL_Color{53, 72, 82, 255} : SDL_Color{35, 45, 52, 255};
++        return Fill(renderer, rect, color) &&
++               Text(renderer, rect.x + std::max(1.0f, (rect.w - SDL_strlen(label) * 8) / 2), rect.y + 8, label, active ? ink : muted);
++    };
++    if (!drawTab(layout.modelsTab, "Models", models) || !drawTab(layout.texturesTab, "Textures", !models))
+     {
+-        const float w = layout.image.h * previewWidth / previewHeight;
+-        const SDL_FRect image{layout.image.x + (layout.image.w - w) * 0.5f, layout.image.y, w, layout.image.h};
+-        if (!SDL_RenderTexture(renderer, preview, nullptr, &image))
++        return false;
++    }
++
++    int top = Layout::pageTop;
++    if (models)
++    {
++        if (!Fill(renderer, layout.image, {17, 23, 28, 255}))
+         {
+             return false;
+         }
++        if (preview)
++        {
++            const float w = layout.image.h * previewWidth / previewHeight;
++            const SDL_FRect image{layout.image.x + (layout.image.w - w) * 0.5f, layout.image.y, w, layout.image.h};
++            if (!SDL_RenderTexture(renderer, preview, nullptr, &image))
++            {
++                return false;
++            }
++        }
++        const std::string status = !scanStatus.empty() ? scanStatus :
++            (width < 190 && preview ? std::to_string(triangleCount) + " tris" : previewStatus);
++        if (!Text(renderer, 12, layout.image.y + layout.image.h + 10, status, muted))
++        {
++            return false;
++        }
++        top = layout.listTop;
+     }
+-    const std::string status = width < 190 && preview ? std::to_string(triangleCount) + " tris" : previewStatus;
+-    const bool partial = !rows.empty() && !scanStatus.empty();
+-    if (!Text(renderer, 12, layout.image.y + layout.image.h + 10, status, muted) ||
+-        !Text(renderer, 12, static_cast<float>(layout.listTop - 19), partial ? scanStatus : "assets/models", muted))
+-    {
+-        return false;
+-    }
+-    if (rows.empty())
++    else if (!textures.Status().empty())
+     {
+-        return Text(renderer, 12, static_cast<float>(layout.listTop + 8), scanStatus, muted);
++        if (!Text(renderer, 12, top + 6, textures.Status(), muted))
++        {
++            return false;
++        }
++        top += 24;
+     }
+ 
+-    const int listHeight = std::max(0, height - layout.listTop);
++    const int listHeight = std::max(0, height - top);
+     if (listHeight == 0)
+     {
+         return true;
+@@ -308,17 +373,56 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
+     {
+         return false;
+     }
+-    const SDL_Rect list{panel.x, panel.y + layout.listTop, width, listHeight};
++    const SDL_Rect list{panel.x, panel.y + top, width, listHeight};
+     if (!SDL_SetRenderViewport(renderer, &list))
+     {
+         return false;
+     }
+-    const float limit = std::max(0.0f, rows.size() * rowHeight - listHeight);
+-    scroll = std::min(scroll, limit);
+-    const auto first = static_cast<std::size_t>(scroll / rowHeight);
+-    float y = first * rowHeight - scroll;
+-    for (auto i = first; i < rows.size() && y < listHeight; ++i, y += rowHeight)
++    const float step = models ? rowHeight : textureRowHeight;
++    const auto count = models ? rows.size() : textures.Items().size();
++    const float limit = std::max(0.0f, count * step - listHeight);
++    float& offset = models ? scroll : textureScroll;
++    offset = std::min(offset, limit);
++    const auto first = static_cast<std::size_t>(offset / step);
++    float y = first * step - offset;
++    for (auto i = first; i < count && y < listHeight; ++i, y += step)
+     {
++        if (!models)
++        {
++            const auto& item = textures.Items()[i];
++            if (selectedTexture == item.path &&
++                !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), step}, {45, 91, 94, 255}))
++            {
++                return false;
++            }
++            const SDL_FRect icon{10, y + 5, 54, 54};
++            SDL_Texture* thumb = textures.ThumbnailTexture(i, renderer);
++            if (thumb)
++            {
++                if (!SDL_RenderTexture(renderer, thumb, nullptr, &icon))
++                {
++                    return false;
++                }
++            }
++            else if (!Fill(renderer, icon, {45, 49, 53, 255}) || !Text(renderer, 33, y + 28, "?", muted))
++            {
++                return false;
++            }
++
++            // Use two lines for long filenames in the narrow sidebar.
++            const size_t chars = static_cast<size_t>(std::max(1, (width - 79) / 8));
++            const char* second = item.name.c_str();
++            for (size_t n = 0; n < chars && *second; ++n)
++            {
++                SDL_StepUTF8(&second, nullptr);
++            }
++            if (!Text(renderer, 72, y + 10, item.name.substr(0, second - item.name.c_str()), ink) ||
++                !Text(renderer, 72, y + 23, second, ink) || !Text(renderer, 72, y + 42, item.folder, muted))
++            {
++                return false;
++            }
++            continue;
++        }
+         const Row& row = rows[i];
+         const bool folder = row.modelPath.empty();
+         if ((!folder && row.modelPath == selected &&
+@@ -330,8 +434,8 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
+     }
+     if (limit > 0)
+     {
+-        const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (rows.size() * rowHeight)));
+-        const float top = (listHeight - thumb) * scroll / limit;
++        const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (count * step)));
++        const float top = (listHeight - thumb) * offset / limit;
+         if (!Fill(renderer, {static_cast<float>(width - 4), top, 3, thumb}, {94, 111, 116, 255}))
+         {
+             return false;
+diff --git a/editor/content_browser.hpp b/editor/content_browser.hpp
+index c181cb953cb0ab48dd451f71f5e1db7a46e22f07..c8814ed54bea68e594aa16e514f2808d9c49048a 100644
+--- a/editor/content_browser.hpp
++++ b/editor/content_browser.hpp
+@@ -1,17 +1,24 @@
+ #pragma once
+ 
++#include "texture_catalog.hpp"
+ #include <SDL3/SDL.h>
+ #include <memory>
+ #include <string>
+ #include <vector>
+ 
+-// Lists model files without loading the whole asset collection.
++// Model previews and texture thumbnails are loaded on demand.
+ class ContentBrowser
+ {
+ public:
++    enum class Tab { Models, Textures };
++    void SetTab(Tab next);
++    Tab ActiveTab() const { return tab; }
++    TextureCatalog& Textures() { return textures; }
+     void Refresh();
++#ifndef _WIN32
+     void HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
+     bool Draw(SDL_Renderer* renderer, int width, int height);
++#endif
+ 
+     struct Row
+     {
+@@ -28,6 +35,13 @@ public:
+     bool UpdatePreview(); // Returns true when the selected model or its preview changed.
+ 
+ private:
++    Tab tab = Tab::Models;
++    TextureCatalog textures;
++    bool texturesScanned = false;
++#ifndef _WIN32
++    float textureScroll = 0;
++    std::string selectedTexture;
++#endif
+     std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface{nullptr, SDL_DestroySurface};
+     std::vector<Row> rows;
+     std::string selected;
+diff --git a/editor/panel_ids.h b/editor/panel_ids.h
+index f83465268a74c05612089200b4f6223a8b295e21..b62bfa0d6bf8f6fa1ff74138fbf98032ce18843f 100644
+--- a/editor/panel_ids.h
++++ b/editor/panel_ids.h
+@@ -3,6 +3,8 @@
+ // Shared dialog-template dimensions in dialog units.
+ #define TOOLBAR_HEIGHT 25
+ #define BROWSER_WIDTH 144
++#define BROWSER_PAGE_TOP 48
++#define BROWSER_MODEL_LIST_TOP 132
+ #define ROAD_PANEL_WIDTH 208
+ #define ROAD_PANEL_HEIGHT 305
+ 
+@@ -19,8 +21,10 @@
+ #define IDC_REFRESH 1010
+ #define IDC_PREVIEW 1011
+ #define IDC_PREVIEW_STATUS 1012
+-#define IDC_MODEL_ROOT 1013
++#define IDC_BROWSER_TABS 1013
+ #define IDC_MODELS 1014
++#define IDC_TEXTURES 1015
++#define IDC_TEXTURE_STATUS 1016
+ 
+ #define IDC_ROAD_TITLE 1020
+ #define IDC_VIEW 1021
+diff --git a/editor/panels.rc b/editor/panels.rc
+index 0ed25be2cf5e2ad2aeed1edf272ed44850379130..3832678df20a1535a6e22b44667db28b7f7b4062 100644
+--- a/editor/panels.rc
++++ b/editor/panels.rc
+@@ -26,10 +26,12 @@ FONT 9, "Segoe UI"
+ BEGIN
+     LTEXT "Content browser", -1, 7, 8, 79, 14
+     PUSHBUTTON "Refresh", IDC_REFRESH, 95, 5, 42, 15
+-    CONTROL "", IDC_PREVIEW, "Static", SS_OWNERDRAW, 7, 25, 130, 64
+-    LTEXT "", IDC_PREVIEW_STATUS, 7, 93, 130, 13
+-    LTEXT "assets/models", IDC_MODEL_ROOT, 7, 109, 130, 13
+-    CONTROL "", IDC_MODELS, "SysTreeView32", WS_TABSTOP | WS_BORDER | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS, 7, 124, 130, 109
++    CONTROL "", IDC_BROWSER_TABS, "SysTabControl32", WS_TABSTOP | TCS_FOCUSONBUTTONDOWN, 7, 24, 130, 21
++    CONTROL "", IDC_PREVIEW, "Static", SS_OWNERDRAW, 7, BROWSER_PAGE_TOP, 130, 64
++    LTEXT "", IDC_PREVIEW_STATUS, 7, 116, 130, 13
++    CONTROL "", IDC_MODELS, "SysTreeView32", WS_TABSTOP | WS_BORDER | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS, 7, BROWSER_MODEL_LIST_TOP, 130, 101
++    LTEXT "", IDC_TEXTURE_STATUS, 7, BROWSER_PAGE_TOP, 130, 13, NOT WS_VISIBLE
++    CONTROL "", IDC_TEXTURES, "ListBox", NOT WS_VISIBLE | WS_TABSTOP | WS_BORDER | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT, 7, BROWSER_PAGE_TOP, 130, 185
+ END
+ 
+ IDD_ROAD DIALOGEX 0, 0, ROAD_PANEL_WIDTH, ROAD_PANEL_HEIGHT
+diff --git a/editor/texture_catalog.cpp b/editor/texture_catalog.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..27fd56bbc7078415c55a63d45c47bf0853b127b0
+--- /dev/null
++++ b/editor/texture_catalog.cpp
+@@ -0,0 +1,162 @@
++#include "texture_catalog.hpp"
++#include "texture_loader.hpp"
++#include <SDL3_image/SDL_image.h>
++
++#include <algorithm>
++#include <cmath>
++#include <filesystem>
++
++namespace
++{
++    namespace fs = std::filesystem;
++    using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
++
++    std::string Utf8(const fs::path& path)
++    {
++        const auto bytes = path.generic_u8string();
++        return {bytes.begin(), bytes.end()};
++    }
++
++    bool IsImage(const fs::path& path)
++    {
++        static constexpr const char* extensions[] = {
++            ".bmp", ".cur", ".gif", ".ico", ".jpeg", ".jpg", ".jpe", ".lbm", ".iff",
++            ".pcx", ".png", ".apng", ".pnm", ".pbm", ".pgm", ".ppm", ".qoi", ".svg",
++            ".tga", ".xcf", ".xpm", ".xv"
++        };
++        const std::string ext = Utf8(path.extension());
++        return std::any_of(std::begin(extensions), std::end(extensions),
++                           [&](const char* candidate) { return SDL_strcasecmp(ext.c_str(), candidate) == 0; });
++    }
++
++    Surface MakeThumbnail(const std::string& root, const std::string& path)
++    {
++        constexpr int size = TextureCatalog::thumbnailSize;
++        Surface source(nullptr, SDL_DestroySurface);
++        // Use the world loader for RLE true-color TGAs, including right-origin images.
++        const char* extension = SDL_strrchr(path.c_str(), '.');
++        if (extension && SDL_strcasecmp(extension, ".tga") == 0)
++        {
++            source.reset(TextureLoader::LoadTgaSurface(path.c_str()));
++        }
++        if (!source)
++        {
++            source.reset(IMG_Load((root + path).c_str()));
++        }
++        Surface thumb(nullptr, SDL_DestroySurface);
++        if (!source || source->w <= 0 || source->h <= 0)
++        {
++            return thumb;
++        }
++        thumb.reset(SDL_CreateSurface(size, size, SDL_PIXELFORMAT_BGRA32));
++        if (!thumb)
++        {
++            return thumb;
++        }
++        const double scale = double(size) / std::max(source->w, source->h);
++        const int w = std::max(1, static_cast<int>(std::lround(source->w * scale)));
++        const int h = std::max(1, static_cast<int>(std::lround(source->h * scale)));
++        const SDL_Rect image{(size - w) / 2, (size - h) / 2, w, h};
++        SDL_FillSurfaceRect(thumb.get(), nullptr, SDL_MapSurfaceRGB(thumb.get(), 37, 42, 46));
++        const Uint32 light = SDL_MapSurfaceRGB(thumb.get(), 122, 128, 132);
++        const Uint32 dark = SDL_MapSurfaceRGB(thumb.get(), 83, 89, 93);
++        constexpr int cell = 8;
++        for (int y = 0; y < h; y += cell)
++        {
++            for (int x = 0; x < w; x += cell)
++            {
++                SDL_Rect tile{image.x + x, image.y + y, std::min(cell, w - x), std::min(cell, h - y)};
++                SDL_FillSurfaceRect(thumb.get(), &tile, (x / cell + y / cell) % 2 ? light : dark);
++            }
++        }
++
++        // Convert first so indexed images and color keys retain transparency when scaled.
++        if (source->format != SDL_PIXELFORMAT_BGRA32)
++        {
++            source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_BGRA32));
++        }
++        if (!source || !SDL_SetSurfaceBlendMode(source.get(), SDL_BLENDMODE_BLEND) ||
++            !SDL_BlitSurfaceScaled(source.get(), nullptr, thumb.get(), &image, SDL_SCALEMODE_LINEAR))
++        {
++            thumb.reset();
++        }
++        return thumb;
++    }
++}
++
++void TextureCatalog::Refresh()
++{
++#ifndef _WIN32
++    for (const auto& preview : previews)
++    {
++        if (preview.texture)
++        {
++            SDL_DestroyTexture(preview.texture);
++        }
++    }
++#endif
++    previews.clear();
++    items.clear();
++    status.clear();
++    const char* base = SDL_GetBasePath();
++    if (base)
++    {
++        root = std::string(base) + "assets/textures/";
++        const fs::path folder(std::u8string(root.begin(), root.end()));
++        std::error_code error;
++        fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, error), end;
++        for (; !error && it != end; it.increment(error))
++        {
++            std::error_code statError;
++            if (it->is_regular_file(statError) && IsImage(it->path()))
++            {
++                const auto relative = it->path().lexically_relative(folder);
++                items.push_back({Utf8(relative), Utf8(relative.filename()), Utf8(relative.parent_path())});
++            }
++        }
++        if (error && error != std::errc::no_such_file_or_directory)
++        {
++            status = "Cannot read texture folder";
++        }
++    }
++    else
++    {
++        status = "Cannot read texture folder";
++    }
++    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.path < b.path; });
++    previews.resize(items.size());
++    if (items.empty() && status.empty())
++    {
++        status = "No textures found";
++    }
++}
++
++SDL_Surface* TextureCatalog::Thumbnail(std::size_t index)
++{
++    auto& preview = previews.at(index);
++    if (!preview.attempted)
++    {
++        preview.attempted = true;
++        preview.surface = MakeThumbnail(root, items[index].path);
++        if (!preview.surface)
++        {
++            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Texture preview '%s': %s", items[index].path.c_str(), SDL_GetError());
++        }
++    }
++    return preview.surface.get();
++}
++
++#ifndef _WIN32
++SDL_Texture* TextureCatalog::ThumbnailTexture(std::size_t index, SDL_Renderer* renderer)
++{
++    auto& preview = previews.at(index);
++    if (!preview.texture)
++    {
++        if (SDL_Surface* thumb = Thumbnail(index))
++        {
++            preview.texture = SDL_CreateTextureFromSurface(renderer, thumb);
++        }
++    }
++    return preview.texture;
++}
++#endif
+diff --git a/editor/texture_catalog.hpp b/editor/texture_catalog.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9cada1d68d21f7a8e16abea0fcdeb8fd65b0c59
+--- /dev/null
++++ b/editor/texture_catalog.hpp
+@@ -0,0 +1,43 @@
++#pragma once
++
++#include <SDL3/SDL.h>
++#include <memory>
++#include <string>
++#include <vector>
++
++class TextureCatalog
++{
++public:
++    static constexpr int thumbnailSize = 64;
++
++    struct Item
++    {
++        std::string path; // UTF-8, relative to assets/textures.
++        std::string name;
++        std::string folder;
++    };
++
++    void Refresh();
++    const std::vector<Item>& Items() const { return items; }
++    const std::string& Status() const { return status; }
++    SDL_Surface* Thumbnail(std::size_t index);
++#ifndef _WIN32
++    SDL_Texture* ThumbnailTexture(std::size_t index, SDL_Renderer* renderer);
++#endif
++
++private:
++    using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
++    struct Preview
++    {
++        Surface surface{nullptr, SDL_DestroySurface};
++        bool attempted = false;
++#ifndef _WIN32
++        SDL_Texture* texture = nullptr; // The renderer owns textures through shutdown.
++#endif
++    };
++
++    std::string root;
++    std::string status;
++    std::vector<Item> items;
++    std::vector<Preview> previews;
++};
+diff --git a/editor/windows_panels.cpp b/editor/windows_panels.cpp
+index 276275c83e89d5e27e5c527f4165811ab6b0a3d7..270f24b204e466e2eb2ed722a63187573b846d4d 100644
+--- a/editor/windows_panels.cpp
++++ b/editor/windows_panels.cpp
+@@ -81,10 +81,10 @@ namespace
+         return bitmap;
+     }
+ 
+-    void DrawPreview(const DRAWITEMSTRUCT& draw, SDL_Surface* surface)
++    void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface)
+     {
+-        SetDCBrushColor(draw.hDC, RGB(17, 23, 28));
+-        FillRect(draw.hDC, &draw.rcItem, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
++        SetDCBrushColor(dc, RGB(17, 23, 28));
++        FillRect(dc, &area, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+         if (!surface)
+         {
+             return;
+@@ -96,11 +96,11 @@ namespace
+         info.bmiHeader.biPlanes = 1;
+         info.bmiHeader.biBitCount = 32;
+         info.bmiHeader.biCompression = BI_RGB;
+-        const int w = draw.rcItem.right - draw.rcItem.left;
+-        const int h = draw.rcItem.bottom - draw.rcItem.top;
++        const int w = area.right - area.left;
++        const int h = area.bottom - area.top;
+         const double scale = std::min(double(w) / surface->w, double(h) / surface->h);
+         const int iw = static_cast<int>(surface->w * scale), ih = static_cast<int>(surface->h * scale);
+-        StretchDIBits(draw.hDC, draw.rcItem.left + (w - iw) / 2, draw.rcItem.top + (h - ih) / 2, iw, ih,
++        StretchDIBits(dc, area.left + (w - iw) / 2, area.top + (h - ih) / 2, iw, ih,
+                       0, 0, surface->w, surface->h, surface->pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+     }
+ 
+@@ -132,7 +132,7 @@ struct WindowsPanels::Impl
+     std::deque<TransformEdit> pendingEdits;
+     std::optional<SDL_Keymod> pressModifiers;
+     ContentBrowser* browser = nullptr;
+-    bool populating = false, populated = false;
++    bool populating = false, populated = false, texturesPopulated = false;
+     int scroll = 0;
+     double lastSpeed = -1;
+     std::array<HBITMAP, transformIcons.size()> icons{};
+@@ -299,9 +299,7 @@ struct WindowsPanels::Impl
+         // paint all six children at their final positions, even when the icon size is unchanged.
+         RedrawWindow(toolbar, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+ 
+-        const SIZE inset = DialogSize(models, 7, 124);
+-        MoveWindow(GetDlgItem(models, IDC_MODELS), inset.cx, inset.cy, left - 2 * inset.cx,
+-                   std::max<int>(1, h - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
++        LayoutBrowserLists();
+ 
+         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
+         si.nMax = DialogSize(road, 0, ROAD_PANEL_HEIGHT).cy - 1;
+@@ -324,6 +322,130 @@ struct WindowsPanels::Impl
+         }
+     }
+ 
++    void LayoutBrowserLists()
++    {
++        RECT panel{};
++        GetClientRect(models, &panel);
++        auto fillToBottom = [&](int id, int top)
++        {
++            const SIZE inset = DialogSize(models, 7, top);
++            MoveWindow(GetDlgItem(models, id), inset.cx, inset.cy, panel.right - 2 * inset.cx,
++                       std::max<int>(1, panel.bottom - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
++        };
++        fillToBottom(IDC_MODELS, BROWSER_MODEL_LIST_TOP);
++        fillToBottom(IDC_TEXTURES, BROWSER_PAGE_TOP + (browser->Textures().Status().empty() ? 0 : 15));
++        SendDlgItemMessageW(models, IDC_TEXTURES, LB_SETITEMHEIGHT, 0, DialogSize(models, 0, 38).cy);
++    }
++
++    void PopulateTextures(const std::string& selected = {})
++    {
++        HWND list = GetDlgItem(models, IDC_TEXTURES);
++        const LRESULT top = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
++        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
++        SendMessageW(list, LB_RESETCONTENT, 0, 0);
++        const auto& catalog = browser->Textures();
++        for (std::size_t i = 0; i < catalog.Items().size(); ++i)
++        {
++            const auto& item = catalog.Items()[i];
++            const auto path = Wide(item.path);
++            const LRESULT row = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(path.c_str()));
++            if (row >= 0)
++            {
++                SendMessageW(list, LB_SETITEMDATA, row, i);
++                if (item.path == selected)
++                {
++                    SendMessageW(list, LB_SETCURSEL, row, 0);
++                }
++            }
++        }
++        if (top > 0)
++        {
++            SendMessageW(list, LB_SETTOPINDEX, top, 0);
++        }
++        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
++        InvalidateRect(list, nullptr, TRUE);
++        SetDlgItemTextW(models, IDC_TEXTURE_STATUS, Wide(catalog.Status()).c_str());
++        texturesPopulated = true;
++    }
++
++    void ShowBrowserTab()
++    {
++        const bool showModels = TabCtrl_GetCurSel(GetDlgItem(models, IDC_BROWSER_TABS)) == 0;
++        browser->SetTab(showModels ? ContentBrowser::Tab::Models : ContentBrowser::Tab::Textures);
++        for (int id : {IDC_PREVIEW, IDC_PREVIEW_STATUS, IDC_MODELS})
++        {
++            ShowWindow(GetDlgItem(models, id), showModels ? SW_SHOWNA : SW_HIDE);
++        }
++        if (!showModels && !texturesPopulated)
++        {
++            PopulateTextures();
++        }
++        const bool hasStatus = !showModels && !browser->Textures().Status().empty();
++        ShowWindow(GetDlgItem(models, IDC_TEXTURE_STATUS), hasStatus ? SW_SHOWNA : SW_HIDE);
++        ShowWindow(GetDlgItem(models, IDC_TEXTURES), showModels ? SW_HIDE : SW_SHOWNA);
++        LayoutBrowserLists();
++    }
++
++    void RefreshBrowser()
++    {
++        if (browser->ActiveTab() == ContentBrowser::Tab::Models)
++        {
++            browser->Refresh();
++            Populate();
++            return;
++        }
++        HWND list = GetDlgItem(models, IDC_TEXTURES);
++        const LRESULT row = SendMessageW(list, LB_GETCURSEL, 0, 0);
++        const LRESULT index = SendMessageW(list, LB_GETITEMDATA, row, 0);
++        const auto& items = browser->Textures().Items();
++        const std::string selected = static_cast<std::size_t>(index) < items.size() ? items[index].path : std::string{};
++        browser->Refresh();
++        PopulateTextures(selected);
++        ShowBrowserTab();
++    }
++
++    void DrawTexture(const DRAWITEMSTRUCT& draw)
++    {
++        const bool selected = (draw.itemState & ODS_SELECTED) != 0;
++        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
++        auto& catalog = browser->Textures();
++        if (draw.itemID != UINT(-1) && draw.itemData < catalog.Items().size())
++        {
++            const auto& item = catalog.Items()[draw.itemData];
++            const int pad = std::max<int>(2, DialogSize(models, 3, 0).cx);
++            RECT icon = draw.rcItem;
++            InflateRect(&icon, -pad, -pad);
++            icon.right = icon.left + icon.bottom - icon.top;
++            SDL_Surface* surface = catalog.Thumbnail(draw.itemData);
++            DrawPreview(draw.hDC, icon, surface);
++            SetBkMode(draw.hDC, TRANSPARENT);
++            if (!surface)
++            {
++                SetTextColor(draw.hDC, RGB(221, 228, 234));
++                DrawTextW(draw.hDC, L"?", -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
++            }
++            RECT label{icon.right + pad, icon.top, draw.rcItem.right - pad, icon.bottom};
++            if (!item.folder.empty())
++            {
++                label.bottom = (icon.top + icon.bottom) / 2;
++            }
++            constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
++            SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
++            DrawTextW(draw.hDC, Wide(item.name).c_str(), -1, &label, flags);
++            if (!item.folder.empty())
++            {
++                label.top = label.bottom;
++                label.bottom = icon.bottom;
++                SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_GRAYTEXT));
++                DrawTextW(draw.hDC, Wide(item.folder).c_str(), -1, &label, flags);
++            }
++        }
++        if ((draw.itemState & (ODS_FOCUS | ODS_NOFOCUSRECT)) == ODS_FOCUS)
++        {
++            DrawFocusRect(draw.hDC, &draw.rcItem);
++        }
++    }
++
+     void Populate()
+     {
+         populated = true;
+@@ -380,7 +502,6 @@ struct WindowsPanels::Impl
+             TreeView_SelectItem(tree, selected);
+             TreeView_EnsureVisible(tree, selected);
+         }
+-        SetDlgItemTextW(models, IDC_MODEL_ROOT, browser->ScanStatus().empty() ? L"assets/models" : Wide(browser->ScanStatus()).c_str());
+         SendMessageW(tree, WM_SETREDRAW, TRUE, 0);
+         InvalidateRect(tree, nullptr, TRUE);
+         populating = false;
+@@ -394,7 +515,7 @@ struct WindowsPanels::Impl
+             {
+             case IDC_TRANSFORM_SPACE:
+             case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
+-            case IDC_REFRESH: browser->Refresh(); Populate(); return;
++            case IDC_REFRESH: RefreshBrowser(); return;
+             case IDC_VIEW: Post(actions, int(RoadAction::ChangeView)); SetFocus(frame); return;
+             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
+             case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
+@@ -532,6 +653,11 @@ struct WindowsPanels::Impl
+         case WM_NOTIFY:
+         {
+             auto* header = reinterpret_cast<NMHDR*>(l);
++            if (header->idFrom == IDC_BROWSER_TABS && header->code == TCN_SELCHANGE)
++            {
++                self->ShowBrowserTab();
++                return TRUE;
++            }
+             if (header->idFrom == IDC_MODELS && header->code == TVN_SELCHANGEDW && !self->populating)
+             {
+                 const LPARAM item = reinterpret_cast<NMTREEVIEWW*>(l)->itemNew.lParam;
+@@ -542,7 +668,13 @@ struct WindowsPanels::Impl
+         case WM_DRAWITEM:
+             if (w == IDC_PREVIEW)
+             {
+-                DrawPreview(*reinterpret_cast<DRAWITEMSTRUCT*>(l), self->browser->Preview());
++                const auto& draw = *reinterpret_cast<DRAWITEMSTRUCT*>(l);
++                DrawPreview(draw.hDC, draw.rcItem, self->browser->Preview());
++                return TRUE;
++            }
++            if (w == IDC_TEXTURES)
++            {
++                self->DrawTexture(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
+                 return TRUE;
+             }
+             return FALSE;
+@@ -649,11 +781,10 @@ struct WindowsPanels::Impl
+                 return false;
+             }
+ 
+-            HWND tree = GetDlgItem(self.models, IDC_MODELS);
+-
+-            if (hover == tree && msg->hwnd != tree)
++            HWND assets = GetDlgItem(self.models, self.browser->ActiveTab() == ContentBrowser::Tab::Models ? IDC_MODELS : IDC_TEXTURES);
++            if (hover == assets && msg->hwnd != assets)
+             {
+-                SendMessageW(tree, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
++                SendMessageW(assets, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
+                 return false;
+             }
+         }
+@@ -732,7 +863,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
+     p.frameWindow = frame;
+     p.frame = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(frame), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+     const HINSTANCE module = GetModuleHandleW(nullptr);
+-    INITCOMMONCONTROLSEX common{sizeof(common), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES};
++    INITCOMMONCONTROLSEX common{sizeof(common), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES};
+ 
+     if (!p.frame || !InitCommonControlsEx(&common))
+     {
+@@ -782,6 +913,18 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
+         return nullptr;
+     }
+ 
++    HWND tabs = GetDlgItem(p.models, IDC_BROWSER_TABS);
++    for (const wchar_t* label : {L"Models", L"Textures"})
++    {
++        TCITEMW item{};
++        item.mask = TCIF_TEXT;
++        item.pszText = const_cast<wchar_t*>(label);
++        if (TabCtrl_InsertItem(tabs, TabCtrl_GetItemCount(tabs), &item) == -1)
++        {
++            WinError("Cannot create content browser tabs");
++            return nullptr;
++        }
++    }
+     ACCEL keys[] = {{FCONTROL | FVIRTKEY, 'S', BSC_FILE_SAVE}, {FCONTROL | FVIRTKEY, 'Z', BSC_EDIT_UNDO},
+                     {FCONTROL | FVIRTKEY, 'Y', BSC_EDIT_REDO}};
+ 
+@@ -938,9 +1081,10 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
+         p.Populate();
+     }
+ 
+-    if (p.browser->UpdatePreview())
++    if (p.browser->ActiveTab() == ContentBrowser::Tab::Models && p.browser->UpdatePreview())
+     {
+-        SetDlgItemTextW(p.models, IDC_PREVIEW_STATUS, Wide(p.browser->PreviewStatus()).c_str());
++        const auto& status = p.browser->ScanStatus().empty() ? p.browser->PreviewStatus() : p.browser->ScanStatus();
++        SetDlgItemTextW(p.models, IDC_PREVIEW_STATUS, Wide(status).c_str());
+         InvalidateRect(GetDlgItem(p.models, IDC_PREVIEW), nullptr, FALSE);
+     }
+ 
+diff --git a/shared/texture_loader.cpp b/shared/texture_loader.cpp
+index 569a64ad2fd60748507220a54c25636cf03217b0..d5fb171a3a5d4977fa6c366f327a1d84fdcde2f9 100644
+--- a/shared/texture_loader.cpp
++++ b/shared/texture_loader.cpp
+@@ -123,7 +123,7 @@ namespace
+         return SDL_CreateTextureFromSurface(renderer, rgba.get());
+     }
+ 
+-    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data, SDL_Rect* discBounds, DiscOpacity opacity)
++    SDL_Surface* DecodeTga(std::span<const Uint8> data, Sint64 maxSize)
+     {
+         constexpr size_t headerSize = 18;
+ 
+@@ -144,8 +144,6 @@ namespace
+             return nullptr;
+         }
+ 
+-        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
+-
+         if (width == 0 || height == 0 || (maxSize > 0 && (width > maxSize || height > maxSize)))
+         {
+             SDL_SetError("Unsupported TGA dimensions: %d x %d", width, height);
+@@ -177,18 +175,14 @@ namespace
+             return nullptr;
+         }
+ 
+-        if (discBounds)
+-        {
+-            return CreateDiscTexture(renderer, surface.get(), *discBounds, opacity);
+-        }
+-        return SDL_CreateTextureFromSurface(renderer, surface.get());
++        return surface.release();
+     }
+ 
+-    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
++    SDL_Surface* LoadTga(const char* relativePath, Sint64 maxSize)
+     {
+-        if (!renderer || !relativePath)
++        if (!relativePath)
+         {
+-            SDL_SetError("A renderer and a texture path are required");
++            SDL_SetError("A texture path is required");
+             return nullptr;
+         }
+ 
+@@ -211,23 +205,38 @@ namespace
+         const std::string path = std::string(base) + "assets/textures/" + name;
+         size_t size = 0;
+         std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
+-        SDL_Texture* texture = nullptr;
+-
+-        if (file)
+-        {
+-            texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size }, discBounds, opacity);
+-        }
+-
+-        if (!texture)
++        SDL_Surface* surface = file ? DecodeTga({static_cast<const Uint8*>(file.get()), size}, maxSize) : nullptr;
++        if (!surface)
+         {
+             const std::string reason = SDL_GetError();
+             SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
+         }
++        return surface;
++    }
+ 
+-        return texture;
++    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
++    {
++        if (!renderer)
++        {
++            SDL_SetError("A renderer is required");
++            return nullptr;
++        }
++        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
++        Surface surface(LoadTga(relativePath, maxSize), SDL_DestroySurface);
++        if (!surface)
++        {
++            return nullptr;
++        }
++        return discBounds ? CreateDiscTexture(renderer, surface.get(), *discBounds, opacity)
++                          : SDL_CreateTextureFromSurface(renderer, surface.get());
+     }
+ }
+ 
++SDL_Surface* TextureLoader::LoadTgaSurface(const char* relativePath)
++{
++    return LoadTga(relativePath, 0);
++}
++
+ SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)
+ {
+     return LoadTexture(renderer, relativePath, nullptr, DiscOpacity::SourceAlpha);
+diff --git a/shared/texture_loader.hpp b/shared/texture_loader.hpp
+index bea62b6b1585093a688ee1b8d81cb454ab1bcd63..1dbfa45244d188690f6da7367b0416d9979e2c07 100644
+--- a/shared/texture_loader.hpp
++++ b/shared/texture_loader.hpp
+@@ -12,6 +12,9 @@ public:
+     // SDL_DestroyTexture. On failure, returns nullptr and sets SDL_GetError().
+     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath);
+ 
++    // Decode a world TGA into CPU pixels for editor previews. The caller owns the surface.
++    static SDL_Surface* LoadTgaSurface(const char* relativePath);
++
+     // Preserve the image colors and return the bounds of texels with at least half opacity.
+     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds);
+ 

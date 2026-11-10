@@ -3,6 +3,8 @@
 // Shared dialog-template dimensions in dialog units.
 #define TOOLBAR_HEIGHT 25
 #define BROWSER_WIDTH 144
+#define BROWSER_PAGE_TOP 48
+#define BROWSER_MODEL_LIST_TOP 132
 #define ROAD_PANEL_WIDTH 208
 #define ROAD_PANEL_HEIGHT 305
 
@@ -19,8 +21,10 @@
 #define IDC_REFRESH 1010
 #define IDC_PREVIEW 1011
 #define IDC_PREVIEW_STATUS 1012
-#define IDC_MODEL_ROOT 1013
+#define IDC_BROWSER_TABS 1013
 #define IDC_MODELS 1014
+#define IDC_TEXTURES 1015
+#define IDC_TEXTURE_STATUS 1016
 
 #define IDC_ROAD_TITLE 1020
 #define IDC_VIEW 1021

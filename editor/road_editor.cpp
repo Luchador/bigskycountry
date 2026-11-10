@@ -874,6 +874,7 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
 {
     menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
+
     if (planView)
     {
         if (!RenderPlan(renderer, world))
@@ -884,18 +885,22 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     else
     {
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
+
         if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) ||
-            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT   , earlier   . later",
-                                       minutes / 60, minutes % 60) ||
+            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT", minutes / 60, minutes % 60) ||
             !Text(renderer, 12, static_cast<float>(scene.h) - 20, status.c_str(), ink))
         {
             return false;
         }
     }
+
     outliner.Update(world, state);
     auto fields = Inspect(world, state.Target());
+
     if (state.outlineSelection.size() > 1)
+    {
         fields.selectionLabel = std::to_string(state.outlineSelection.size()) + " items selected";
+    }
     else if (!state.outlineSelection.empty())
     {
         const auto key = *state.outlineSelection.begin();

@@ -14,11 +14,20 @@ namespace
     constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
     namespace fs = std::filesystem;
 
+    std::string Utf8(const fs::path& path)
+    {
+        const auto bytes = path.generic_u8string();
+        return {bytes.begin(), bytes.end()};
+    }
+
 #ifndef _WIN32
+    constexpr float textureRowHeight = 64.0f;
+
     struct Layout
     {
-        SDL_FRect refresh, image;
+        SDL_FRect refresh, modelsTab, texturesTab, image;
         int listTop;
+        static constexpr int pageTop = 70;
 
         Layout(int w, int h)
         {
@@ -26,8 +35,11 @@ namespace
             refresh = {w - 10.0f - buttonWidth, 10, buttonWidth, 24};
             const float width = static_cast<float>(std::max(0, w - 24));
             const float height = std::min(width * previewHeight / previewWidth, static_cast<float>(h / 3));
-            image = {12, 44, width, height};
-            listTop = static_cast<int>(image.y + height) + 55;
+            const float tabWidth = width / 2;
+            modelsTab = {12, 40, tabWidth, 24};
+            texturesTab = {12 + tabWidth, 40, tabWidth, 24};
+            image = {12, pageTop, width, height};
+            listTop = static_cast<int>(image.y + height) + 32;
         }
     };
 
@@ -42,15 +54,6 @@ namespace
                SDL_RenderDebugText(renderer, x, y, text.c_str());
     }
 
-#endif
-
-    std::string Utf8(const fs::path& path)
-    {
-        const auto bytes = path.generic_u8string();
-        return {bytes.begin(), bytes.end()};
-    }
-
-#ifndef _WIN32
     bool DrawRefresh(SDL_Renderer* renderer, const SDL_FRect& rect)
     {
         if (!Fill(renderer, rect, {47, 59, 66, 255}))
@@ -132,8 +135,30 @@ namespace
     }
 }
 
+void ContentBrowser::SetTab(Tab next)
+{
+    tab = next;
+    if (tab == Tab::Textures && !texturesScanned)
+    {
+        Refresh();
+    }
+}
+
 void ContentBrowser::Refresh()
 {
+    if (tab == Tab::Textures)
+    {
+        textures.Refresh();
+#ifndef _WIN32
+        if (std::none_of(textures.Items().begin(), textures.Items().end(),
+                         [&](const TextureCatalog::Item& item) { return item.path == selectedTexture; }))
+        {
+            selectedTexture.clear();
+        }
+#endif
+        texturesScanned = true;
+        return;
+    }
     rows.clear();
     scanStatus.clear();
     previewDirty = true;
@@ -227,11 +252,16 @@ bool ContentBrowser::UpdatePreview()
 void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height)
 {
     const Layout layout(width, height);
+    const bool models = tab == Tab::Models;
+    const int top = models ? layout.listTop : Layout::pageTop + (textures.Status().empty() ? 0 : 24);
+    const float step = models ? rowHeight : textureRowHeight;
+    float& offset = models ? scroll : textureScroll;
+    const auto count = models ? rows.size() : textures.Items().size();
     if (event.type == SDL_EVENT_MOUSE_WHEEL)
     {
         const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
-        const float limit = std::max(0.0f, rows.size() * rowHeight - std::max(0, height - layout.listTop));
-        scroll = std::clamp(scroll - steps * rowHeight * 2, 0.0f, limit);
+        const float limit = std::max(0.0f, count * step - std::max(0, height - top));
+        offset = std::clamp(offset - steps * step * 2, 0.0f, limit);
     }
     if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT)
     {
@@ -241,10 +271,22 @@ void ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint local, int
     {
         Refresh();
     }
-    else if (local.y >= layout.listTop)
+    else if (SDL_PointInRectFloat(&local, &layout.modelsTab))
     {
-        const auto index = static_cast<std::size_t>((local.y - layout.listTop + scroll) / rowHeight);
-        if (index < rows.size() && !rows[index].modelPath.empty())
+        SetTab(Tab::Models);
+    }
+    else if (SDL_PointInRectFloat(&local, &layout.texturesTab))
+    {
+        SetTab(Tab::Textures);
+    }
+    else if (local.y >= top)
+    {
+        const auto index = static_cast<std::size_t>((local.y - top + offset) / step);
+        if (!models && index < count)
+        {
+            selectedTexture = textures.Items()[index].path;
+        }
+        else if (models && index < count && !rows[index].modelPath.empty())
         {
             Select(rows[index].modelPath);
         }
@@ -257,7 +299,8 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     {
         return true;
     }
-    if (UpdatePreview())
+    const bool models = tab == Tab::Models;
+    if (models && UpdatePreview())
     {
         if (preview)
         {
@@ -271,34 +314,56 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     }
     const Layout layout(width, height);
     if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, {24, 32, 38, 255}) ||
-        (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Models", ink)) ||
-        !DrawRefresh(renderer, layout.refresh) ||
-        !Fill(renderer, layout.image, {17, 23, 28, 255}))
+        (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Content", ink)) ||
+        !DrawRefresh(renderer, layout.refresh))
     {
         return false;
     }
-    if (preview)
+    auto drawTab = [&](const SDL_FRect& rect, const char* label, bool active)
     {
-        const float w = layout.image.h * previewWidth / previewHeight;
-        const SDL_FRect image{layout.image.x + (layout.image.w - w) * 0.5f, layout.image.y, w, layout.image.h};
-        if (!SDL_RenderTexture(renderer, preview, nullptr, &image))
+        const auto color = active ? SDL_Color{53, 72, 82, 255} : SDL_Color{35, 45, 52, 255};
+        return Fill(renderer, rect, color) &&
+               Text(renderer, rect.x + std::max(1.0f, (rect.w - SDL_strlen(label) * 8) / 2), rect.y + 8, label, active ? ink : muted);
+    };
+    if (!drawTab(layout.modelsTab, "Models", models) || !drawTab(layout.texturesTab, "Textures", !models))
+    {
+        return false;
+    }
+
+    int top = Layout::pageTop;
+    if (models)
+    {
+        if (!Fill(renderer, layout.image, {17, 23, 28, 255}))
         {
             return false;
         }
+        if (preview)
+        {
+            const float w = layout.image.h * previewWidth / previewHeight;
+            const SDL_FRect image{layout.image.x + (layout.image.w - w) * 0.5f, layout.image.y, w, layout.image.h};
+            if (!SDL_RenderTexture(renderer, preview, nullptr, &image))
+            {
+                return false;
+            }
+        }
+        const std::string status = !scanStatus.empty() ? scanStatus :
+            (width < 190 && preview ? std::to_string(triangleCount) + " tris" : previewStatus);
+        if (!Text(renderer, 12, layout.image.y + layout.image.h + 10, status, muted))
+        {
+            return false;
+        }
+        top = layout.listTop;
     }
-    const std::string status = width < 190 && preview ? std::to_string(triangleCount) + " tris" : previewStatus;
-    const bool partial = !rows.empty() && !scanStatus.empty();
-    if (!Text(renderer, 12, layout.image.y + layout.image.h + 10, status, muted) ||
-        !Text(renderer, 12, static_cast<float>(layout.listTop - 19), partial ? scanStatus : "assets/models", muted))
+    else if (!textures.Status().empty())
     {
-        return false;
-    }
-    if (rows.empty())
-    {
-        return Text(renderer, 12, static_cast<float>(layout.listTop + 8), scanStatus, muted);
+        if (!Text(renderer, 12, top + 6, textures.Status(), muted))
+        {
+            return false;
+        }
+        top += 24;
     }
 
-    const int listHeight = std::max(0, height - layout.listTop);
+    const int listHeight = std::max(0, height - top);
     if (listHeight == 0)
     {
         return true;
@@ -308,17 +373,56 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     {
         return false;
     }
-    const SDL_Rect list{panel.x, panel.y + layout.listTop, width, listHeight};
+    const SDL_Rect list{panel.x, panel.y + top, width, listHeight};
     if (!SDL_SetRenderViewport(renderer, &list))
     {
         return false;
     }
-    const float limit = std::max(0.0f, rows.size() * rowHeight - listHeight);
-    scroll = std::min(scroll, limit);
-    const auto first = static_cast<std::size_t>(scroll / rowHeight);
-    float y = first * rowHeight - scroll;
-    for (auto i = first; i < rows.size() && y < listHeight; ++i, y += rowHeight)
+    const float step = models ? rowHeight : textureRowHeight;
+    const auto count = models ? rows.size() : textures.Items().size();
+    const float limit = std::max(0.0f, count * step - listHeight);
+    float& offset = models ? scroll : textureScroll;
+    offset = std::min(offset, limit);
+    const auto first = static_cast<std::size_t>(offset / step);
+    float y = first * step - offset;
+    for (auto i = first; i < count && y < listHeight; ++i, y += step)
     {
+        if (!models)
+        {
+            const auto& item = textures.Items()[i];
+            if (selectedTexture == item.path &&
+                !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), step}, {45, 91, 94, 255}))
+            {
+                return false;
+            }
+            const SDL_FRect icon{10, y + 5, 54, 54};
+            SDL_Texture* thumb = textures.ThumbnailTexture(i, renderer);
+            if (thumb)
+            {
+                if (!SDL_RenderTexture(renderer, thumb, nullptr, &icon))
+                {
+                    return false;
+                }
+            }
+            else if (!Fill(renderer, icon, {45, 49, 53, 255}) || !Text(renderer, 33, y + 28, "?", muted))
+            {
+                return false;
+            }
+
+            // Use two lines for long filenames in the narrow sidebar.
+            const size_t chars = static_cast<size_t>(std::max(1, (width - 79) / 8));
+            const char* second = item.name.c_str();
+            for (size_t n = 0; n < chars && *second; ++n)
+            {
+                SDL_StepUTF8(&second, nullptr);
+            }
+            if (!Text(renderer, 72, y + 10, item.name.substr(0, second - item.name.c_str()), ink) ||
+                !Text(renderer, 72, y + 23, second, ink) || !Text(renderer, 72, y + 42, item.folder, muted))
+            {
+                return false;
+            }
+            continue;
+        }
         const Row& row = rows[i];
         const bool folder = row.modelPath.empty();
         if ((!folder && row.modelPath == selected &&
@@ -330,8 +434,8 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     }
     if (limit > 0)
     {
-        const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (rows.size() * rowHeight)));
-        const float top = (listHeight - thumb) * scroll / limit;
+        const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (count * step)));
+        const float top = (listHeight - thumb) * offset / limit;
         if (!Fill(renderer, {static_cast<float>(width - 4), top, 3, thumb}, {94, 111, 116, 255}))
         {
             return false;

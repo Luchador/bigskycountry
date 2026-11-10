@@ -81,10 +81,10 @@ namespace
         return bitmap;
     }
 
-    void DrawPreview(const DRAWITEMSTRUCT& draw, SDL_Surface* surface)
+    void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface)
     {
-        SetDCBrushColor(draw.hDC, RGB(17, 23, 28));
-        FillRect(draw.hDC, &draw.rcItem, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        SetDCBrushColor(dc, RGB(17, 23, 28));
+        FillRect(dc, &area, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
         if (!surface)
         {
             return;
@@ -96,11 +96,11 @@ namespace
         info.bmiHeader.biPlanes = 1;
         info.bmiHeader.biBitCount = 32;
         info.bmiHeader.biCompression = BI_RGB;
-        const int w = draw.rcItem.right - draw.rcItem.left;
-        const int h = draw.rcItem.bottom - draw.rcItem.top;
+        const int w = area.right - area.left;
+        const int h = area.bottom - area.top;
         const double scale = std::min(double(w) / surface->w, double(h) / surface->h);
         const int iw = static_cast<int>(surface->w * scale), ih = static_cast<int>(surface->h * scale);
-        StretchDIBits(draw.hDC, draw.rcItem.left + (w - iw) / 2, draw.rcItem.top + (h - ih) / 2, iw, ih,
+        StretchDIBits(dc, area.left + (w - iw) / 2, area.top + (h - ih) / 2, iw, ih,
                       0, 0, surface->w, surface->h, surface->pixels, &info, DIB_RGB_COLORS, SRCCOPY);
     }
 
@@ -132,7 +132,7 @@ struct WindowsPanels::Impl
     std::deque<TransformEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
-    bool populating = false, populated = false;
+    bool populating = false, populated = false, texturesPopulated = false;
     int scroll = 0;
     double lastSpeed = -1;
     std::array<HBITMAP, transformIcons.size()> icons{};
@@ -299,9 +299,7 @@ struct WindowsPanels::Impl
         // paint all six children at their final positions, even when the icon size is unchanged.
         RedrawWindow(toolbar, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 
-        const SIZE inset = DialogSize(models, 7, 124);
-        MoveWindow(GetDlgItem(models, IDC_MODELS), inset.cx, inset.cy, left - 2 * inset.cx,
-                   std::max<int>(1, h - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
+        LayoutBrowserLists();
 
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, ROAD_PANEL_HEIGHT).cy - 1;
@@ -321,6 +319,130 @@ struct WindowsPanels::Impl
             ScrollWindowEx(road, 0, scroll - next, nullptr, nullptr, nullptr, nullptr,
                            SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
             scroll = next;
+        }
+    }
+
+    void LayoutBrowserLists()
+    {
+        RECT panel{};
+        GetClientRect(models, &panel);
+        auto fillToBottom = [&](int id, int top)
+        {
+            const SIZE inset = DialogSize(models, 7, top);
+            MoveWindow(GetDlgItem(models, id), inset.cx, inset.cy, panel.right - 2 * inset.cx,
+                       std::max<int>(1, panel.bottom - inset.cy - DialogSize(models, 0, 6).cy), TRUE);
+        };
+        fillToBottom(IDC_MODELS, BROWSER_MODEL_LIST_TOP);
+        fillToBottom(IDC_TEXTURES, BROWSER_PAGE_TOP + (browser->Textures().Status().empty() ? 0 : 15));
+        SendDlgItemMessageW(models, IDC_TEXTURES, LB_SETITEMHEIGHT, 0, DialogSize(models, 0, 38).cy);
+    }
+
+    void PopulateTextures(const std::string& selected = {})
+    {
+        HWND list = GetDlgItem(models, IDC_TEXTURES);
+        const LRESULT top = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
+        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
+        SendMessageW(list, LB_RESETCONTENT, 0, 0);
+        const auto& catalog = browser->Textures();
+        for (std::size_t i = 0; i < catalog.Items().size(); ++i)
+        {
+            const auto& item = catalog.Items()[i];
+            const auto path = Wide(item.path);
+            const LRESULT row = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(path.c_str()));
+            if (row >= 0)
+            {
+                SendMessageW(list, LB_SETITEMDATA, row, i);
+                if (item.path == selected)
+                {
+                    SendMessageW(list, LB_SETCURSEL, row, 0);
+                }
+            }
+        }
+        if (top > 0)
+        {
+            SendMessageW(list, LB_SETTOPINDEX, top, 0);
+        }
+        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(list, nullptr, TRUE);
+        SetDlgItemTextW(models, IDC_TEXTURE_STATUS, Wide(catalog.Status()).c_str());
+        texturesPopulated = true;
+    }
+
+    void ShowBrowserTab()
+    {
+        const bool showModels = TabCtrl_GetCurSel(GetDlgItem(models, IDC_BROWSER_TABS)) == 0;
+        browser->SetTab(showModels ? ContentBrowser::Tab::Models : ContentBrowser::Tab::Textures);
+        for (int id : {IDC_PREVIEW, IDC_PREVIEW_STATUS, IDC_MODELS})
+        {
+            ShowWindow(GetDlgItem(models, id), showModels ? SW_SHOWNA : SW_HIDE);
+        }
+        if (!showModels && !texturesPopulated)
+        {
+            PopulateTextures();
+        }
+        const bool hasStatus = !showModels && !browser->Textures().Status().empty();
+        ShowWindow(GetDlgItem(models, IDC_TEXTURE_STATUS), hasStatus ? SW_SHOWNA : SW_HIDE);
+        ShowWindow(GetDlgItem(models, IDC_TEXTURES), showModels ? SW_HIDE : SW_SHOWNA);
+        LayoutBrowserLists();
+    }
+
+    void RefreshBrowser()
+    {
+        if (browser->ActiveTab() == ContentBrowser::Tab::Models)
+        {
+            browser->Refresh();
+            Populate();
+            return;
+        }
+        HWND list = GetDlgItem(models, IDC_TEXTURES);
+        const LRESULT row = SendMessageW(list, LB_GETCURSEL, 0, 0);
+        const LRESULT index = SendMessageW(list, LB_GETITEMDATA, row, 0);
+        const auto& items = browser->Textures().Items();
+        const std::string selected = static_cast<std::size_t>(index) < items.size() ? items[index].path : std::string{};
+        browser->Refresh();
+        PopulateTextures(selected);
+        ShowBrowserTab();
+    }
+
+    void DrawTexture(const DRAWITEMSTRUCT& draw)
+    {
+        const bool selected = (draw.itemState & ODS_SELECTED) != 0;
+        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+        auto& catalog = browser->Textures();
+        if (draw.itemID != UINT(-1) && draw.itemData < catalog.Items().size())
+        {
+            const auto& item = catalog.Items()[draw.itemData];
+            const int pad = std::max<int>(2, DialogSize(models, 3, 0).cx);
+            RECT icon = draw.rcItem;
+            InflateRect(&icon, -pad, -pad);
+            icon.right = icon.left + icon.bottom - icon.top;
+            SDL_Surface* surface = catalog.Thumbnail(draw.itemData);
+            DrawPreview(draw.hDC, icon, surface);
+            SetBkMode(draw.hDC, TRANSPARENT);
+            if (!surface)
+            {
+                SetTextColor(draw.hDC, RGB(221, 228, 234));
+                DrawTextW(draw.hDC, L"?", -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
+            RECT label{icon.right + pad, icon.top, draw.rcItem.right - pad, icon.bottom};
+            if (!item.folder.empty())
+            {
+                label.bottom = (icon.top + icon.bottom) / 2;
+            }
+            constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
+            SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+            DrawTextW(draw.hDC, Wide(item.name).c_str(), -1, &label, flags);
+            if (!item.folder.empty())
+            {
+                label.top = label.bottom;
+                label.bottom = icon.bottom;
+                SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_GRAYTEXT));
+                DrawTextW(draw.hDC, Wide(item.folder).c_str(), -1, &label, flags);
+            }
+        }
+        if ((draw.itemState & (ODS_FOCUS | ODS_NOFOCUSRECT)) == ODS_FOCUS)
+        {
+            DrawFocusRect(draw.hDC, &draw.rcItem);
         }
     }
 
@@ -380,7 +502,6 @@ struct WindowsPanels::Impl
             TreeView_SelectItem(tree, selected);
             TreeView_EnsureVisible(tree, selected);
         }
-        SetDlgItemTextW(models, IDC_MODEL_ROOT, browser->ScanStatus().empty() ? L"assets/models" : Wide(browser->ScanStatus()).c_str());
         SendMessageW(tree, WM_SETREDRAW, TRUE, 0);
         InvalidateRect(tree, nullptr, TRUE);
         populating = false;
@@ -394,7 +515,7 @@ struct WindowsPanels::Impl
             {
             case IDC_TRANSFORM_SPACE:
             case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
-            case IDC_REFRESH: browser->Refresh(); Populate(); return;
+            case IDC_REFRESH: RefreshBrowser(); return;
             case IDC_VIEW: Post(actions, int(RoadAction::ChangeView)); SetFocus(frame); return;
             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
             case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
@@ -532,6 +653,11 @@ struct WindowsPanels::Impl
         case WM_NOTIFY:
         {
             auto* header = reinterpret_cast<NMHDR*>(l);
+            if (header->idFrom == IDC_BROWSER_TABS && header->code == TCN_SELCHANGE)
+            {
+                self->ShowBrowserTab();
+                return TRUE;
+            }
             if (header->idFrom == IDC_MODELS && header->code == TVN_SELCHANGEDW && !self->populating)
             {
                 const LPARAM item = reinterpret_cast<NMTREEVIEWW*>(l)->itemNew.lParam;
@@ -542,7 +668,13 @@ struct WindowsPanels::Impl
         case WM_DRAWITEM:
             if (w == IDC_PREVIEW)
             {
-                DrawPreview(*reinterpret_cast<DRAWITEMSTRUCT*>(l), self->browser->Preview());
+                const auto& draw = *reinterpret_cast<DRAWITEMSTRUCT*>(l);
+                DrawPreview(draw.hDC, draw.rcItem, self->browser->Preview());
+                return TRUE;
+            }
+            if (w == IDC_TEXTURES)
+            {
+                self->DrawTexture(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
                 return TRUE;
             }
             return FALSE;
@@ -649,11 +781,10 @@ struct WindowsPanels::Impl
                 return false;
             }
 
-            HWND tree = GetDlgItem(self.models, IDC_MODELS);
-
-            if (hover == tree && msg->hwnd != tree)
+            HWND assets = GetDlgItem(self.models, self.browser->ActiveTab() == ContentBrowser::Tab::Models ? IDC_MODELS : IDC_TEXTURES);
+            if (hover == assets && msg->hwnd != assets)
             {
-                SendMessageW(tree, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
+                SendMessageW(assets, WM_MOUSEWHEEL, msg->wParam, msg->lParam);
                 return false;
             }
         }
@@ -732,7 +863,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.frameWindow = frame;
     p.frame = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(frame), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     const HINSTANCE module = GetModuleHandleW(nullptr);
-    INITCOMMONCONTROLSEX common{sizeof(common), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES};
+    INITCOMMONCONTROLSEX common{sizeof(common), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES};
 
     if (!p.frame || !InitCommonControlsEx(&common))
     {
@@ -782,6 +913,18 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
+    HWND tabs = GetDlgItem(p.models, IDC_BROWSER_TABS);
+    for (const wchar_t* label : {L"Models", L"Textures"})
+    {
+        TCITEMW item{};
+        item.mask = TCIF_TEXT;
+        item.pszText = const_cast<wchar_t*>(label);
+        if (TabCtrl_InsertItem(tabs, TabCtrl_GetItemCount(tabs), &item) == -1)
+        {
+            WinError("Cannot create content browser tabs");
+            return nullptr;
+        }
+    }
     ACCEL keys[] = {{FCONTROL | FVIRTKEY, 'S', BSC_FILE_SAVE}, {FCONTROL | FVIRTKEY, 'Z', BSC_EDIT_UNDO},
                     {FCONTROL | FVIRTKEY, 'Y', BSC_EDIT_REDO}};
 
@@ -938,9 +1081,10 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
         p.Populate();
     }
 
-    if (p.browser->UpdatePreview())
+    if (p.browser->ActiveTab() == ContentBrowser::Tab::Models && p.browser->UpdatePreview())
     {
-        SetDlgItemTextW(p.models, IDC_PREVIEW_STATUS, Wide(p.browser->PreviewStatus()).c_str());
+        const auto& status = p.browser->ScanStatus().empty() ? p.browser->PreviewStatus() : p.browser->ScanStatus();
+        SetDlgItemTextW(p.models, IDC_PREVIEW_STATUS, Wide(status).c_str());
         InvalidateRect(GetDlgItem(p.models, IDC_PREVIEW), nullptr, FALSE);
     }
 

@@ -123,7 +123,7 @@ namespace
         return SDL_CreateTextureFromSurface(renderer, rgba.get());
     }
 
-    SDL_Texture* DecodeTexture(SDL_Renderer* renderer, std::span<const Uint8> data, SDL_Rect* discBounds, DiscOpacity opacity)
+    SDL_Surface* DecodeTga(std::span<const Uint8> data, Sint64 maxSize)
     {
         constexpr size_t headerSize = 18;
 
@@ -143,8 +143,6 @@ namespace
             SDL_SetError("Expected a non-interleaved 24-bit or 32-bit RLE true-color TGA");
             return nullptr;
         }
-
-        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
 
         if (width == 0 || height == 0 || (maxSize > 0 && (width > maxSize || height > maxSize)))
         {
@@ -177,18 +175,14 @@ namespace
             return nullptr;
         }
 
-        if (discBounds)
-        {
-            return CreateDiscTexture(renderer, surface.get(), *discBounds, opacity);
-        }
-        return SDL_CreateTextureFromSurface(renderer, surface.get());
+        return surface.release();
     }
 
-    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
+    SDL_Surface* LoadTga(const char* relativePath, Sint64 maxSize)
     {
-        if (!renderer || !relativePath)
+        if (!relativePath)
         {
-            SDL_SetError("A renderer and a texture path are required");
+            SDL_SetError("A texture path is required");
             return nullptr;
         }
 
@@ -211,21 +205,36 @@ namespace
         const std::string path = std::string(base) + "assets/textures/" + name;
         size_t size = 0;
         std::unique_ptr<void, decltype(&SDL_free)> file(SDL_LoadFile(path.c_str(), &size), SDL_free);
-        SDL_Texture* texture = nullptr;
-
-        if (file)
-        {
-            texture = DecodeTexture(renderer, { static_cast<const Uint8*>(file.get()), size }, discBounds, opacity);
-        }
-
-        if (!texture)
+        SDL_Surface* surface = file ? DecodeTga({static_cast<const Uint8*>(file.get()), size}, maxSize) : nullptr;
+        if (!surface)
         {
             const std::string reason = SDL_GetError();
             SDL_SetError("Could not load texture '%s': %s", path.c_str(), reason.c_str());
         }
-
-        return texture;
+        return surface;
     }
+
+    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
+    {
+        if (!renderer)
+        {
+            SDL_SetError("A renderer is required");
+            return nullptr;
+        }
+        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
+        Surface surface(LoadTga(relativePath, maxSize), SDL_DestroySurface);
+        if (!surface)
+        {
+            return nullptr;
+        }
+        return discBounds ? CreateDiscTexture(renderer, surface.get(), *discBounds, opacity)
+                          : SDL_CreateTextureFromSurface(renderer, surface.get());
+    }
+}
+
+SDL_Surface* TextureLoader::LoadTgaSurface(const char* relativePath)
+{
+    return LoadTga(relativePath, 0);
 }
 
 SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath)

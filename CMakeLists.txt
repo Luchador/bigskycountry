@@ -56,9 +56,23 @@ include(cmake/shaders.cmake)
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
+# SDL_image 3.4.0 for editor thumbnails. Use its built-in decoders to avoid extra runtime DLLs.
+set(BUILD_SHARED_LIBS OFF)
+set(SDLIMAGE_VENDORED OFF)
+set(SDLIMAGE_PNG_LIBPNG OFF)
+set(SDLIMAGE_AVIF OFF)
+set(SDLIMAGE_WEBP OFF)
+set(SDLIMAGE_TIF OFF)
+FetchContent_Declare(SDL3_image
+    URL https://codeload.github.com/libsdl-org/SDL_image/tar.gz/ad58ecfc27a1bd09e510ceff8bbbdb1094806476
+    URL_HASH SHA256=29fa60ea0432997c4ae61358a8e8fcb3638520d123a590fc9f42558967239cd2
+)
+FetchContent_MakeAvailable(SDL3_image)
+
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
+    editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
     editor/transform_inspector.cpp
@@ -93,11 +107,12 @@ if(WIN32)
 else()
     target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
-target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
+target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::SDL3_image-static)
 
 # Both executables use the same runtime directory, including on multi-config builds.
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
     COMMAND "${CMAKE_COMMAND}"
         "-DassetSource=${CMAKE_CURRENT_SOURCE_DIR}/assets"
