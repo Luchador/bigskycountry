@@ -1,4 +1,5 @@
 #include "content_browser.hpp"
+#include "editor_theme.hpp"
 #include "free_camera.hpp"
 #include "world_renderer.hpp"
 
@@ -11,7 +12,7 @@ namespace
 {
     constexpr float rowHeight = 24.0f;
     constexpr int previewWidth = 194, previewHeight = 116;
-    constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
+    constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
     namespace fs = std::filesystem;
 
     std::string Utf8(const fs::path& path)
@@ -56,7 +57,7 @@ namespace
 
     bool DrawRefresh(SDL_Renderer* renderer, const SDL_FRect& rect)
     {
-        if (!Fill(renderer, rect, {47, 59, 66, 255}))
+        if (!Fill(renderer, rect, EditorTheme::button))
         {
             return false;
         }
@@ -115,7 +116,7 @@ namespace
         }
         camera.LookAt(eye * distance, {});
         WorldRenderer scene;
-        if (!SDL_SetRenderDrawColor(offscreen.get(), 17, 23, 28, 255) || !SDL_RenderClear(offscreen.get()) ||
+        if (!EditorTheme::SetColor(offscreen.get(), EditorTheme::preview) || !SDL_RenderClear(offscreen.get()) ||
             !scene.Begin(offscreen.get(), camera))
         {
             return nullptr;
@@ -313,7 +314,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
         }
     }
     const Layout layout(width, height);
-    if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, {24, 32, 38, 255}) ||
+    if (!Fill(renderer, {0, 0, static_cast<float>(width), static_cast<float>(height)}, EditorTheme::panel) ||
         (width >= 78 && !Text(renderer, 12, 18, width >= 212 ? "Content browser" : "Content", ink)) ||
         !DrawRefresh(renderer, layout.refresh))
     {
@@ -321,7 +322,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     }
     auto drawTab = [&](const SDL_FRect& rect, const char* label, bool active)
     {
-        const auto color = active ? SDL_Color{53, 72, 82, 255} : SDL_Color{35, 45, 52, 255};
+        const auto color = active ? EditorTheme::selected : EditorTheme::button;
         return Fill(renderer, rect, color) &&
                Text(renderer, rect.x + std::max(1.0f, (rect.w - SDL_strlen(label) * 8) / 2), rect.y + 8, label, active ? ink : muted);
     };
@@ -333,7 +334,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     int top = Layout::pageTop;
     if (models)
     {
-        if (!Fill(renderer, layout.image, {17, 23, 28, 255}))
+        if (!Fill(renderer, layout.image, EditorTheme::preview))
         {
             return false;
         }
@@ -391,7 +392,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
         {
             const auto& item = textures.Items()[i];
             if (selectedTexture == item.path &&
-                !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), step}, {45, 91, 94, 255}))
+                !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), step}, EditorTheme::selected))
             {
                 return false;
             }
@@ -404,7 +405,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
                     return false;
                 }
             }
-            else if (!Fill(renderer, icon, {45, 49, 53, 255}) || !Text(renderer, 33, y + 28, "?", muted))
+            else if (!Fill(renderer, icon, EditorTheme::field) || !Text(renderer, 33, y + 28, "?", muted))
             {
                 return false;
             }
@@ -426,7 +427,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
         const Row& row = rows[i];
         const bool folder = row.modelPath.empty();
         if ((!folder && row.modelPath == selected &&
-             !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), rowHeight}, {45, 91, 94, 255})) ||
+             !Fill(renderer, {5, y, static_cast<float>(std::max(0, width - 12)), rowHeight}, EditorTheme::selected)) ||
             !Text(renderer, folder ? 12 : 22, y + 8, row.label, folder ? muted : ink))
         {
             return false;
@@ -436,7 +437,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
     {
         const float thumb = std::min(static_cast<float>(listHeight), std::max(12.0f, static_cast<float>(listHeight) * listHeight / (count * step)));
         const float top = (listHeight - thumb) * offset / limit;
-        if (!Fill(renderer, {static_cast<float>(width - 4), top, 3, thumb}, {94, 111, 116, 255}))
+        if (!Fill(renderer, {static_cast<float>(width - 4), top, 3, thumb}, EditorTheme::button))
         {
             return false;
         }

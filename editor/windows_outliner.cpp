@@ -1,4 +1,5 @@
 #include "windows_outliner.hpp"
+#include "windows_theme.hpp"
 #include "panel_ids.h"
 #include <commctrl.h>
 #include <windowsx.h>
@@ -26,6 +27,7 @@ namespace
         {
             auto* edit = reinterpret_cast<NameEdit*>(l);
             SetWindowLongPtrW(dlg, DWLP_USER, l);
+            WindowsTheme::ApplyDialog(dlg);
             SetWindowTextW(dlg, edit->title.c_str());
             SetDlgItemTextW(dlg, IDC_FOLDER_NAME, edit->value.c_str());
             SendDlgItemMessageW(dlg, IDC_FOLDER_NAME, EM_SETLIMITTEXT, 255, 0);
@@ -294,6 +296,7 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
     if (msg == WM_INITDIALOG)
     {
         SetWindowLongPtrW(hwnd, DWLP_USER, l);
+        WindowsTheme::ApplyDialog(hwnd);
         return FALSE;
     }
     auto* self = reinterpret_cast<WindowsOutliner*>(GetWindowLongPtrW(hwnd, DWLP_USER));

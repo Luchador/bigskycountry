@@ -1,5 +1,6 @@
 #include "sdl_transform_panel.hpp"
 
+#include "editor_theme.hpp"
 #include <algorithm>
 
 namespace
@@ -14,8 +15,8 @@ namespace
 bool SdlTransformPanel::Draw(SDL_Renderer* r, int width, const TransformFields& fields) const
 {
     const SDL_FRect background{0, 0, static_cast<float>(width), height};
-    if (!SDL_SetRenderDrawColor(r, 24, 32, 38, 255) || !SDL_RenderFillRect(r, &background) ||
-        !SDL_SetRenderDrawColor(r, 221, 228, 234, 255) ||
+    if (!EditorTheme::SetColor(r, EditorTheme::panel) || !SDL_RenderFillRect(r, &background) ||
+        !EditorTheme::SetColor(r, EditorTheme::text) ||
         !SDL_RenderDebugTextFormat(r, 8, 8, "Transform | %s", fields.Title().c_str())) return false;
     const char* labels[] = {"Loc (m)", "Rot (deg)", "Scale"};
 
@@ -23,17 +24,19 @@ bool SdlTransformPanel::Draw(SDL_Renderer* r, int width, const TransformFields& 
     {
         const SDL_FRect cell = Cell(width, i);
 
-        if (!SDL_SetRenderDrawColor(r, 185, 197, 205, 255)) 
+        if (!EditorTheme::SetColor(r, EditorTheme::secondary))
         {
             return false;
         }
 
-        if (i < 3 && !SDL_RenderDebugTextFormat(r, cell.x + cell.w / 2 - 4, 26, "%c", 'X' + i)) 
+        if (i < 3 && (!EditorTheme::SetColor(r, EditorTheme::axes[i]) ||
+                      !SDL_RenderDebugTextFormat(r, cell.x + cell.w / 2 - 4, 26, "%c", 'X' + i)))
         {
             return false;
         }
 
-        if (i % 3 == 0 && !SDL_RenderDebugText(r, 6, cell.y + 5, labels[i / 3])) 
+        if (i % 3 == 0 && (!EditorTheme::SetColor(r, EditorTheme::secondary) ||
+                           !SDL_RenderDebugText(r, 6, cell.y + 5, labels[i / 3])))
         {
             return false;
         }
@@ -41,7 +44,7 @@ bool SdlTransformPanel::Draw(SDL_Renderer* r, int width, const TransformFields& 
         const bool active = fields.target == target && i == field;
         const bool enabled = fields.CanEdit(i);
 
-        if (!SDL_SetRenderDrawColor(r, active ? 44 : 15, active ? 79 : 23, active ? 84 : 28, 255) || !SDL_RenderFillRect(r, &cell)) 
+        if (!EditorTheme::SetColor(r, active ? EditorTheme::selected : EditorTheme::field) || !SDL_RenderFillRect(r, &cell))
         {
             return false;
         }
@@ -53,7 +56,7 @@ bool SdlTransformPanel::Draw(SDL_Renderer* r, int width, const TransformFields& 
             std::size_t start = active && caret >= visible ? caret - visible + 1 : 0;
             text = text.substr(start, visible);
 
-            if (!SDL_SetRenderDrawColor(r, 221, 228, 234, 255) || !SDL_RenderDebugText(r, cell.x + 2, cell.y + 5, text.c_str())) 
+            if (!EditorTheme::SetColor(r, EditorTheme::text) || !SDL_RenderDebugText(r, cell.x + 2, cell.y + 5, text.c_str()))
             {
                 return false;
             }

@@ -1,4 +1,5 @@
 #include "road_editor.hpp"
+#include "editor_theme.hpp"
 #include "editor_colors.hpp"
 #include "viewport_picker.hpp"
 #include "world_state.hpp"
@@ -17,7 +18,7 @@ namespace
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
     constexpr float threeLanePanelHeight = 104.0f;
-    constexpr SDL_Color ink{221, 228, 234, 255}, muted{159, 174, 183, 255};
+    constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
 
     bool Near(SDL_FPoint a, SDL_FPoint b)
     {
@@ -653,7 +654,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     constexpr SDL_Color amber = EditorColors::ToBytes(EditorColors::amber);
     constexpr SDL_Color blue = EditorColors::ToBytes(EditorColors::blue);
 
-    if (!SDL_SetRenderDrawColor(renderer, 36, 45, 49, 255) || !SDL_RenderClear(renderer))
+    if (!EditorTheme::SetColor(renderer, EditorTheme::planBackground) || !SDL_RenderClear(renderer))
     {
         return false;
     }
@@ -669,7 +670,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     const float step = static_cast<float>(spacing * scale);
     const SDL_FPoint origin = ToScreen({});
 
-    if (!SDL_SetRenderDrawColor(renderer, 54, 65, 69, 255))
+    if (!EditorTheme::SetColor(renderer, EditorTheme::grid))
     {
         return false;
     }
@@ -736,7 +737,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
             }
             const bool selectedPoint = active && state.PointSelected(static_cast<int>(i));
             const float r = active ? 5.0f : 3.0f;
-            if (!Fill(renderer, {pos.x - r - 1, pos.y - r - 1, 2 * r + 2, 2 * r + 2}, {30, 36, 40, 255}) ||
+            if (!Fill(renderer, {pos.x - r - 1, pos.y - r - 1, 2 * r + 2, 2 * r + 2}, EditorTheme::border) ||
                 !Fill(renderer, {pos.x - r, pos.y - r, 2 * r, 2 * r},
                       selectedPoint ? amber : (active ? blue : muted)))
             {
@@ -785,15 +786,15 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 #ifndef _WIN32
 bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const
 {
-    if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h + roadScroll)}, {24, 32, 38, 255}))
+    if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h + roadScroll)}, EditorTheme::panel))
     {
         return false;
     }
 
     for (const Button& b : Buttons(world))
     {
-        const SDL_Color fill = b.active ? SDL_Color{45, 101, 102, 255} : SDL_Color{47, 59, 66, 255};
-        if (!Fill(renderer, b.rect, b.enabled ? fill : SDL_Color{34, 44, 50, 255}) ||
+        const SDL_Color fill = b.active ? EditorTheme::selected : EditorTheme::button;
+        if (!Fill(renderer, b.rect, b.enabled ? fill : EditorTheme::header) ||
             !Text(renderer, b.rect.x + 8, b.rect.y + 10, b.label, b.enabled ? ink : muted))
         {
             return false;

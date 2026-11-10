@@ -1,4 +1,5 @@
 #include "texture_catalog.hpp"
+#include "editor_theme.hpp"
 #include "texture_loader.hpp"
 #include <SDL3_image/SDL_image.h>
 
@@ -60,9 +61,10 @@ namespace
         const int w = std::max(1, static_cast<int>(std::lround(source->w * scale)));
         const int h = std::max(1, static_cast<int>(std::lround(source->h * scale)));
         const SDL_Rect image{(size - w) / 2, (size - h) / 2, w, h};
-        SDL_FillSurfaceRect(thumb.get(), nullptr, SDL_MapSurfaceRGB(thumb.get(), 37, 42, 46));
-        const Uint32 light = SDL_MapSurfaceRGB(thumb.get(), 122, 128, 132);
-        const Uint32 dark = SDL_MapSurfaceRGB(thumb.get(), 83, 89, 93);
+        const auto pixel = [&](SDL_Color c) { return SDL_MapSurfaceRGB(thumb.get(), c.r, c.g, c.b); };
+        SDL_FillSurfaceRect(thumb.get(), nullptr, pixel(EditorTheme::preview));
+        const Uint32 light = pixel(EditorTheme::checkerLight);
+        const Uint32 dark = pixel(EditorTheme::checkerDark);
         constexpr int cell = 8;
         for (int y = 0; y < h; y += cell)
         {

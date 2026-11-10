@@ -1,4 +1,5 @@
 #include "sdl_outliner.hpp"
+#include "editor_theme.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -323,8 +324,8 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
 
 bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int height)
 {
-    constexpr SDL_Color ink{222, 229, 235, 255}, muted{153, 166, 178, 255};
-    if (!Fill(r, 0, 0, width, height, {26, 32, 38, 255}) || !Fill(r, 0, 0, width, 25, {38, 46, 54, 255}) ||
+    constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
+    if (!Fill(r, 0, 0, width, height, EditorTheme::list) || !Fill(r, 0, 0, width, 25, EditorTheme::header) ||
         !Text(r, 7, 8, "Outliner", ink) || !Text(r, width - 198, 8, "New folder", ink) ||
         !Text(r, width - 108, 8, "Rename", Folder(m) ? ink : muted) ||
         !Text(r, width - 51, 8, "Delete", Folder(m) ? ink : muted))
@@ -332,7 +333,7 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         return false;
     }
     const int split = width * 2 / 3;
-    if (!Fill(r, 0, 25, width, 21, {19, 24, 29, 255}))
+    if (!Fill(r, 0, 25, width, 21, EditorTheme::chrome))
     {
         return false;
     }
@@ -340,7 +341,7 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
     {
         const int x = edit->op == OutlineOp::Create ? 45 : 70;
         if (!Text(r, 6, 31, edit->op == OutlineOp::Create ? "New:" : "Rename:", muted) ||
-            !Fill(r, x, 27, width - x - 4, 16, selectText ? SDL_Color{42, 83, 125, 255} : SDL_Color{37, 53, 63, 255}) ||
+            !Fill(r, x, 27, width - x - 4, 16, selectText ? EditorTheme::selected : EditorTheme::field) ||
             !Text(r, x + 3, 31, text, ink))
         {
             return false;
@@ -367,17 +368,21 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         const auto& row = m.Rows()[i];
         if (drop == row.key)
         {
-            if (!Fill(r, 0, y, width, rowHeight, {51, 105, 86, 255}))
+            if (!Fill(r, 0, y, width, rowHeight, EditorTheme::hover))
             {
                 return false;
             }
         }
         else if (m.Selection().contains(row.key))
         {
-            if (!Fill(r, 0, y, width, rowHeight, {42, 83, 125, 255}))
+            if (!Fill(r, 0, y, width, rowHeight, EditorTheme::selected))
             {
                 return false;
             }
+        }
+        else if (i % 2 && !Fill(r, 0, y, width, rowHeight, EditorTheme::alternateRow))
+        {
+            return false;
         }
         const int x = Indent(row.depth, width);
         if (row.branch && !Text(r, x, y + 6, row.expanded ? "v" : ">", muted))

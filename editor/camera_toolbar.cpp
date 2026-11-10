@@ -1,4 +1,5 @@
 #include "camera_toolbar.hpp"
+#include "editor_theme.hpp"
 #include "free_camera.hpp"
 
 #include <algorithm>
@@ -64,16 +65,16 @@ bool CameraToolbar::Draw(SDL_Renderer* renderer, int width, const FreeCamera& ca
     const float fill = track.w * static_cast<float>(camera.GetSpeedFraction());
     const float thumb = track.x + fill;
 
-    if (!Fill(renderer, {0, 0, w, height}, {31, 40, 47, 255}) ||
-        !Fill(renderer, {0, height - 1, w, 1}, {60, 74, 80, 255}) ||
-        !Fill(renderer, track, {76, 90, 97, 255}) ||
-        !Fill(renderer, {track.x, track.y, fill, track.h}, {76, 158, 158, 255}) ||
-        !Fill(renderer, {thumb - 4, 9, 8, 18}, dragging ? SDL_Color{164, 233, 227, 255} : SDL_Color{215, 229, 231, 255}))
+    if (!Fill(renderer, {0, 0, w, height}, EditorTheme::chrome) ||
+        !Fill(renderer, {0, height - 1, w, 1}, EditorTheme::border) ||
+        !Fill(renderer, track, EditorTheme::button) ||
+        !Fill(renderer, {track.x, track.y, fill, track.h}, EditorTheme::accent) ||
+        !Fill(renderer, {thumb - 4, 9, 8, 18}, dragging ? EditorTheme::accent : EditorTheme::text))
     {
         return false;
     }
 
-    if (!SDL_SetRenderDrawColor(renderer, 221, 228, 234, 255))
+    if (!EditorTheme::SetColor(renderer, EditorTheme::text))
     {
         return false;
     }

@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "windows_theme.hpp"
 #include "windows_outliner.hpp"
 #include "content_browser.hpp"
 #include "edit_history.hpp"
@@ -73,7 +74,9 @@ namespace
             return nullptr;
         }
         Surface target(SDL_CreateSurfaceFrom(size, size, SDL_PIXELFORMAT_BGRA32, pixels, 4 * size), SDL_DestroySurface);
-        if (!target || !SDL_BlitSurfaceScaled(icon.get(), nullptr, target.get(), nullptr, SDL_SCALEMODE_LINEAR))
+        const auto face = EditorTheme::button;
+        if (!target || !SDL_FillSurfaceRect(target.get(), nullptr, SDL_MapSurfaceRGB(target.get(), face.r, face.g, face.b)) ||
+            !SDL_BlitSurfaceScaled(icon.get(), nullptr, target.get(), nullptr, SDL_SCALEMODE_LINEAR))
         {
             DeleteObject(bitmap);
             return nullptr;
@@ -83,8 +86,7 @@ namespace
 
     void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface)
     {
-        SetDCBrushColor(dc, RGB(17, 23, 28));
-        FillRect(dc, &area, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        FillRect(dc, &area, WindowsTheme::Brush(EditorTheme::preview));
         if (!surface)
         {
             return;
@@ -307,6 +309,11 @@ struct WindowsPanels::Impl
         si.nPos = scroll;
         const int next = SetScrollInfo(road, SB_VERT, &si, TRUE);
         ScrollTo(next);
+        // Repaint children after their final positions and scrollbar ranges are known.
+        for (HWND panel : {models, outline.Window(), road})
+        {
+            RedrawWindow(panel, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
     }
 
     void ScrollTo(int pos)
@@ -407,7 +414,7 @@ struct WindowsPanels::Impl
     void DrawTexture(const DRAWITEMSTRUCT& draw)
     {
         const bool selected = (draw.itemState & ODS_SELECTED) != 0;
-        FillRect(draw.hDC, &draw.rcItem, GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+        FillRect(draw.hDC, &draw.rcItem, WindowsTheme::Brush(selected ? EditorTheme::selected : EditorTheme::list));
         auto& catalog = browser->Textures();
         if (draw.itemID != UINT(-1) && draw.itemData < catalog.Items().size())
         {
@@ -421,7 +428,7 @@ struct WindowsPanels::Impl
             SetBkMode(draw.hDC, TRANSPARENT);
             if (!surface)
             {
-                SetTextColor(draw.hDC, RGB(221, 228, 234));
+                SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
                 DrawTextW(draw.hDC, L"?", -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
             RECT label{icon.right + pad, icon.top, draw.rcItem.right - pad, icon.bottom};
@@ -430,13 +437,13 @@ struct WindowsPanels::Impl
                 label.bottom = (icon.top + icon.bottom) / 2;
             }
             constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-            SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+            SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
             DrawTextW(draw.hDC, Wide(item.name).c_str(), -1, &label, flags);
             if (!item.folder.empty())
             {
                 label.top = label.bottom;
                 label.bottom = icon.bottom;
-                SetTextColor(draw.hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_GRAYTEXT));
+                SetTextColor(draw.hDC, WindowsTheme::Color(selected ? EditorTheme::text : EditorTheme::secondary));
                 DrawTextW(draw.hDC, Wide(item.folder).c_str(), -1, &label, flags);
             }
         }
@@ -611,6 +618,7 @@ struct WindowsPanels::Impl
         if (msg == WM_INITDIALOG)
         {
             SetWindowLongPtrW(hwnd, DWLP_USER, l);
+            WindowsTheme::ApplyDialog(hwnd, GetDlgItem(hwnd, IDC_SPEED) ? EditorTheme::chrome : EditorTheme::panel);
             return FALSE;
         }
 
@@ -634,16 +642,6 @@ struct WindowsPanels::Impl
                 self->Control(LOWORD(w), HIWORD(w));
             }
             return TRUE;
-        case WM_CTLCOLORSTATIC:
-        {
-            const int id = GetDlgCtrlID(reinterpret_cast<HWND>(l));
-            if (id < IDC_AXIS_X || id > IDC_AXIS_Z) return FALSE;
-            static constexpr COLORREF axisColors[] = {RGB(151, 52, 45), RGB(35, 107, 48), RGB(43, 81, 158)};
-            HDC dc = reinterpret_cast<HDC>(w);
-            SetTextColor(dc, axisColors[id - IDC_AXIS_X]);
-            SetBkColor(dc, GetSysColor(COLOR_3DFACE));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_3DFACE));
-        }
         case WM_HSCROLL:
             if (reinterpret_cast<HWND>(l) == GetDlgItem(hwnd, IDC_SPEED))
             {
