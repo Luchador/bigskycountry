@@ -533,6 +533,9 @@ struct WindowsPanels::Impl
             case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
             case IDC_FEWER: Post(actions, int(RoadAction::Fewer)); return;
             case IDC_MORE: Post(actions, int(RoadAction::More)); return;
+            case IDC_DIVIDED: Post(actions, int(RoadAction::Divide)); return;
+            case IDC_GAP_LESS: Post(actions, int(RoadAction::NarrowerGap)); return;
+            case IDC_GAP_MORE: Post(actions, int(RoadAction::WiderGap)); return;
             case IDC_LEFT: Post(actions, int(RoadAction::Left)); return;
             case IDC_RIGHT: Post(actions, int(RoadAction::Right)); return;
             }
@@ -550,6 +553,10 @@ struct WindowsPanels::Impl
             if (id == IDC_LAYOUT && i >= 0 && i < 3)
             {
                 Post(actions, int(layout[i]));
+            }
+            if (id == IDC_MEDIAN && (i == 0 || i == 1))
+            {
+                Post(actions, int(i == 0 ? RoadAction::ConcreteMedian : RoadAction::GrassMedian));
             }
             if (id == IDC_EDGE && i >= 0 && i < 3)
             {
@@ -575,7 +582,7 @@ struct WindowsPanels::Impl
         EnableWindow(GetDlgItem(road, IDC_NEW), !data.drawing);
         SendDlgItemMessageW(road, IDC_ALIGNMENT, CB_SETCURSEL, data.style.curved, 0);
         SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
-        EnableWindow(GetDlgItem(road, IDC_FEWER), lanes > 1);
+        EnableWindow(GetDlgItem(road, IDC_FEWER), lanes > (data.style.IsDivided() ? 2 : 1));
         EnableWindow(GetDlgItem(road, IDC_MORE), lanes < RoadStyle::maxLanes);
 
         for (int id : {IDC_LAYOUT_LABEL, IDC_LAYOUT})
@@ -597,6 +604,16 @@ struct WindowsPanels::Impl
         CheckDlgButton(road, IDC_RIGHT, data.style.rightShoulder ? BST_CHECKED : BST_UNCHECKED);
         SendDlgItemMessageW(road, IDC_EDGE, CB_SETCURSEL, int(data.style.edge), 0);
         wchar_t text[100];
+        const bool divided = data.style.IsDivided();
+        const bool hasMedian = data.style.HalfMedianWidth() > 0;
+        CheckDlgButton(road, IDC_DIVIDED, divided ? BST_CHECKED : BST_UNCHECKED);
+        EnableWindow(GetDlgItem(road, IDC_DIVIDED), data.style.CanDivide());
+        EnableWindow(GetDlgItem(road, IDC_GAP_LESS), divided && data.style.DividedGap() > RoadStyle::minSeparation);
+        EnableWindow(GetDlgItem(road, IDC_GAP_MORE), divided);
+        swprintf(text, 100, L"%.2f", data.style.DividedGap());
+        SetDlgItemTextW(road, IDC_GAP_VALUE, divided ? text : L"");
+        EnableWindow(GetDlgItem(road, IDC_MEDIAN), hasMedian);
+        SendDlgItemMessageW(road, IDC_MEDIAN, CB_SETCURSEL, hasMedian ? int(data.style.median) : -1, 0);
         swprintf(text, 100, L"Width: %.2f m", data.style.LeftWidth() + data.style.RightWidth() + 2 * data.style.EdgeWidth());
         SetDlgItemTextW(road, IDC_WIDTH, text);
 
@@ -1012,6 +1029,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     }
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
+    Choices(p.road, IDC_MEDIAN, {L"Concrete", L"Grass"});
     Choices(p.road, IDC_EDGE, {L"None", L"Transition strip", L"Curb"});
     SendDlgItemMessageW(p.toolbar, IDC_SPEED, TBM_SETRANGE, FALSE, MAKELONG(0, speedSteps));
     SendDlgItemMessageW(p.toolbar, IDC_SPEED, TBM_SETPAGESIZE, 0, speedSteps / 10);

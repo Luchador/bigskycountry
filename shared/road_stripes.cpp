@@ -140,17 +140,42 @@ namespace
         }
     }
 
-    void AddPavementBand(Road& road, int side, Vector3 previousInner, Vector3 inner,
-                         Vector3 previousOuter, Vector3 outer)
+    struct CrossSection
     {
-        if (previousInner != inner)
+        Vector3 center, outward;
+        Vector3 At(double offset) const { return center + outward * offset; }
+    };
+
+    // On a bevel the sections meet at the center, leaving one triangle in the innermost band.
+    template<typename Emit>
+    void VisitBand(int side, const CrossSection& a, const CrossSection& b, double inner, double outer, Emit emit)
+    {
+        const Vector3 ai = a.At(inner), bi = b.At(inner), ao = a.At(outer), bo = b.At(outer);
+        if (ai != bi)
         {
-            road.triangles.push_back(side > 0 ? Road::Triangle{previousOuter, inner, previousInner}
-                                              : Road::Triangle{previousInner, inner, previousOuter});
+            emit(side > 0 ? Road::Triangle{ao, bi, ai} : Road::Triangle{ai, bi, ao});
         }
-        road.triangles.push_back(side > 0 ? Road::Triangle{previousOuter, outer, inner}
-                                          : Road::Triangle{previousOuter, inner, outer});
+        emit(side > 0 ? Road::Triangle{ao, bo, bi} : Road::Triangle{ao, bi, bo});
     }
+
+    void PaintCarriagewayEdges(Road& road, int side, CrossSection a, CrossSection b,
+                               double travelStart, double travelEnd)
+    {
+        Vector3 up{0, 1, 0};
+        const Vector3 delta = b.center - a.center;
+        if (delta.x == 0 && delta.z == 0 && delta.y != 0)
+        {
+            up = Math::Cross(Math::Normalize(b.outward) * side, {0, delta.y > 0 ? 1.0 : -1.0, 0});
+        }
+        a.center = a.center + up * stripeHeight;
+        b.center = b.center + up * stripeHeight;
+        VisitBand(side, a, b, travelStart, travelStart + stripeWidth,
+                  [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
+        VisitBand(side, a, b, travelEnd - stripeWidth, travelEnd,
+                  [&](const Road::Triangle& t) { road.whiteStripes.push_back(t); });
+    }
+
+    void PaintDashes(const std::vector<Vector3>& path, std::vector<Road::Triangle>& mesh);
 
     // Use the same cross sections for pavement, its outline and any edge treatment.
     // Adjacent spans then meet at the same elevation along the entire join.
@@ -162,26 +187,41 @@ namespace
         const RoadEdge edge = road.style.edge;
         const int faces = edge == RoadEdge::Curb ? 3 : (edge == RoadEdge::Transition ? 1 : 0);
         const double pavement = side < 0 ? road.style.RightWidth() : road.style.LeftWidth();
-        // On a graded bend, a wide pavement triangle can cut through a stripe.
-        // Add longitudinal edges at lane boundaries, including the shoulder line.
-        std::vector<double> laneFractions;
+        const double halfGap = road.style.HalfSeparation();
+        const double halfMedian = road.style.HalfMedianWidth();
+        const int lanes = road.style.GetLaneCount();
+        const double travelEdge = halfGap + lanes * RoadStyle::laneWidth * 0.5;
+        const SDL_FColor medianColor = road.style.median == RoadMedian::Grass
+            ? SDL_FColor{0.29f, 0.49f, 0.24f, 1} : SDL_FColor{0.69f, 0.69f, 0.67f, 1};
+
+        // Split the asphalt at the yellow line and, on graded bends, along the other lane boundaries.
+        std::vector<double> pavementCuts;
+        if (road.style.IsDivided()) pavementCuts.push_back(halfGap);
         if (hasGradedBend)
         {
-            const double firstLane = road.style.GetLaneCount() % 2 ? RoadStyle::laneWidth * 0.5 : RoadStyle::laneWidth;
-            for (double offset = firstLane; offset < pavement; offset += RoadStyle::laneWidth)
+            const double firstLane = lanes % 2 ? RoadStyle::laneWidth * 0.5 : RoadStyle::laneWidth;
+            for (int i = 0; i < (lanes + 1) / 2; ++i)
             {
-                laneFractions.push_back(offset / pavement);
+                const double offset = halfGap + firstLane + i * RoadStyle::laneWidth;
+                if (offset < pavement) pavementCuts.push_back(offset);
             }
         }
-        Vector3 previousCenter{};
+        // Divided markings use the pavement's actual miter/bevel stations on each side.
+        std::vector<std::vector<Vector3>> dividers(road.style.IsDivided() ? lanes / 2 - 1 : 0);
+        CrossSection last{};
         EdgeProfile previous{};
         std::vector<Vector3> boundary;
 
         VisitOffsetStations(spans, side * (pavement + road.style.EdgeWidth()), [&](Vector3 center, Vector3 normal)
         {
             const Vector3 outward = normal * side;
+            const CrossSection current{center, outward};
+            for (std::size_t i = 0; i < dividers.size(); ++i)
+            {
+                dividers[i].push_back(current.At(halfGap + (i + 1) * RoadStyle::laneWidth));
+            }
             EdgeProfile profile{};
-            profile[0] = center + outward * pavement;
+            profile[0] = current.At(pavement);
             if (faces > 0)
             {
                 profile[1] = profile[0] + outward * RoadStyle::stripWidth;
@@ -200,16 +240,28 @@ namespace
             }
             else
             {
-                Vector3 previousInner = previousCenter, inner = center;
-                for (double fraction : laneFractions)
+                if (halfMedian > 0.0)
                 {
-                    const Vector3 previousOuter = previousCenter + (previous[0] - previousCenter) * fraction;
-                    const Vector3 outer = center + (profile[0] - center) * fraction;
-                    AddPavementBand(road, side, previousInner, inner, previousOuter, outer);
-                    previousInner = previousOuter;
-                    inner = outer;
+                    VisitBand(side, last, current, 0.0, halfMedian, [&](const Road::Triangle& t)
+                    {
+                        road.edgeTriangles.push_back({Road::EdgeVertex{t[0], medianColor},
+                                                      Road::EdgeVertex{t[1], medianColor},
+                                                      Road::EdgeVertex{t[2], medianColor}});
+                    });
                 }
-                AddPavementBand(road, side, previousInner, inner, previous[0], profile[0]);
+                const auto asphalt = [&](const Road::Triangle& t) { road.triangles.push_back(t); };
+                double inner = halfMedian;
+                for (double cut : pavementCuts)
+                {
+                    VisitBand(side, last, current, inner, cut, asphalt);
+                    inner = cut;
+                }
+                VisitBand(side, last, current, inner, pavement, asphalt);
+
+                if (road.style.IsDivided())
+                {
+                    PaintCarriagewayEdges(road, side, last, current, halfGap, travelEdge);
+                }
 
                 if (edge == RoadEdge::Transition)
                 {
@@ -225,7 +277,7 @@ namespace
 
             boundary.push_back(profile[faces]);
             previous = profile;
-            previousCenter = center;
+            last = current;
         });
 
         for (int i = faces - 1; i >= 0; --i)
@@ -234,6 +286,7 @@ namespace
         }
 
         AppendBoundary(road, side, boundary);
+        for (const auto& path : dividers) PaintDashes(path, road.whiteStripes);
     }
 
     // lo and hi are signed distances perpendicular to each span, in meters.
@@ -364,12 +417,15 @@ void Road::BuildSurface(const std::vector<Vector3>& samples)
 
     for (int side : {-1, 1})
     {
-        // Place the white stripe wholly inside the travel edge, beside any shoulder.
-        const auto edge = OffsetPath(spans, side * halfTravelWidth);
-        PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
-
         BuildRoadSide(*this, spans, side, hasGradedBend);
+        if (!style.IsDivided())
+        {
+            // Place the white stripe wholly inside the travel edge, beside any shoulder.
+            const auto edge = OffsetPath(spans, side * halfTravelWidth);
+            PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
+        }
     }
+    if (style.IsDivided()) return;
 
     constexpr double halfLane = RoadStyle::laneWidth * 0.5;
     const bool centerTurn = style.HasCenterTurnLane();

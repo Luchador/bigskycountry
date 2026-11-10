@@ -23,11 +23,15 @@ enum class RoadEdge
     Curb = 2 
 };
 
+enum class RoadMedian { Concrete, Grass };
+
 struct RoadStyle
 {
     static constexpr double dashPeriod = 12.0; // One painted dash plus its gap, in meters.
     static constexpr double laneWidth = 5.0;
     static constexpr double shoulderWidth = 5.0;
+    static constexpr double innerShoulderWidth = 1.0;
+    static constexpr double minSeparation = 2.0 * innerShoulderWidth;
     static constexpr double stripWidth = 0.40;
     static constexpr double curbHeight = 0.15;
     static constexpr double curbTopWidth = 0.15;
@@ -35,20 +39,28 @@ struct RoadStyle
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = false;
-    bool divided = false;
-    double dividedGap = 4.0;
+    RoadMedian median = RoadMedian::Concrete;
     ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
     RoadEdge edge = RoadEdge::None;
 
     bool operator==(const RoadStyle&) const = default;
     int GetLaneCount() const;
     void SetLaneCount(int count);
+    bool CanDivide() const { return lanes % 2 == 0; }
+    bool IsDivided() const { return divided; }
+    void SetDivided(bool value) { divided = value && CanDivide(); }
+    double DividedGap() const { return dividedGap; }
+    void SetDividedGap(double meters);
+    double HalfSeparation() const { return divided ? dividedGap * 0.5 : 0.0; }
+    double HalfMedianWidth() const { return divided ? HalfSeparation() - innerShoulderWidth : 0.0; }
     bool HasCenterTurnLane() const;
     double LeftWidth() const;
     double RightWidth() const;
     double EdgeWidth() const;
 
 private:
+    bool divided = false;
+    double dividedGap = 4.0; // Distance between opposing travel lanes, including both inner shoulders.
     int lanes = 2; // Total across both directions, including any center turn lane.
 };
 
@@ -73,7 +85,7 @@ struct Road
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     std::vector<Triangle> triangles;
-    std::vector<std::array<EdgeVertex, 3>> edgeTriangles;
+    std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;

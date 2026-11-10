@@ -17,5 +17,10 @@ enum class RoadAction
     Right,
     NoEdge,
     Transition,
-    Curb
+    Curb,
+    Divide,
+    NarrowerGap,
+    WiderGap,
+    ConcreteMedian,
+    GrassMedian
 };

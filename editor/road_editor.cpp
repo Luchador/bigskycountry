@@ -17,7 +17,15 @@ namespace
     constexpr int panelWidth = 218;
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
+#ifndef _WIN32
     constexpr float threeLanePanelHeight = 104.0f;
+
+    float RoadStyleBottom(const RoadStyle& style)
+    {
+        return (style.IsDivided() ? 514.0f : 406.0f) +
+               (style.GetLaneCount() == 3 ? threeLanePanelHeight : 0.0f);
+    }
+#endif
     constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
 
     bool Near(SDL_FPoint a, SDL_FPoint b)
@@ -172,19 +180,33 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) 
         {Action::New, {12, 84, 194, 28}, state.draft && !EditingDraft() ? "Resume draft" : "New road", false, !EditingDraft()},
         {Action::Straight, {12, 148, 94, 28}, "Straight", !style.curved},
         {Action::Curve, {112, 148, 94, 28}, "Bezier", style.curved},
-        {Action::Fewer, {12, 210, 32, 28}, "-", false, laneCount > 1},
+        {Action::Fewer, {12, 210, 32, 28}, "-", false, laneCount > (style.IsDivided() ? 2 : 1)},
         {Action::More, {174, 210, 32, 28}, "+", false, laneCount < RoadStyle::maxLanes},
         {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder},
         {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
         {Action::NoEdge, {12, 328 + offset, 46, 28}, "None", style.edge == RoadEdge::None},
         {Action::Transition, {62, 328 + offset, 94, 28}, "Transition", style.edge == RoadEdge::Transition},
-        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb}};
+        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb},
+        {Action::Divide, {12, 368 + offset, 194, 28}, "Divided road", style.IsDivided(), style.CanDivide()}};
+
+    if (style.IsDivided())
+    {
+        buttons.push_back({Action::NarrowerGap, {12, 422 + offset, 32, 28}, "-", false,
+                           style.DividedGap() > RoadStyle::minSeparation});
+        buttons.push_back({Action::WiderGap, {174, 422 + offset, 32, 28}, "+"});
+        const bool hasMedian = style.HalfMedianWidth() > 0;
+        buttons.push_back({Action::ConcreteMedian, {12, 476 + offset, 94, 28}, "Concrete",
+                           hasMedian && style.median == RoadMedian::Concrete, hasMedian});
+        buttons.push_back({Action::GrassMedian, {112, 476 + offset, 94, 28}, "Grass",
+                           hasMedian && style.median == RoadMedian::Grass, hasMedian});
+    }
+    const float styleBottom = RoadStyleBottom(style);
 
     if (planView)
     {
-        buttons.push_back({Action::Finish, {12, 398 + offset, 194, 28}, "Finish road  [Enter]", false,
+        buttons.push_back({Action::Finish, {12, styleBottom + 30, 194, 28}, "Finish road  [Enter]", false,
                            state.drawing && state.draft->points.size() >= 2});
-        buttons.push_back({Action::Cancel, {12, 432 + offset, 194, 28}, "Cancel draft [Esc]", false, state.drawing});
+        buttons.push_back({Action::Cancel, {12, styleBottom + 64, 194, 28}, "Cancel draft [Esc]", false, state.drawing});
     }
 
     if (laneCount == 3)
@@ -425,10 +447,10 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
         style.curved = true;
         break;
     case Action::Fewer:
-        style.SetLaneCount(style.GetLaneCount() - 1);
+        style.SetLaneCount(std::max(style.IsDivided() ? 2 : 1, style.GetLaneCount() - (style.IsDivided() ? 2 : 1)));
         break;
     case Action::More:
-        style.SetLaneCount(style.GetLaneCount() + 1);
+        style.SetLaneCount(style.GetLaneCount() + (style.IsDivided() ? 2 : 1));
         break;
     case Action::TwoNorthbound:
         style.threeLaneLayout = ThreeLaneLayout::TwoNorthbound;
@@ -453,6 +475,19 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
         break;
     case Action::Curb:
         style.edge = RoadEdge::Curb;
+        break;
+    case Action::Divide:
+        style.SetDivided(!style.IsDivided());
+        break;
+    case Action::NarrowerGap:
+    case Action::WiderGap:
+        if (!style.IsDivided()) return;
+        style.SetDividedGap(style.DividedGap() + (action == Action::WiderGap ? 0.5 : -0.5));
+        break;
+    case Action::ConcreteMedian:
+    case Action::GrassMedian:
+        if (style.HalfMedianWidth() <= 0) return;
+        style.median = action == Action::GrassMedian ? RoadMedian::Grass : RoadMedian::Concrete;
         break;
     default:
         return;
@@ -891,11 +926,16 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
             return false;
         }
     }
+    const float styleBottom = RoadStyleBottom(style);
+    if (style.IsDivided() &&
+        (!Text(renderer, 12, 406 + offset, "Separation (m)", muted) ||
+         !SDL_RenderDebugTextFormat(renderer, 80, 432 + offset, "%.2f", style.DividedGap()) ||
+         !Text(renderer, 12, 460 + offset, "Median", muted))) return false;
     if (!Text(renderer, 12, 132, "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
         !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
         !Text(renderer, 12, 312 + offset, "Road edges", muted) ||
         !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", laneCount) ||
-        !SDL_RenderDebugTextFormat(renderer, 12, 368 + offset, "Width: %.2f m",
+        !SDL_RenderDebugTextFormat(renderer, 12, styleBottom, "Width: %.2f m",
                                    style.LeftWidth() + style.RightWidth() + 2.0 * style.EdgeWidth()))
     {
         return false;
@@ -904,7 +944,7 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
     if (!planView && current && state.point >= 0)
     {
         if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, 255) ||
-            !SDL_RenderDebugTextFormat(renderer, 12, 444 + offset, "Point %d   Y: %.2f m",
+            !SDL_RenderDebugTextFormat(renderer, 12, styleBottom + 28, "Point %d   Y: %.2f m",
                                        state.point + 1, current->points[state.point].position.y))
         {
             return false;
@@ -1000,8 +1040,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
         return false;
     }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
-    const bool threeLanes = (current ? current->style : state.defaults).GetLaneCount() == 3;
-    const int contentHeight = (planView ? 470 : 464) + (threeLanes ? static_cast<int>(threeLanePanelHeight) : 0);
+    const RoadStyle& style = current ? current->style : state.defaults;
+    const int contentHeight = static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50);
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;

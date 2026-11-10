@@ -7,13 +7,14 @@
 
 namespace
 {
-    bool ValidStyle(int lanes, int layout, double dividedGap, int edge)
+    bool ValidStyle(int lanes, int layout, double dividedGap, int edge, int median)
     {
         return lanes >= 1 && lanes <= RoadStyle::maxLanes &&
                layout >= static_cast<int>(ThreeLaneLayout::TwoNorthbound) &&
                layout <= static_cast<int>(ThreeLaneLayout::CenterTurn) &&
                std::isfinite(dividedGap) && dividedGap >= 0.0 &&
-               edge >= static_cast<int>(RoadEdge::None) && edge <= static_cast<int>(RoadEdge::Curb);
+               edge >= static_cast<int>(RoadEdge::None) && edge <= static_cast<int>(RoadEdge::Curb) &&
+               median >= static_cast<int>(RoadMedian::Concrete) && median <= static_cast<int>(RoadMedian::Grass);
     }
 
     bool ValidPoint(Vector3 position, double heading, double pitch)
@@ -28,32 +29,42 @@ namespace RoadIO
     void WriteStyle(std::ostream& out, const RoadStyle& style)
     {
         const int edge = static_cast<int>(style.edge);
-        if (!ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.dividedGap, edge))
+        const int median = static_cast<int>(style.median);
+        if (!ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.DividedGap(), edge, median))
         {
             out.setstate(std::ios::failbit);
             return;
         }
         out << style.GetLaneCount() << ' ' << style.curved << ' ' << style.leftShoulder << ' '
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
-            << style.divided << ' ' << style.dividedGap << ' ' << edge << '\n';
+            << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
     {
         int lanes, layout;
+        bool divided;
+        double gap;
+        int median = static_cast<int>(RoadMedian::Concrete);
         int edge = static_cast<int>(RoadEdge::None);
         in >> lanes >> style.curved >> style.leftShoulder >> style.rightShoulder >> layout
-           >> style.divided >> style.dividedGap;
+           >> divided >> gap;
         if (version >= 2)
         {
             in >> edge;
         }
-        if (!in || !ValidStyle(lanes, layout, style.dividedGap, edge))
+        if (version >= 5) in >> median;
+        if (!in || !ValidStyle(lanes, layout, gap, edge, median) ||
+            (version >= 5 && (gap < RoadStyle::minSeparation || (divided && lanes % 2 != 0))))
         {
             in.setstate(std::ios::failbit);
             return;
         }
         style.SetLaneCount(lanes);
+        // Older files stored unused division fields and allowed odd lanes or sub-minimum gaps.
+        style.SetDivided(divided);
+        style.SetDividedGap(gap);
+        style.median = static_cast<RoadMedian>(median);
         style.threeLaneLayout = static_cast<ThreeLaneLayout>(layout);
         style.edge = static_cast<RoadEdge>(edge);
     }
