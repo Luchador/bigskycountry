@@ -6,6 +6,7 @@
 // Editor chrome. World materials and viewport selection colors have their own semantics.
 namespace EditorTheme
 {
+    inline constexpr SDL_Color menuBar{22, 22, 22, 255};
     inline constexpr SDL_Color chrome{29, 29, 29, 255};
     inline constexpr SDL_Color panel{48, 48, 48, 255};
     inline constexpr SDL_Color list{40, 40, 40, 255};

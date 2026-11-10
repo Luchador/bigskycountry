@@ -30,11 +30,11 @@ namespace
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_TEST_TERRAIN, L"&Test Terrain"}};
 
-    void MenuBackground(HMENU menu)
+    void MenuBackground(HMENU menu, SDL_Color color)
     {
         MENUINFO info{sizeof(info)};
         info.fMask = MIM_BACKGROUND;
-        info.hbrBack = WindowsTheme::Brush(EditorTheme::chrome);
+        info.hbrBack = WindowsTheme::Brush(color);
         SetMenuInfo(menu, &info);
     }
 
@@ -59,8 +59,8 @@ namespace
     {
         HMENU popup = CreatePopupMenu();
         if (!popup) return SDL_SetError("Cannot create editor submenu (Windows error %lu)", GetLastError());
-        MenuBackground(parent);
-        MenuBackground(popup);
+        MenuBackground(parent, title.bar ? EditorTheme::menuBar : EditorTheme::chrome);
+        MenuBackground(popup, EditorTheme::chrome);
         if (!Insert(parent, title, popup))
         {
             DestroyMenu(popup);
@@ -103,7 +103,8 @@ namespace
         {
             RECT r = draw->rcItem;
             const bool active = draw->itemState & (ODS_SELECTED | ODS_HOTLIGHT);
-            FillRect(dc, &r, WindowsTheme::Brush(active ? selected : chrome));
+            const auto background = item.bar ? menuBar : chrome;
+            FillRect(dc, &r, WindowsTheme::Brush(active ? selected : background));
             const auto fg = (draw->itemState & (ODS_DISABLED | ODS_GRAYED)) ? disabled : text;
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, WindowsTheme::Color(fg));
@@ -119,25 +120,44 @@ namespace
         if (font) DeleteObject(font);
     }
 
+    void PaintMenuBarFrame(HWND window)
+    {
+        HMENU menu = GetMenu(window);
+        MENUBARINFO bar{sizeof(bar)};
+        RECT bounds{}, client{};
+        POINT origin{};
+        if (!menu || IsIconic(window) || !GetMenuBarInfo(window, OBJID_MENU, 0, &bar) ||
+            IsRectEmpty(&bar.rcBar) || !GetWindowRect(window, &bounds) || !GetClientRect(window, &client) ||
+            IsRectEmpty(&client) || !ClientToScreen(window, &origin))
+        {
+            return;
+        }
+        HDC dc = GetWindowDC(window);
+        if (!dc) return;
+        HBRUSH brush = WindowsTheme::Brush(EditorTheme::menuBar);
+        RECT last{};
+        if (GetMenuItemRect(window, menu, GetMenuItemCount(menu) - 1, &last))
+        {
+            RECT unused{last.right, last.top, bar.rcBar.right, last.bottom};
+            OffsetRect(&unused, -bounds.left, -bounds.top);
+            FillRect(dc, &unused, brush);
+        }
+
+        // Windows paints a one-pixel separator outside the item rectangles.
+        // Anchor it to the actual client edge so resizing and DPI changes keep it above the toolbar.
+        OffsetRect(&client, origin.x - bounds.left, origin.y - bounds.top);
+        RECT separator{client.left, client.top - 1, client.right, client.top};
+        FillRect(dc, &separator, brush);
+        ReleaseDC(window, dc);
+    }
+
     LRESULT CALLBACK MenuProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
                              UINT_PTR subclass, DWORD_PTR eventType)
     {
-        if (message == WM_NCPAINT || message == WM_NCACTIVATE)
+        if (message == WM_NCPAINT || message == WM_NCACTIVATE || message == WM_EXITMENULOOP)
         {
             const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
-            // Some visual styles paint the unused part of a native menu bar in the system color.
-            MENUBARINFO bar{sizeof(bar)};
-            RECT bounds{}, last{};
-            HMENU menu = GetMenu(window);
-            if (menu && GetMenuBarInfo(window, OBJID_MENU, 0, &bar) && GetWindowRect(window, &bounds) &&
-                GetMenuItemRect(window, menu, GetMenuItemCount(menu) - 1, &last))
-            {
-                RECT unused{last.right, last.top, bar.rcBar.right, last.bottom};
-                OffsetRect(&unused, -bounds.left, -bounds.top);
-                HDC dc = GetWindowDC(window);
-                FillRect(dc, &unused, WindowsTheme::Brush(EditorTheme::chrome));
-                ReleaseDC(window, dc);
-            }
+            PaintMenuBarFrame(window);
             return result;
         }
         if (message == WM_MEASUREITEM || message == WM_DRAWITEM)
