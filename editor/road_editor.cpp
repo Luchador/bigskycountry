@@ -363,7 +363,7 @@ void RoadEditor::AssignRoadMaterial(WorldDocument& world, const std::string& pat
     if (index >= 0) road = &world.roads.at(index);
     if (!road || road->style.material == path) return;
     Material material;
-    if (!Material::ValidAssetPath(path) || !material.Load(Material::Resolve(browser.Textures().Root(), path)))
+    if (!Material::ValidAssetPath(path) || !material.Load(browser.Textures().Root() + path))
     {
         status = SDL_GetError();
         return;

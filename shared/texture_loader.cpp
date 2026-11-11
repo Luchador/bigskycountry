@@ -1,4 +1,6 @@
 #include "texture_loader.hpp"
+#include "dds_texture.hpp"
+#include "material.hpp"
 #include <SDL3_image/SDL_image.h>
 
 #include <algorithm>
@@ -192,34 +194,6 @@ namespace
         return surface;
     }
 
-    SDL_Surface* LoadTga(const char* relativePath, Sint64 maxSize)
-    {
-        if (!relativePath)
-        {
-            SDL_SetError("A texture path is required");
-            return nullptr;
-        }
-
-        std::string name(relativePath);
-        std::replace(name.begin(), name.end(), '\\', '/');
-
-        if (name.empty() || name.front() == '/' || name.find(':') != std::string::npos || ("/" + name + "/").find("/../") != std::string::npos)
-        {
-            SDL_SetError("Expected a path relative to assets/textures: '%s'", relativePath);
-            return nullptr;
-        }
-
-        const char* base = SDL_GetBasePath();
-
-        if (!base)
-        {
-            return nullptr;
-        }
-
-        const std::string path = std::string(base) + "assets/textures/" + name;
-        return LoadTgaFile(path.c_str(), maxSize);
-    }
-
     SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
     {
         if (!renderer)
@@ -227,8 +201,14 @@ namespace
             SDL_SetError("A renderer is required");
             return nullptr;
         }
-        const Sint64 maxSize = SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
-        Surface surface(LoadTga(relativePath, maxSize), SDL_DestroySurface);
+        std::string name = relativePath ? relativePath : "";
+        std::replace(name.begin(), name.end(), '\\', '/');
+        if (!Material::ValidTexturePath(name))
+        {
+            SDL_SetError("Expected a relative texture path");
+            return nullptr;
+        }
+        Surface surface(DdsTexture::LoadColorSurface(name), SDL_DestroySurface);
         if (!surface)
         {
             return nullptr;
@@ -236,11 +216,6 @@ namespace
         return discBounds ? CreateDiscTexture(renderer, surface.get(), *discBounds, opacity)
                           : SDL_CreateTextureFromSurface(renderer, surface.get());
     }
-}
-
-SDL_Surface* TextureLoader::LoadTgaSurface(const char* relativePath)
-{
-    return LoadTga(relativePath, 0);
 }
 
 SDL_Surface* TextureLoader::LoadTgaSurfaceFromFile(const char* path)

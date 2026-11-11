@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asset_paths.hpp"
 #include "math.hpp"
 
 #include <SDL3/SDL.h>
@@ -73,8 +74,11 @@ private:
 class MeshAssets
 {
 public:
+    explicit MeshAssets(AssetRoot location = AssetRoot::Cooked) : location(location) {}
+    AssetRoot Location() const { return location; }
     std::shared_ptr<const Mesh> Load(const std::string& relativePath);
 
 private:
+    AssetRoot location;
     std::unordered_map<std::string, std::shared_ptr<const Mesh>> loaded;
 };

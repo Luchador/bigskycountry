@@ -21,7 +21,7 @@ struct WorldDepthVertex
 class WorldRenderer
 {
 public:
-    explicit WorldRenderer(bool authoring = false) : roadMaterials(authoring) {}
+    explicit WorldRenderer(AssetRoot location = AssetRoot::Cooked) : roadMaterials(location) {}
     ~WorldRenderer();
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;

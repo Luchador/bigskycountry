@@ -14,6 +14,7 @@
 class WorldDocument
 {
 public:
+    explicit WorldDocument(AssetRoot location = AssetRoot::Cooked) : models(location) {}
     SceneHierarchy hierarchy;
     bool Contains(SceneKey key) const;
     const std::string& Path() const { return path; }

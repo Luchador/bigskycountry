@@ -4,7 +4,6 @@
 #include <cJSON.h>
 #include <algorithm>
 #include <cstring>
-#include <filesystem>
 #include <memory>
 #include <string_view>
 
@@ -54,29 +53,6 @@ bool Material::ValidAssetPath(const std::string& path)
 {
     return ValidTexturePath(path) && path.size() > 5 &&
            SDL_strcasecmp(path.c_str() + path.size() - 5, ".bmat") == 0;
-}
-
-std::string Material::TextureRoot(bool authoring)
-{
-#ifdef BIGSKY_PROJECT_ASSETS
-    std::error_code error;
-    if (authoring && std::filesystem::is_directory(BIGSKY_PROJECT_ASSETS, error))
-    {
-        const auto root = std::filesystem::path(BIGSKY_PROJECT_ASSETS).generic_u8string();
-        return std::string(root.begin(), root.end()) + "/textures/";
-    }
-#endif
-    const char* base = SDL_GetBasePath();
-    return base ? std::string(base) + "assets/textures/" : std::string{};
-}
-
-std::string Material::Resolve(const std::string& root, const std::string& relative)
-{
-    const auto file = root + relative;
-    SDL_PathInfo info{};
-    if (!root.empty() && SDL_GetPathInfo(file.c_str(), &info) && info.type == SDL_PATHTYPE_FILE)
-        return file;
-    return TextureRoot() + relative;
 }
 
 unsigned Material::Revision() { return materialRevision; }

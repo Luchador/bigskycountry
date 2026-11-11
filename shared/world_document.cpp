@@ -237,7 +237,7 @@ void WorldDocument::TickObjects(float deltaSeconds)
 
 bool WorldDocument::Open(const char* documentPath)
 {
-    WorldDocument loaded;
+    WorldDocument loaded(models.Location());
     if (documentPath)
     {
         loaded.path = documentPath;

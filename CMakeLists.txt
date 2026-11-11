@@ -33,6 +33,7 @@ FetchContent_MakeAvailable(cjson)
 
 add_library(BigSkyApplication STATIC
     "${cjson_SOURCE_DIR}/cJSON.c"
+    shared/asset_paths.cpp
     shared/material.cpp
     shared/dds_texture.cpp
     shared/road_material.cpp
@@ -116,9 +117,6 @@ add_executable(BigSkyCountryEditor WIN32
     editor/editor_menu.cpp
     editor/edit_history.cpp
 )
-# Author material assets in the source project so a clean build preserves them.
-set_property(SOURCE shared/material.cpp APPEND PROPERTY COMPILE_DEFINITIONS
-    "BIGSKY_PROJECT_ASSETS=u8\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"")
 if(WIN32)
     enable_language(RC)
     if(MSVC AND CMAKE_GENERATOR MATCHES "^Ninja" AND CMAKE_NINJA_CMCLDEPS_RC)
@@ -145,21 +143,26 @@ else()
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
-# Both executables use the same runtime directory, including on multi-config builds.
+# Migrate the previous layout before globbing, including assets authored only in a build.
+if(CMAKE_CURRENT_BINARY_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    message(FATAL_ERROR "Use an out-of-source build, for example cmake -S . -B build")
+endif()
+include(cmake/migrate_assets.cmake)
+bigsky_migrate_assets("${CMAKE_CURRENT_BINARY_DIR}/assets")
+foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+    bigsky_migrate_assets("${CMAKE_CURRENT_BINARY_DIR}/${config}/assets")
+endforeach()
+
 include(cmake/textures.cmake)
+set_property(SOURCE shared/asset_paths.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "BIGSKY_PROJECT_ASSETS=u8\"${asset_root}/\""
+    "BIGSKY_COOKED_RELATIVE=u8\"$<PATH:RELATIVE_PATH,${cooked_root},$<TARGET_FILE_DIR:BigSkyCountry>>/\"")
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cjson_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cJSON.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bcdec_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/bcdec.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
-    COMMAND "${CMAKE_COMMAND}"
-        "-DtextureCache=${texture_cache}"
-        "-DassetSource=${CMAKE_CURRENT_SOURCE_DIR}/assets"
-        "-DassetDestination=$<TARGET_FILE_DIR:BigSkyCountry>/assets"
-        "-DmanifestDir=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles"
-        "-Dconfig=$<CONFIG>"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_assets.cmake"
     VERBATIM
 )
 add_dependencies(BigSkyAssets BigSkyTextures)

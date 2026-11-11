@@ -195,24 +195,20 @@ void ContentBrowser::Refresh()
     scanStatus.clear();
     previewDirty = true;
     std::map<std::string, std::vector<std::string>> folders;
-    const char* base = SDL_GetBasePath();
+    const std::string path = AssetPaths::Root(AssetRoot::Project) + "models/";
+    const fs::path root(std::u8string(path.begin(), path.end()));
     std::error_code error;
-    if (base)
+    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error), end;
+    for (; !error && it != end; it.increment(error))
     {
-        const std::string path = std::string(base) + "assets/models";
-        const fs::path root(std::u8string(path.begin(), path.end()));
-        fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error), end;
-        for (; !error && it != end; it.increment(error))
+        std::error_code statError;
+        if (it->is_regular_file(statError) && SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".glb") == 0)
         {
-            std::error_code statError;
-            if (it->is_regular_file(statError) && SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".glb") == 0)
-            {
-                const fs::path relative = it->path().lexically_relative(root);
-                folders[Utf8(relative.parent_path())].push_back(Utf8(relative.filename()));
-            }
+            const fs::path relative = it->path().lexically_relative(root);
+            folders[Utf8(relative.parent_path())].push_back(Utf8(relative.filename()));
         }
     }
-    if (!base || (error && error != std::errc::no_such_file_or_directory))
+    if (error && error != std::errc::no_such_file_or_directory)
     {
         scanStatus = "Cannot read model folder";
     }
@@ -260,7 +256,7 @@ bool ContentBrowser::UpdatePreview()
     previewStatus.clear();
     if (!selected.empty())
     {
-        MeshAssets assets;
+        MeshAssets assets(AssetRoot::Project);
         const auto mesh = assets.Load(selected);
         if (mesh)
         {

@@ -1,3 +1,4 @@
+#include "asset_paths.hpp"
 #include "dds_texture.hpp"
 #include <SDL3/SDL.h>
 #define BCDEC_IMPLEMENTATION
@@ -29,6 +30,32 @@ namespace
         }
         return values;
     }();
+}
+
+std::string DdsTexture::CookedPath(const std::string& source, Format format)
+{
+    // A source can supply several material slots with different channel layouts.
+    const char* folder = format == Format::BaseColor ? "BC7_UNORM_SRGB" :
+                         format == Format::Packed ? "BC7_UNORM" :
+                         format == Format::Normal ? "BC5_UNORM" : "BC4_UNORM";
+    return AssetPaths::Root(AssetRoot::Cooked) + "textures/" + folder + "/" + source + ".dds";
+}
+
+SDL_Surface* DdsTexture::LoadColorSurface(const std::string& source)
+{
+    DdsTexture texture;
+    if (!texture.Load(CookedPath(source, Format::BaseColor), Format::BaseColor)) return nullptr;
+    texture.mips.resize(1); // Only the base level is needed for SDL's sprite texture.
+    texture.Decode();
+    const auto& mip = texture.mips.front();
+    SDL_Surface* surface = SDL_CreateSurface(mip.width, mip.height, SDL_PIXELFORMAT_RGBA32);
+    if (surface)
+    {
+        for (Uint32 y = 0; y < mip.height; ++y)
+            std::memcpy(static_cast<Uint8*>(surface->pixels) + size_t(y) * surface->pitch,
+                        mip.pixels.data() + size_t(y) * mip.width * 4, size_t(mip.width) * 4);
+    }
+    return surface;
 }
 
 bool DdsTexture::Load(const std::string& path, Format expected)

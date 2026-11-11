@@ -26,8 +26,6 @@ struct Material
     std::array<std::string, materialSlotCount> textures{}; // Relative to assets/textures. Empty means unassigned.
     static bool ValidTexturePath(const std::string& path);
     static bool ValidAssetPath(const std::string& path);
-    static std::string TextureRoot(bool authoring = false);
-    static std::string Resolve(const std::string& root, const std::string& relative);
     // Main-thread cache generations for saved material definitions and refreshed source images.
     static unsigned Revision();
     static unsigned ImageRevision();

@@ -1,3 +1,4 @@
+#include "asset_paths.hpp"
 #include "transform_settings.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -30,15 +31,10 @@ double TransformSettings::SnapDistance(double meters) const
 
 SDL_Surface* LoadTransformIcon(TransformIcon icon)
 {
-    const char* base = SDL_GetBasePath();
-    if (!base)
-    {
-        return nullptr;
-    }
     constexpr std::array names{"btn_transform_global.png", "btn_transform_local.png",
                                "btn_snap_to_grid_off.png", "btn_snap_to_grid_on.png"};
     const char* name = names[static_cast<size_t>(icon)];
-    const std::string path = std::string(base) + "assets/textures/editor/" + name;
+    const std::string path = AssetPaths::Root(AssetRoot::Project) + "textures/editor/" + name;
     SDL_Surface* surface = SDL_LoadPNG(path.c_str());
     if (!surface)
     {

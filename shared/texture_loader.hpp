@@ -8,14 +8,13 @@ class TextureLoader
 public:
     TextureLoader() = delete;
 
-    // Paths are relative to assets/textures, e.g. "world/sun.tga".
+    // Identify a cooked RGBA sprite by its source path, e.g. "world/sun.tga".
     // Call on the main thread. The caller owns the result and releases it with
     // SDL_DestroyTexture. On failure, returns nullptr and sets SDL_GetError().
     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath);
 
     // Source image in straight-alpha RGBA32, for uncooked materials and browser previews.
     static SDL_Surface* LoadImageFile(const std::string& path);
-    static SDL_Surface* LoadTgaSurface(const char* relativePath);
 
     // Decode a TGA at the supplied filesystem path for editor previews. The caller owns the surface.
     static SDL_Surface* LoadTgaSurfaceFromFile(const char* path);

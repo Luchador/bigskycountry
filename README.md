@@ -13,9 +13,13 @@ The build recursively converts TIFF, PNG, TGA, JPEG, and BMP images under `asset
 | Ends in `_orm` | BC7 linear | Occlusion (R), roughness (G), metalness (B) |
 | Any other name | BC4 linear | Red |
 
-Runtime materials use compatible DDS files from `assets/cooked/textures/` beside the executable and can read uncooked images from `assets/textures/` (including files placed directly in the build). A development build also stages original images for the editor and existing sky/UI loaders. Rerun the build after adding or editing a material texture.
+Keep editable images and `.bmat` files in the project's `assets/textures/` and GLBs in `assets/models/`. Click **Refresh** in the Content Browser after adding, changing, or removing a file. The editor reads these directories directly and can preview a new material immediately.
 
-On Windows, CMake fetches a pinned DirectXTex `texconv` automatically. An existing host executable can be supplied with `-DBIGSKY_TEXCONV=...`. On Linux, install the libtiff development package and run `python3 -m pip install -r tools/texture-requirements.txt` in the Python environment used by CMake.
+Build either executable, or run `cmake --build build --target BigSkyAssets` for an asset-only update. The game reads `build/cooked/`. It contains runtime-ready GLBs, material definitions, and DDS textures. For example, `road.png` used as a base color cooks to `cooked/textures/BC7_UNORM_SRGB/road.png.dds`. When a material slot requires a different format from the filename default, the build cooks that format once and shares it across materials. The sun and moon use BC7 sRGB to preserve their colors and alpha. A packaged game needs the `cooked/` directory beside its executable.
+
+**Upgrading an existing build.** Close the old editor and build in the existing build directory once. CMake recovers build-only textures, materials, and models into the project, and removes the old `build/assets/`. If both copies of a file differ, the project copy stays active and CMake reports the build copy's location under `assets-backup/` in the build directory. A successful cook also removes the old `build/texture-cache/` when all its files are accounted for.
+
+On Windows, CMake fetches a pinned DirectXTex `texconv` automatically. An existing host executable can be supplied with `-DBIGSKY_TEXCONV=...`. On Linux, install the libtiff development package and run `python3 -m pip install -r tools/texture-requirements.txt` in the Python environment used by CMake. When cross-compiling material maps that need SDL_image decoding, set `BIGSKY_HOST_IMAGE_DECODER` to a native build of `BigSkyDecodeImage` or configure a target emulator.
 
 ## World saves
 
@@ -38,7 +42,7 @@ Terrain placements use the separate `TERR` section described below. The current 
 
 ### Static mesh assets
 
-Put a self-contained glTF 2.0 binary under `assets/models/`. Both executables load models relative to that directory. The importer reads the active scene, applies node transforms, and converts glTF coordinates to the engine's Y-up world. It supports indexed and unindexed triangle lists, strips and fans, including interleaved vertex data. It retains normals and the first UV set. The current opaque pass draws material base color multiplied by vertex color. Texture sampling, animation, skinning, sparse accessors, and compressed primitives are outside this import path.
+Put a self-contained glTF 2.0 binary under `assets/models/`. Model references use paths relative to that directory. The editor reads the project GLB and the game reads its staged copy in `cooked/models/`. The importer reads the active scene, applies node transforms, and converts glTF coordinates to the engine's Y-up world. It supports indexed and unindexed triangle lists, strips and fans, including interleaved vertex data. It retains normals and the first UV set. The current opaque pass draws material base color multiplied by vertex color. Texture sampling, animation, skinning, sparse accessors, and compressed primitives are outside this import path.
 
 A `MESH` version 1 section in a world file stores one instance per record. Write the quoted model path, world position (X Y Z), then the three basis vectors (local X, Y and Z in world coordinates). The following payload places a model at (10, 2, 30) with its authored size and orientation.
 
@@ -101,7 +105,7 @@ The editor uses a dark charcoal theme. New panels and controls should use the UI
 
 Drag a GLB model from the **Models** tab into the 3D viewport to place a **Prop**. The lowest part of the model sits at the height of the nearest road or terrain triangle under the cursor. On empty ground it sits at Y = 0. If the ray misses the ground, its pivot lands 20 m along the cursor ray. The new prop is selected. Use **W** to move it, **E** to rotate it, or **Delete** to remove it. Placement, transforms and deletion save to the world and support **Ctrl+Z** and **Ctrl+Y**.
 
-In the Content Browser’s **Textures** tab, select a folder to browse its texture thumbnails and materials. Right-click an empty area and choose **Add New Material**. Enter a name to save a versioned JSON `.bmat` asset in that folder. Development builds write to the project’s `assets/textures` directory and stage the files beside the executable on the next build. A standalone editor uses its own `assets/textures` directory.
+In the Content Browser’s **Textures** tab, select a folder to browse its texture thumbnails and materials. Right-click an empty area and choose **Add New Material**. Enter a name to save a versioned JSON `.bmat` asset in that folder. Material creation and editing always write to the project’s `assets/textures` directory.
 
 Double-click a material to open its floating **Material Editor**. Hold the left mouse button and drag in its preview viewport to orbit the sphere. Drag textures from any Content Browser folder onto the **Base color**, **Normal**, **ORM**, **Emissive**, or **Opacity** thumbnail. Use **Clear** to remove a map. The sphere updates and the material saves after each change. ORM uses red for occlusion, green for roughness, and blue for metalness. **Alpha cutout** discards pixels where base-color alpha multiplied by the opacity map’s red channel is below 0.5. **Standard** renders the whole surface. Materials reference the original textures by their paths and share the same decoded images.
 

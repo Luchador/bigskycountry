@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asset_paths.hpp"
 #include "dds_texture.hpp"
 #include "material.hpp"
 #include <map>
@@ -29,7 +30,7 @@ struct RoadMaterial
 class RoadMaterials
 {
 public:
-    explicit RoadMaterials(bool authoring) : root(Material::TextureRoot(authoring)) {}
+    explicit RoadMaterials(AssetRoot location) : location(location), root(AssetPaths::Root(location) + "textures/") {}
     ~RoadMaterials();
     RoadMaterials(const RoadMaterials&) = delete;
     RoadMaterials& operator=(const RoadMaterials&) = delete;
@@ -39,6 +40,7 @@ public:
 private:
     void ClearTextures();
     const RoadMaterialTexture* Map(const std::string& path, MaterialSlot slot);
+    const AssetRoot location;
     const std::string root;
     SDL_GPUDevice* device = nullptr;
     SDL_GPUSampler* sampler = nullptr;

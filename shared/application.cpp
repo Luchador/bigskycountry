@@ -36,7 +36,7 @@ namespace
         }
 
         Sky sky;
-        WorldRenderer worldRenderer(mode == ApplicationMode::Editor);
+        WorldRenderer worldRenderer(world.models.Location());
         FreeCamera freeCamera;
 
         if (!world.roads.empty())
@@ -234,7 +234,7 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
 
     if (success)
     {
-        WorldDocument world;
+        WorldDocument world(mode == ApplicationMode::Editor ? AssetRoot::Project : AssetRoot::Cooked);
         success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window, world.models)) &&
                   RunWindowLoop(window, renderer, mode, world, roadTool);
     }

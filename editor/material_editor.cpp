@@ -8,7 +8,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     if (!Material::ValidAssetPath(relative))
         return SDL_SetError("Invalid material path");
     Material next;
-    if (!next.Load(Material::Resolve(assets.Root(), relative)))
+    if (!next.Load(assets.Root() + relative))
         return false;
     catalog = &assets;
     path = relative;
@@ -20,7 +20,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
 
 bool MaterialEditor::Commit(Material next)
 {
-    if (!catalog || !next.Save(Material::Resolve(catalog->Root(), path)))
+    if (!catalog || !next.Save(catalog->Root() + path))
         return false;
     material = std::move(next);
     previewDirty = true;

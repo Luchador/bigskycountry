@@ -41,18 +41,15 @@ const RoadMaterialTexture* RoadMaterials::Map(const std::string& path, MaterialS
             image.Solid(format, defaults[index]);
         else
         {
-            const auto source = Material::Resolve(root, path);
-            const auto dot = path.find_last_of('.');
-            const char* base = SDL_GetBasePath();
-            const std::string cooked = base ? std::string(base) + "assets/cooked/textures/" +
-                                              path.substr(0, dot) + ".dds" : std::string{};
+            const bool editor = location == AssetRoot::Project;
+            const std::string source = root + path;
+            const std::string cooked = DdsTexture::CookedPath(path, format);
             SDL_PathInfo src{}, dds{};
-            loaded = !cooked.empty() && SDL_GetPathInfo(cooked.c_str(), &dds) &&
-                     (!SDL_GetPathInfo(source.c_str(), &src) || dds.modify_time >= src.modify_time) &&
-                     image.Load(cooked, format);
-            if (!loaded)
+            loaded = (!editor || (SDL_GetPathInfo(source.c_str(), &src) && SDL_GetPathInfo(cooked.c_str(), &dds) &&
+                                  dds.modify_time >= src.modify_time)) && image.Load(cooked, format);
+            if (editor && !loaded)
             {
-                // Newly authored maps may live only in build/assets or have a nonstandard suffix.
+                // Preview newly added or edited source maps before the next cook.
                 std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> pixels(
                     TextureLoader::LoadImageFile(source), SDL_DestroySurface);
                 loaded = pixels && image.FromImage(pixels.get(), format);
@@ -93,7 +90,7 @@ const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* t
     if (inserted)
     {
         Material definition;
-        if (!Material::ValidAssetPath(path) || !definition.Load(Material::Resolve(root, path)))
+        if (!Material::ValidAssetPath(path) || !definition.Load(root + path))
         {
             SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Road material '%s': %s", path.c_str(), SDL_GetError());
             return nullptr;

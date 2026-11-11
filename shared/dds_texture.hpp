@@ -10,6 +10,9 @@ class DdsTexture
 {
 public:
     enum class Format : Uint32 { Packed = 98, BaseColor = 99, Normal = 83, Scalar = 80 }; // DXGI format IDs.
+    static std::string CookedPath(const std::string& source, Format format);
+    // Read the full-resolution RGBA image used by the sky sprites.
+    static SDL_Surface* LoadColorSurface(const std::string& source);
     bool Load(const std::string& path, Format expected);
     bool FromImage(SDL_Surface* rgba, Format expected);
     void Solid(Format expected, std::array<Uint8, 4> rgba);

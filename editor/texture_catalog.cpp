@@ -1,3 +1,4 @@
+#include "asset_paths.hpp"
 #include "texture_catalog.hpp"
 #include "editor_theme.hpp"
 #include "texture_loader.hpp"
@@ -7,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-#include <set>
 
 namespace
 {
@@ -91,30 +91,21 @@ namespace
     }
 }
 
-TextureCatalog::TextureCatalog() : root(Material::TextureRoot(true)) {}
+TextureCatalog::TextureCatalog() : root(AssetPaths::Root(AssetRoot::Project) + "textures/") {}
 
 void TextureCatalog::Refresh()
 {
-    const auto previousRoot = root;
-    root = Material::TextureRoot(true);
-    if (!roots.empty()) Material::RefreshAssets();
-    roots = {root};
-    const auto runtime = Material::TextureRoot();
-    if (runtime != root) roots.push_back(runtime);
+    Material::RefreshAssets();
     std::error_code error;
-    std::set<std::string, PathLess> paths{""};
-    for (const auto& assetRoot : roots)
+    folders = {""};
+    const auto directory = FromUtf8(root);
+    fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
+    for (; !error && it != end; it.increment(error))
     {
-        const auto directory = FromUtf8(assetRoot);
-        fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
-        for (; !error && it != end; it.increment(error))
-        {
-            std::error_code stat;
-            if (!it->is_symlink(stat) && it->is_directory(stat))
-                paths.insert(Utf8(it->path().lexically_relative(directory)));
-        }
+        std::error_code stat;
+        if (!it->is_symlink(stat) && it->is_directory(stat))
+            folders.push_back(Utf8(it->path().lexically_relative(directory)));
     }
-    folders.assign(paths.begin(), paths.end());
     // Compare path components so each subtree stays together (including names such as "road-old").
     std::sort(folders.begin(), folders.end(), [](const auto& a, const auto& b) { return FromUtf8(a) < FromUtf8(b); });
     if (std::find(folders.begin(), folders.end(), folder) == folders.end()) folder.clear();
@@ -122,7 +113,7 @@ void TextureCatalog::Refresh()
     const auto removed = std::erase_if(images, [&](const auto& entry)
     {
         SDL_PathInfo info{};
-        return previousRoot != root || !entry.second.image || !SDL_GetPathInfo(Material::Resolve(root, entry.first).c_str(), &info) ||
+        return !entry.second.image || !SDL_GetPathInfo((root + entry.first).c_str(), &info) ||
                info.modify_time != entry.second.source.modify_time || info.size != entry.second.source.size;
     });
     if (removed) ++imageRevision;
@@ -156,24 +147,20 @@ void TextureCatalog::ReadFolder()
         return;
     }
 
-    std::set<std::string, PathLess> seen;
-    for (const auto& assetRoot : roots)
+    const auto base = FromUtf8(root);
+    std::error_code error;
+    fs::directory_iterator it(base / FromUtf8(folder), error), end;
+    for (; !error && it != end; it.increment(error))
     {
-        const auto base = FromUtf8(assetRoot);
-        std::error_code error;
-        fs::directory_iterator it(base / FromUtf8(folder), error), end;
-        for (; !error && it != end; it.increment(error))
-        {
-            std::error_code stat;
-            if (!it->is_regular_file(stat)) continue;
-            const auto& file = it->path();
-            const auto relative = Utf8(file.lexically_relative(base));
-            const bool material = Material::ValidAssetPath(relative);
-            if ((material || IsImage(file)) && seen.insert(relative).second)
-                items.push_back({relative, Utf8(material ? file.stem() : file.filename()), material});
-        }
-        if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folder";
+        std::error_code stat;
+        if (!it->is_regular_file(stat)) continue;
+        const auto& file = it->path();
+        const auto relative = Utf8(file.lexically_relative(base));
+        const bool material = Material::ValidAssetPath(relative);
+        if (material || IsImage(file))
+            items.push_back({relative, Utf8(material ? file.stem() : file.filename()), material});
     }
+    if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folder";
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.path < b.path; });
 #ifndef _WIN32
     thumbnailTextures.resize(items.size());
@@ -256,7 +243,7 @@ SDL_Surface* TextureCatalog::Image(const std::string& path)
     auto [it, inserted] = images.try_emplace(path);
     if (inserted)
     {
-        const auto file = Material::Resolve(root, path);
+        const auto file = root + path;
         SDL_GetPathInfo(file.c_str(), &it->second.source);
         it->second.image.reset(TextureLoader::LoadImageFile(file));
         if (!it->second.image)

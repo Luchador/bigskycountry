@@ -61,7 +61,7 @@ private:
     std::vector<SDL_Texture*> thumbnailTextures;
 #endif
     void ReadFolder();
-    std::vector<std::string> roots, folders;
+    std::vector<std::string> folders;
     std::string folder;
     std::string root;
     std::string status;

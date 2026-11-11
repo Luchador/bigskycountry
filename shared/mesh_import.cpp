@@ -325,15 +325,9 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
         return found->second;
     }
 
-    const char* base = SDL_GetBasePath();
-
-    if (!base)
-    {
-        return nullptr;
-    }
-
+    const std::string path = AssetPaths::Root(location) + "models/" + name;
     size_t size;
-    std::unique_ptr<void, decltype(&SDL_free)> bytes(SDL_LoadFile((std::string(base) + "assets/models/" + name).c_str(), &size), SDL_free);
+    std::unique_ptr<void, decltype(&SDL_free)> bytes(SDL_LoadFile(path.c_str(), &size), SDL_free);
     auto mesh = std::make_shared<Mesh>();
 
     if (!bytes || !ImportGLB(bytes.get(), size, *mesh))
