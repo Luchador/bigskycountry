@@ -14,7 +14,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     path = relative;
     yaw = pitch = 0.0;
     material = std::move(next);
-    preview.reset();
+    previewDirty = true;
     return true;
 }
 
@@ -23,7 +23,7 @@ bool MaterialEditor::Commit(Material next)
     if (!catalog || !next.Save(catalog->Root() + path))
         return false;
     material = std::move(next);
-    preview.reset();
+    previewDirty = true;
     return true;
 }
 
@@ -61,16 +61,23 @@ bool MaterialEditor::Orbit(double deltaX, double deltaY, double viewportSpan)
     if (nextYaw == yaw && nextPitch == pitch) return false;
     yaw = nextYaw;
     pitch = nextPitch;
-    preview.reset();
+    previewDirty = true;
     return true;
 }
 
 SDL_Surface* MaterialEditor::Preview(int pixelWidth, int pixelHeight)
 {
     if (!catalog || pixelWidth <= 0 || pixelHeight <= 0) return nullptr;
-    if (!preview || preview->w != pixelWidth || preview->h != pixelHeight || ImagesChanged())
+    if (!preview || preview->w != pixelWidth || preview->h != pixelHeight)
     {
-        preview = RenderSphere(pixelWidth, pixelHeight);
+        preview.reset(SDL_CreateSurface(pixelWidth, pixelHeight, SDL_PIXELFORMAT_BGRA32));
+        if (!preview) return nullptr;
+        previewDirty = true;
+    }
+    if (previewDirty || ImagesChanged())
+    {
+        RenderSphere(*preview);
+        previewDirty = false;
         imageRevision = catalog->ImageRevision();
     }
     return preview.get();

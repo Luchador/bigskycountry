@@ -18,11 +18,12 @@ public:
 
 private:
     bool Commit(Material next);
-    MaterialSurface RenderSphere(int width, int height) const;
+    void RenderSphere(SDL_Surface& target) const;
     TextureCatalog* catalog = nullptr;
     std::string path;
     Material material;
     double yaw = 0.0, pitch = 0.0;
+    bool previewDirty = true;
     MaterialSurface preview{nullptr, SDL_DestroySurface};
     Uint64 imageRevision = 0;
 };

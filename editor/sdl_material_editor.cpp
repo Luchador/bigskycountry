@@ -240,13 +240,20 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
     return true;
 }
 
-void SdlMaterialEditor::UpdateImages(int pixelWidth, int pixelHeight)
+bool SdlMaterialEditor::UpdateImages(int pixelWidth, int pixelHeight)
 {
-    SDL_DestroyTexture(sphere);
     auto* pixels = editor.Preview(pixelWidth, pixelHeight);
-    sphere = pixels ? SDL_CreateTextureFromSurface(renderer, pixels) : nullptr;
+    if (!pixels) return false;
+    if (!sphere || sphere->w != pixelWidth || sphere->h != pixelHeight)
+    {
+        auto* resized = SDL_CreateTexture(renderer, pixels->format, SDL_TEXTUREACCESS_STREAMING, pixelWidth, pixelHeight);
+        if (!resized) return false;
+        SDL_DestroyTexture(sphere);
+        sphere = resized;
+    }
+    if (!SDL_UpdateTexture(sphere, nullptr, pixels->pixels, pixels->pitch)) return false;
     sphereDirty = false;
-    if (!imagesDirty) return;
+    if (!imagesDirty) return true;
     for (std::size_t i = 0; i < thumbs.size(); ++i)
     {
         SDL_DestroyTexture(thumbs[i]);
@@ -254,6 +261,7 @@ void SdlMaterialEditor::UpdateImages(int pixelWidth, int pixelHeight)
         thumbs[i] = thumb ? SDL_CreateTextureFromSurface(renderer, thumb) : nullptr;
     }
     imagesDirty = false;
+    return true;
 }
 
 bool SdlMaterialEditor::Draw()
@@ -275,7 +283,9 @@ bool SdlMaterialEditor::Draw()
     const int previewWidth = std::lround(layout.view.w * scaleX);
     if (!SDL_SetRenderScale(renderer, scaleX, scaleY)) return false;
     if (imagesDirty || sphereDirty || !sphere || sphere->w != previewWidth || sphere->h != outputHeight)
-        UpdateImages(previewWidth, outputHeight);
+    {
+        if (!UpdateImages(previewWidth, outputHeight)) return false;
+    }
 
     using namespace EditorTheme;
     if (!EditorTheme::SetColor(renderer, panel) || !SDL_RenderClear(renderer) ||
