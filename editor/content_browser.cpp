@@ -361,7 +361,15 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
         const auto index = static_cast<std::size_t>((local.y - top + offset) / step);
         if (!models && index < count)
         {
-            selectedTexture = textures.Items()[index].path;
+            const auto& item = textures.Items()[index];
+            selectedTexture = item.path;
+            if (item.material && event.button.clicks == 2)
+            {
+                auto* owner = SDL_GetWindowFromEvent(&event);
+                if (!materialWindow.Open(owner, textures, item.path))
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Material Editor", SDL_GetError(), owner);
+            }
+            if (!item.material) materialWindow.StartDrag(item.path);
         }
         else if (models && index < count && !rows[index].modelPath.empty())
         {

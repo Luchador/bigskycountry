@@ -5,6 +5,7 @@
 #include <memory>
 #ifndef _WIN32
 #include <set>
+#include "sdl_material_editor.hpp"
 #endif
 #include <string>
 #include <vector>
@@ -21,6 +22,8 @@ public:
 #ifndef _WIN32
     // A model-row press selects the preview and returns the path available to drag.
     std::string HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
+    SdlMaterialEditor& MaterialWindow() { return materialWindow; }
+    const SdlMaterialEditor& MaterialWindow() const { return materialWindow; }
     bool HandleMaterialPopup(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, SDL_Rect panel);
     bool Draw(SDL_Renderer* renderer, int width, int height);
 #endif
@@ -44,6 +47,7 @@ private:
     TextureCatalog textures;
     bool texturesScanned = false;
 #ifndef _WIN32
+    SdlMaterialEditor materialWindow;
     void UpdateFolderRows();
     std::set<std::string> collapsedFolders;
     std::vector<std::size_t> folderRows;

@@ -26,7 +26,7 @@ public:
     SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
     bool ViewportFocused() const override { return panels.ViewportFocused(); }
 #else
-    bool ViewportFocused() const override { return !transformPanel.Focused() && !outlinePanel.Focused(); }
+    bool ViewportFocused() const override { return !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused(); }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;

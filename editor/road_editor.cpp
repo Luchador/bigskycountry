@@ -1035,7 +1035,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     {
         return false;
     }
-    if (!menu.DrawViewportMenu(renderer))
+    if (!browser.MaterialWindow().Draw() || !menu.DrawViewportMenu(renderer))
     {
         return false;
     }
@@ -1364,6 +1364,9 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
 EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
                                    WorldDocument& world, FreeCamera& camera)
 {
+#ifndef _WIN32
+    if (browser.MaterialWindow().Handle(event)) return EditorEvent::Handled;
+#endif
     if (event.type == SDL_EVENT_QUIT)
     {
         Release(world);

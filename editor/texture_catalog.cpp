@@ -1,6 +1,7 @@
 #include "texture_catalog.hpp"
 #include "editor_theme.hpp"
 #include "texture_loader.hpp"
+#include "material.hpp"
 #include <SDL3_image/SDL_image.h>
 
 #include <algorithm>
@@ -50,9 +51,8 @@ namespace
                            [&](const char* candidate) { return SDL_strcasecmp(ext.c_str(), candidate) == 0; });
     }
 
-    Surface MakeThumbnail(const std::string& root, const std::string& path)
+    Surface ReadImage(const std::string& root, const std::string& path)
     {
-        constexpr int size = TextureCatalog::thumbnailSize;
         Surface source(nullptr, SDL_DestroySurface);
         // Use the world loader for RLE true-color TGAs, including right-origin images.
         const char* extension = SDL_strrchr(path.c_str(), '.');
@@ -67,6 +67,30 @@ namespace
             const bool png = extension && (SDL_strcasecmp(extension, ".png") == 0 || SDL_strcasecmp(extension, ".apng") == 0);
             source.reset(png ? SDL_LoadPNG(file.c_str()) : IMG_Load(file.c_str()));
         }
+        if (!source) return source;
+        if (source->format != SDL_PIXELFORMAT_RGBA32)
+        {
+            source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_RGBA32));
+            if (!source) return source;
+        }
+        // WIC and libtiff supply associated alpha. Keep the shared image in straight RGBA.
+        if (extension && (SDL_strcasecmp(extension, ".tif") == 0 || SDL_strcasecmp(extension, ".tiff") == 0))
+        {
+            for (int y = 0; y < source->h; ++y)
+            {
+                auto* pixel = static_cast<Uint8*>(source->pixels) + y * source->pitch;
+                for (int x = 0; x < source->w; ++x, pixel += 4)
+                    if (pixel[3] && pixel[3] < 255)
+                        for (int c = 0; c < 3; ++c) pixel[c] = std::min(255, (pixel[c] * 255 + pixel[3] / 2) / pixel[3]);
+            }
+        }
+        SDL_SetSurfaceBlendMode(source.get(), SDL_BLENDMODE_BLEND);
+        return source;
+    }
+
+    Surface MakeThumbnail(SDL_Surface* source)
+    {
+        constexpr int size = TextureCatalog::thumbnailSize;
         Surface thumb(nullptr, SDL_DestroySurface);
         if (!source || source->w <= 0 || source->h <= 0)
         {
@@ -95,16 +119,7 @@ namespace
             }
         }
 
-        // Convert first so indexed images and color keys retain transparency when scaled.
-        if (source->format != SDL_PIXELFORMAT_BGRA32)
-        {
-            source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_BGRA32));
-        }
-        // libtiff's RGBA reader and Windows Imaging Component return associated alpha.
-        const bool tiff = extension && (SDL_strcasecmp(extension, ".tif") == 0 || SDL_strcasecmp(extension, ".tiff") == 0);
-        const SDL_BlendMode blend = tiff ? SDL_BLENDMODE_BLEND_PREMULTIPLIED : SDL_BLENDMODE_BLEND;
-        if (!source || !SDL_SetSurfaceBlendMode(source.get(), blend) ||
-            !SDL_BlitSurfaceScaled(source.get(), nullptr, thumb.get(), &image, SDL_SCALEMODE_LINEAR))
+        if (!SDL_BlitSurfaceScaled(source, nullptr, thumb.get(), &image, SDL_SCALEMODE_LINEAR))
         {
             thumb.reset();
         }
@@ -114,6 +129,7 @@ namespace
 
 void TextureCatalog::Refresh()
 {
+    const auto previousRoot = root;
     root.clear();
     fs::path assets;
     std::error_code error;
@@ -140,6 +156,14 @@ void TextureCatalog::Refresh()
     // Compare path components so each subtree stays together (including names such as "road-old").
     std::sort(folders.begin(), folders.end(), [](const auto& a, const auto& b) { return FromUtf8(a) < FromUtf8(b); });
     if (std::find(folders.begin(), folders.end(), folder) == folders.end()) folder.clear();
+    // Folder navigation retains the cache. Refresh retries missing or changed files only.
+    const auto removed = std::erase_if(images, [&](const auto& entry)
+    {
+        SDL_PathInfo info{};
+        return previousRoot != root || !entry.second.image || !SDL_GetPathInfo((root + entry.first).c_str(), &info) ||
+               info.modify_time != entry.second.source.modify_time || info.size != entry.second.source.size;
+    });
+    if (removed) ++imageRevision;
     ReadFolder();
     if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folders";
 }
@@ -156,10 +180,12 @@ void TextureCatalog::SelectFolder(const std::string& path)
 void TextureCatalog::ReadFolder()
 {
 #ifndef _WIN32
-    for (const auto& preview : previews)
-        if (preview.texture) SDL_DestroyTexture(preview.texture);
+    for (auto* texture : thumbnailTextures)
+    {
+        if (texture) SDL_DestroyTexture(texture);
+    }
+    thumbnailTextures.clear();
 #endif
-    previews.clear();
     items.clear();
     status.clear();
     if (root.empty())
@@ -182,7 +208,9 @@ void TextureCatalog::ReadFolder()
     }
     if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folder";
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.path < b.path; });
-    previews.resize(items.size());
+#ifndef _WIN32
+    thumbnailTextures.resize(items.size());
+#endif
 }
 
 std::string TextureCatalog::NewMaterialName() const
@@ -250,33 +278,40 @@ bool TextureCatalog::CreateMaterial(const std::string& name, std::string& create
     return true;
 }
 
+SDL_Surface* TextureCatalog::Image(const std::string& path)
+{
+    if (!Material::ValidTexturePath(path)) return nullptr;
+    auto [it, inserted] = images.try_emplace(path);
+    if (inserted)
+    {
+        SDL_GetPathInfo((root + path).c_str(), &it->second.source);
+        it->second.image = ReadImage(root, path);
+        if (!it->second.image)
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Texture '%s': %s", path.c_str(), SDL_GetError());
+    }
+    return it->second.image.get();
+}
+
+SDL_Surface* TextureCatalog::Thumbnail(const std::string& path)
+{
+    auto* image = Image(path);
+    if (!image) return nullptr;
+    auto& thumb = images.at(path).thumbnail;
+    if (!thumb) thumb = MakeThumbnail(image);
+    return thumb.get();
+}
+
 SDL_Surface* TextureCatalog::Thumbnail(std::size_t index)
 {
-    if (items.at(index).material) return nullptr;
-    auto& preview = previews.at(index);
-    if (!preview.attempted)
-    {
-        preview.attempted = true;
-        preview.surface = MakeThumbnail(root, items[index].path);
-        if (!preview.surface)
-        {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Texture preview '%s': %s", items[index].path.c_str(), SDL_GetError());
-        }
-    }
-    return preview.surface.get();
+    return items.at(index).material ? nullptr : Thumbnail(items[index].path);
 }
 
 #ifndef _WIN32
 SDL_Texture* TextureCatalog::ThumbnailTexture(std::size_t index, SDL_Renderer* renderer)
 {
-    auto& preview = previews.at(index);
-    if (!preview.texture)
-    {
-        if (SDL_Surface* thumb = Thumbnail(index))
-        {
-            preview.texture = SDL_CreateTextureFromSurface(renderer, thumb);
-        }
-    }
-    return preview.texture;
+    auto*& texture = thumbnailTextures.at(index);
+    if (!texture)
+        if (auto* thumb = Thumbnail(index)) texture = SDL_CreateTextureFromSurface(renderer, thumb);
+    return texture;
 }
 #endif

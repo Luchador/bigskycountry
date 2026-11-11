@@ -24,7 +24,16 @@ FetchContent_Declare(bcdec
     SOURCE_SUBDIR header_only)
 FetchContent_MakeAvailable(bcdec)
 
+# Read and update versioned .bmat JSON in both the engine and editor.
+FetchContent_Declare(cjson
+    URL https://codeload.github.com/DaveGamble/cJSON/tar.gz/c859b25da02955fef659d658b8f324b5cde87be3
+    URL_HASH SHA256=880a86445ad5cf38f877bac31198268d8fac5d2ce996ebf55d3066a4109ddd8d
+    SOURCE_SUBDIR header_only)
+FetchContent_MakeAvailable(cjson)
+
 add_library(BigSkyApplication STATIC
+    "${cjson_SOURCE_DIR}/cJSON.c"
+    shared/material.cpp
     shared/dds_texture.cpp
     shared/asphalt_material.cpp
     shared/bscobject.cpp
@@ -57,8 +66,9 @@ add_library(BigSkyApplication STATIC
     shared/texture_loader.cpp
     shared/world_state.cpp
 )
+set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
-target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
+target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 include(cmake/shaders.cmake)
 
@@ -88,6 +98,8 @@ FetchContent_MakeAvailable(SDL3_image)
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
+    editor/material_editor.cpp
+    editor/material_preview.cpp
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
@@ -114,8 +126,8 @@ if(WIN32)
                 "${CMAKE_CURRENT_SOURCE_DIR}/editor/panel_ids.h")
         endif()
     endif()
-    target_sources(BigSkyCountryEditor PRIVATE editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/panels.rc)
-    set_source_files_properties(editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/editor_menu.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
+    target_sources(BigSkyCountryEditor PRIVATE editor/windows_material_editor.cpp editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/panels.rc)
+    set_source_files_properties(editor/windows_material_editor.cpp editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/editor_menu.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
     target_include_directories(BigSkyCountryEditor PRIVATE editor)
     if(MSVC)
         target_sources(BigSkyCountryEditor PRIVATE editor/editor.manifest)
@@ -124,7 +136,7 @@ if(WIN32)
     endif()
     target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32 windowscodecs dwmapi uxtheme)
 else()
-    target_sources(BigSkyCountryEditor PRIVATE editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
+    target_sources(BigSkyCountryEditor PRIVATE editor/sdl_material_editor.cpp editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::SDL3_image-static)
 
@@ -132,6 +144,7 @@ target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::
 include(cmake/textures.cmake)
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cjson_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cJSON.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bcdec_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/bcdec.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"

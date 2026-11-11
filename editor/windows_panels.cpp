@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "windows_material_editor.hpp"
 #include "windows_theme.hpp"
 #include "windows_outliner.hpp"
 #include "content_browser.hpp"
@@ -90,28 +91,6 @@ namespace
         return bitmap;
     }
 
-    void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface)
-    {
-        FillRect(dc, &area, WindowsTheme::Brush(EditorTheme::preview));
-        if (!surface)
-        {
-            return;
-        }
-        BITMAPINFO info{};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = surface->pitch / 4;
-        info.bmiHeader.biHeight = -surface->h;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        const int w = area.right - area.left;
-        const int h = area.bottom - area.top;
-        const double scale = std::min(double(w) / surface->w, double(h) / surface->h);
-        const int iw = static_cast<int>(surface->w * scale), ih = static_cast<int>(surface->h * scale);
-        StretchDIBits(dc, area.left + (w - iw) / 2, area.top + (h - ih) / 2, iw, ih,
-                      0, 0, surface->w, surface->h, surface->pixels, &info, DIB_RGB_COLORS, SRCCOPY);
-    }
-
     // Keep the main HWND as the SDL input window, even over the swapchain.
     LRESULT CALLBACK ViewProc(HWND window, UINT message, WPARAM w, LPARAM l)
     {
@@ -142,6 +121,10 @@ struct WindowsPanels::Impl
     std::deque<TransformEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
+    WindowsMaterialEditor materialEditor;
+    std::string pressedTexture;
+    POINT texturePress{};
+    bool draggingTexture = false;
     bool populating = false, populated = false, texturesPopulated = false;
     std::set<std::string> collapsedTextureFolders;
     int scroll = 0;
@@ -456,6 +439,7 @@ struct WindowsPanels::Impl
         browser->Refresh();
         PopulateTextureFolders();
         PopulateTextures(selected, true);
+        materialEditor.RefreshImages();
         ShowBrowserTab();
     }
 
@@ -519,7 +503,7 @@ struct WindowsPanels::Impl
             InflateRect(&icon, -pad, -pad);
             icon.right = icon.left + icon.bottom - icon.top;
             SDL_Surface* surface = item.material ? nullptr : catalog.Thumbnail(draw.itemData);
-            DrawPreview(draw.hDC, icon, surface);
+            WindowsTheme::DrawPreview(draw.hDC, icon, surface);
             SetBkMode(draw.hDC, TRANSPARENT);
             if (!surface)
             {
@@ -597,8 +581,94 @@ struct WindowsPanels::Impl
         populating = false;
     }
 
+    void OpenSelectedMaterial()
+    {
+        HWND list = GetDlgItem(models, IDC_TEXTURES);
+        const auto row = SendMessageW(list, LB_GETCURSEL, 0, 0);
+        const auto index = static_cast<std::size_t>(SendMessageW(list, LB_GETITEMDATA, row, 0));
+        auto& catalog = browser->Textures();
+        if (index < catalog.Items().size() && catalog.Items()[index].material &&
+            !materialEditor.Open(frame, catalog, catalog.Items()[index].path))
+            MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+    }
+
+    void CancelTextureDrag(HWND list)
+    {
+        pressedTexture.clear();
+        draggingTexture = false;
+        materialEditor.Hover({});
+        if (GetCapture() == list) ReleaseCapture();
+    }
+
+    static LRESULT CALLBACK TextureListProc(HWND list, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR data)
+    {
+        auto& self = *reinterpret_cast<Impl*>(data);
+        if (msg == WM_NCDESTROY)
+            RemoveWindowSubclass(list, TextureListProc, id);
+        if (msg == WM_KEYDOWN && w == VK_RETURN)
+        {
+            self.OpenSelectedMaterial();
+            return 0;
+        }
+        if (msg == WM_LBUTTONDOWN && self.materialEditor.Window())
+        {
+            const auto hit = SendMessageW(list, LB_ITEMFROMPOINT, 0, l);
+            const auto row = LOWORD(hit);
+            RECT r{};
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            const auto index = static_cast<std::size_t>(SendMessageW(list, LB_GETITEMDATA, row, 0));
+            const auto& items = self.browser->Textures().Items();
+            if (!HIWORD(hit) && index < items.size() && !items[index].material &&
+                SendMessageW(list, LB_GETITEMRECT, row, reinterpret_cast<LPARAM>(&r)) != LB_ERR && PtInRect(&r, p))
+            {
+                SetFocus(list);
+                SendMessageW(list, LB_SETCURSEL, row, 0);
+                self.pressedTexture = items[index].path;
+                self.texturePress = p;
+                SetCapture(list);
+                return 0;
+            }
+        }
+        if (!self.pressedTexture.empty())
+        {
+            if (msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP)
+            {
+                POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                if (std::abs(point.x - self.texturePress.x) >= GetSystemMetrics(SM_CXDRAG) ||
+                    std::abs(point.y - self.texturePress.y) >= GetSystemMetrics(SM_CYDRAG)) self.draggingTexture = true;
+                ClientToScreen(list, &point);
+                const auto slot = self.materialEditor.SlotAt(point);
+                if (msg == WM_LBUTTONUP)
+                {
+                    const auto path = std::move(self.pressedTexture);
+                    const bool drop = self.draggingTexture && slot.has_value();
+                    self.CancelTextureDrag(list);
+                    if (drop) self.materialEditor.Drop(*slot, path);
+                }
+                else if (self.draggingTexture)
+                {
+                    self.materialEditor.Hover(slot);
+                    SetCursor(LoadCursorW(nullptr, slot ? IDC_CROSS : IDC_NO));
+                }
+                return 0;
+            }
+            if (msg == WM_CAPTURECHANGED || msg == WM_CANCELMODE || msg == WM_RBUTTONDOWN ||
+                (msg == WM_KEYDOWN && w == VK_ESCAPE))
+            {
+                self.CancelTextureDrag(list);
+                return 0;
+            }
+        }
+        return DefSubclassProc(list, msg, w, l);
+    }
+
     void Control(int id, int notification)
     {
+        if (id == IDC_TEXTURES && notification == LBN_DBLCLK)
+        {
+            OpenSelectedMaterial();
+            return;
+        }
         if (notification == BN_CLICKED)
         {
             switch (id)
@@ -854,7 +924,7 @@ struct WindowsPanels::Impl
             if (w == IDC_PREVIEW)
             {
                 const auto& draw = *reinterpret_cast<DRAWITEMSTRUCT*>(l);
-                DrawPreview(draw.hDC, draw.rcItem, self->browser->Preview());
+                WindowsTheme::DrawPreview(draw.hDC, draw.rcItem, self->browser->Preview());
                 return TRUE;
             }
             if (w == IDC_TEXTURES)
@@ -931,6 +1001,10 @@ struct WindowsPanels::Impl
     {
         auto& self = *static_cast<Impl*>(data);
         HWND focus = GetFocus();
+        HWND material = self.materialEditor.Window();
+        if (material && msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST &&
+            (msg->hwnd == material || IsChild(material, msg->hwnd)))
+            return !IsDialogMessageW(material, msg);
 
         if (focus != self.frame && !IsChild(self.frame, focus))
         {
@@ -1106,6 +1180,11 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
+    if (!SetWindowSubclass(GetDlgItem(p.models, IDC_TEXTURES), Impl::TextureListProc, 2, reinterpret_cast<DWORD_PTR>(&p)))
+    {
+        WinError("Cannot initialize texture dragging");
+        return nullptr;
+    }
     HWND tabs = GetDlgItem(p.models, IDC_BROWSER_TABS);
     for (const wchar_t* label : {L"Models", L"Textures"})
     {
