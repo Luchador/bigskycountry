@@ -80,8 +80,9 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
 
 void SdlMaterialEditor::FinishDrag()
 {
-    if (!dragged.empty())
+    if (orbitPoint || !dragged.empty())
         SDL_CaptureMouse(false);
+    orbitPoint.reset();
     dragged.clear();
     hover.reset();
     dirty = true;
@@ -102,6 +103,7 @@ void SdlMaterialEditor::StartDrag(const std::string& path)
 {
     if (!window)
         return;
+    FinishDrag();
     dragged = path;
     SDL_CaptureMouse(true);
 }
@@ -121,6 +123,30 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
         return false;
     auto* source = SDL_GetWindowFromEvent(&e);
     const bool own = source == window;
+    if (orbitPoint)
+    {
+        const bool released = e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT;
+        if (own && (e.type == SDL_EVENT_MOUSE_MOTION || released))
+        {
+            if (released || (e.motion.state & SDL_BUTTON_LMASK))
+            {
+                const SDL_FPoint point = released ? SDL_FPoint{e.button.x, e.button.y} : SDL_FPoint{e.motion.x, e.motion.y};
+                const auto view = Layout(window).view;
+                if (editor.Orbit(point.x - orbitPoint->x, point.y - orbitPoint->y, std::min(view.w, view.h)))
+                    sphereDirty = true;
+                orbitPoint = point;
+            }
+            if (released || !(e.motion.state & SDL_BUTTON_LMASK)) FinishDrag();
+            return true;
+        }
+        if (own && e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)
+        {
+            FinishDrag();
+            return true;
+        }
+        if (released || (own && e.type == SDL_EVENT_WINDOW_FOCUS_LOST) || e.type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+            FinishDrag();
+    }
     if (!dragged.empty())
     {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)
@@ -179,7 +205,8 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
             Close();
         return true;
     }
-    if (e.type == SDL_EVENT_WINDOW_EXPOSED || e.type == SDL_EVENT_WINDOW_RESIZED)
+    if (e.type == SDL_EVENT_WINDOW_EXPOSED || e.type == SDL_EVENT_WINDOW_RESIZED ||
+        e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_RESTORED)
         dirty = true;
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
     {
@@ -196,6 +223,11 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
                     Report(editor.SetType(static_cast<MaterialType>(i)));
             }
         }
+        else if (SDL_PointInRectFloat(&p, &layout.view))
+        {
+            orbitPoint = p;
+            SDL_CaptureMouse(true);
+        }
         else if (SDL_PointInRectFloat(&p, &layout.type))
             typeMenu = true;
         else
@@ -211,6 +243,8 @@ void SdlMaterialEditor::UpdateImages()
     SDL_DestroyTexture(sphere);
     auto* pixels = editor.Preview();
     sphere = pixels ? SDL_CreateTextureFromSurface(renderer, pixels) : nullptr;
+    sphereDirty = false;
+    if (!imagesDirty) return;
     for (std::size_t i = 0; i < thumbs.size(); ++i)
     {
         SDL_DestroyTexture(thumbs[i]);
@@ -226,9 +260,9 @@ bool SdlMaterialEditor::Draw()
         return true;
     if (editor.ImagesChanged())
         imagesDirty = true;
-    if (!dirty && !imagesDirty)
+    if (!dirty && !imagesDirty && !sphereDirty)
         return true;
-    if (imagesDirty)
+    if (imagesDirty || sphereDirty)
         UpdateImages();
     const Layout layout(window);
     using namespace EditorTheme;

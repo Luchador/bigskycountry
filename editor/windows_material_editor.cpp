@@ -3,6 +3,8 @@
 #include "windows_theme.hpp"
 #include "panel_ids.h"
 #include <algorithm>
+#include <commctrl.h>
+#include <windowsx.h>
 
 namespace
 {
@@ -23,6 +25,11 @@ bool WindowsMaterialEditor::Open(HWND owner, TextureCatalog& assets, const std::
         if (!CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_MATERIAL), owner, Dialog,
                                 reinterpret_cast<LPARAM>(this)))
             return SDL_SetError("Cannot open the material editor");
+        if (!SetWindowSubclass(GetDlgItem(window, IDC_MAT_PREVIEW), PreviewInput, 1, reinterpret_cast<DWORD_PTR>(this)))
+        {
+            DestroyWindow(window);
+            return SDL_SetError("Cannot initialize material preview input");
+        }
         RECT frame{}, bounds{};
         GetWindowRect(owner, &frame);
         GetWindowRect(window, &bounds);
@@ -49,18 +56,20 @@ void WindowsMaterialEditor::Layout()
     const int top = Units(window, 42, false), clear = Units(window, 28, true);
     const int step =
         std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / int(materialSlotCount)));
-    MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, TRUE);
-    MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), TRUE);
-    MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 60, false), TRUE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, FALSE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), FALSE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 60, false), FALSE);
     for (int i = 0; i < int(materialSlotCount); ++i)
     {
         const int y = top + step * i;
         MoveWindow(GetDlgItem(window, IDC_MAT_SLOT_FIRST + i), x, y, width - clear - pad, std::max(1, step - pad),
-                   TRUE);
+                   FALSE);
         const int h = Units(window, 15, false);
         MoveWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), x + width - clear, y + (step - pad - h) / 2, clear, h,
-                   TRUE);
+                   FALSE);
     }
+    // Erase the old control positions and paint the whole layout during the native resize loop.
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void WindowsMaterialEditor::Sync()
@@ -116,6 +125,46 @@ void WindowsMaterialEditor::Drop(MaterialSlot slot, const std::string& path)
     Sync();
 }
 
+LRESULT CALLBACK WindowsMaterialEditor::PreviewInput(HWND view, UINT message, WPARAM w, LPARAM l,
+                                                      UINT_PTR id, DWORD_PTR data)
+{
+    auto& self = *reinterpret_cast<WindowsMaterialEditor*>(data);
+    switch (message)
+    {
+    case WM_LBUTTONDOWN:
+        SetFocus(view);
+        self.lastOrbitPoint = {GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        SetCapture(view);
+        return 0;
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONUP:
+        if (GetCapture() == view)
+        {
+            if ((w & MK_LBUTTON) || message == WM_LBUTTONUP)
+            {
+                const POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                RECT bounds{};
+                GetClientRect(view, &bounds);
+                if (self.editor.Orbit(point.x - self.lastOrbitPoint.x, point.y - self.lastOrbitPoint.y,
+                                      std::min(bounds.right, bounds.bottom)))
+                    InvalidateRect(view, nullptr, FALSE);
+                self.lastOrbitPoint = point;
+            }
+            if (message == WM_LBUTTONUP || !(w & MK_LBUTTON)) ReleaseCapture();
+            return 0;
+        }
+        break;
+    case WM_CANCELMODE:
+    case WM_KILLFOCUS:
+        if (GetCapture() == view) ReleaseCapture();
+        break;
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(view, PreviewInput, id);
+        break;
+    }
+    return DefSubclassProc(view, message, w, l);
+}
+
 void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
 {
     if (draw.CtlID == IDC_MAT_PREVIEW)
@@ -167,7 +216,7 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
     switch (message)
     {
     case WM_SIZE:
-        self->Layout();
+        if (w != SIZE_MINIMIZED) self->Layout();
         return TRUE;
     case WM_GETMINMAXINFO: {
         auto* limits = reinterpret_cast<MINMAXINFO*>(l);

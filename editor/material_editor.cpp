@@ -1,4 +1,7 @@
 #include "material_editor.hpp"
+#include "math.hpp"
+#include <algorithm>
+#include <cmath>
 
 bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
 {
@@ -9,6 +12,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
         return false;
     catalog = &assets;
     path = relative;
+    yaw = pitch = 0.0;
     material = std::move(next);
     preview.reset();
     return true;
@@ -46,11 +50,26 @@ bool MaterialEditor::SetTexture(MaterialSlot slot, const std::string& relative)
     return Commit(std::move(next));
 }
 
+bool MaterialEditor::Orbit(double deltaX, double deltaY, double viewportSpan)
+{
+    if (viewportSpan <= 0.0) return false;
+    // Dragging across the shorter viewport dimension turns the sphere half a revolution.
+    const double sensitivity = std::numbers::pi / viewportSpan;
+    constexpr double pitchLimit = Math::DegreesToRadians(89.0);
+    const double nextPitch = std::clamp(pitch + deltaY * sensitivity, -pitchLimit, pitchLimit);
+    const double nextYaw = std::remainder(yaw - deltaX * sensitivity, 2.0 * std::numbers::pi);
+    if (nextYaw == yaw && nextPitch == pitch) return false;
+    yaw = nextYaw;
+    pitch = nextPitch;
+    preview.reset();
+    return true;
+}
+
 SDL_Surface* MaterialEditor::Preview()
 {
     if (catalog && (!preview || ImagesChanged()))
     {
-        preview = RenderMaterialSphere(material, *catalog);
+        preview = RenderSphere();
         imageRevision = catalog->ImageRevision();
     }
     return preview.get();

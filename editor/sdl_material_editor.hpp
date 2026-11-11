@@ -21,7 +21,8 @@ private:
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* sphere = nullptr;
     std::array<SDL_Texture*, materialSlotCount> thumbs{};
-    bool dirty = false, imagesDirty = false, typeMenu = false;
+    bool dirty = false, imagesDirty = false, sphereDirty = false, typeMenu = false;
+    std::optional<SDL_FPoint> orbitPoint;
     std::string dragged;
     std::optional<MaterialSlot> hover;
 };

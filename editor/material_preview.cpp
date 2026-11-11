@@ -77,6 +77,10 @@ namespace
     {
         SDL_Surface *base, *normal, *orm, *emissive, *opacity;
         bool cutout;
+        Vector3 toEye;
+        const Vector3 light = Math::Normalize({-.48, .68, .72});
+        const Vector3 half = Math::Normalize(light + toEye);
+        const double fresnelWeight = std::pow(1.0 - std::clamp(Math::Dot(toEye, half), 0.0, 1.0), 5);
 
         void Shade(Uint8* pixel, Vector3 n, double u, double v) const
         {
@@ -95,19 +99,16 @@ namespace
             const auto packed = Sample(orm, u, v, {1, .5f, 0, 1});
             const auto glow = Sample(emissive, u, v, {0, 0, 0, 1}, true);
             const double ao = packed[0], rough = std::max(.085, double(packed[1])), metal = packed[2];
-            static const auto light = Math::Normalize({-.48, .68, .72});
-            static const auto half = Math::Normalize(light + Vector3{0, 0, 1});
-            const double nl = std::max(0., Math::Dot(n, light)), nv = std::clamp(n.z, .001, 1.);
+            const double nl = std::max(0., Math::Dot(n, light)), nv = std::clamp(Math::Dot(n, toEye), .001, 1.);
             const double nh = std::max(0., Math::Dot(n, half));
             const double a2 = rough * rough * rough * rough;
             const double denom = nh * nh * (a2 - 1) + 1;
             const double distribution = a2 / (pi * denom * denom);
             const double k = (rough + 1) * (rough + 1) / 8;
             const double visibility = .25 / ((nv * (1 - k) + k) * (nl * (1 - k) + k));
-            static const double fresnelWeight = std::pow(1 - half.z, 5);
             const double ambient = .16 + .17 * (.5 + .5 * n.y);
             // A broad studio reflection keeps metallic surfaces readable away from the direct light.
-            const auto reflection = n * (2 * nv) - Vector3{0, 0, 1};
+            const auto reflection = n * (2 * nv) - toEye;
             const double studio =
                 .09 + .2 * (.5 + .5 * reflection.y) +
                 1.6 * std::pow(std::max(0., Math::Dot(reflection, light)), 2 + 20 * (1 - rough)) / (1 + rough);
@@ -122,24 +123,27 @@ namespace
         }
     };
 
-    SDL_FPoint Project(Vector3 p)
-    {
-        return {float(size * .5 + radius * p.x), float(size * .5 - radius * p.y)};
-    }
     double Edge(SDL_FPoint a, SDL_FPoint b, double x, double y)
     {
         return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
     }
 }
 
-MaterialSurface RenderMaterialSphere(const Material& material, TextureCatalog& assets)
+MaterialSurface MaterialEditor::RenderSphere() const
 {
     const auto image = [&](MaterialSlot slot) {
-        return assets.Image(material.textures[static_cast<std::size_t>(slot)]);
+        return catalog->Image(material.textures[static_cast<std::size_t>(slot)]);
+    };
+    // Orthographic camera aimed at the center of the sphere. UVs and lighting stay in mesh space.
+    const Vector3 right{std::cos(yaw), 0.0, -std::sin(yaw)};
+    const Vector3 toEye{std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
+    const Vector3 up = Math::Cross(toEye, right);
+    const auto project = [&](Vector3 point) -> SDL_FPoint {
+        return {float(size * .5 + radius * Math::Dot(point, right)), float(size * .5 - radius * Math::Dot(point, up))};
     };
     const Shader shader{image(MaterialSlot::BaseColor), image(MaterialSlot::Normal),
                         image(MaterialSlot::ORM),       image(MaterialSlot::Emissive),
-                        image(MaterialSlot::Opacity),   material.type == MaterialType::AlphaCutout};
+                        image(MaterialSlot::Opacity),   material.type == MaterialType::AlphaCutout, toEye};
     MaterialSurface surface(SDL_CreateSurface(size, size, SDL_PIXELFORMAT_BGRA32), SDL_DestroySurface);
     if (!surface)
         return surface;
@@ -151,7 +155,7 @@ MaterialSurface RenderMaterialSphere(const Material& material, TextureCatalog& a
         const auto& a = sphere.vertices[sphere.indices[i]];
         const auto& b = sphere.vertices[sphere.indices[i + 1]];
         const auto& c = sphere.vertices[sphere.indices[i + 2]];
-        const auto p = Project(a.position), q = Project(b.position), r = Project(c.position);
+        const auto p = project(a.position), q = project(b.position), r = project(c.position);
         const double area = Edge(p, q, r.x, r.y);
         if (area < .0001)
             continue; // Back of the convex mesh and degenerate pole triangles.
