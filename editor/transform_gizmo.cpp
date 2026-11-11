@@ -28,6 +28,18 @@ namespace
     }
 }
 
+void DragAngle::Update(double bearing)
+{
+    total += std::remainder(bearing - previous, 2.0 * std::numbers::pi);
+    previous = bearing;
+}
+
+double DragAngle::Snap(double radians, bool enabled)
+{
+    constexpr double step = Math::DegreesToRadians(5.0);
+    return enabled ? std::round(radians / step) * step : radians;
+}
+
 std::optional<GizmoPlacement> GizmoPlacement::At(Vector3 pivot, const FreeCamera& camera, SDL_Rect scene)
 {
     const double focal = ViewportFocalLength(scene);
@@ -116,7 +128,9 @@ std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const
     return {};
 }
 
-GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const GizmoPlacement& placement, const ViewportPicker& pick) : axis(axes[axisIndex]), startAxes(axes), mode(tool), origin(placement.origin), mouseStart(pick.mouse)
+GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const GizmoPlacement& placement, const ViewportPicker& pick)
+    : axis(axes[axisIndex]), axisName("XYZ"[axisIndex]), startAxes(axes), mode(tool), origin(placement.origin),
+      mouseStart(pick.mouse), unitsPerPixel(placement.metersPerPixel)
 {
     const double metersPerPixel = placement.metersPerPixel;
     const Vector3 view = Math::Normalize(origin - pick.eye);
@@ -140,7 +154,6 @@ GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const
     // pointing straight at the camera can be translated by dragging vertically.
     useScreen = true;
     screenDirection = {0, -1};
-    unitsPerPixel = metersPerPixel;
 
     if (mode == GizmoMode::Rotate)
     {
@@ -161,27 +174,31 @@ GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const
     }
 }
 
-std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings) const
+std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings, bool snapRotation)
 {
     if (useScreen)
     {
         const double amount = ((mouse.x - mouseStart.x) * screenDirection.x + (mouse.y - mouseStart.y) * screenDirection.y) * unitsPerPixel;
-        return mode == GizmoMode::Translate ? settings.SnapDistance(amount) : amount;
+        return mode == GizmoMode::Translate ? settings.SnapDistance(amount) : DragAngle::Snap(amount, snapRotation);
     }
 
     const auto point = OnPlane(camera.GetPosition(), ViewportRay(camera, scene, mouse), origin, normal);
 
-    if (!point)
-    {
-        return {};
-    }
-
-    const Vector3 current = *point - origin;
-
     if (mode == GizmoMode::Translate)
     {
-        return settings.SnapDistance(Math::Dot(current - start, axis));
+        if (!point) return {};
+        return settings.SnapDistance(Math::Dot(*point - origin - start, axis));
     }
 
-    return std::atan2(Math::Dot(axis, Math::Cross(start, current)), Math::Dot(start, current));
+    // Keep the last valid bearing at the pivot or when the ring plane is edge-on.
+    // Ctrl can still change the snap at that bearing without further pointer motion.
+    if (point)
+    {
+        const Vector3 current = *point - origin;
+        if (Math::Length(current) > unitsPerPixel)
+        {
+            rotation.Update(std::atan2(Math::Dot(axis, Math::Cross(start, current)), Math::Dot(start, current)));
+        }
+    }
+    return rotation.Amount(snapRotation);
 }

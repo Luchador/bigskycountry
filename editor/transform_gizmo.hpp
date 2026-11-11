@@ -24,16 +24,33 @@ struct GizmoPlacement
     static std::optional<GizmoPlacement> At(Vector3 pivot, const FreeCamera& camera, SDL_Rect scene);
 };
 
+// A circular handle reports bearings modulo one turn. Accumulate signed motion
+// so the delta readout stays continuous through 180 degrees and multiple turns.
+class DragAngle
+{
+public:
+    explicit DragAngle(double startBearing = 0) : previous(startBearing) {}
+    void Update(double bearing);
+    double Amount(bool snap) const { return Snap(total, snap); }
+    static double Snap(double radians, bool enabled);
+
+private:
+    double previous, total = 0;
+};
+
 // Signed displacement in meters or rotation in radians relative to mouse-down.
 class GizmoDrag
 {
 public:
-    std::optional<double> Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings) const;
+    std::optional<double> Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings, bool snapRotation);
     Vector3 axis;
+    char AxisName() const { return axisName; }
 
 private:
     friend class TransformGizmo;
     GizmoDrag(GizmoMode mode, const GizmoAxes& axes, int axisIndex, const GizmoPlacement& placement, const ViewportPicker& pick);
+    DragAngle rotation;
+    char axisName;
     GizmoAxes startAxes;
     GizmoMode mode;
     Vector3 origin, normal, start;

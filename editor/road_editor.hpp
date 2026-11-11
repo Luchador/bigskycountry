@@ -70,6 +70,7 @@ private:
     SDL_FPoint Handle(const Road& road, int index) const;
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
     bool DrawMeasurement(SDL_Renderer* renderer) const;
+    bool DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const;
 #ifndef _WIN32
     bool RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocument& world, const PropertiesInspector& properties);
 #endif
@@ -85,6 +86,7 @@ private:
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
+    void RotatePlanPoint(Road& road);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void ApplyOutline(const OutlineCommand& cmd, WorldDocument& world);
     void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
@@ -128,6 +130,9 @@ private:
     RoadOverlay overlay;
     TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
+    DragAngle planRotation;
+    double appliedAngle = 0; // Signed radians actually applied since mouse-down.
+    bool snapRotation = false;
     std::vector<RoadPoint> originalPoints;
     Vector3 originalRotation{};
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.

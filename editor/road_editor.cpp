@@ -667,6 +667,16 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         return;
     }
 
+    if (!shift && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
+    {
+        Road& road = world.roads[state.selected];
+        const Vector3 radial = pos - road.points[state.point].position;
+        planRotation = DragAngle(std::atan2(radial.z, radial.x));
+        snapRotation = subtract;
+        BeginRoadDrag(road, Drag::Rotate, false);
+        return;
+    }
+
     // Give the nearest marker the click when zoom brings several within the hit radius.
     std::optional<IntersectionAnchor> closest;
     float best = pickRadius;
@@ -703,12 +713,6 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
             return;
         }
         // Shift-dragging the attached endpoint itself still extends the road.
-    }
-    if (!shift && !subtract && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
-    {
-        dragStart.emplace(state, Selected(world));
-        drag = Drag::Rotate;
-        return;
     }
 
     auto grabPoint = [&](int roadIndex, int point)
@@ -810,17 +814,14 @@ void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 {
     dragStart.emplace(state, &road);
     drag = kind;
-    const bool translate = kind == Drag::Move || gizmo.mode == GizmoMode::Translate;
+    const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
     const bool endpoint = state.point == 0 || state.point + 1 == static_cast<int>(road.points.size());
     if (state.point >= 0 && translate && endpoint && shift)
     {
         extensionSource = state.point;
     }
-    if (kind == Drag::Gizmo || extensionSource)
-    {
-        originalPoints = road.points;
-        originalRotation = road.rotation;
-    }
+    originalPoints = road.points;
+    originalRotation = road.rotation;
 }
 
 void RoadEditor::MovePoint(Road& road, Vector3 position)
@@ -895,15 +896,29 @@ void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion
     }
     else if (drag == Drag::Rotate)
     {
-        Road& road = world.roads[state.selected];
-        const Vector3 offset = ToWorld(mouse.x, mouse.y) - road.points[state.point].position;
-        if (std::hypot(offset.x, offset.z) * scale >= 2.0)
-        {
-            road.RotatePoint(state.point, std::atan2(offset.z, offset.x));
-            road.Rebuild();
-            dragChanged = true;
-        }
+        RotatePlanPoint(world.roads[state.selected]);
     }
+}
+
+void RoadEditor::RotatePlanPoint(Road& road)
+{
+    const Vector3 offset = ToWorld(mouse.x, mouse.y) - originalPoints[state.point].position;
+    if (std::hypot(offset.x, offset.z) * scale >= 2.0)
+    {
+        planRotation.Update(std::atan2(offset.z, offset.x));
+    }
+    const double angle = planRotation.Amount(snapRotation);
+    if (angle == appliedAngle) return;
+
+    road.points = originalPoints;
+    if (angle != 0)
+    {
+        const Vector3 tangent = road.Tangent(state.point);
+        road.RotatePoint(state.point, std::atan2(tangent.z, tangent.x) + angle);
+    }
+    road.Rebuild();
+    appliedAngle = angle;
+    dragChanged = angle != 0;
 }
 
 void RoadEditor::Release(WorldDocument& world)
@@ -916,9 +931,42 @@ void RoadEditor::Release(WorldDocument& world)
     originalPoints.clear();
     extensionSource.reset();
     gizmoDrag.reset();
+    appliedAngle = 0;
+    snapRotation = false;
     dragStart.reset();
     dragChanged = false;
     drag = Drag::None;
+}
+
+bool RoadEditor::DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const
+{
+    if (!dragStart) return true;
+
+    char label[96];
+    if (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate))
+    {
+        const double degrees = appliedAngle / Math::DegreesToRadians(1.0);
+        SDL_snprintf(label, sizeof(label), "%+.1f\xC2\xB0", std::abs(degrees) < 0.05 ? 0.0 : degrees);
+    }
+    else
+    {
+        const int source = extensionSource.value_or(std::max(0, state.point));
+        const Vector3 start = dragStart->meshTransform ? dragStart->meshTransform->position : originalPoints[source].position;
+        const Vector3 delta = position - start;
+        const auto meters = [](double d) { return std::abs(d) < 0.005 ? 0.0 : d; };
+        if (DraggingGizmo())
+            SDL_snprintf(label, sizeof(label), "%c %+.2f m", gizmoDrag->AxisName(), meters(Math::Dot(delta, gizmoDrag->axis)));
+        else
+            SDL_snprintf(label, sizeof(label), "X %+.2f  Z %+.2f m", meters(delta.x), meters(delta.z));
+    }
+
+    constexpr float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE, pad = 5, gap = 14;
+    const float width = SDL_utf8strlen(label) * glyph + 2 * pad, height = glyph + 2 * pad;
+    const float x = mouse.x + gap + width <= scene.w ? mouse.x + gap : mouse.x - gap - width;
+    const float y = mouse.y + gap + height <= scene.h ? mouse.y + gap : mouse.y - gap - height;
+    const SDL_FRect box{std::clamp(x, 0.0f, std::max(0.0f, scene.w - width)),
+                        std::clamp(y, 0.0f, std::max(0.0f, scene.h - height)), width, height};
+    return Fill(renderer, box, EditorTheme::preview) && Text(renderer, box.x + pad, box.y + pad, label, ink);
 }
 
 bool RoadEditor::DrawMeasurement(SDL_Renderer* renderer) const
@@ -1260,6 +1308,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
 
     outliner.Update(world, state);
     auto fields = Inspect(world, state.Target());
+    if (!DrawTransformDelta(renderer, fields.value.position)) return false;
     const auto properties = InspectProperties(world, state, EditingDraft());
 
     if (state.outlineSelection.size() > 1)
@@ -1408,27 +1457,19 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, shift || subtract);
-    if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
-    {
-        const IntersectionAnchor anchor{hit.index, hit.side};
-        if (shift || subtract) SelectAnchor(world, anchor, subtract);
-        else
-        {
-            state.InspectAnchor(anchor);
-            status.clear();
-        }
-        return;
-    }
+    const bool anchorHit = hit.kind == RoadPickKind::Intersection && hit.side >= 0;
+    const bool snapPick = subtract && !shift && gizmo.mode == GizmoMode::Rotate;
     const auto placement = SelectedGizmoPlacement(world, camera);
     // A marker at the road pivot must still be selectable when the handles overlap it.
     const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
     const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
-    if (placement && !subtract && !pickPoint && !addSegment)
+    if (placement && !addSegment && (snapPick || (!subtract && !anchorHit && !pickPoint)))
     {
         ViewportPicker handles(camera, scene, mouse);
         gizmoDrag = gizmo.BeginDrag(state.meshSelection.kind == SelectionKind::Object ? handles : picker, *placement);
         if (gizmoDrag)
         {
+            snapRotation = subtract;
             if (selected)
             {
                 BeginRoadDrag(*selected, Drag::Gizmo, shift);
@@ -1441,6 +1482,18 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
             }
             return;
         }
+    }
+
+    if (anchorHit)
+    {
+        const IntersectionAnchor anchor{hit.index, hit.side};
+        if (shift || subtract) SelectAnchor(world, anchor, subtract);
+        else
+        {
+            state.InspectAnchor(anchor);
+            status.clear();
+        }
+        return;
     }
 
     // Keep the current point or segment selection when a modified click misses it.
@@ -1660,8 +1713,9 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
 void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
 {
     mouse = pointer;
-    const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings);
-    if (!amount)
+    const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings, snapRotation);
+    const bool rotating = gizmo.mode == GizmoMode::Rotate;
+    if (!amount || (rotating && *amount == appliedAngle))
     {
         return;
     }
@@ -1681,29 +1735,27 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         }
         if (mesh)
         {
-            if (SetPlacementTransform(world, state.meshSelection, pose))
-            {
-                dragChanged = pose != start;
-            }
-            return;
-        }
-        Road& road = world.roads[state.selected];
-        if (pose.position == road.points.front().position && pose.rotation == road.rotation)
-        {
-            return;
-        }
-        // Drag amounts are absolute from mouse-down. Reuse the original points and orientation each frame.
-        road.points = originalPoints;
-        road.rotation = originalRotation;
-        if (road.SetPose(pose.position, pose.rotation))
-        {
-            dragChanged = pose != start;
+            if (!SetPlacementTransform(world, state.meshSelection, pose)) return;
         }
         else
         {
-            road.Rebuild();
-            dragChanged = false;
+            Road& road = world.roads[state.selected];
+            if (pose.position != road.points.front().position || pose.rotation != road.rotation)
+            {
+                // Reapply the absolute drag amount to the mouse-down pose.
+                road.points = originalPoints;
+                road.rotation = originalRotation;
+                if (!road.SetPose(pose.position, pose.rotation))
+                {
+                    road.Rebuild();
+                    appliedAngle = 0;
+                    dragChanged = false;
+                    return;
+                }
+            }
         }
+        if (rotating) appliedAngle = *amount;
+        dragChanged = pose != start;
         return;
     }
     Road& road = world.roads[state.selected];
@@ -1720,7 +1772,8 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         road.RotatePoint(state.point, gizmoDrag->axis, *amount);
     }
     road.Rebuild();
-    dragChanged = true;
+    appliedAngle = *amount;
+    dragChanged = *amount != 0;
 }
 
 EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
@@ -1905,6 +1958,15 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         Release(world);
         return EditorEvent::Pass;
     }
+    if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
+        (event.key.key == SDLK_LCTRL || event.key.key == SDLK_RCTRL) &&
+        (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate)))
+    {
+        snapRotation = (event.key.mod & SDL_KMOD_CTRL) != 0;
+        if (DraggingGizmo()) MoveGizmo(world, camera, mouse);
+        else RotatePlanPoint(world.roads[state.selected]);
+        return EditorEvent::Handled;
+    }
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F && ViewportFocused() &&
         !SDL_GetWindowRelativeMouseMode(window) && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
     {
@@ -1951,7 +2013,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             Release(world);
             return EditorEvent::Handled;
         }
-        if ((DraggingGizmo() || extensionSource) && event.key.key == SDLK_ESCAPE)
+        if (dragStart && event.key.key == SDLK_ESCAPE)
         {
             if (dragStart->meshTransform)
             {
@@ -2176,7 +2238,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             {
                 MoveGizmo(world, camera, pointer);
             }
-            else if (extensionSource)
+            else if (drag == Drag::Rotate)
+            {
+                mouse = pointer;
+                RotatePlanPoint(world.roads[state.selected]);
+            }
+            else if (drag == Drag::Move)
             {
                 MovePoint(world.roads[state.selected], ToWorld(pointer.x, pointer.y) + grabOffset);
             }
