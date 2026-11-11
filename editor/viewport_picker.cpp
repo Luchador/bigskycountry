@@ -74,17 +74,19 @@ Vector3 ViewportPicker::PlacementPosition(double modelBaseY) const
 bool ViewportPicker::TestRoad(const Road& road)
 {
     const double previous = depth;
-    for (const auto* surface : {&road.triangles, &road.whiteStripes, &road.yellowStripes})
+    for (const auto* surface : {&road.whiteStripes, &road.yellowStripes})
     {
         for (const auto& t : *surface)
         {
             TestTriangle(t[0], t[1], t[2]);
         }
     }
-    for (const auto& t : road.edgeTriangles)
+    const auto testSurface = [&](const auto& surface)
     {
-        TestTriangle(t[0].position, t[1].position, t[2].position);
-    }
+        for (const auto& t : surface) TestTriangle(t[0].position, t[1].position, t[2].position);
+    };
+    testSurface(road.pavementTriangles);
+    testSurface(road.edgeTriangles);
     return depth < previous;
 }
 

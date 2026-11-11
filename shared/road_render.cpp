@@ -55,7 +55,7 @@ namespace
 
         for (const auto& triangle : triangles)
         {
-            ViewGeometry::VertexPolygon<Vertex> p{};
+            ViewGeometry::VertexPolygon<decltype(transform(triangle[0]))> p{};
 
             for (const Vertex& point : triangle)
             {
@@ -83,9 +83,8 @@ namespace
         }
     }
 
-    template<typename ViewTransform>
-
-    void AppendTriangles(const std::vector<Road::Triangle>& triangles, SDL_FColor color, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
+    template<typename Vertex, typename ViewTransform>
+    void AppendTriangles(const std::vector<std::array<Vertex, 3>>& triangles, SDL_FColor color, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
     {
         AppendMesh(triangles, transform, Clip, [&](Vector3 v)
         {
@@ -115,7 +114,10 @@ namespace
     {
         if (layer == RoadLayer::Pavement)
         {
-            AppendTriangles(road.triangles, roadColor, transform, focal, viewport, vertices);
+            AppendTriangles(road.pavementTriangles, roadColor, [&](const Road::PavementVertex& v)
+            {
+                return transform(v.position);
+            }, focal, viewport, vertices);
             AppendMesh(road.edgeTriangles, [&](const Road::EdgeVertex& v)
             {
                 return Road::EdgeVertex{transform(v.position), v.color};
@@ -158,14 +160,14 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
         }
     };
     const std::size_t start = vertices.size();
-    if (!road.triangles.empty())
+    if (!road.pavementTriangles.empty())
     {
-        // Project the aggregate in road-local meters. Adjacent coplanar triangles
-        // share UVs, and moving or rotating the road carries the material with it.
-        const Vector3 origin = road.points.empty() ? road.triangles.front()[0] : road.points.front().position;
-        const auto frame = ObjectTransform{origin, road.rotation}.ToMeshTransform();
         const std::array fallback{asphalt, asphalt, asphalt};
-        for (const auto& triangle : road.triangles) SubmitMaterialTriangle(triangle, fallback, frame);
+        for (const auto& t : road.pavementTriangles)
+        {
+            SubmitMaterialTriangle({t[0].position, t[1].position, t[2].position}, fallback,
+                                   {t[0].uv, t[1].uv, t[2].uv});
+        }
         materialRanges.push_back({start, vertices.size(), road.style.material});
     }
     for (const auto& triangle : road.edgeTriangles)

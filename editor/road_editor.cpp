@@ -641,24 +641,21 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
 void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
 {
     state.SelectPoint(-1, -1);
+    const auto hitSurface = [&](const auto& surface)
+    {
+        return std::any_of(surface.begin(), surface.end(), [&](const auto& t)
+        {
+            return HitTriangle(pos, {t[0].position, t[1].position, t[2].position});
+        });
+    };
     // Later roads are drawn last, so pick them first wherever pavement overlaps.
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
-        for (const auto& triangle : world.roads[i].triangles)
+        const Road& road = world.roads[i];
+        if (hitSurface(road.pavementTriangles) || hitSurface(road.edgeTriangles))
         {
-            if (HitTriangle(pos, triangle))
-            {
-                state.selected = i;
-                return;
-            }
-        }
-        for (const auto& edge : world.roads[i].edgeTriangles)
-        {
-            if (HitTriangle(pos, {edge[0].position, edge[1].position, edge[2].position}))
-            {
-                state.selected = i;
-                return;
-            }
+            state.selected = i;
+            return;
         }
     }
 }

@@ -86,27 +86,43 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
     }
 }
 
-// Project in local meters using the two axes most parallel to the face. This
-// gives roads and chunks the same texel density, including on steep slopes.
+namespace
+{
+    // Terrain uses a four-meter tile projected onto the dominant local plane.
+    std::array<SDL_FPoint, 3> TerrainUVs(const std::array<Vector3, 3>& points, const MeshTransform& frame)
+    {
+        const Vector3 local = frame.Unrotate(Math::Cross(points[1] - points[0], points[2] - points[0]));
+        Vector3 u = frame.x, v = frame.z;
+        if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = frame.y;
+        else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
+        std::array<SDL_FPoint, 3> uv;
+        for (size_t i = 0; i < points.size(); ++i)
+        {
+            const Vector3 offset = points[i] - frame.origin;
+            uv[i] = {float(Math::Dot(offset, u) / SurfaceMaterial::tileMeters),
+                     float(Math::Dot(offset, v) / SurfaceMaterial::tileMeters)};
+        }
+        return uv;
+    }
+}
+
 void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
-                                           const std::array<SDL_FColor, 3>& colors, const MeshTransform& frame,
+                                           const std::array<SDL_FColor, 3>& colors, const std::array<SDL_FPoint, 3>& uv,
                                            const std::array<Vector3, 3>* smoothNormals)
 {
-    const Vector3 normal = Math::Normalize(Math::Cross(points[1] - points[0], points[2] - points[0]));
-    const Vector3 local = frame.Unrotate(normal);
-    Vector3 u = frame.x, v = frame.z;
-    if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = frame.y;
-    else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
-    Vector3 tangent = Math::Normalize(Math::Cross(normal, v));
-    if (Math::Dot(tangent, u) < 0) tangent = tangent * -1;
-    const float handedness = Math::Dot(Math::Cross(normal, tangent), v) < 0 ? -1.0f : 1.0f;
+    // Derive the normal-map axes from the same UVs all material maps sample.
+    const Vector3 e1 = points[1] - points[0], e2 = points[2] - points[0];
+    const Vector3 normal = Math::Normalize(Math::Cross(e1, e2));
+    const double du1 = double(uv[1].x) - uv[0].x, dv1 = double(uv[1].y) - uv[0].y;
+    const double du2 = double(uv[2].x) - uv[0].x, dv2 = double(uv[2].y) - uv[0].y;
+    const double determinant = du1 * dv2 - du2 * dv1;
+    const float handedness = determinant < 0.0 ? -1.0f : 1.0f;
+    const Vector3 tangent = Math::Normalize(determinant == 0.0 ? e1 : (e1 * dv2 - e2 * dv1) * handedness);
     for (size_t i = 0; i < points.size(); ++i)
     {
         const Vector3 p = points[i];
         auto vertex = WorldToClip(p, colors[i]);
-        const Vector3 offset = p - frame.origin;
-        vertex.uv = {float(Math::Dot(offset, u) / SurfaceMaterial::tileMeters),
-                     float(Math::Dot(offset, v) / SurfaceMaterial::tileMeters)};
+        vertex.uv = uv[i];
         vertex.normal = smoothNormals ? (*smoothNormals)[i] : normal;
         vertex.lit = lightGeometry;
         vertex.tangent = tangent;
@@ -136,7 +152,7 @@ void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
         // Terrain transforms are rigid, so rotating the authored normals preserves length.
         const std::array normals{instance.transform.Direction(a.normal), instance.transform.Direction(b.normal),
                                  instance.transform.Direction(c.normal)};
-        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, instance.transform, &normals);
+        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, TerrainUVs(positions, instance.transform), &normals);
     }
     if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), chunk.material});
 }

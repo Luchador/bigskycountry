@@ -62,6 +62,7 @@ namespace
     struct RoadPath
     {
         std::vector<Span> spans;
+        std::vector<double> distances{0.0}; // Cumulative 3D centerline length at each station.
         std::vector<Vector3> curveLeft; // One horizontal cross-section axis per Bézier station.
     };
 
@@ -72,6 +73,14 @@ namespace
         return {-tangent.z / run, 0, tangent.x / run};
     }
 
+    struct CrossSection
+    {
+        Vector3 center, lateral;
+        double distance;
+        double bevelSlope = 0.0; // Signed advance along the join per meter from the centerline.
+        Vector3 At(double offset) const { return center + lateral * offset; }
+    };
+
     // A positive offset is left of the road in the direction its points were placed.
     template<typename Visit>
     void VisitOffsetStations(const RoadPath& path, double offset, Visit visit)
@@ -81,8 +90,8 @@ namespace
         {
             // A sampled spline is smooth here. Sweeping both sides from its tangent
             // gives one cross section at this elevation for every part of the road.
-            visit(spans.front().start, path.curveLeft.front());
-            for (std::size_t i = 0; i < spans.size(); ++i) visit(spans[i].end, path.curveLeft[i + 1]);
+            visit(CrossSection{spans.front().start, path.curveLeft.front(), 0.0});
+            for (std::size_t i = 0; i < spans.size(); ++i) visit(CrossSection{spans[i].end, path.curveLeft[i + 1], path.distances[i + 1]});
             return;
         }
 
@@ -99,7 +108,7 @@ namespace
             trim[i] = divisor > 0.0 ? offset * turn / divisor : -1.0;
         }
 
-        visit(spans.front().start, spans.front().left);
+        visit(CrossSection{spans.front().start, spans.front().left, 0.0});
 
         for (std::size_t i = 1; i < spans.size(); ++i)
         {
@@ -110,16 +119,22 @@ namespace
             if (trim[i] >= 0.0 && trim[i] + std::max(0.0, trim[i - 1]) <= a.length && trim[i] + std::max(0.0, trim[i + 1]) <= b.length)
             {
                 const double divisor = 1.0 + Math::Dot(a.left, b.left);
-                visit(b.start, (a.left + b.left) * (1.0 / divisor));
+                visit(CrossSection{b.start, (a.left + b.left) * (1.0 / divisor), path.distances[i]});
             }
             else
             {
-                visit(a.end, a.left);
-                visit(b.start, b.left);
+                // Both sections of a bevel share a center. Give the outer edge its
+                // chord length in V and leave room on short spans between two bevels.
+                const double room = 0.25 * std::min(path.distances[i] - path.distances[i - 1],
+                                                    path.distances[i + 1] - path.distances[i]);
+                const double slope = offset == 0.0 ? 0.0 :
+                    std::min(0.5 * Math::Length(a.left - b.left), room / std::abs(offset));
+                visit(CrossSection{a.end, a.left, path.distances[i], -slope});
+                visit(CrossSection{b.start, b.left, path.distances[i], slope});
             }
         }
 
-        visit(spans.back().end, spans.back().left);
+        visit(CrossSection{spans.back().end, spans.back().left, path.distances.back()});
     }
 
     struct MarkingPath
@@ -137,9 +152,9 @@ namespace
     MarkingPath OffsetPath(const RoadPath& path, double offset)
     {
         MarkingPath marking;
-        VisitOffsetStations(path, offset, [&](Vector3 center, Vector3 normal)
+        VisitOffsetStations(path, offset, [&](const CrossSection& station)
         {
-            marking.Append(center, normal, offset, !path.curveLeft.empty());
+            marking.Append(station.center, station.lateral, offset, !path.curveLeft.empty());
         });
         return marking;
     }
@@ -175,23 +190,20 @@ namespace
         }
     }
 
-    struct CrossSection
-    {
-        Vector3 center, outward;
-        Vector3 At(double offset) const { return center + outward * offset; }
-    };
-
     // On a bevel the sections meet at the center, leaving one triangle in the innermost band.
-    template<typename Emit>
-    void VisitBand(int side, const CrossSection& a, const CrossSection& b, double inner, double outer, Emit emit)
+    template<typename MakeVertex, typename Emit>
+    void VisitBand(int side, const CrossSection& a, const CrossSection& b, double inner, double outer,
+                   MakeVertex vertex, Emit emit)
     {
-        const Vector3 ai = a.At(inner), bi = b.At(inner), ao = a.At(outer), bo = b.At(outer);
-        if (ai != bi)
+        const auto ai = vertex(a, inner), bi = vertex(b, inner), ao = vertex(a, outer), bo = vertex(b, outer);
+        if (a.At(inner) != b.At(inner))
         {
-            emit(side > 0 ? Road::Triangle{ao, bi, ai} : Road::Triangle{ai, bi, ao});
+            emit(side > 0 ? std::array{ao, bi, ai} : std::array{ai, bi, ao});
         }
-        emit(side > 0 ? Road::Triangle{ao, bo, bi} : Road::Triangle{ao, bi, bo});
+        emit(side > 0 ? std::array{ao, bo, bi} : std::array{ao, bi, bo});
     }
+
+    Vector3 BandPosition(const CrossSection& section, double offset) { return section.At(offset); }
 
     void PaintCarriagewayEdges(Road& road, int side, CrossSection a, CrossSection b,
                                double travelStart, double travelEnd)
@@ -200,13 +212,13 @@ namespace
         const Vector3 delta = b.center - a.center;
         if (delta.x == 0 && delta.z == 0 && delta.y != 0)
         {
-            up = Math::Cross(Math::Normalize(b.outward) * side, {0, delta.y > 0 ? 1.0 : -1.0, 0});
+            up = Math::Cross(Math::Normalize(b.lateral) * side, {0, delta.y > 0 ? 1.0 : -1.0, 0});
         }
         a.center = a.center + up * stripeHeight;
         b.center = b.center + up * stripeHeight;
-        VisitBand(side, a, b, travelStart, travelStart + stripeWidth,
+        VisitBand(side, a, b, travelStart, travelStart + stripeWidth, BandPosition,
                   [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
-        VisitBand(side, a, b, travelEnd - stripeWidth, travelEnd,
+        VisitBand(side, a, b, travelEnd - stripeWidth, travelEnd, BandPosition,
                   [&](const Road::Triangle& t) { road.whiteStripes.push_back(t); });
     }
 
@@ -241,31 +253,42 @@ namespace
                 if (offset < pavement) pavementCuts.push_back(offset);
             }
         }
+        // Reserve one U tile for the pair of inner shoulders. Each carriageway
+        // then starts at an integer U, regardless of the width of the median.
+        const double centerU = lanes * 0.5 + (road.style.IsDivided() && side < 0 ? 1.0 : 0.0);
+        const auto pavementVertex = [&](const CrossSection& section, double offset)
+        {
+            const double tileWidth = offset < halfGap ? 2.0 * RoadStyle::innerShoulderWidth : RoadStyle::laneWidth;
+            const double u = centerU - side * (offset - halfGap) / tileWidth;
+            const double v = (section.distance + offset * section.bevelSlope) / RoadStyle::laneWidth;
+            return Road::PavementVertex{section.At(offset), {static_cast<float>(u), static_cast<float>(v)}};
+        };
+
         // Divided markings follow the same cross sections as their carriageway.
         std::vector<MarkingPath> dividers(road.style.IsDivided() ? lanes / 2 - 1 : 0);
         CrossSection last{};
         EdgeProfile previous{};
         std::vector<Vector3> boundary;
 
-        VisitOffsetStations(path, side * (pavement + road.style.EdgeWidth()), [&](Vector3 center, Vector3 normal)
+        VisitOffsetStations(path, side * (pavement + road.style.EdgeWidth()), [&](CrossSection current)
         {
-            const Vector3 outward = normal * side;
-            const CrossSection current{center, outward};
+            const Vector3 left = current.lateral;
+            current.lateral = left * side;
             for (std::size_t i = 0; i < dividers.size(); ++i)
             {
-                dividers[i].Append(center, normal, side * (halfGap + (i + 1) * RoadStyle::laneWidth), !path.curveLeft.empty());
+                dividers[i].Append(current.center, left, side * (halfGap + (i + 1) * RoadStyle::laneWidth), !path.curveLeft.empty());
             }
             EdgeProfile profile{};
             profile[0] = current.At(pavement);
             if (faces > 0)
             {
-                profile[1] = profile[0] + outward * RoadStyle::stripWidth;
+                profile[1] = profile[0] + current.lateral * RoadStyle::stripWidth;
             }
 
             if (edge == RoadEdge::Curb)
             {
                 profile[2] = profile[1] + Vector3{0, RoadStyle::curbHeight, 0};
-                profile[3] = profile[2] + outward * RoadStyle::curbTopWidth;
+                profile[3] = profile[2] + current.lateral * RoadStyle::curbTopWidth;
             }
 
             if (boundary.empty())
@@ -277,21 +300,21 @@ namespace
             {
                 if (halfMedian > 0.0)
                 {
-                    VisitBand(side, last, current, 0.0, halfMedian, [&](const Road::Triangle& t)
+                    VisitBand(side, last, current, 0.0, halfMedian, BandPosition, [&](const Road::Triangle& t)
                     {
                         road.edgeTriangles.push_back({Road::EdgeVertex{t[0], medianColor},
                                                       Road::EdgeVertex{t[1], medianColor},
                                                       Road::EdgeVertex{t[2], medianColor}});
                     });
                 }
-                const auto asphalt = [&](const Road::Triangle& t) { road.triangles.push_back(t); };
+                const auto asphalt = [&](const auto& t) { road.pavementTriangles.push_back(t); };
                 double inner = halfMedian;
                 for (double cut : pavementCuts)
                 {
-                    VisitBand(side, last, current, inner, cut, asphalt);
+                    VisitBand(side, last, current, inner, cut, pavementVertex, asphalt);
                     inner = cut;
                 }
-                VisitBand(side, last, current, inner, pavement, asphalt);
+                VisitBand(side, last, current, inner, pavement, pavementVertex, asphalt);
 
                 if (road.style.IsDivided())
                 {
@@ -459,6 +482,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
             path.curveLeft.push_back(CurveLeft(tangents[end], path.curveLeft.back()));
         }
         path.spans.push_back(span);
+        path.distances.push_back(path.distances.back() + Math::Length(span.end - span.start));
     });
     const auto& spans = path.spans;
     if (spans.empty())

@@ -2,6 +2,7 @@
 
 #include "math.hpp"
 #include <SDL3/SDL_pixels.h>
+#include <SDL3/SDL_rect.h>
 
 #include <array>
 #include <cstddef>
@@ -78,6 +79,11 @@ struct RoadPoint
 struct Road
 {
     using Triangle = std::array<Vector3, 3>;
+    struct PavementVertex
+    {
+        Vector3 position;
+        SDL_FPoint uv;
+    };
     struct EdgeVertex
     {
         Vector3 position;
@@ -87,7 +93,7 @@ struct Road
     RoadStyle style;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
-    std::vector<Triangle> triangles;
+    std::vector<std::array<PavementVertex, 3>> pavementTriangles;
     std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
     std::vector<Triangle> whiteStripes;

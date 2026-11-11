@@ -2,7 +2,7 @@ My project Big Sky Country
 
 ## Material textures
 
-New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor apply it to pavement and shoulders at one tile per 4 m. Markings, curbs, transition strips, and medians use their own colors.
+New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor wrap it along the road spline. U repeats once across each travel lane. V starts at the first control point and repeats every lane-width (5 m) of 3D centerline length, including elevation changes. The pattern continues onto the shoulders. Markings, curbs, transition strips, and medians use their own colors.
 
 The build recursively converts TIFF, PNG, TGA, JPEG, and BMP images under `assets/textures` into DDS files with a full mip chain. Filename matching ignores case and reads the suffix immediately before the extension.
 

@@ -294,7 +294,7 @@ void Road::Rebuild()
 {
     centerline.clear();
     pointSamples.clear();
-    triangles.clear();
+    pavementTriangles.clear();
     edgeTriangles.clear();
     outline.clear();
     whiteStripes.clear();
@@ -357,7 +357,7 @@ void Road::Rebuild()
         return (b.z - a.z) * (c.x - a.x) < (b.x - a.x) * (c.z - a.z);
     };
 
-    for (auto* mesh : {&triangles, &whiteStripes, &yellowStripes})
+    for (auto* mesh : {&whiteStripes, &yellowStripes})
     {
         for (Triangle& triangle : *mesh)
         {
@@ -368,17 +368,22 @@ void Road::Rebuild()
         }
     }
 
-    for (auto& triangle : edgeTriangles)
+    const auto windSurface = [&](auto& surface)
     {
-        if (facesDown(triangle[0].position, triangle[1].position, triangle[2].position))
+        for (auto& triangle : surface)
         {
-            std::swap(triangle[1], triangle[2]);
+            if (facesDown(triangle[0].position, triangle[1].position, triangle[2].position))
+            {
+                std::swap(triangle[1], triangle[2]);
+            }
         }
-    }
+    };
+    windSurface(pavementTriangles);
+    windSurface(edgeTriangles);
 
     if (rotated)
     {
-        for (auto* mesh : {&triangles, &whiteStripes, &yellowStripes})
+        for (auto* mesh : {&whiteStripes, &yellowStripes})
         {
             for (Triangle& triangle : *mesh)
             {
@@ -388,13 +393,15 @@ void Road::Rebuild()
                 }
             }
         }
-        for (auto& triangle : edgeTriangles)
+        const auto moveSurface = [&](auto& surface)
         {
-            for (EdgeVertex& vertex : triangle)
+            for (auto& triangle : surface)
             {
-                vertex.position = frame.Point(vertex.position);
+                for (auto& vertex : triangle) vertex.position = frame.Point(vertex.position);
             }
-        }
+        };
+        moveSurface(pavementTriangles);
+        moveSurface(edgeTriangles);
         for (Vector3& vertex : outline)
         {
             vertex = frame.Point(vertex);

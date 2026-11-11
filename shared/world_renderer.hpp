@@ -63,7 +63,7 @@ private:
     bool DrawSoftware();
 
     void SubmitMaterialTriangle(const std::array<Vector3, 3>& points, const std::array<SDL_FColor, 3>& colors,
-                                const MeshTransform& frame, const std::array<Vector3, 3>* smoothNormals = nullptr);
+                                const std::array<SDL_FPoint, 3>& uv, const std::array<Vector3, 3>* smoothNormals = nullptr);
     WorldDepthVertex WorldToClip(Vector3 position, SDL_FColor color) const;
     SDL_Renderer* renderer = nullptr;
     const FreeCamera* camera = nullptr;
