@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace
@@ -130,7 +131,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const
 {
-    overlay.DrawIntersections(renderer, world, state.meshSelection.kind == SelectionKind::Intersection ? state.meshSelection.index : -1, camera, scene);
+    overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world))
     {
         overlay.Draw(renderer, *road, state, camera, scene);
@@ -646,6 +647,36 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         return;
     }
 
+    if (shift || subtract)
+    {
+        // Pick the nearest center when plan-view markers overlap at a distant zoom.
+        std::optional<IntersectionAnchor> closest;
+        float best = std::numeric_limits<float>::infinity();
+        for (const auto& [id, item] : world.intersections)
+        {
+            for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+            {
+                const auto p = ToScreen(item.AnchorPosition(side));
+                const float distance = std::hypot(p.x - x, p.y - y);
+                if (Near(cursor, p) && distance < best)
+                {
+                    closest = IntersectionAnchor{id, side};
+                    best = distance;
+                }
+            }
+        }
+        if (closest)
+        {
+            const Road* road = Selected(world);
+            const bool ownEnd = road && state.point >= 0 && road->points[state.point].anchor == closest;
+            if (subtract || !ownEnd)
+            {
+                SelectAnchor(world, *closest, subtract);
+                return;
+            }
+            // Shift-dragging the attached endpoint itself still extends the road.
+        }
+    }
     if (!shift && !subtract && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
         dragStart.emplace(state, Selected(world));
@@ -708,7 +739,12 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
     state.SelectPoint(-1, -1);
     for (const auto& [id, item] : world.intersections)
     {
-        if (Near(ToScreen(pos), ToScreen(item.position)))
+        const auto nearAnchor = [&](Vector3 direction)
+        {
+            return Near(ToScreen(pos), ToScreen(item.position + direction * Intersection::anchorDistance));
+        };
+        if (Near(ToScreen(pos), ToScreen(item.position)) ||
+            std::any_of(IntersectionAnchor::directions.begin(), IntersectionAnchor::directions.end(), nearAnchor))
         {
             state.SelectRows({{SceneKind::Intersection, id}});
             return;
@@ -768,6 +804,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
             if (inserted)
             {
                 road.points = originalPoints;
+                state.anchorSelection = dragStart->anchorSelection;
                 state.additionalPoints = dragStart->additionalPoints;
                 state.point = *extensionSource;
                 road.Rebuild();
@@ -777,6 +814,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         }
         if (!inserted)
         {
+            state.anchorSelection.reset();
             state.additionalPoints.clear();
             state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
             road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
@@ -963,8 +1001,18 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
+    const auto drawPoint = [&](SDL_FPoint p, float r, SDL_Color color)
+    {
+        return Fill(renderer, {p.x-r-1, p.y-r-1, 2*r+2, 2*r+2}, EditorTheme::border) &&
+               Fill(renderer, {p.x-r, p.y-r, 2*r, 2*r}, color);
+    };
     for (const auto& [id, item] : world.intersections)
     {
+        for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+        {
+            const bool active = state.anchorSelection == IntersectionAnchor{id, side};
+            if (!drawPoint(ToScreen(item.AnchorPosition(side)), 5.0f, active ? amber : blue)) return false;
+        }
         const auto p = ToScreen(item.position);
         const auto color = state.meshSelection == TransformTarget{SelectionKind::Intersection, id} ? amber : blue;
         if (!Fill(renderer, {p.x-7, p.y-2, 14, 4}, color) || !Fill(renderer, {p.x-2, p.y-7, 4, 14}, color)) return false;
@@ -981,9 +1029,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
             }
             const bool selectedPoint = active && state.PointSelected(static_cast<int>(i));
             const float r = active ? 5.0f : 3.0f;
-            if (!Fill(renderer, {pos.x - r - 1, pos.y - r - 1, 2 * r + 2, 2 * r + 2}, EditorTheme::border) ||
-                !Fill(renderer, {pos.x - r, pos.y - r, 2 * r, 2 * r},
-                      selectedPoint ? amber : (active ? blue : muted)))
+            if (!drawPoint(pos, r, selectedPoint ? amber : (active ? blue : muted)))
             {
                 return false;
             }
@@ -1019,7 +1065,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
-    if (!SDL_RenderDebugTextFormat(renderer, 12, static_cast<float>(scene.h) - 20, "Grid: %.0f m    Roads: %zu    %s", spacing, world.roads.size(), status.c_str()))
+    if (!SDL_RenderDebugTextFormat(renderer, 12, static_cast<float>(scene.h) - 20, "Grid: %.0f m    Roads: %zu    %s", spacing, world.roads.size(), StatusText()))
     {
         return false;
     }
@@ -1151,7 +1197,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
 
         if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) ||
             !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT", minutes / 60, minutes % 60) ||
-            !Text(renderer, 12, static_cast<float>(scene.h) - 20, status.c_str(), ink))
+            !Text(renderer, 12, static_cast<float>(scene.h) - 20, StatusText(), ink))
         {
             return false;
         }
@@ -1234,13 +1280,84 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     }
 }
 
+void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract)
+{
+    if (subtract)
+    {
+        if (state.anchorSelection == anchor) state.anchorSelection.reset();
+        return;
+    }
+    state.anchorSelection.reset();
+    const Road* road = Selected(world);
+    if (!road || !state.additionalPoints.empty() || state.point < 0 ||
+        (state.point != 0 && state.point + 1 != static_cast<int>(road->points.size())))
+    {
+        status = "Select one road endpoint first";
+        return;
+    }
+    if (road->points[state.point].anchor)
+    {
+        status = "This road endpoint is already connected";
+        return;
+    }
+    for (const auto& end : world.ConnectedEnds(anchor.intersectionId))
+    {
+        if (end.anchor == anchor)
+        {
+            status = "This intersection anchor is already connected";
+            return;
+        }
+    }
+    state.anchorSelection = anchor;
+    status.clear();
+}
+
+void RoadEditor::ConnectEndpoint(WorldDocument& world)
+{
+    if (!state.anchorSelection || EditingDraft() || drag != Drag::None) return;
+    const IntersectionAnchor anchor = *state.anchorSelection;
+    const auto junction = world.intersections.find(anchor.intersectionId);
+    if (junction == world.intersections.end()) return;
+    SelectAnchor(world, anchor, false); // Recheck the selection and occupancy at commit time.
+    if (!state.anchorSelection) return;
+    Road& road = world.roads[state.selected];
+    const Vector3 position = junction->second.AnchorPosition(anchor.side);
+    RoadPoint& previous = road.points[state.point];
+    if (!ValidRoadSpan(road, previous.position, position))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    EditSnapshot before(state, &road);
+    const bool first = state.point == 0;
+    if (road.style.curved && !previous.heading)
+    {
+        // Extending a Bézier endpoint must preserve the shape of its existing span.
+        const Vector3 tangent = road.Tangent(state.point);
+        previous.heading = std::atan2(tangent.z, tangent.x);
+        previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
+    }
+    const Vector3 tangent = IntersectionAnchor::directions[anchor.side] * (first ? 1.0 : -1.0);
+    RoadPoint point{position, std::atan2(tangent.z, tangent.x), 0, 0, anchor};
+    const int index = first ? 0 : static_cast<int>(road.points.size());
+    road.points.insert(road.points.begin() + index, point);
+    road.Rebuild();
+    state.SelectPoint(state.selected, index);
+    Commit(world, state.selected, std::move(before), &road);
+}
+
 void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers)
 {
     const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
     const bool subtract = (modifiers & SDL_KMOD_CTRL) != 0;
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
-    const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene);
+    const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, shift || subtract);
+    if (hit.kind == RoadPickKind::Intersection && hit.side >= 0 && (shift || subtract))
+    {
+        SelectAnchor(world, {hit.index, hit.side}, subtract);
+        return;
+    }
     const auto placement = SelectedGizmoPlacement(world, camera);
     // A marker at the road pivot must still be selectable when the handles overlap it.
     const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
@@ -1273,6 +1390,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     switch (hit.kind)
     {
     case RoadPickKind::Segment:
+        state.anchorSelection.reset();
         if (subtract)
         {
             state.segments.erase(hit.index);
@@ -1325,6 +1443,12 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         EditSnapshot before(state);
         before.junction = EditSnapshot::Junction{id, world.intersections.at(id)};
         before.hierarchy = world.hierarchy;
+        before.detachedEnds = world.ConnectedEnds(id);
+        for (const auto& end : before.detachedEnds)
+        {
+            auto& points = world.roads[end.road].points;
+            (end.first ? points.front() : points.back()).anchor.reset();
+        }
         world.hierarchy.Move({{SceneKind::Intersection, id}}, 0);
         world.intersections.erase(id);
         state.SelectPoint(-1, -1);
@@ -1458,7 +1582,17 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
     }
     else
     {
-        Commit(world, state.selected, std::move(before), Selected(world));
+        Road& road = world.roads[state.selected];
+        // Deliberately moving or extending an attached end releases it. Undo restores its link.
+        for (auto& point : road.points)
+        {
+            if (!point.anchor) continue;
+            const auto ref = *point.anchor;
+            if ((&point != &road.points.front() && &point != &road.points.back()) ||
+                point.position != world.intersections.at(ref.intersectionId).AnchorPosition(ref.side))
+                point.anchor.reset();
+        }
+        Commit(world, state.selected, std::move(before), &road);
     }
 }
 
@@ -1710,9 +1844,21 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         Release(world);
         return EditorEvent::Pass;
     }
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F && ViewportFocused() &&
+        !SDL_GetWindowRelativeMouseMode(window) && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
+    {
+        if (!event.key.repeat) ConnectEndpoint(world);
+        return EditorEvent::Handled;
+    }
     if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
         !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
     {
+        if (event.key.key == SDLK_ESCAPE && state.anchorSelection && drag == Drag::None)
+        {
+            state.anchorSelection.reset();
+            status.clear();
+            return EditorEvent::Handled;
+        }
         if (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET)
         {
             if (!event.key.repeat)
@@ -1754,6 +1900,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             {
                 Road& road = world.roads[state.selected];
                 state.point = extensionSource.value_or(state.point);
+                state.anchorSelection = dragStart->anchorSelection;
                 state.additionalPoints = dragStart->additionalPoints;
                 road.points = std::move(originalPoints);
                 road.rotation = originalRotation;

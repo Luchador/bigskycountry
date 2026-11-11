@@ -93,7 +93,18 @@ namespace RoadIO
                 return;
             }
             out << p.position.x << ' ' << p.position.y << ' ' << p.position.z << ' '
-                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << ' ' << p.pitch << ' ' << p.roll << '\n';
+                << p.heading.has_value() << ' ' << p.heading.value_or(0.0) << ' ' << p.pitch << ' ' << p.roll;
+            if (p.anchor)
+            {
+                if (!p.anchor->Valid() || (&p != &road.points.front() && &p != &road.points.back()))
+                {
+                    out.setstate(std::ios::failbit);
+                    return;
+                }
+                out << ' ' << p.anchor->intersectionId << ' ' << p.anchor->side;
+            }
+            else out << " 0";
+            out << '\n';
         }
     }
 
@@ -124,6 +135,21 @@ namespace RoadIO
                 in >> p.pitch;
             }
             if (version >= 4) in >> p.roll;
+            if (version >= 7)
+            {
+                int id;
+                if (!(in >> id)) return road;
+                if (id != 0)
+                {
+                    IntersectionAnchor anchor{id, -1};
+                    if (!(in >> anchor.side) || !anchor.Valid() || (i != 0 && i != count - 1))
+                    {
+                        in.setstate(std::ios::failbit);
+                        return road;
+                    }
+                    p.anchor = anchor;
+                }
+            }
             if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll))
             {
                 in.setstate(std::ios::failbit);

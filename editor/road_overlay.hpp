@@ -12,6 +12,7 @@ struct RoadPick
 {
     RoadPickKind kind = RoadPickKind::Empty;
     int index = -1;
+    int side = -1; // Intersection approach, or -1 for the center.
 };
 
 class RoadOverlay
@@ -21,9 +22,10 @@ public:
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
     void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection,
               const FreeCamera& camera, SDL_Rect scene) const;
-    void DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, int selected, const FreeCamera& camera, SDL_Rect scene) const;
+    void DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
+                           const FreeCamera& camera, SDL_Rect scene) const;
     RoadPick Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected,
-                  const FreeCamera& camera, SDL_Rect scene) const;
+                  const FreeCamera& camera, SDL_Rect scene, bool preferAnchor = false) const;
 
 private:
     std::array<MeshInstance, 2> IntersectionMarker(const GizmoPlacement& placement) const;

@@ -79,6 +79,8 @@ private:
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
     std::optional<GizmoPlacement> SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const;
+    void SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract);
+    void ConnectEndpoint(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
@@ -92,6 +94,10 @@ private:
     void DeleteSelection(WorldDocument& world);
     void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);
     void Release(WorldDocument& world);
+    const char* StatusText() const
+    {
+        return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
+    }
     bool Save(WorldDocument& world);
     void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
     void CommitTransform(WorldDocument& world, EditSnapshot before);

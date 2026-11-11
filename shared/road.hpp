@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <compare>
 #include <optional>
 #include <span>
 #include <string>
@@ -68,12 +69,24 @@ private:
     int lanes = 2; // Total across both directions, including any center turn lane.
 };
 
+// Persistent reference to one of a junction's four approaches.
+struct IntersectionAnchor
+{
+    int intersectionId;
+    int side; // Index into directions, stored in ROAD records.
+    static constexpr int sideCount = 4;
+    static constexpr std::array<Vector3, sideCount> directions{{{1, 0, 0}, {0, 0, 1}, {-1, 0, 0}, {0, 0, -1}}};
+    bool Valid() const { return intersectionId > 0 && side >= 0 && side < sideCount; }
+    auto operator<=>(const IntersectionAnchor&) const = default;
+};
+
 struct RoadPoint
 {
     Vector3 position;
     std::optional<double> heading; // Radians from +X toward +Z; empty follows the neighboring points.
     double pitch = 0.0; // Radians above the XZ plane for a manual tangent.
     double roll = 0.0; // Radians about the tangent; orients the control point's local Y/Z axes.
+    std::optional<IntersectionAnchor> anchor; // Only endpoints can be attached.
 };
 
 struct Road

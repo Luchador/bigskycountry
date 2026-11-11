@@ -5,6 +5,7 @@
 #include <string_view>
 
 class WorldDocument;
+struct Road;
 
 enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection };
 struct TransformTarget
@@ -36,5 +37,6 @@ struct TransformEdit
 
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
 bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
+bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value);
 std::optional<double> ParseTransformValue(std::string_view text);

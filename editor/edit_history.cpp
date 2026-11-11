@@ -71,6 +71,7 @@ void RoadEditorState::SelectRows(const std::set<SceneKey>& keys)
 
 void RoadEditorState::PickPoint(int roadIndex, int index, bool add, bool subtract)
 {
+    anchorSelection.reset();
     if (subtract)
     {
         if (roadIndex != selected || point < 0)
@@ -107,7 +108,7 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRo
 }
 
 EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads)
-    : meshSelection(editor.meshSelection), outlineSelection(editor.outlineSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
+    : meshSelection(editor.meshSelection), anchorSelection(editor.anchorSelection), outlineSelection(editor.outlineSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -158,6 +159,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     const EditSnapshot& to = undo ? action.before : action.after;
     auto& roads = world.roads;
     RoadEditorState restored;
+    restored.anchorSelection = to.anchorSelection;
     restored.meshSelection = to.meshSelection;
     restored.outlineSelection = to.outlineSelection;
     restored.segments = to.segments;
@@ -215,6 +217,12 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         const auto& [id, value] = *to.junction;
         if (value) world.intersections.insert_or_assign(id, *value);
         else world.intersections.erase(id);
+        // Deleting a junction leaves the roads in place. Undo restores their endpoint links.
+        for (const auto& end : value ? to.detachedEnds : from.detachedEnds)
+        {
+            auto& points = roads.at(end.road).points;
+            (end.first ? points.front() : points.back()).anchor = value ? std::optional{end.anchor} : std::nullopt;
+        }
     }
     if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
     if (to.terrainMaterial)

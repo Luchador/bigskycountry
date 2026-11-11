@@ -178,13 +178,64 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     return fields;
 }
 
+bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b)
+{
+    const double span = Math::Length(a - b);
+
+    if (span < 0.05)
+    {
+        return SDL_SetError("Road points must be at least 0.05 m apart");
+    }
+
+    if (!std::isfinite(span))
+    {
+        return SDL_SetError("Road segment length is out of range");
+    }
+
+    // Each 12 m dash cycle needs at least one six-vertex quad per dashed divider.
+    // The shared GPU vertex buffer has a 32-bit byte size.
+    const int dividers = std::max(0, road.style.GetLaneCount() - 2);
+    const double dashBytes = span / RoadStyle::dashPeriod * dividers * 6 * sizeof(WorldDepthVertex);
+
+    if (dashBytes > std::numeric_limits<Uint32>::max())
+    {
+        return SDL_SetError("The dashed markings exceed the world vertex buffer limit");
+    }
+    return true;
+}
+
 bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform)
 {
     const auto index = static_cast<std::size_t>(target.index);
     if (target.kind == SelectionKind::Intersection && world.intersections.contains(target.index) &&
         std::isfinite(Math::Length(transform.position)) && transform.rotation == Vector3{} && transform.scale == Vector3{1,1,1})
     {
-        world.intersections.at(target.index).position = transform.position;
+        auto& junction = world.intersections.at(target.index);
+        if (junction.position == transform.position) return true;
+        Intersection moved = junction;
+        moved.position = transform.position;
+        const auto ends = world.ConnectedEnds(target.index);
+        // Validate all incident spans before changing any of them.
+        const auto position = [&](const RoadPoint& p)
+        {
+            return p.anchor && p.anchor->intersectionId == target.index ? moved.AnchorPosition(p.anchor->side) : p.position;
+        };
+        for (const auto& end : ends)
+        {
+            const Road& road = world.roads[end.road];
+            const auto& points = road.points;
+            const auto neighbor = end.first ? 1 : points.size() - 2;
+            const auto& point = end.first ? points.front() : points.back();
+            if (!ValidRoadSpan(road, position(point), position(points[neighbor]))) return false;
+        }
+        junction.position = transform.position;
+        for (const auto& end : ends)
+        {
+            auto& points = world.roads[end.road].points;
+            (end.first ? points.front() : points.back()).position = junction.AnchorPosition(end.anchor.side);
+        }
+        for (std::size_t i = 0; i < ends.size(); ++i)
+            if (i == 0 || ends[i].road != ends[i-1].road) world.roads[ends[i].road].Rebuild();
         return true;
     }
     if (target.kind == SelectionKind::Object && index < world.Objects().size())
@@ -233,27 +284,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
                 continue;
             }
 
-            const double span = Math::Length(t.position - road.points[neighbor].position);
-
-            if (span < 0.05)
-            {
-                return SDL_SetError("Road points must be at least 0.05 m apart");
-            }
-
-            if (!std::isfinite(span))
-            {
-                return SDL_SetError("Road segment length is out of range");
-            }
-
-            // Each 12 m dash cycle needs at least one six-vertex quad per dashed divider.
-            // The shared GPU vertex buffer has a 32-bit byte size.
-            const int dividers = std::max(0, road.style.GetLaneCount() - 2);
-            const double dashBytes = span / RoadStyle::dashPeriod * dividers * 6 * sizeof(WorldDepthVertex);
-
-            if (dashBytes > std::numeric_limits<Uint32>::max())
-            {
-                return SDL_SetError("The dashed markings exceed the world vertex buffer limit");
-            }
+            if (!ValidRoadSpan(road, t.position, road.points[neighbor].position)) return false;
         }
         p.position = t.position;
     }

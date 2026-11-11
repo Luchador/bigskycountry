@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <cmath>
 #include <iomanip>
+#include <set>
 #include <limits>
 #include <locale>
 #include <memory>
@@ -126,6 +127,41 @@ namespace
                SDL_WriteU32LE(output, version) && SDL_WriteU64LE(output, payload.size()) &&
                SDL_WriteIO(output, payload.data(), payload.size()) == payload.size();
     }
+}
+
+std::vector<WorldDocument::ConnectedEnd> WorldDocument::ConnectedEnds(int intersectionId) const
+{
+    std::vector<ConnectedEnd> ends;
+    for (std::size_t i = 0; i < roads.size(); ++i)
+    {
+        const auto& points = roads[i].points;
+        if (points.size() < 2) continue;
+        for (bool first : {true, false})
+        {
+            const auto& anchor = (first ? points.front() : points.back()).anchor;
+            if (anchor && anchor->intersectionId == intersectionId) ends.push_back({i, first, *anchor});
+        }
+    }
+    return ends;
+}
+
+bool WorldDocument::ValidConnections() const
+{
+    std::set<IntersectionAnchor> occupied;
+    for (const Road& road : roads)
+    {
+        if (road.points.size() < 2) return SDL_SetError("Road needs two endpoints");
+        for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
+        {
+            if (!point->anchor) continue;
+            const auto ref = *point->anchor;
+            const auto it = intersections.find(ref.intersectionId);
+            if (!ref.Valid() || it == intersections.end() || !occupied.insert(ref).second ||
+                point->position != it->second.AnchorPosition(ref.side))
+                return SDL_SetError("Invalid road connection to intersection %d, side %d", ref.intersectionId, ref.side);
+        }
+    }
+    return true;
 }
 
 int WorldDocument::CreateIntersection(Vector3 position)
@@ -421,6 +457,7 @@ bool WorldDocument::Open(const char* documentPath)
     {
         if (!loaded.Contains(key)) return SDL_SetError("Missing OUTL entity in '%s'", loaded.path.c_str());
     }
+    if (!loaded.ValidConnections()) return false;
     for (Road& road : loaded.roads)
     {
         road.Rebuild();
@@ -435,6 +472,7 @@ bool WorldDocument::Save() const
     {
         return SDL_SetError("Open a world before saving it");
     }
+    if (!ValidConnections()) return false;
     for (const auto& [key, parent] : hierarchy.Members())
     {
         if (!Contains(key)) return SDL_SetError("Cannot save an outliner entry for a missing entity");

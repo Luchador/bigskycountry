@@ -141,16 +141,25 @@ std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement
             MeshInstance{marker, {placement.origin, {width, 0, 0}, {0, width, 0}, {0, 0, length}}}};
 }
 
-void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, int selected,
+void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
                                     const FreeCamera& camera, SDL_Rect scene) const
 {
     for (const auto& [id, item] : world.intersections)
     {
+        for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+        {
+            if (const auto anchor = PointPlacement(item.AnchorPosition(side), camera, scene))
+            {
+                const bool active = selection.anchorSelection == IntersectionAnchor{id, side};
+                renderer.SubmitMesh(Marker(*anchor), active ? EditorColors::amber : EditorColors::blue);
+            }
+        }
+        const bool selected = selection.meshSelection == TransformTarget{SelectionKind::Intersection, id};
         const auto placement = PointPlacement(item.position, camera, scene);
         if (!placement) continue;
         for (const auto& mesh : IntersectionMarker(*placement))
-            renderer.SubmitMesh(mesh, id == selected ? EditorColors::amber : EditorColors::blue);
-        if (id != selected || item.cornerRadius == 0) continue;
+            renderer.SubmitMesh(mesh, selected ? EditorColors::amber : EditorColors::blue);
+        if (!selected || item.cornerRadius == 0) continue;
 
         const OverlayStroke stroke(camera, scene, ViewportFocalLength(scene));
         auto previous = camera.WorldToView(item.position + Vector3{item.cornerRadius, 0, 0});
@@ -168,7 +177,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
     }
 }
 
-RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene) const
+RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene, bool preferAnchor) const
 {
     RoadPick hit;
 
@@ -197,6 +206,19 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
             for (const auto& mesh : IntersectionMarker(*placement))
                 if (picker.TestMesh(mesh)) hit = {RoadPickKind::Intersection, id};
     }
+    // A joined endpoint and its anchor share one marker. Shift gives the anchor the tie.
+    const auto pickAnchors = [&]
+    {
+        for (const auto& [id, item] : world.intersections)
+        {
+            for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+            {
+                const auto placement = PointPlacement(item.AnchorPosition(side), camera, scene);
+                if (placement && picker.TestMesh(Marker(*placement))) hit = {RoadPickKind::Intersection, id, side};
+            }
+        }
+    };
+    if (preferAnchor) pickAnchors();
     if (selected)
     {
         VisitSegmentTriangles(*selected, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)
@@ -215,5 +237,6 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         });
     }
 
+    if (!preferAnchor) pickAnchors();
     return hit;
 }

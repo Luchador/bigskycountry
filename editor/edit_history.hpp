@@ -1,6 +1,6 @@
 #pragma once
 
-#include "intersection.hpp"
+#include "world_document.hpp"
 #include "bscobject.hpp"
 #include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
@@ -20,6 +20,7 @@ struct RoadEditorState
     bool drawing = false;
     std::set<int> segments; // Indices of selected spans in the active road.
 
+    std::optional<IntersectionAnchor> anchorSelection; // Secondary selection paired with an active road endpoint.
     TransformTarget meshSelection;
     std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
     std::set<SceneKey> SelectedRows() const;
@@ -39,6 +40,7 @@ struct RoadEditorState
 
     void SelectPoint(int roadIndex, int pointIndex)
     {
+        anchorSelection.reset();
         selected = roadIndex;
         point = pointIndex;
         additionalPoints.clear();
@@ -75,6 +77,8 @@ struct EditSnapshot
         bool operator==(const Junction&) const = default;
     };
     std::optional<Junction> junction;
+    std::vector<WorldDocument::ConnectedEnd> detachedEnds; // Restore these links when undoing a junction deletion.
+    std::optional<IntersectionAnchor> anchorSelection;
     std::optional<bool> objectInvincible;
     std::optional<SceneHierarchy> hierarchy;
     std::set<SceneKey> outlineSelection;

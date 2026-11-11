@@ -23,6 +23,14 @@ public:
     std::vector<Road> roads;
     std::map<int, Intersection> intersections; // Stable positive IDs, also used by the outliner.
     int CreateIntersection(Vector3 position); // Returns 0 on failure.
+    struct ConnectedEnd
+    {
+        std::size_t road;
+        bool first;
+        IntersectionAnchor anchor;
+        bool operator==(const ConnectedEnd&) const = default;
+    };
+    std::vector<ConnectedEnd> ConnectedEnds(int intersectionId) const;
     std::vector<MeshInstance> meshes; // Static MESH placements, including arbitrary affine transforms.
 
     // Returns a world-owned object, or nullptr with an SDL error and no object added.
@@ -60,6 +68,7 @@ public:
     bool Save() const;
 
 private:
+    bool ValidConnections() const;
     struct Section
     {
         std::array<char, 4> tag;
