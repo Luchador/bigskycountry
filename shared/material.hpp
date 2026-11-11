@@ -3,7 +3,7 @@
 #include <array>
 #include <string>
 
-enum class MaterialType { Standard, AlphaCutout, Count };
+enum class MaterialType { Standard, AlphaCutout, Terrain, Count };
 struct MaterialTypeInfo
 {
     const char* key;
@@ -11,7 +11,8 @@ struct MaterialTypeInfo
 };
 inline constexpr std::array<MaterialTypeInfo, static_cast<std::size_t>(MaterialType::Count)> materialTypes{{
     {"standard", "Standard"},
-    {"alphaCutout", "Alpha cutout"}
+    {"alphaCutout", "Alpha cutout"},
+    {"terrain", "Terrain"}
 }};
 
 enum class MaterialSlot { BaseColor, Normal, ORM, Emissive, Opacity, Count };

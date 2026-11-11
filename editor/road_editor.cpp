@@ -341,36 +341,51 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     }
 }
 
-void RoadEditor::AssignRoadMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
-                                    std::optional<SDL_FPoint> viewportPoint)
+void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
+                                std::optional<SDL_FPoint> viewportPoint)
 {
-    int index = state.selected;
-    Road* road = nullptr;
+    RoadPick target{RoadPickKind::Road, EditingDraft() ? -1 : state.selected};
     if (viewportPoint)
     {
         if (planView || drag != Drag::None) return;
         ViewportPicker picker(camera, scene, *viewportPoint);
-        world.ForEachMesh([&](const MeshInstance& mesh) { picker.TestMesh(mesh); });
-        index = -1;
-        for (size_t i = 0; i < world.roads.size(); ++i)
-            if (picker.TestRoad(world.roads[i])) index = static_cast<int>(i);
+        target = overlay.Pick(picker, world, nullptr, camera, scene);
     }
-    else if (EditingDraft())
-    {
-        index = -1;
+    Road* road = nullptr;
+    TerrainChunk* chunk = nullptr;
+    if (target.kind == RoadPickKind::Terrain)
+        chunk = world.Terrain().at(target.index).get();
+    else if (target.kind == RoadPickKind::Road && target.index >= 0)
+        road = &world.roads.at(target.index);
+    else if (!viewportPoint && EditingDraft())
         road = &*state.draft;
-    }
-    if (index >= 0) road = &world.roads.at(index);
-    if (!road || road->style.material == path) return;
+    else
+        return;
+
+    auto& current = chunk ? chunk->material : road->style.material;
+    if (current == path) return;
     Material material;
     if (!Material::ValidAssetPath(path) || !material.Load(browser.Textures().Root() + path))
     {
         status = SDL_GetError();
         return;
     }
-    EditSnapshot before(state, index >= 0 ? road : nullptr);
-    road->style.material = path;
-    Commit(world, index, std::move(before), index >= 0 ? road : nullptr);
+    if (chunk)
+    {
+        EditSnapshot before(state), after(state);
+        before.terrainMaterial = EditSnapshot::TerrainMaterial{target.index, current};
+        after.terrainMaterial = EditSnapshot::TerrainMaterial{target.index, path};
+        current = path;
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+    }
+    else
+    {
+        const Road* placed = target.index >= 0 ? road : nullptr;
+        EditSnapshot before(state, placed);
+        current = path;
+        Commit(world, target.index, std::move(before), placed);
+    }
 }
 
 void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path)
@@ -1480,9 +1495,9 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                                                point.y + scene.y - roadPanel.y + roadScroll};
                         const auto slot = MaterialSlotRect(Style(world));
                         if (local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
-                            AssignRoadMaterial(world, draggedAsset, camera, {});
+                            AssignMaterial(world, draggedAsset, camera, {});
                         else if (point.x >= 0 && point.y >= 0 && point.x < scene.w && point.y < scene.h)
-                            AssignRoadMaterial(world, draggedAsset, camera, point);
+                            AssignMaterial(world, draggedAsset, camera, point);
                     }
                     else PlaceProp(world, camera, point, draggedAsset);
                 }
@@ -1546,7 +1561,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (!SetContentViewport(renderer)) return EditorEvent::Error;
             *point = {point->x * scene.w, point->y * scene.h};
         }
-        AssignRoadMaterial(world, drop->path, camera, point);
+        AssignMaterial(world, drop->path, camera, point);
         return EditorEvent::Handled;
     }
     if (const auto drop = panels.TakeModelDrop(event))

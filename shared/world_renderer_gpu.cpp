@@ -11,8 +11,8 @@
 #include "world_frag_spirv.hpp"
 #include "wireframe_frag_dxil.hpp"
 #include "wireframe_frag_spirv.hpp"
-#include "asphalt_frag_dxil.hpp"
-#include "asphalt_frag_spirv.hpp"
+#include "material_frag_dxil.hpp"
+#include "material_frag_spirv.hpp"
 
 namespace
 {
@@ -69,7 +69,7 @@ WorldRenderer::~WorldRenderer()
     {
         SDL_ReleaseGPUGraphicsPipeline(device, surfacePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
-        SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
     }
 }
@@ -106,8 +106,8 @@ bool WorldRenderer::CreatePipelines()
         {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
         {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, color)},
         {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(WorldDepthVertex, uv)},
-        {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(PavementLighting, light)},
-        {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(PavementLighting, view)}
+        {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(SurfaceLighting, light)},
+        {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(SurfaceLighting, view)}
     };
     SDL_GPUColorTargetDescription color{};
     color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
@@ -148,10 +148,10 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        asphaltPipeline = materialPipeline("AsphaltPS", asphalt_frag_dxil, asphalt_frag_spirv, materialSlotCount, 1);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, materialSlotCount, 1);
     }
 
-    if (asphaltPipeline)
+    if (texturedPipeline)
     {
         wireframePipeline = materialPipeline("WireframePS", wireframe_frag_dxil, wireframe_frag_spirv, 0);
     }
@@ -177,10 +177,10 @@ bool WorldRenderer::CreatePipelines()
             SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
             wireframePipeline = nullptr;
         }
-        if (asphaltPipeline)
+        if (texturedPipeline)
         {
-            SDL_ReleaseGPUGraphicsPipeline(device, asphaltPipeline);
-            asphaltPipeline = nullptr;
+            SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
+            texturedPipeline = nullptr;
         }
         if (surfacePipeline)
         {
@@ -389,12 +389,12 @@ bool WorldRenderer::DrawGPU()
     }
     else
     {
-        for (const auto& range : pavement)
+        for (const auto& range : materialRanges)
         {
             if (!range.material) continue;
             drawSurface(cursor, range.first);
-            SDL_BindGPUGraphicsPipeline(pass, asphaltPipeline);
-            roadMaterials.Bind(*range.material, commands, pass);
+            SDL_BindGPUGraphicsPipeline(pass, texturedPipeline);
+            materialCache.Bind(*range.material, commands, pass);
             drawSurface(range.first, range.end);
             SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
             cursor = range.end;

@@ -141,25 +141,23 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
 {
     RoadPick hit;
 
-    for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+    // Equal-depth fragments use the last drawn surface. Test in reverse draw
+    // order so picking and material drops agree with the depth buffer.
+    for (int i = static_cast<int>(world.Objects().size()) - 1; i >= 0; --i)
     {
-        if (picker.TestRoad(world.roads[i]))
-        {
-            hit = {RoadPickKind::Road, i};
-        }
+        if (picker.TestMesh(world.Objects()[i]->Instance())) hit = {RoadPickKind::Object, i};
     }
-
-    for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
-    {
-        if (picker.TestMesh(world.meshes[i])) hit = {RoadPickKind::Mesh, i};
-    }
-    for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+    for (int i = static_cast<int>(world.Terrain().size()) - 1; i >= 0; --i)
     {
         if (picker.TestMesh(world.Terrain()[i]->Instance())) hit = {RoadPickKind::Terrain, i};
     }
-    for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
+    for (int i = static_cast<int>(world.meshes.size()) - 1; i >= 0; --i)
     {
-        if (picker.TestMesh(world.Objects()[i]->Instance())) hit = {RoadPickKind::Object, i};
+        if (picker.TestMesh(world.meshes[i])) hit = {RoadPickKind::Mesh, i};
+    }
+    for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
+    {
+        if (picker.TestRoad(world.roads[i])) hit = {RoadPickKind::Road, i};
     }
 
     if (selected)

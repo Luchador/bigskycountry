@@ -10,6 +10,8 @@ public:
     using MeshPlacement::Instance;
     using MeshPlacement::SetMesh;
 
+    std::string material; // Relative .bmat path, or empty to use the mesh colors.
+
     bool SetTransform(const ObjectTransform& t)
     {
         if (t.scale != Vector3{1, 1, 1})

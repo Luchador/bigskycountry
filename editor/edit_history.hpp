@@ -61,6 +61,13 @@ struct EditSnapshot
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
+    struct TerrainMaterial
+    {
+        int index;
+        std::string path;
+        bool operator==(const TerrainMaterial&) const = default;
+    };
+    std::optional<TerrainMaterial> terrainMaterial;
     std::optional<SceneHierarchy> hierarchy;
     std::set<SceneKey> outlineSelection;
     bool operator==(const EditSnapshot&) const = default;

@@ -1,4 +1,4 @@
-#include "road_material.hpp"
+#include "surface_material.hpp"
 #include "texture_loader.hpp"
 
 #include <algorithm>
@@ -14,20 +14,20 @@ namespace
     }};
 }
 
-RoadMaterials::~RoadMaterials()
+SurfaceMaterialCache::~SurfaceMaterialCache()
 {
     ClearTextures();
     if (sampler) SDL_ReleaseGPUSampler(device, sampler);
 }
 
-void RoadMaterials::ClearTextures()
+void SurfaceMaterialCache::ClearTextures()
 {
     for (auto& [key, texture] : textures)
         if (texture && texture->gpu) SDL_ReleaseGPUTexture(device, texture->gpu);
     textures.clear();
 }
 
-const RoadMaterialTexture* RoadMaterials::Map(const std::string& path, MaterialSlot slot)
+const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path, MaterialSlot slot)
 {
     const auto index = static_cast<size_t>(slot);
     const auto format = formats[index];
@@ -67,13 +67,13 @@ const RoadMaterialTexture* RoadMaterials::Map(const std::string& path, MaterialS
                 it->second.emplace().cpu = std::move(image);
             }
         }
-        if (!it->second) SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Road material texture '%s': %s", path.c_str(), SDL_GetError());
+        if (!it->second) SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Surface material texture '%s': %s", path.c_str(), SDL_GetError());
     }
     if (it->second) return &*it->second;
     return path.empty() ? nullptr : Map({}, slot);
 }
 
-const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* target)
+const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GPUDevice* target)
 {
     device = target;
     if (revision != Material::Revision())
@@ -92,7 +92,7 @@ const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* t
         Material definition;
         if (!Material::ValidAssetPath(path) || !definition.Load(root + path))
         {
-            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Road material '%s': %s", path.c_str(), SDL_GetError());
+            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Surface material '%s': %s", path.c_str(), SDL_GetError());
             return nullptr;
         }
         if (device && !sampler)
@@ -105,7 +105,7 @@ const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* t
             sampler = SDL_CreateGPUSampler(device, &info);
             if (!sampler) return nullptr;
         }
-        RoadMaterial material;
+        SurfaceMaterial material;
         material.type = definition.type;
         for (size_t i = 0; i < materialSlotCount; ++i)
         {
@@ -117,7 +117,7 @@ const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* t
     return it->second ? &*it->second : nullptr;
 }
 
-void RoadMaterials::Bind(const RoadMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const
+void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const
 {
     std::array<SDL_GPUTextureSamplerBinding, materialSlotCount> bindings{};
     for (size_t i = 0; i < bindings.size(); ++i) bindings[i] = {material.maps[i]->gpu, sampler};
@@ -126,7 +126,7 @@ void RoadMaterials::Bind(const RoadMaterial& material, SDL_GPUCommandBuffer* com
     SDL_PushGPUFragmentUniformData(commands, 0, params, sizeof(params));
 }
 
-SDL_FColor RoadMaterial::Shade(float u, float v, float footprint, const PavementLighting& basis) const
+SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const SurfaceLighting& basis) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);

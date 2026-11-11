@@ -36,7 +36,7 @@ add_library(BigSkyApplication STATIC
     shared/asset_paths.cpp
     shared/material.cpp
     shared/dds_texture.cpp
-    shared/road_material.cpp
+    shared/surface_material.cpp
     shared/bscobject.cpp
     shared/building.cpp
     shared/character.cpp

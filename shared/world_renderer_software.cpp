@@ -85,8 +85,8 @@ bool WorldRenderer::DrawSoftware()
     size_t range = 0;
     for (std::size_t first = 0; first < vertices.size(); first += 3)
     {
-        while (range < pavement.size() && first >= pavement[range].end) ++range;
-        const bool textured = range < pavement.size() && first >= pavement[range].first && pavement[range].material;
+        while (range < materialRanges.size() && first >= materialRanges[range].end) ++range;
+        const bool textured = range < materialRanges.size() && first >= materialRanges[range].first && materialRanges[range].material;
         const bool wire = first < wireframeEnd;
         if (first == foregroundStart) std::fill(softwareDepth.begin(), softwareDepth.end(), Sample{});
         const bool outline = first >= outlineStart && first < foregroundStart;
@@ -193,7 +193,7 @@ bool WorldRenderer::DrawSoftware()
                         {
                             lighting.view[j] = static_cast<float>((u*a.view[j] + v*b.view[j] + w*c.view[j]) / sum);
                         }
-                        const auto color = pavement[range].material->Shade(float(tu), float(tv), footprint, lighting);
+                        const auto color = materialRanges[range].material->Shade(float(tu), float(tv), footprint, lighting);
                         if (color.a == 0) continue;
                         sample = {depth, selected};
                         pixel[0] = Channel(color.r);

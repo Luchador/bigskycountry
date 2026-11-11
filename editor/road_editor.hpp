@@ -72,8 +72,8 @@ private:
     bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world);
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
-    void AssignRoadMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
-                            std::optional<SDL_FPoint> viewportPoint);
+    void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
+                        std::optional<SDL_FPoint> viewportPoint);
     void PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);

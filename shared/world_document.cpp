@@ -1,4 +1,5 @@
 #include "world_document.hpp"
+#include "material.hpp"
 #include "road_io.hpp"
 #include "object_io.hpp"
 #include "building.hpp"
@@ -24,7 +25,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 1;
+    constexpr Uint32 terrainVersion = 2;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
@@ -90,7 +91,7 @@ namespace
         return out.good() || SDL_SetError("Could not serialize mesh instances");
     }
 
-    bool ReadTerrain(std::string payload, WorldDocument& world)
+    bool ReadTerrain(std::string payload, Uint32 version, WorldDocument& world)
     {
         std::istringstream in(std::move(payload));
         in.imbue(std::locale::classic());
@@ -104,10 +105,14 @@ namespace
             {
                 return SDL_SetError("Invalid terrain chunk in TERR");
             }
-            if (!world.PlaceTerrain(path, t))
+            std::string material;
+            if (version >= 2 && (!(in >> std::quoted(material)) || (!material.empty() && !Material::ValidAssetPath(material))))
             {
-                return false;
+                return SDL_SetError("Invalid terrain material path in TERR");
             }
+            TerrainChunk* chunk = world.PlaceTerrain(path, t);
+            if (!chunk) return false;
+            chunk->material = std::move(material);
             in >> std::ws;
         }
         return true;
@@ -311,7 +316,7 @@ bool WorldDocument::Open(const char* documentPath)
         {
             return SDL_SetError("Duplicate or unsupported OBJS section in '%s'", loaded.path.c_str());
         }
-        if (section.tag == terrainTag && (sawTerrain || section.version != terrainVersion))
+        if (section.tag == terrainTag && (sawTerrain || section.version < 1 || section.version > terrainVersion))
         {
             return SDL_SetError("Duplicate or unsupported TERR section in '%s'", loaded.path.c_str());
         }
@@ -356,7 +361,7 @@ bool WorldDocument::Open(const char* documentPath)
         else if (section.tag == terrainTag)
         {
             sawTerrain = true;
-            if (!ReadTerrain(std::move(section.payload), loaded))
+            if (!ReadTerrain(std::move(section.payload), section.version, loaded))
             {
                 return false;
             }
@@ -439,9 +444,9 @@ bool WorldDocument::Save() const
     {
         const auto& mesh = chunk->Instance().mesh;
         const auto& t = chunk->GetTransform();
-        if (!mesh || mesh->assetPath.empty() ||
+        if (!mesh || mesh->assetPath.empty() || (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material)) ||
             !(terrainData << std::quoted(mesh->assetPath) << ' ' << t.position.x << ' ' << t.position.y << ' ' << t.position.z
-                          << ' ' << t.rotation.x << ' ' << t.rotation.y << ' ' << t.rotation.z << '\n'))
+                          << ' ' << t.rotation.x << ' ' << t.rotation.y << ' ' << t.rotation.z << ' ' << std::quoted(chunk->material) << '\n'))
         {
             return SDL_SetError("Cannot save terrain chunk");
         }

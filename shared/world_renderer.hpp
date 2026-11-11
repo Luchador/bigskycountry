@@ -1,12 +1,13 @@
 #pragma once
 
 #include "mesh.hpp"
-#include "road_material.hpp"
+#include "surface_material.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
 class FreeCamera;
 struct Road;
+class TerrainChunk;
 inline constexpr double worldNearDepth = 0.1;
 
 // Homogeneous clip position. z / w is near / viewZ, with 1 at the near plane.
@@ -15,13 +16,13 @@ struct WorldDepthVertex
     float x, y, z, w;
     SDL_FColor color;
     SDL_FPoint uv{};
-    PavementLighting lighting{};
+    SurfaceLighting lighting{};
 };
 
 class WorldRenderer
 {
 public:
-    explicit WorldRenderer(AssetRoot location = AssetRoot::Cooked) : roadMaterials(location) {}
+    explicit WorldRenderer(AssetRoot location = AssetRoot::Cooked) : materialCache(location) {}
     ~WorldRenderer();
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;
@@ -30,6 +31,7 @@ public:
     bool Begin(SDL_Renderer* renderer, const FreeCamera& camera);
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
+    void SubmitTerrain(const TerrainChunk& chunk);
     void SubmitRoad(const Road& road, bool selected);
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     // Mark the world triangles before submitting solid editor handles and overlays.
@@ -44,6 +46,8 @@ private:
     bool DrawGPU();
     bool DrawSoftware();
 
+    void SubmitMaterialTriangle(const std::array<Vector3, 3>& points, const std::array<SDL_FColor, 3>& colors,
+                                const MeshTransform& frame);
     WorldDepthVertex WorldToClip(Vector3 position, SDL_FColor color) const;
     SDL_Renderer* renderer = nullptr;
     const FreeCamera* camera = nullptr;
@@ -52,15 +56,15 @@ private:
     std::vector<WorldDepthVertex> vertices;
     std::vector<WorldDepthVertex> projectedMesh;
     std::vector<WorldDepthVertex> outline;
-    struct PavementRange
+    struct MaterialRange
     {
         size_t first, end;
         std::string path;
-        const RoadMaterial* material = nullptr;
+        const SurfaceMaterial* material = nullptr;
     };
-    std::vector<PavementRange> pavement;
-    RoadMaterials roadMaterials;
-    Vector3 pavementSun{};
+    std::vector<MaterialRange> materialRanges;
+    SurfaceMaterialCache materialCache;
+    Vector3 sunDirection{};
     std::size_t wireframeEnd = 0, foregroundStart = 0;
     std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
@@ -69,7 +73,7 @@ private:
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
-    SDL_GPUGraphicsPipeline* asphaltPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* texturedPipeline = nullptr;
     SDL_GPUGraphicsPipeline* wireframePipeline = nullptr;
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;
     SDL_GPUBuffer* vertexBuffer = nullptr;

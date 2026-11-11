@@ -208,13 +208,19 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         }
         ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
     }
+    if (to.terrainMaterial)
+    {
+        const auto& target = *to.terrainMaterial;
+        if (!world.Contains({SceneKind::Terrain, target.index})) return Result::Failed;
+        world.Terrain()[target.index]->material = target.path;
+    }
     if (to.meshTransform && !SetMeshTransform(world, to.meshSelection, *to.meshTransform))
     {
         return Result::Failed;
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.hierarchy;
+    const bool mapChanged = action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 

@@ -1,8 +1,12 @@
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
+#include "terrain_chunk.hpp"
+#include "sun.hpp"
+#include "world_state.hpp"
 #include "editor_colors.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
@@ -19,7 +23,8 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
     scaleY = viewport.h > 0 ? 2.0 * focal / viewport.h : 0.0;
     vertices.clear();
     outline.clear();
-    pavement.clear();
+    materialRanges.clear();
+    sunDirection = Sun::Direction(g_WorldState.GetTimeOfDayMinutes());
     wireframeEnd = 0;
     foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedStart = selectedEnd = outlineStart = 0;
@@ -71,6 +76,59 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
     }
 }
 
+// Project in local meters using the two axes most parallel to the face. This
+// gives roads and chunks the same texel density, including on steep slopes.
+void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
+                                           const std::array<SDL_FColor, 3>& colors, const MeshTransform& frame)
+{
+    const Vector3 normal = Math::Normalize(Math::Cross(points[1] - points[0], points[2] - points[0]));
+    const Vector3 local = frame.Unrotate(normal);
+    Vector3 u = frame.x, v = frame.z;
+    if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = frame.y;
+    else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
+    Vector3 tangent = Math::Normalize(Math::Cross(normal, v));
+    if (Math::Dot(tangent, u) < 0) tangent = tangent * -1;
+    Vector3 bitangent = Math::Cross(normal, tangent);
+    if (Math::Dot(bitangent, v) < 0) bitangent = bitangent * -1;
+    const auto toTangent = [&](Vector3 d) -> std::array<float, 3>
+    {
+        return {float(Math::Dot(d, tangent)), float(Math::Dot(d, bitangent)), float(Math::Dot(d, normal))};
+    };
+    const auto light = toTangent(sunDirection);
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        const Vector3 p = points[i];
+        auto vertex = WorldToClip(p, colors[i]);
+        const Vector3 offset = p - frame.origin;
+        vertex.uv = {float(Math::Dot(offset, u) / SurfaceMaterial::tileMeters),
+                     float(Math::Dot(offset, v) / SurfaceMaterial::tileMeters)};
+        vertex.lighting = {light, toTangent(camera->GetPosition() - p)};
+        vertices.push_back(vertex);
+    }
+}
+
+void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
+{
+    const MeshInstance& instance = chunk.Instance();
+    if (chunk.material.empty() || !instance.mesh)
+    {
+        SubmitMesh(instance);
+        return;
+    }
+    const Mesh& mesh = *instance.mesh;
+    const auto start = vertices.size();
+    for (size_t i = 0; i < mesh.indices.size(); i += 3)
+    {
+        const auto& a = mesh.vertices[mesh.indices[i]];
+        const auto& b = mesh.vertices[mesh.indices[i + 1]];
+        const auto& c = mesh.vertices[mesh.indices[i + 2]];
+        const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
+                                   instance.transform.Point(c.position)};
+        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, instance.transform);
+    }
+    if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), chunk.material});
+}
+
 void WorldRenderer::WireframeSubmittedGeometry()
 {
     // Reserve UVs in this pass for two barycentric coordinates. Clipping and
@@ -97,7 +155,7 @@ bool WorldRenderer::End()
     if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
     if (!wireframeEnd)
     {
-        for (auto& range : pavement) range.material = roadMaterials.Get(range.path, device);
+        for (auto& range : materialRanges) range.material = materialCache.Get(range.path, device);
     }
     return (device ? DrawGPU() : DrawSoftware()) &&
            SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);

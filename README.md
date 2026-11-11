@@ -79,7 +79,9 @@ Open the single-chunk example from the repository root with `.\build\BigSkyCount
 
 In the 3D editor, right-click and choose **Create → Test Terrain** to center a flat green chunk at the picked world position. The model at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Its 9 × 9 cells cover 45 × 45 m and form 162 upward-facing triangles. Each placement has its own position and rotation in the Transform panel. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
 
-A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 1 section stores the quoted path, position XYZ in meters, and rotation XYZ in radians for each chunk. Chunks use the mesh’s authored scale.
+Drag a material from the Content Browser’s **Textures** tab onto a chunk in the 3D viewport. The assignment belongs to that placement, saves with the world, and supports **Ctrl+Z** and **Ctrl+Y**. The texture repeats every 4 m in the chunk’s local coordinates.
+
+A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 2 section stores the quoted model path, position XYZ in meters, rotation XYZ in radians, and a quoted material path relative to `assets/textures` for each chunk. An empty material path or a version 1 record uses the mesh’s original colors. Chunks use the mesh’s authored scale.
 
 ### Scene outliner
 
@@ -107,7 +109,7 @@ Drag a GLB model from the **Models** tab into the 3D viewport to place a **Prop*
 
 In the Content Browser’s **Textures** tab, select a folder to browse its texture thumbnails and materials. Right-click an empty area and choose **Add New Material**. Enter a name to save a versioned JSON `.bmat` asset in that folder. Material creation and editing always write to the project’s `assets/textures` directory.
 
-Double-click a material to open its floating **Material Editor**. Hold the left mouse button and drag in its preview viewport to orbit the sphere. Drag textures from any Content Browser folder onto the **Base color**, **Normal**, **ORM**, **Emissive**, or **Opacity** thumbnail. Use **Clear** to remove a map. The sphere updates and the material saves after each change. ORM uses red for occlusion, green for roughness, and blue for metalness. **Alpha cutout** discards pixels where base-color alpha multiplied by the opacity map’s red channel is below 0.5. **Standard** renders the whole surface. Materials reference the original textures by their paths and share the same decoded images.
+Double-click a material to open its floating **Material Editor**. Hold the left mouse button and drag in its preview viewport to orbit the sphere. Drag textures from any Content Browser folder onto the **Base color**, **Normal**, **ORM**, **Emissive**, or **Opacity** thumbnail. Use **Clear** to remove a map. The sphere updates and the material saves after each change. ORM uses red for occlusion, green for roughness, and blue for metalness. **Alpha cutout** discards pixels where base-color alpha multiplied by the opacity map’s red channel is below 0.5. **Standard** and **Terrain** both render the whole surface and use the same texture slots. Materials reference the original textures by their paths and share the same decoded images.
 
 The content browser uses a native tree of the GLB files in `assets/models`. Select a model to preview it, or click **Refresh** after changing the folder. The road inspector uses checkboxes for shoulders and drop-downs for alignment, three-lane layout, and edges. Its changes use the editor’s existing undo and save commands. The toolbar’s camera-speed slider stays in sync with the viewport mouse wheel.
 

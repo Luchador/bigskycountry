@@ -177,10 +177,12 @@ namespace
                     worldRenderer.SubmitRoad(road, &road == selected);
                 }
 
-                world.ForEachMesh([&](const MeshInstance& instance)
+                for (const auto& instance : world.meshes) worldRenderer.SubmitMesh(instance);
+                for (const auto& chunk : world.Terrain()) worldRenderer.SubmitTerrain(*chunk);
+                for (const auto& object : world.Objects())
                 {
-                    worldRenderer.SubmitMesh(instance);
-                });
+                    if (object->IsLoaded()) worldRenderer.SubmitMesh(object->Instance());
+                }
 
                 if (roadTool)
                 {

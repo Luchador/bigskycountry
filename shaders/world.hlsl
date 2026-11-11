@@ -60,12 +60,12 @@ BSC_COMBINED SamplerState ormSampler : register(s2, space2);
 
 BSC_COMBINED SamplerState emissiveSampler : register(s3, space2);
 BSC_COMBINED SamplerState opacitySampler : register(s4, space2);
-cbuffer RoadProperties : register(b0, space3)
+cbuffer MaterialProperties : register(b0, space3)
 {
     uint alphaCutout;
 };
 
-float4 AsphaltPS(WorldFragment input) : SV_Target0
+float4 MaterialPS(WorldFragment input) : SV_Target0
 {
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
     if (alphaCutout) clip(base.a * opacityMap.Sample(opacitySampler, input.uv) - 0.5);
