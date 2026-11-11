@@ -48,7 +48,8 @@ std::set<SceneKey> RoadEditorState::SelectedRows() const
 {
     if (!outlineSelection.empty()) return outlineSelection;
     if (selected >= 0) return {{SceneKind::Road, selected}};
-    if (meshSelection.kind == SelectionKind::Intersection) return {{SceneKind::Intersection, meshSelection.index}};
+    if (meshSelection.kind == SelectionKind::Intersection || meshSelection.kind == SelectionKind::Anchor)
+        return {{SceneKind::Intersection, meshSelection.index}};
     if (meshSelection.kind == SelectionKind::Object) return {{SceneKind::Object, meshSelection.index}};
     if (meshSelection.kind == SelectionKind::Terrain) return {{SceneKind::Terrain, meshSelection.index}};
     return {};

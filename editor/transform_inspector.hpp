@@ -7,7 +7,7 @@
 class WorldDocument;
 struct Road;
 
-enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection };
+enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor };
 struct TransformTarget
 {
     SelectionKind kind = SelectionKind::None;

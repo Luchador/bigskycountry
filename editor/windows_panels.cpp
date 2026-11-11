@@ -729,6 +729,7 @@ struct WindowsPanels::Impl
             case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
             case IDC_RADIUS_LESS: Post(actions, int(RoadAction::SmallerRadius)); return;
             case IDC_RADIUS_MORE: Post(actions, int(RoadAction::LargerRadius)); return;
+            case IDC_STOP_LINE: Post(actions, int(RoadAction::ToggleStopLine)); return;
             case IDC_INVINCIBLE: Post(actions, int(RoadAction::ToggleInvincible)); return;
             case IDC_FEWER: Post(actions, int(RoadAction::Fewer)); return;
             case IDC_MORE: Post(actions, int(RoadAction::More)); return;
@@ -788,6 +789,7 @@ struct WindowsPanels::Impl
                 ShowWindow(GetDlgItem(road, id), roadPage ? SW_SHOWNA : SW_HIDE);
             for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
                 ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), properties.page == PropertiesPage::Object ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
@@ -805,6 +807,7 @@ struct WindowsPanels::Impl
                 SetDlgItemTextW(road, IDC_RADIUS_VALUE, radius);
                 EnableWindow(GetDlgItem(road, IDC_RADIUS_LESS), properties.radius > 0);
             }
+            CheckDlgButton(road, IDC_STOP_LINE, properties.stopLine ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(road, IDC_INVINCIBLE, properties.invincible ? BST_CHECKED : BST_UNCHECKED);
             return;
         }

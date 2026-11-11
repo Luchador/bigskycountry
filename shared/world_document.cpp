@@ -23,6 +23,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
+    constexpr Uint32 intersectionVersion = 2;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -174,9 +175,7 @@ void WorldDocument::UpdateIntersections()
             if (!ends[i]) continue;
             const auto [road, end] = *ends[i];
             distinct.insert(road);
-            const auto& s = roads[road].style;
-            layout.arms[i] = IntersectionApproach{end == 0 ? s.LeftWidth() : s.RightWidth(),
-                                                   end == 0 ? s.RightWidth() : s.LeftWidth(), s.edge};
+            layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
         if (distinct.size() < 3) continue;
         active.insert(id);
@@ -446,7 +445,8 @@ bool WorldDocument::Open(const char* documentPath)
         }
         else if (section.tag == intersectionTag)
         {
-            if (sawIntersections || section.version != 1) return SDL_SetError("Duplicate or unsupported INTS section");
+            if (sawIntersections || section.version < 1 || section.version > intersectionVersion)
+                return SDL_SetError("Duplicate or unsupported INTS section");
             sawIntersections = true;
             std::istringstream data(std::move(section.payload));
             data.imbue(std::locale::classic());
@@ -457,8 +457,17 @@ bool WorldDocument::Open(const char* documentPath)
                 auto& p = item.position;
                 if (!(data >> id >> p.x >> p.y >> p.z >> item.cornerRadius >> std::quoted(item.material)) ||
                     id <= 0 || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
-                    !Material::ValidAssetPath(item.material) || !loaded.intersections.emplace(id, std::move(item)).second)
+                    !Material::ValidAssetPath(item.material))
                     return SDL_SetError("Invalid intersection in INTS");
+                if (section.version >= 2)
+                {
+                    unsigned int mask;
+                    if (!(data >> mask) || mask >= (1u << IntersectionAnchor::sideCount))
+                        return SDL_SetError("Invalid intersection stop lines in INTS");
+                    item.stopLines = decltype(item.stopLines){mask};
+                }
+                if (!loaded.intersections.emplace(id, std::move(item)).second)
+                    return SDL_SetError("Duplicate intersection ID in INTS");
             }
         }
         else if (section.tag == roadTag)
@@ -558,7 +567,7 @@ bool WorldDocument::Save() const
         if (id <= 0 || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
             !Material::ValidAssetPath(item.material) ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
-                          << ' ' << std::quoted(item.material) << '\n'))
+                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << '\n'))
             return SDL_SetError("Cannot save invalid intersection");
     }
     std::ostringstream meshData;
@@ -600,7 +609,7 @@ bool WorldDocument::Save() const
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
-                    (intersections.empty() || WriteSection(output, intersectionTag, 1, std::move(junctionData).str())) &&
+                    (intersections.empty() || WriteSection(output, intersectionTag, intersectionVersion, std::move(junctionData).str())) &&
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
                     (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str())) &&
                     (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str())) &&

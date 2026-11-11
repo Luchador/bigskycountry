@@ -49,14 +49,14 @@ bool SdlTransformPanel::Draw(SDL_Renderer* r, int width, const TransformFields& 
             return false;
         }
 
-        if (enabled)
+        std::string text = active ? buffer : fields.Text(i);
+        if (active || !text.empty())
         {
-            std::string text = active ? buffer : fields.Text(i);
             const auto visible = static_cast<std::size_t>(std::max(1.0f, (cell.w - 4) / 8));
             std::size_t start = active && caret >= visible ? caret - visible + 1 : 0;
             text = text.substr(start, visible);
 
-            if (!EditorTheme::SetColor(r, EditorTheme::text) || !SDL_RenderDebugText(r, cell.x + 2, cell.y + 5, text.c_str()))
+            if (!EditorTheme::SetColor(r, enabled ? EditorTheme::text : EditorTheme::disabled) || !SDL_RenderDebugText(r, cell.x + 2, cell.y + 5, text.c_str()))
             {
                 return false;
             }

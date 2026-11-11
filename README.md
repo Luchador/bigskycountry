@@ -91,6 +91,8 @@ Each intersection has four permanent control-point markers, 10 m from its center
 
 Connecting three distinct roads generates a flat T-junction at the intersection elevation. Connecting the fourth side opens it into a four-way crossing. The surface uses the intersection’s pavement material and corner radius. It matches each approach’s shoulders, curbs and transition strips. Lane markings and divided-road medians end where the road meets the junction. Wide approaches and large corner radii can move that seam beyond the 10 m anchor. Disconnecting roads updates the surface immediately. With fewer than three roads, the four anchor markers remain available for editing.
 
+Click an intersection anchor in the 3D or top-down view to edit its **Stop line** checkbox. Each anchor defaults to on and remembers its setting when a road is disconnected. On a generated junction the white bar runs across the incoming travel lanes, starting at the road paint and extending 0.60 m onto the intersection. When an attached road is selected, its endpoint takes priority at the shared marker. Select the junction surface or its Outliner row, then click the anchor to inspect it.
+
 ### Scene outliner
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or terrain chunk in the list makes its transform available for editing.

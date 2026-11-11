@@ -150,7 +150,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
         {
             if (const auto anchor = PointPlacement(item.AnchorPosition(side), camera, scene))
             {
-                const bool active = selection.anchorSelection == IntersectionAnchor{id, side};
+                const bool active = selection.AnchorHighlighted({id, side});
                 renderer.SubmitMesh(Marker(*anchor), active ? EditorColors::amber : EditorColors::blue);
             }
         }

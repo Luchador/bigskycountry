@@ -23,6 +23,14 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.material = item.material;
         result.materialSlot = true;
     }
+    else if (target.kind == SelectionKind::Anchor)
+    {
+        static constexpr std::array names{"East (+X) anchor", "North (+Z) anchor", "West (-X) anchor", "South (-Z) anchor"};
+        result.page = PropertiesPage::Anchor;
+        result.title = "Intersection " + std::to_string(target.index);
+        result.detail = names.at(target.point);
+        result.stopLine = world.intersections.at(target.index).stopLines.test(target.point);
+    }
     else if (target.kind == SelectionKind::Terrain)
     {
         const auto& chunk = *world.Terrain().at(target.index);

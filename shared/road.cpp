@@ -90,6 +90,17 @@ double RoadStyle::EdgeWidth() const
     }
 }
 
+double Road::ThreeLaneDividerOffset() const
+{
+    // Use the authored road frame so trimming its ends at junctions cannot swap lane directions.
+    const auto frame = ObjectTransform{{}, rotation}.ToMeshTransform();
+    const Vector3 travel = frame.Unrotate(points.back().position - points.front().position);
+    const bool northFollowsPoints = travel.z == 0.0 ? travel.x >= 0.0 : travel.z > 0.0;
+    const bool twoNorthbound = style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound;
+    constexpr double halfLane = RoadStyle::laneWidth * 0.5;
+    return twoNorthbound == northFollowsPoints ? halfLane : -halfLane;
+}
+
 Vector3 Road::Tangent(std::size_t index) const
 {
     const RoadPoint& point = points[index];

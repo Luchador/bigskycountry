@@ -45,7 +45,7 @@ namespace
 
 bool TransformFields::CanEdit(int field) const
 {
-    if (target.kind == SelectionKind::None || field < 0 || field >= 9)
+    if (target.kind == SelectionKind::None || target.kind == SelectionKind::Anchor || field < 0 || field >= 9)
     {
         return false;
     }
@@ -62,7 +62,7 @@ double TransformFields::DisplayValue(int field) const
 
 std::string TransformFields::Text(int field) const
 {
-    if (!CanEdit(field))
+    if (!CanEdit(field) && !(target.kind == SelectionKind::Anchor && field >= 0 && field < 3))
     {
         return {};
     }
@@ -81,6 +81,7 @@ std::string TransformFields::Title() const
     const std::string n = std::to_string(target.index + 1);
     switch (target.kind)
     {
+    case SelectionKind::Anchor: return "Intersection " + std::to_string(target.index) + " / Anchor " + std::to_string(target.point + 1);
     case SelectionKind::Intersection: return "Intersection " + std::to_string(target.index);
     case SelectionKind::Road: return "Road " + n;
     case SelectionKind::Point: return "Road " + n + " / Point " + std::to_string(target.point + 1);
@@ -155,6 +156,10 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         }
         break;
     }
+    case SelectionKind::Anchor:
+        if (!world.intersections.contains(target.index) || !IntersectionAnchor{target.index, target.point}.Valid()) return {};
+        fields.value.position = world.intersections.at(target.index).AnchorPosition(target.point);
+        break;
     case SelectionKind::Intersection:
         if (!world.intersections.contains(target.index)) return {};
         fields.value.position = world.intersections.at(target.index).position;

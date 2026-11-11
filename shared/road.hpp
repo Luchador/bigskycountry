@@ -141,6 +141,7 @@ struct Road : RoadGeometry
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
     Vector3 Tangent(std::size_t index) const;
+    double ThreeLaneDividerOffset() const; // Signed distance left of the authored path for a 2+1 layout.
     std::array<Vector3, 3> PointAxes(std::size_t index, bool includeRoll = true) const;
     void RotatePoint(std::size_t index, double heading);
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);

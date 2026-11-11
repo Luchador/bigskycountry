@@ -36,6 +36,18 @@ struct RoadEditorState
         return index == point || additionalPoints.contains(index);
     }
 
+    void InspectAnchor(IntersectionAnchor anchor)
+    {
+        drawing = false;
+        SelectPoint(-1, -1);
+        meshSelection = {SelectionKind::Anchor, anchor.intersectionId, anchor.side};
+    }
+    bool AnchorHighlighted(IntersectionAnchor anchor) const
+    {
+        return anchorSelection == anchor ||
+               meshSelection == TransformTarget{SelectionKind::Anchor, anchor.intersectionId, anchor.side};
+    }
+
     void PickPoint(int roadIndex, int index, bool add, bool subtract);
 
     void SelectPoint(int roadIndex, int pointIndex)

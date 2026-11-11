@@ -25,5 +25,6 @@ enum class RoadAction
     GrassMedian,
     SmallerRadius,
     LargerRadius,
+    ToggleStopLine,
     ToggleInvincible
 };

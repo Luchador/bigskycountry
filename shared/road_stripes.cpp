@@ -551,12 +551,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     }
     else if (laneCount == 3)
     {
-        // North is +Z. On an east-west road, use +X as the northbound direction.
-        const Vector3 travel = spans.back().end - spans.front().start;
-        const bool northFollowsPoints = travel.z == 0.0 ? travel.x >= 0.0 : travel.z > 0.0;
-        const bool twoNorthbound = style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound;
-        // Traffic keeps right. Positive offsets are left of the authored path.
-        const double boundary = (twoNorthbound == northFollowsPoints) ? halfLane : -halfLane;
+        const double boundary = ThreeLaneDividerOffset();
         PaintDoubleYellow(path, boundary, yellowStripes);
         PaintDashes(OffsetPath(path, -boundary), whiteStripes);
         return;

@@ -1,4 +1,5 @@
 #include "intersection.hpp"
+#include "view_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -86,11 +87,55 @@ namespace
         return std::max(0.0, pavementRadius - std::max(edgeA, edgeB));
     }
 
+    void PaintStopLine(RoadGeometry& geometry, Vector3 mouth, Vector3 outward, Vector3 left,
+                       const IntersectionApproach::LaneSpan& lanes)
+    {
+        // Clip the paint rectangle to the pavement. The back edge of an asymmetric
+        // T can taper inside the lane edge between the two ends of the rectangle.
+        const std::array normals{left, left * -1, outward, outward * -1};
+        const double station = Math::Dot(mouth, outward);
+        const double lateral = Math::Dot(mouth, left);
+        const std::array offsets{lateral + lanes.inner, -lateral - lanes.outer,
+                                 station - Intersection::stopLineWidth, -station};
+        for (const auto& triangle : geometry.pavementTriangles)
+        {
+            ViewGeometry::Polygon paint{{triangle[0].position, triangle[1].position, triangle[2].position}, 3};
+            for (std::size_t i = 0; i < normals.size() && paint.count >= 3; ++i)
+                paint = ViewGeometry::Clip(paint, normals[i], offsets[i]);
+
+            const Vector3 lift = up * RoadStyle::stripeHeight;
+            for (int i = 2; i < paint.count; ++i)
+            {
+                const Vector3 a = paint.points[0], b = paint.points[i - 1], c = paint.points[i];
+                if (Math::Cross(b - a, c - a).y > 0)
+                    geometry.whiteStripes.push_back({a + lift, b + lift, c + lift});
+            }
+        }
+    }
+
     int NextArm(const IntersectionLayout& layout, int side)
     {
         do { side = (side + 1) % sides; } while (!layout.arms[side]);
         return side;
     }
+}
+
+IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first, bool paintStopLine)
+{
+    const auto& style = road.style;
+    IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
+                             first ? style.RightWidth() : style.LeftWidth(), style.edge, {}};
+    if (!paintStopLine) return arm;
+
+    const int lanes = style.GetLaneCount();
+    const double halfLane = RoadStyle::laneWidth * 0.5;
+    const double outer = style.HalfSeparation() + lanes * halfLane;
+    double inner = style.HalfSeparation();
+    if (lanes == 1) inner = -halfLane; // Shared, unstriped lane.
+    else if (style.HasCenterTurnLane()) inner = halfLane;
+    else if (lanes == 3) inner = road.ThreeLaneDividerOffset() * (first ? 1 : -1);
+    arm.stopLine = LaneSpan{inner, outer};
+    return arm;
 }
 
 void IntersectionSurface::Build(const IntersectionLayout& input)
@@ -198,5 +243,13 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
                 add(center + d * (setbacks[i] - length * t) + n * std::lerp(wa, wb, smooth), normal, t);
             }
         }
+    }
+
+    for (int i = 0; i < sides; ++i)
+    {
+        const auto& arm = layout.arms[i];
+        if (arm && arm->stopLine)
+            PaintStopLine(geometry, layout.center + directions[i] * setbacks[i], directions[i],
+                          directions[(i + 1) % sides], *arm->stopLine);
     }
 }
