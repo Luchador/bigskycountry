@@ -65,11 +65,12 @@ bool MaterialEditor::Orbit(double deltaX, double deltaY, double viewportSpan)
     return true;
 }
 
-SDL_Surface* MaterialEditor::Preview()
+SDL_Surface* MaterialEditor::Preview(int pixelWidth, int pixelHeight)
 {
-    if (catalog && (!preview || ImagesChanged()))
+    if (!catalog || pixelWidth <= 0 || pixelHeight <= 0) return nullptr;
+    if (!preview || preview->w != pixelWidth || preview->h != pixelHeight || ImagesChanged())
     {
-        preview = RenderSphere();
+        preview = RenderSphere(pixelWidth, pixelHeight);
         imageRevision = catalog->ImageRevision();
     }
     return preview.get();

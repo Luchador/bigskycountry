@@ -14,7 +14,7 @@ public:
 private:
     void Close();
     void FinishDrag();
-    void UpdateImages();
+    void UpdateImages(int pixelWidth, int pixelHeight);
     void Report(bool success);
     MaterialEditor editor;
     SDL_Window* window = nullptr; // Owned utility window, also destroyed when its parent closes.

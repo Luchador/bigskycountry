@@ -1,21 +1,22 @@
 #include "sdl_material_editor.hpp"
 #include "editor_theme.hpp"
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
     struct Layout
     {
+        int windowWidth = 0, windowHeight = 0;
         SDL_FRect view, type;
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
         explicit Layout(SDL_Window* window)
         {
-            int w, h;
-            SDL_GetWindowSize(window, &w, &h);
-            const float split = float(w) - 224;
-            view = {0, 0, split, float(h)};
+            SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+            const float split = float(windowWidth) - 224;
+            view = {0, 0, split, float(windowHeight)};
             type = {split + 10, 32, 204, 25};
-            const float step = std::min(80.f, (h - 70.f) / materialSlotCount);
+            const float step = std::min(80.f, (windowHeight - 70.f) / materialSlotCount);
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
                 slots[i] = {split + 10, 68 + i * step, 160, step - 5};
@@ -52,6 +53,7 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
         SDL_SetPointerProperty(props, SDL_PROP_WINDOW_CREATE_PARENT_POINTER, owner);
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_UTILITY_BOOLEAN, true);
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
+        SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 660);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 460);
         int x, y, w, h;
@@ -238,10 +240,10 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
     return true;
 }
 
-void SdlMaterialEditor::UpdateImages()
+void SdlMaterialEditor::UpdateImages(int pixelWidth, int pixelHeight)
 {
     SDL_DestroyTexture(sphere);
-    auto* pixels = editor.Preview();
+    auto* pixels = editor.Preview(pixelWidth, pixelHeight);
     sphere = pixels ? SDL_CreateTextureFromSurface(renderer, pixels) : nullptr;
     sphereDirty = false;
     if (!imagesDirty) return;
@@ -262,14 +264,22 @@ bool SdlMaterialEditor::Draw()
         imagesDirty = true;
     if (!dirty && !imagesDirty && !sphereDirty)
         return true;
-    if (imagesDirty || sphereDirty)
-        UpdateImages();
     const Layout layout(window);
+    int outputWidth, outputHeight;
+    if (!SDL_GetRenderOutputSize(renderer, &outputWidth, &outputHeight)) return false;
+    if (layout.view.w <= 0 || layout.windowHeight <= 0 || outputWidth <= 0 || outputHeight <= 0) return true;
+
+    // Controls and mouse input use window coordinates. Shade the preview in drawable pixels.
+    const float scaleX = float(outputWidth) / layout.windowWidth;
+    const float scaleY = float(outputHeight) / layout.windowHeight;
+    const int previewWidth = std::lround(layout.view.w * scaleX);
+    if (!SDL_SetRenderScale(renderer, scaleX, scaleY)) return false;
+    if (imagesDirty || sphereDirty || !sphere || sphere->w != previewWidth || sphere->h != outputHeight)
+        UpdateImages(previewWidth, outputHeight);
+
     using namespace EditorTheme;
-    const float side = std::min(layout.view.w, layout.view.h);
-    const SDL_FRect ball{(layout.view.w - side) / 2, (layout.view.h - side) / 2, side, side};
-    if (!EditorTheme::SetColor(renderer, panel) || !SDL_RenderClear(renderer) || !Fill(renderer, layout.view, field) ||
-        !sphere || !SDL_RenderTexture(renderer, sphere, nullptr, &ball) ||
+    if (!EditorTheme::SetColor(renderer, panel) || !SDL_RenderClear(renderer) ||
+        !sphere || !SDL_RenderTexture(renderer, sphere, nullptr, &layout.view) ||
         !Text(renderer, layout.type.x, 13, "Material type", text) || !Fill(renderer, layout.type, button) ||
         !Text(renderer, layout.type.x + 6, layout.type.y + 8,
               materialTypes[static_cast<std::size_t>(editor.Current().type)].label, text) ||

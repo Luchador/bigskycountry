@@ -12,13 +12,13 @@ public:
     bool SetTexture(MaterialSlot slot, const std::string& path);
     const Material& Current() const { return material; }
     bool Orbit(double deltaX, double deltaY, double viewportSpan);
-    SDL_Surface* Preview();
+    SDL_Surface* Preview(int pixelWidth, int pixelHeight);
     SDL_Surface* Thumbnail(std::size_t slot);
     bool ImagesChanged() const { return catalog && imageRevision != catalog->ImageRevision(); }
 
 private:
     bool Commit(Material next);
-    MaterialSurface RenderSphere() const;
+    MaterialSurface RenderSphere(int width, int height) const;
     TextureCatalog* catalog = nullptr;
     std::string path;
     Material material;

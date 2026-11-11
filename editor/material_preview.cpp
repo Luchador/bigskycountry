@@ -8,8 +8,6 @@
 namespace
 {
     constexpr double pi = std::numbers::pi;
-    constexpr int size = 320;
-    constexpr double radius = size * .425;
 
     Mesh BuildSphere()
     {
@@ -129,7 +127,7 @@ namespace
     }
 }
 
-MaterialSurface MaterialEditor::RenderSphere() const
+MaterialSurface MaterialEditor::RenderSphere(int width, int height) const
 {
     const auto image = [&](MaterialSlot slot) {
         return catalog->Image(material.textures[static_cast<std::size_t>(slot)]);
@@ -138,13 +136,14 @@ MaterialSurface MaterialEditor::RenderSphere() const
     const Vector3 right{std::cos(yaw), 0.0, -std::sin(yaw)};
     const Vector3 toEye{std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
     const Vector3 up = Math::Cross(toEye, right);
+    const double radius = std::min(width, height) * .425;
     const auto project = [&](Vector3 point) -> SDL_FPoint {
-        return {float(size * .5 + radius * Math::Dot(point, right)), float(size * .5 - radius * Math::Dot(point, up))};
+        return {float(width * .5 + radius * Math::Dot(point, right)), float(height * .5 - radius * Math::Dot(point, up))};
     };
     const Shader shader{image(MaterialSlot::BaseColor), image(MaterialSlot::Normal),
                         image(MaterialSlot::ORM),       image(MaterialSlot::Emissive),
                         image(MaterialSlot::Opacity),   material.type == MaterialType::AlphaCutout, toEye};
-    MaterialSurface surface(SDL_CreateSurface(size, size, SDL_PIXELFORMAT_BGRA32), SDL_DestroySurface);
+    MaterialSurface surface(SDL_CreateSurface(width, height, SDL_PIXELFORMAT_BGRA32), SDL_DestroySurface);
     if (!surface)
         return surface;
     constexpr auto background = EditorTheme::field;

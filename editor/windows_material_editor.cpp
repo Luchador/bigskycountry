@@ -169,7 +169,9 @@ void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
 {
     if (draw.CtlID == IDC_MAT_PREVIEW)
     {
-        WindowsTheme::DrawPreview(draw.hDC, draw.rcItem, editor.Preview(), EditorTheme::field);
+        const RECT& view = draw.rcItem;
+        auto* pixels = editor.Preview(view.right - view.left, view.bottom - view.top);
+        WindowsTheme::DrawPreview(draw.hDC, view, pixels, EditorTheme::field);
         return;
     }
     const unsigned slot = draw.CtlID - IDC_MAT_SLOT_FIRST;
