@@ -77,6 +77,7 @@ private:
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
                         std::optional<SDL_FPoint> viewportPoint);
+    void PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position);
     void PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
@@ -90,7 +91,7 @@ private:
     void RotatePlanPoint(Road& road);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void ApplyOutline(const OutlineCommand& cmd, WorldDocument& world);
-    void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
+    void ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit);
     std::optional<SceneKey> PlanElementAt(const WorldDocument& world, Vector3 pos) const;
     SDL_FPoint PlanGroupHandle(const ObjectTransform& frame) const;
     void BeginGroupDrag(const WorldDocument& world, Drag kind);

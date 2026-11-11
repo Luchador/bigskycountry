@@ -1,5 +1,6 @@
 #include "transform_inspector.hpp"
 #include "world_document.hpp"
+#include "geographic_coordinates.hpp"
 #include "road_group_transform.hpp"
 #include "world_renderer.hpp"
 
@@ -46,11 +47,12 @@ namespace
 
 bool TransformFields::CanEdit(int field) const
 {
-    if (roadBound || target.kind == SelectionKind::None || target.kind == SelectionKind::Anchor || field < 0 || field >= 9)
+    if (roadBound || target.kind == SelectionKind::None || target.kind == SelectionKind::Anchor || field < 0 || field > geographicLocation)
     {
         return false;
     }
 
+    if (field == geographicLocation) return true;
     if (target.YawOnly()) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
 }
@@ -63,45 +65,36 @@ double TransformFields::DisplayValue(int field) const
 
 std::string TransformFields::Text(int field) const
 {
-    if (!CanEdit(field) && !(target.kind == SelectionKind::Anchor && field >= 0 && field < 3))
+    if (!CanEdit(field) && !(target.kind == SelectionKind::Anchor && ((field >= 0 && field < 3) || field == geographicLocation)))
     {
         return {};
     }
 
     std::ostringstream out;
     out.imbue(std::locale::classic());
+    if (field == geographicLocation)
+    {
+        const auto coordinates = GeographicCoordinates::FromWorld(value.position);
+        if (!coordinates) return {};
+        out << std::fixed << std::setprecision(8) << coordinates->latitude << ", " << coordinates->longitude;
+        return out.str();
+    }
     const double n = DisplayValue(field);
     out << std::fixed << std::setprecision(2) << (std::abs(n) < 0.005 ? 0.0 : n);
 
     return out.str();
 }
 
-std::string TransformFields::Title() const
-{
-    if (!selectionLabel.empty()) return selectionLabel;
-    const std::string n = std::to_string(target.index + 1);
-    switch (target.kind)
-    {
-    case SelectionKind::Anchor: return "Intersection " + std::to_string(target.index) + " / Anchor " + std::to_string(target.point + 1);
-    case SelectionKind::Intersection: return "Intersection " + std::to_string(target.index);
-    case SelectionKind::Road: return "Road " + n;
-    case SelectionKind::Point: return "Road " + n + " / Point " + std::to_string(target.point + 1);
-    case SelectionKind::Object: return "Object " + n;
-    case SelectionKind::Terrain: return "Terrain " + n;
-    default: return "No selection";
-    }
-}
-
 std::optional<double> ParseTransformValue(std::string_view text)
 {
-    const auto start = text.find_first_not_of(" \t");
+    const auto start = text.find_first_not_of(" \t\r\n");
 
     if (start == text.npos)
     {
         return {};
     }
 
-    text = text.substr(start, text.find_last_not_of(" \t") - start + 1);
+    text = text.substr(start, text.find_last_not_of(" \t\r\n") - start + 1);
 
     if (text.front() == '+')
     {
@@ -122,6 +115,40 @@ std::optional<double> ParseTransformValue(std::string_view text)
     }
 
     return value;
+}
+
+std::optional<ObjectTransform> TransformFields::Parse(int field, std::string_view text) const
+{
+    if (!CanEdit(field)) return {};
+    ObjectTransform desired = value;
+    if (field == geographicLocation)
+    {
+        const auto comma = text.find(',');
+        if (comma != text.npos)
+        {
+            const auto lat = ParseTransformValue(text.substr(0, comma));
+            const auto lon = ParseTransformValue(text.substr(comma + 1));
+            if (lat && lon)
+            {
+                if (const auto p = GeographicCoordinates{*lat, *lon}.ToWorld(value.position.y))
+                {
+                    desired.position = *p;
+                    return desired;
+                }
+            }
+        }
+        SDL_SetError("Use latitude, longitude in decimal degrees (latitude between the poles, longitude -180 to 180)");
+        return {};
+    }
+    const auto number = ParseTransformValue(text);
+    if (!number)
+    {
+        SDL_SetError("Enter a finite number");
+        return {};
+    }
+    if (*number != DisplayValue(field))
+        Component(Row(desired, field), field % 3) = field >= 3 && field < 6 ? *number / degrees : *number;
+    return desired;
 }
 
 TransformFields Inspect(const WorldDocument& world, TransformTarget target)
@@ -251,27 +278,23 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
     return SDL_SetError("Invalid mesh selection");
 }
 
-bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value)
+bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, const ObjectTransform& t)
 {
-    if (!fields.CanEdit(field) || !std::isfinite(value))
-    {
-        return SDL_SetError("Invalid transform field");
-    }
-
-    ObjectTransform t = fields.value;
-    Component(Row(t, field), field % 3) = field >= 3 && field < 6 ? value / degrees : value;
+    if (!fields.CanEdit(field)) return SDL_SetError("Invalid transform field");
+    const bool translating = field < 3 || field == TransformFields::geographicLocation;
     const TransformTarget& target = fields.target;
     if (target.kind == SelectionKind::RoadGroup)
     {
         const RoadGroupPose original = RoadGroupPose::Capture(world, target.members);
         const auto& start = fields.value;
-        if (field < 3) return original.Transform(world, target.members, start.position, t.position - start.position, {}, 0);
+        if (translating) return original.Transform(world, target.members, start.position, t.position - start.position, {}, 0);
 
         // For Rz * Ry * Rx, X turns about the reference's local X, Y about Z-rotated Y, and Z about world Z.
         Vector3 axis{0, 0, 1};
         if (field == 3) axis = ObjectTransform{{}, start.rotation}.ToMeshTransform().x;
         if (field == 4) axis = {-std::sin(start.rotation.z), std::cos(start.rotation.z), 0};
-        const double delta = (value - fields.DisplayValue(field)) / degrees;
+        Vector3 difference = t.rotation - start.rotation;
+        const double delta = Component(difference, field - 3);
         return original.Transform(world, target.members, start.position, {}, axis, delta);
     }
 
@@ -290,7 +313,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
     const int i = target.point;
     RoadPoint& p = road.points[i];
 
-    if (field < 3)
+    if (translating)
     {
         for (int neighbor : {i - 1, i + 1})
         {

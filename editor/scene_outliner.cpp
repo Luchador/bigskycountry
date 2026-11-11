@@ -1,4 +1,5 @@
 #include "scene_outliner.hpp"
+#include "marker.hpp"
 #include "world_document.hpp"
 
 #include <SDL3/SDL.h>
@@ -16,6 +17,8 @@ namespace
             return "Vehicle";
         case ObjectType::Character:
             return "Character";
+        case ObjectType::Marker:
+            return "Marker";
         case ObjectType::Prop:
             return "Prop";
         default:
@@ -109,8 +112,10 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     }
     for (int i = 0; i < static_cast<int>(sizes[2]); ++i)
     {
-        add(SceneKind::Object, i, ModelLabel(world.Objects()[i]->Instance(), i),
-            ObjectLabel(world.Objects()[i]->Type()));
+        const auto& object = *world.Objects()[i];
+        const auto* marker = dynamic_cast<const Marker*>(&object);
+        add(SceneKind::Object, i, marker && !marker->Text().empty() ? marker->Text() : ModelLabel(object.Instance(), i),
+            ObjectLabel(object.Type()));
     }
     for (int i = 0; i < static_cast<int>(sizes[3]); ++i)
     {

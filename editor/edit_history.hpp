@@ -103,6 +103,7 @@ struct EditSnapshot
     std::vector<WorldDocument::ConnectedEnd> detachedEnds; // Restore these links when undoing a junction deletion.
     std::optional<IntersectionAnchor> anchorSelection;
     std::optional<bool> objectInvincible;
+    std::optional<std::string> markerText;
     std::optional<SceneHierarchy> hierarchy;
     std::set<SceneKey> outlineSelection;
     bool operator==(const EditSnapshot&) const = default;

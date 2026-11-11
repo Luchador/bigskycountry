@@ -1,4 +1,5 @@
 #include "edit_history.hpp"
+#include "marker.hpp"
 #include "road_io.hpp"
 #include "world_document.hpp"
 
@@ -279,6 +280,11 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         }
     }
     if (to.roadGroup) to.roadGroup->Restore(world);
+    if (to.markerText)
+    {
+        auto* marker = dynamic_cast<Marker*>(world.Objects().at(to.meshSelection.index).get());
+        if (!marker || !marker->SetText(*to.markerText)) return Result::Failed;
+    }
     if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
     if (to.terrainMaterial)
     {
@@ -292,7 +298,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = to.roadGroup || to.junction || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
+    const bool mapChanged = to.roadGroup || to.junction || to.markerText || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 

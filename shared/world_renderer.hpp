@@ -43,12 +43,13 @@ public:
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
     bool Begin(SDL_Renderer* renderer, const FreeCamera& camera, const WorldLighting* lights = nullptr);
-    void BeginEditorOverlay() { lightGeometry = false; }
+    void BeginUnlit() { lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
     void SubmitTerrain(const TerrainChunk& chunk);
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
+    bool SphereVisible(Vector3 center, double radius) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();

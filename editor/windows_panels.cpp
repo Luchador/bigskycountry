@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "marker.hpp"
 #include "properties_inspector.hpp"
 #include "windows_material_editor.hpp"
 #include "windows_theme.hpp"
@@ -121,7 +122,7 @@ struct WindowsPanels::Impl
     Uint32 materialDropEvent = 0;
     std::deque<MaterialDrop> materialDrops;
     std::optional<TransformFields> inspected;
-    std::deque<TransformEdit> pendingEdits;
+    std::deque<InspectorEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     WindowsMaterialEditor materialEditor;
@@ -205,10 +206,63 @@ struct WindowsPanels::Impl
     };
     std::optional<Inspector> lastInspector;
 
+    static_assert(IDC_GEO_LOCATION - IDC_LOC_X == TransformFields::geographicLocation);
+
+    void SetGeographicLayout(bool geographic)
+    {
+        const auto show = [&](int id, bool visible)
+        {
+            ShowWindow(GetDlgItem(road, id), visible ? SW_SHOWNA : SW_HIDE);
+        };
+        // Offset the existing rows in dialog units. Their client rectangles already
+        // include the current inspector scroll offset.
+        const auto shiftRow = [&](int id, int units)
+        {
+            const HWND control = GetDlgItem(road, id);
+            RECT rect{};
+            GetWindowRect(control, &rect);
+            MapWindowPoints(nullptr, road, reinterpret_cast<POINT*>(&rect), 2);
+            const int dy = DialogSize(road, 0, units).cy;
+            SetWindowPos(control, nullptr, rect.left, rect.top + (geographic ? dy : -dy), 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        };
+        for (int id : {IDC_AXIS_X, IDC_AXIS_Y, IDC_AXIS_Z}) shiftRow(id, 25);
+        for (int id : {IDC_ROTATION_LABEL, IDC_ROT_X, IDC_ROT_Y, IDC_ROT_Z}) shiftRow(id, 7);
+        for (int id : {IDC_SCALE_LABEL, IDC_SCALE_X, IDC_SCALE_Y, IDC_SCALE_Z}) shiftRow(id, 7);
+
+        // Elevation is the same world-Y field in either layout.
+        RECT height = geographic ? RECT{138,24,193,38} : RECT{108,24,149,38};
+        MapDialogRect(road, &height);
+        MoveWindow(GetDlgItem(road, IDC_LOC_Y), height.left, height.top - scroll,
+                   height.right - height.left, height.bottom - height.top, TRUE);
+        for (int id : {IDC_POSITION_LABEL, IDC_LOC_X, IDC_LOC_Z}) show(id, !geographic);
+        for (int id : {IDC_COORDINATES_LABEL, IDC_ELEVATION_LABEL, IDC_GEO_LOCATION}) show(id, geographic);
+        RedrawWindow(road, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    }
+
+    static LRESULT CALLBACK GeographicEditProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR)
+    {
+        if (msg == WM_PASTE)
+        {
+            char* text = SDL_GetClipboardText();
+            if (text && std::string_view(text).find(',') != std::string_view::npos)
+                SendMessageW(hwnd, EM_SETSEL, 0, -1);
+            SDL_free(text);
+        }
+        if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, GeographicEditProc, id);
+        return DefSubclassProc(hwnd, msg, w, l);
+    }
+
     void RestoreField(int id)
     {
+        if (id == IDC_MARKER_TEXT && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
+        {
+            SetDlgItemTextW(road, id, Wide(lastInspector->properties.markerText).c_str());
+            SendDlgItemMessageW(road, id, EM_SETMODIFY, FALSE, 0);
+            return;
+        }
         const int field = id - IDC_LOC_X;
-        if (inspected && field >= 0 && field < 9)
+        if (inspected && field >= 0 && field <= TransformFields::geographicLocation)
         {
             SetDlgItemTextW(road, id, Wide(inspected->Text(field)).c_str());
             SendDlgItemMessageW(road, id, EM_SETMODIFY, FALSE, 0);
@@ -218,13 +272,9 @@ struct WindowsPanels::Impl
     void SyncFields(const TransformFields& fields)
     {
         if (inspected && *inspected == fields) return;
-        const bool changedTarget = !inspected || inspected->target != fields.target || inspected->selectionLabel != fields.selectionLabel;
+        const bool changedTarget = !inspected || inspected->target != fields.target;
         inspected = fields;
-        if (changedTarget)
-        {
-            SetDlgItemTextW(road, IDC_TRANSFORM_TITLE, Wide("Transform - " + fields.Title()).c_str());
-        }
-        for (int field = 0; field < 9; ++field)
+        for (int field = 0; field <= TransformFields::geographicLocation; ++field)
         {
             HWND control = GetDlgItem(road, IDC_LOC_X + field);
             EnableWindow(control, fields.CanEdit(field));
@@ -234,16 +284,13 @@ struct WindowsPanels::Impl
 
     void SubmitField(HWND control, int field)
     {
-        if (inspected && inspected->CanEdit(field) && SendMessageW(control, EM_GETMODIFY, 0, 0))
+        const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
+        if (inspected && (marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
         {
-            wchar_t text[128]{};
-            GetWindowTextW(control, text, 128);
-            // Transform numbers use ASCII digits, sign, decimal point and exponent.
-            std::string input;
-            for (const wchar_t* ch = text; *ch; ++ch)
-            {
-                input += *ch <= 127 ? static_cast<char>(*ch) : '?';
-            }
+            std::wstring text(GetWindowTextLengthW(control) + 1, L'\0');
+            const int length = GetWindowTextW(control, text.data(), static_cast<int>(text.size()));
+            text.resize(length);
+            auto input = WindowsNameDialog::Utf8(text);
             pendingEdits.push_back({inspected->target, field, std::move(input)});
             SDL_Event event{};
             event.type = transformEvent;
@@ -316,7 +363,7 @@ struct WindowsPanels::Impl
         GetClientRect(road, &client);
         const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT :
-                           (page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150);
+                           (page == PropertiesPage::Intersection || page == PropertiesPage::Terrain || page == PropertiesPage::Marker ? 192 : 150);
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, height).cy - 1;
         si.nPage = static_cast<UINT>(client.bottom);
@@ -720,6 +767,9 @@ struct WindowsPanels::Impl
         {
             switch (id)
             {
+            case IDC_USE_GEOGRAPHIC:
+                SetGeographicLayout(IsDlgButtonChecked(road, id) == BST_CHECKED);
+                return;
             case IDC_TRANSFORM_SPACE:
             case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
             case IDC_REFRESH: RefreshBrowser(); return;
@@ -774,6 +824,9 @@ struct WindowsPanels::Impl
 
         const auto& properties = data.properties;
         const bool pageChanged = !lastInspector || lastInspector->properties.page != properties.page;
+        const bool marker = properties.page == PropertiesPage::Marker;
+        const bool refreshText = marker && (pageChanged || lastInspector->properties.title != properties.title ||
+                                             lastInspector->properties.markerText != properties.markerText);
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
         const bool junction = properties.page == PropertiesPage::Intersection;
@@ -790,10 +843,13 @@ struct WindowsPanels::Impl
             for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
                 ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
-            ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), properties.page == PropertiesPage::Object ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_MARKER_TEXT_LABEL), marker ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_MARKER_TEXT), marker ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
         }
+        if (refreshText) RestoreField(IDC_MARKER_TEXT);
         SetDlgItemTextW(road, IDC_ROAD_TITLE, Wide(properties.title).c_str());
         InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
         const int lanes = data.style.GetLaneCount();
@@ -1179,8 +1235,9 @@ struct WindowsPanels::Impl
             !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
             self.outline.QueueTerrainFill((msg->lParam & (1L << 30)) != 0)) return false;
 
-        const int field = GetDlgCtrlID(focus) - IDC_LOC_X;
-        if (IsChild(self.road, focus) && field >= 0 && field < 9 &&
+        const int id = GetDlgCtrlID(focus);
+        const int field = id == IDC_MARKER_TEXT ? InspectorEdit::markerText : id - IDC_LOC_X;
+        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (msg->message == WM_KEYDOWN)
@@ -1313,7 +1370,13 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
-    for (int id = IDC_LOC_X; id <= IDC_SCALE_Z; ++id)
+    if (!SetWindowSubclass(GetDlgItem(p.road, IDC_GEO_LOCATION), Impl::GeographicEditProc, 1, 0))
+    {
+        WinError("Cannot initialize geographic coordinate input");
+        return nullptr;
+    }
+    SendDlgItemMessageW(p.road, IDC_MARKER_TEXT, EM_SETLIMITTEXT, 2 * Marker::maxCharacters, 0);
+    for (int id = IDC_LOC_X; id <= IDC_GEO_LOCATION; ++id)
     {
         SendDlgItemMessageW(p.road, id, EM_SETLIMITTEXT, 120, 0);
     }
@@ -1447,10 +1510,10 @@ bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, Tran
     return true;
 }
 
-std::optional<TransformEdit> WindowsPanels::TakeTransformEdit(const SDL_Event& event)
+std::optional<InspectorEdit> WindowsPanels::TakeInspectorEdit(const SDL_Event& event)
 {
     if (event.type != impl->transformEvent || impl->pendingEdits.empty()) return {};
-    TransformEdit edit = std::move(impl->pendingEdits.front());
+    InspectorEdit edit = std::move(impl->pendingEdits.front());
     impl->pendingEdits.pop_front();
     return edit;
 }

@@ -1,5 +1,6 @@
 #include "object_io.hpp"
 #include "vehicle.hpp"
+#include "marker.hpp"
 #include "world_document.hpp"
 
 #include <cmath>
@@ -11,7 +12,7 @@
 
 namespace ObjectIO
 {
-    bool Read(std::string payload, WorldDocument& world)
+    bool Read(std::string payload, std::uint32_t version, WorldDocument& world)
     {
         std::istringstream in(std::move(payload));
         in.imbue(std::locale::classic());
@@ -38,6 +39,10 @@ namespace ObjectIO
             {
                 return SDL_SetError("Invalid vehicle acceleration in OBJS");
             }
+            std::string label;
+            if (kind == ObjectType::Marker &&
+                (version < 2 || (in >> std::ws).peek() != '"' || !(in >> std::quoted(label))))
+                return SDL_SetError("Missing marker text in OBJS");
             BSCObject* object = world.PlaceObject(kind, path, t);
             if (!object)
             {
@@ -49,6 +54,7 @@ namespace ObjectIO
             {
                 vehicle->acceleration = acceleration;
             }
+            if (auto* marker = dynamic_cast<Marker*>(object); marker && !marker->SetText(std::move(label))) return false;
             in >> std::ws;
         }
         return true;
@@ -79,6 +85,8 @@ namespace ObjectIO
                 }
                 out << ' ' << vehicle->acceleration;
             }
+            if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
+                out << ' ' << std::quoted(marker->Text());
             out << '\n';
         }
         return out.good() || SDL_SetError("Could not serialize world objects");

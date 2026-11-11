@@ -1,5 +1,6 @@
 #include "properties_inspector.hpp"
 #include "edit_history.hpp"
+#include "marker.hpp"
 #include "world_document.hpp"
 
 PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEditorState& state, bool editingDraft)
@@ -49,6 +50,12 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Object " + std::to_string(target.index + 1);
         result.detail = object.Instance().mesh->assetPath;
         result.invincible = object.invincible;
+        if (const auto* marker = dynamic_cast<const Marker*>(&object))
+        {
+            result.page = PropertiesPage::Marker;
+            result.title = "Marker " + std::to_string(target.index + 1);
+            result.markerText = marker->Text();
+        }
     }
     else
     {

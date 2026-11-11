@@ -5,6 +5,7 @@
 #include "building.hpp"
 #include "character.hpp"
 #include "prop.hpp"
+#include "marker.hpp"
 #include "vehicle.hpp"
 
 #include <SDL3/SDL.h>
@@ -283,6 +284,14 @@ BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelP
     case ObjectType::Prop:
         object = std::make_unique<Prop>();
         break;
+    case ObjectType::Marker:
+        if (modelPath != Marker::modelPath)
+        {
+            SDL_SetError("Invalid marker model path");
+            return nullptr;
+        }
+        object = std::make_unique<Marker>();
+        break;
     case ObjectType::Character:
         object = std::make_unique<Character>();
         break;
@@ -454,7 +463,7 @@ bool WorldDocument::Open(const char* documentPath)
         {
             return SDL_SetError("Duplicate or unsupported MESH section in '%s'", loaded.path.c_str());
         }
-        if (section.tag == objectTag && (sawObjects || section.version != ObjectIO::currentVersion))
+        if (section.tag == objectTag && (sawObjects || section.version < 1 || section.version > ObjectIO::currentVersion))
         {
             return SDL_SetError("Duplicate or unsupported OBJS section in '%s'", loaded.path.c_str());
         }
@@ -540,7 +549,7 @@ bool WorldDocument::Open(const char* documentPath)
         else if (section.tag == objectTag)
         {
             sawObjects = true;
-            if (!ObjectIO::Read(std::move(section.payload), loaded))
+            if (!ObjectIO::Read(std::move(section.payload), section.version, loaded))
             {
                 return false;
             }

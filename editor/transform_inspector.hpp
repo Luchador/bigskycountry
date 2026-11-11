@@ -27,17 +27,18 @@ struct TransformFields
 {
     TransformTarget target;
     ObjectTransform value;
-    std::string selectionLabel;
+    static constexpr int geographicLocation = 9; // A single latitude/longitude edit affecting X and Z.
     bool roadBound = false;
     bool CanEdit(int field) const;
     double DisplayValue(int field) const;
     std::string Text(int field) const;
-    std::string Title() const;
+    std::optional<ObjectTransform> Parse(int field, std::string_view text) const;
     bool operator==(const TransformFields&) const = default;
 };
 
-struct TransformEdit
+struct InspectorEdit
 {
+    static constexpr int markerText = TransformFields::geographicLocation + 1;
     TransformTarget target;
     int field;
     std::string text;
@@ -46,5 +47,5 @@ struct TransformEdit
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
 bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
 bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b);
-bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value);
+bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, const ObjectTransform& desired);
 std::optional<double> ParseTransformValue(std::string_view text);

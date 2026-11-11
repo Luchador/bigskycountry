@@ -6,6 +6,7 @@
 #include "application.hpp"
 #include "free_camera.hpp"
 #include "input.hpp"
+#include "marker.hpp"
 #include "world_state.hpp"
 #include "world_document.hpp"
 
@@ -194,13 +195,16 @@ namespace
                     if (object->IsLoaded()) worldRenderer.SubmitMesh(object->Instance());
                 }
 
+                if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
+                worldRenderer.BeginUnlit();
+                for (const auto& object : world.Objects())
+                {
+                    if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
+                        marker->SubmitLabel(worldRenderer, view);
+                }
+
                 if (roadTool)
                 {
-                    if (roadTool->WireframeEnabled())
-                    {
-                        worldRenderer.WireframeSubmittedGeometry();
-                    }
-                    worldRenderer.BeginEditorOverlay();
                     roadTool->SubmitGizmos(worldRenderer, world, view);
                 }
 

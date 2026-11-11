@@ -9,7 +9,8 @@ enum class ObjectType : unsigned
     Building = 1,
     Vehicle = 2,
     Prop = 3,
-    Character = 4
+    Character = 4,
+    Marker = 5
 };
 
 // One placed actor. Instances share an immutable model but have independent state.

@@ -1,4 +1,5 @@
 #include "road_editor.hpp"
+#include "marker.hpp"
 #include "editor_theme.hpp"
 #include "editor_colors.hpp"
 #include "viewport_picker.hpp"
@@ -20,6 +21,7 @@ namespace
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
 #ifndef _WIN32
+    constexpr SDL_FRect markerTextBox{12, 127, 194, 22};
     constexpr SDL_FRect propertyMaterialSlot{12, 118, 194, 54};
     constexpr float threeLanePanelHeight = 104.0f;
 
@@ -192,7 +194,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
                 {Action::LargerRadius, {174, 73, 32, 28}, "+"}};
     if (properties.page == PropertiesPage::Anchor)
         return {{Action::ToggleStopLine, {12, 73, 194, 28}, "Stop line", properties.stopLine}};
-    if (properties.page == PropertiesPage::Object)
+    if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
         return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
     if (properties.page != PropertiesPage::Road) return {};
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
@@ -310,24 +312,9 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Save(world);
         return;
     }
-    if (command == EditorCommand::CreateTestTerrain)
+    if (command == EditorCommand::CreateMarker)
     {
-        constexpr char modelPath[] = "terrain/test_grid.glb";
-        const ObjectTransform transform{creationPoint};
-        EditSnapshot before(state);
-        if (!world.PlaceTerrain(modelPath, transform))
-        {
-            status = SDL_GetError();
-            SDL_Log("%s", status.c_str());
-            return;
-        }
-        state.drawing = false;
-        state.SelectPoint(-1, -1);
-        state.meshSelection = {SelectionKind::Terrain, static_cast<int>(world.Terrain().size()) - 1};
-        EditSnapshot after(state);
-        after.addedTerrain = EditSnapshot::TerrainPlacement{modelPath, transform};
-        history.Record(-1, std::move(before), std::move(after));
-        Save(world);
+        PlaceObject(world, ObjectType::Marker, Marker::modelPath, creationPoint);
         return;
     }
     if (command == EditorCommand::Save)
@@ -460,10 +447,14 @@ void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_F
     // Respect the model's authored pivot, including meshes centered above or below it.
     double baseY = mesh->vertices[mesh->indices.front()].position.y;
     for (auto i : mesh->indices) baseY = std::min(baseY, mesh->vertices[i].position.y);
-    const ObjectTransform transform{picker.PlacementPosition(baseY)};
+    PlaceObject(world, ObjectType::Prop, path, picker.PlacementPosition(baseY));
+}
+
+void RoadEditor::PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position)
+{
     const int index = static_cast<int>(world.Objects().size());
     EditSnapshot before(state);
-    if (!world.PlaceObject(ObjectType::Prop, path, transform))
+    if (!world.PlaceObject(type, path, ObjectTransform{position}))
     {
         status = SDL_GetError();
         return;
@@ -1307,6 +1298,9 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                            properties.material.substr(properties.material.rfind('/') + 1);
         if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     }
+    if (properties.page == PropertiesPage::Marker &&
+        (!Text(renderer, 12, 111, "Marker text", muted) ||
+         !transformPanel.DrawField(renderer, markerTextBox, state.Target(), InspectorEdit::markerText, properties.markerText, true))) return false;
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
     if (properties.page == PropertiesPage::Intersection)
         return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
@@ -1403,21 +1397,10 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
 
     outliner.Update(world, state);
-    auto fields = Inspect(world, state.Target());
+    const auto fields = Inspect(world, state.Target());
     if (!DrawTransformDelta(renderer, fields.value.position)) return false;
     const auto properties = InspectProperties(world, state, EditingDraft());
 
-    if (state.outlineSelection.size() > 1)
-    {
-        fields.selectionLabel = std::to_string(state.outlineSelection.size()) + " items selected";
-    }
-    else if (!state.outlineSelection.empty())
-    {
-        const auto key = *state.outlineSelection.begin();
-        if (key.kind == SceneKind::Mesh) fields.selectionLabel = "Static mesh " + std::to_string(key.index + 1);
-        if (key.kind == SceneKind::Folder) fields.selectionLabel = "Folder";
-        if (key.kind == SceneKind::World) fields.selectionLabel = "World";
-    }
 #ifdef _WIN32
     panels.SyncOutliner(outliner);
     panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields, properties);
@@ -1435,7 +1418,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
     const int contentHeight = properties.page == PropertiesPage::Road ?
-        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) : properties.materialSlot ? 182 : 110;
+        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) : properties.materialSlot ? 182 : properties.page == PropertiesPage::Marker ? 158 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;
@@ -1815,24 +1798,38 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
     outliner.Update(world, state);
 }
 
-void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit)
+void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
-    const TransformFields fields = Inspect(world, edit.target);
-    if (!fields.CanEdit(edit.field)) return;
-    const auto number = ParseTransformValue(edit.text);
-    if (!number)
+    if (edit.field == InspectorEdit::markerText)
     {
-        status = "Enter a finite number";
+        if (edit.target.kind != SelectionKind::Object) return;
+        auto* marker = dynamic_cast<Marker*>(world.Objects().at(edit.target.index).get());
+        if (!marker || edit.text == marker->Text()) return;
+        EditSnapshot before(state), after(state);
+        before.markerText = marker->Text();
+        if (!marker->SetText(edit.text)) { status = SDL_GetError(); return; }
+        after.markerText = marker->Text();
+        history.Record(-1, std::move(before), std::move(after));
+        outliner.Invalidate();
+        Save(world);
         return;
     }
-    if (*number == fields.DisplayValue(edit.field)) return;
+    const TransformFields fields = Inspect(world, edit.target);
+    if (!fields.CanEdit(edit.field)) return;
+    const auto desired = fields.Parse(edit.field, edit.text);
+    if (!desired)
+    {
+        status = SDL_GetError();
+        return;
+    }
+    if (*desired == fields.value) return;
     const Road* road = Selected(world);
     EditSnapshot before(state, road);
     if (edit.target.kind == SelectionKind::Intersection || edit.target.kind == SelectionKind::RoadGroup)
         before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
     else if (!road) before.meshTransform = fields.value;
-    if (!ApplyTransform(world, fields, edit.field, *number))
+    if (!ApplyTransform(world, fields, edit.field, *desired))
     {
         status = SDL_GetError();
         return;
@@ -2054,7 +2051,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (outlineCommand) ApplyOutline(*outlineCommand, world);
             return EditorEvent::Handled;
         }
-        std::optional<TransformEdit> edit;
+        std::optional<InspectorEdit> edit;
         if (transformPanel.Key(window, event, edit))
         {
             if (edit) ApplyInspectorEdit(world, *edit);
@@ -2093,7 +2090,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         ApplyOutline(*cmd, world);
         return EditorEvent::Handled;
     }
-    if (const auto edit = panels.TakeTransformEdit(event))
+    if (const auto edit = panels.TakeInspectorEdit(event))
     {
         ApplyInspectorEdit(world, *edit);
         return EditorEvent::Handled;
@@ -2328,7 +2325,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     return EditorEvent::Handled;
                 }
                 const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y - outlineArea.h - transformArea.h + roadScroll};
-                for (const Button& button : Buttons(world, InspectProperties(world, state, EditingDraft())))
+                const auto properties = InspectProperties(world, state, EditingDraft());
+                if (properties.page == PropertiesPage::Marker && SDL_PointInRectFloat(&local, &markerTextBox))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::markerText, properties.markerText);
+                    return EditorEvent::Handled;
+                }
+                for (const Button& button : Buttons(world, properties))
                 {
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
                     {

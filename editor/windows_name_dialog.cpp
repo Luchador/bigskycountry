@@ -54,16 +54,21 @@ namespace WindowsNameDialog
         }
         return w;
     }
+    std::string Utf8(const std::wstring& value)
+    {
+        const int count = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                                              nullptr, 0, nullptr, nullptr);
+        std::string text(count, 0);
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), text.data(), count,
+                            nullptr, nullptr);
+        return text;
+    }
+
     std::optional<std::string> Prompt(HWND owner, const wchar_t* title, const std::string& initial)
     {
         NameEdit edit{title, Wide(initial)};
         if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_NAME), owner, NameDialog,
                             reinterpret_cast<LPARAM>(&edit)) != IDOK) return {};
-        const int count = WideCharToMultiByte(CP_UTF8, 0, edit.value.data(), static_cast<int>(edit.value.size()),
-                                              nullptr, 0, nullptr, nullptr);
-        std::string text(count, 0);
-        WideCharToMultiByte(CP_UTF8, 0, edit.value.data(), static_cast<int>(edit.value.size()), text.data(), count,
-                            nullptr, nullptr);
-        return text;
+        return Utf8(edit.value);
     }
 }

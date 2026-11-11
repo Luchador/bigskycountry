@@ -54,7 +54,7 @@ In C++, load the asset with `world.models.Load("props/barn.glb")`. On success, a
 
 ### Placed objects
 
-`BSCObject` holds a transform, a shared mesh, health, and invincibility. `Building`, `Vehicle`, `Prop`, and `Character` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
+`BSCObject` holds a transform, a shared mesh, health, and invincibility. `Building`, `Vehicle`, `Prop`, `Character`, and `Marker` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
 
 Place an object from C++ using a model path relative to `assets/models`. This example places a barn from `assets/models/buildings/barn.glb`.
 
@@ -71,13 +71,19 @@ if (!barn)
 
 The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
 
-The optional `OBJS` version 1 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, and 4 for a character. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
+The optional `OBJS` version 2 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, and 5 for a marker. A marker record ends with its quoted UTF-8 label. Version 1 object sections also load. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
+
+### Place markers
+
+Right-click in the 3D viewport and choose **Create → Marker**. The editor places `assets/models/objects/marker/marker.glb` at the picked position and selects it. In the inspector, enter a place name in **Marker text** and press **Enter**. An empty name hides the lettering. The Outliner shows the name and the world saves it with the marker. Placement, text edits, and deletion support Undo and Redo.
+
+In the game and the editor, the lettering faces the active camera around the world Y axis. Its lower edge is 50 game meters above the transformed mesh. The default capital letter height is 100 game meters.
 
 ### Terrain chunks
 
 Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.
 
-In the 3D editor, right-click and choose **Create → Test Terrain** to center a flat green chunk at the picked world position. The model at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Its 9 × 9 cells cover 45 × 45 m and form 162 upward-facing triangles. Each placement has its own position and rotation in the Transform panel. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
+The test grid at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Each placement has its own position and rotation in the Transform panel.
 
 Drag a material from the Content Browser’s **Textures** tab onto a chunk in the 3D viewport. The assignment belongs to that placement, saves with the world, and supports **Ctrl+Z** and **Ctrl+Y**. The texture repeats every 4 m in the chunk’s local coordinates.
 
@@ -111,7 +117,11 @@ With a folder selected, **Delete** moves its contents to its parent and removes 
 
 ### Transform panel
 
-The Transform panel sits above a selection-sensitive properties inspector. Roads and control points show the road settings. Terrain chunks show their mesh and material slot, and objects show their mesh and Invincible setting. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. The title identifies the selection. Locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
+The Transform panel sits above a selection-sensitive properties inspector. Roads and control points show the road settings. Terrain chunks show their mesh and material slot, and objects show their mesh and Invincible setting. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. With **Use Geographic Coordinates** unchecked, locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
+
+Check **Use Geographic Coordinates** to display the selection’s latitude and longitude. Paste a Google Maps pair such as `35.0851266266639, -106.65282545913769` into **Latitude, longitude** and press **Enter**. Both horizontal axes update in one undo step. The separate elevation field uses game meters.
+
+The world origin is **40° N, 98.5° W**. The editor projects WGS 84 coordinates using ellipsoidal Mercator with true scale at 40° N, subtracts the projected origin, then divides east and north distances by six. +X points east and +Z points north. This keeps constant-latitude lines horizontal and preserves local angles. Distance scale varies with latitude. The checkbox changes the coordinate display and input. World files continue to store game meters.
 
 Type a value in one axis field and press **Enter** to apply it. **Esc** or leaving the field discards uncommitted text. Each change saves the world and supports **Ctrl+Z** and **Ctrl+Y**. The other axes keep their full precision.
 

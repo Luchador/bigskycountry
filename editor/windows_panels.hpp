@@ -38,7 +38,7 @@ public:
     bool Command(const SDL_Event& event, RoadAction& action) const;
     bool HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings);
     SDL_Keymod TakePressModifiers();
-    std::optional<TransformEdit> TakeTransformEdit(const SDL_Event& event);
+    std::optional<InspectorEdit> TakeInspectorEdit(const SDL_Event& event);
     void SyncOutliner(const SceneOutliner& model);
     std::optional<OutlineCommand> TakeOutlineCommand(const SDL_Event& event);
     void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields, const PropertiesInspector& properties);

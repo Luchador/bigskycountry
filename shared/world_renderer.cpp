@@ -55,6 +55,15 @@ void WorldRenderer::SubmitTriangle(const std::array<Vector3, 3>& positions, cons
     }
 }
 
+bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
+{
+    const Vector3 p = camera->WorldToView(center);
+    // Clip-space side planes expressed in view meters, expanded by the sphere radius.
+    return p.z + radius >= worldNearDepth &&
+           std::abs(p.x * scaleX) <= p.z + radius * std::hypot(1.0, scaleX) &&
+           std::abs(p.y * scaleY) <= p.z + radius * std::hypot(1.0, scaleY);
+}
+
 void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
 {
     if (!instance.mesh)

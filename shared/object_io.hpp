@@ -8,7 +8,7 @@ class WorldDocument;
 
 namespace ObjectIO
 {
-    inline constexpr std::uint32_t currentVersion = 1;
-    bool Read(std::string payload, WorldDocument& world);
+    inline constexpr std::uint32_t currentVersion = 2;
+    bool Read(std::string payload, std::uint32_t version, WorldDocument& world);
     bool Write(std::ostream& out, const WorldDocument& world);
 }

@@ -1,6 +1,10 @@
 /build/
-# Track the small terrain fixture alongside its editor command.
+# Track built-in assets needed by the editor and game.
 /assets/*
+!/assets/fonts/
+/assets/fonts/*
+!/assets/fonts/OpenSans-Semibold.ttf
+!/assets/fonts/OpenSans-LICENSE.txt
 !/assets/models/
 /assets/models/*
 !/assets/models/terrain/

@@ -39,7 +39,18 @@ FetchContent_Declare(cjson
     SOURCE_SUBDIR header_only)
 FetchContent_MakeAvailable(cjson)
 
+# Triangulate TrueType glyphs for world-space marker lettering.
+FetchContent_Declare(ttf2mesh
+    GIT_REPOSITORY https://github.com/fetisov/ttf2mesh.git
+    GIT_TAG b767f3e1026c979c6f2d6099576f206702065234
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR library_only)
+FetchContent_MakeAvailable(ttf2mesh)
+set_source_files_properties("${ttf2mesh_SOURCE_DIR}/ttf2mesh.c" PROPERTIES COMPILE_DEFINITIONS "TTF_NO_FILESYSTEM;TTF_NO_SIGNAL_H")
+
 add_library(BigSkyApplication STATIC
+    "${ttf2mesh_SOURCE_DIR}/ttf2mesh.c"
+    shared/marker.cpp
     "${cjson_SOURCE_DIR}/cJSON.c"
     shared/asset_paths.cpp
     shared/material.cpp
@@ -75,13 +86,14 @@ add_library(BigSkyApplication STATIC
     shared/application.cpp
     shared/free_camera.cpp
     shared/input.cpp
+    shared/geographic_coordinates.cpp
     shared/math.cpp
     shared/texture_loader.cpp
     shared/world_state.cpp
 )
 set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
-target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
-target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
+target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
+target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 include(cmake/shaders.cmake)
 
@@ -173,6 +185,8 @@ set_property(SOURCE shared/asset_paths.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     "BIGSKY_COOKED_RELATIVE=u8\"$<PATH:RELATIVE_PATH,${cooked_root},$<TARGET_FILE_DIR:BigSkyCountry>>/\"")
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${ttf2mesh_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/ttf2mesh.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${asset_root}/fonts/OpenSans-LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/OpenSans.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cjson_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cJSON.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bcdec_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/bcdec.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"

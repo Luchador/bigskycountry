@@ -5,12 +5,12 @@
 class WorldDocument;
 struct RoadEditorState;
 
-enum class PropertiesPage { Road, Intersection, Anchor, Terrain, Object, Other };
+enum class PropertiesPage { Road, Intersection, Anchor, Terrain, Object, Marker, Other };
 
 struct PropertiesInspector
 {
     PropertiesPage page = PropertiesPage::Road;
-    std::string title, detail, material;
+    std::string title, detail, material, markerText;
     bool materialSlot = false, invincible = false;
     bool stopLine = false;
     double radius = 0;
