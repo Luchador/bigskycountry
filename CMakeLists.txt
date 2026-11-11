@@ -47,6 +47,7 @@ add_library(BigSkyApplication STATIC
     shared/mesh.cpp
     shared/mesh_import.cpp
     shared/world_renderer.cpp
+    shared/intersection.cpp
     shared/road.cpp
     shared/road_stripes.cpp
     shared/road_io.cpp

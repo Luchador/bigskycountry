@@ -9,7 +9,6 @@ namespace
     constexpr double stripeWidth = 0.16;
     constexpr double yellowGap = 0.16; // Clear space between the two yellow stripes.
     constexpr double yellowPairOffset = (yellowGap + stripeWidth) * 0.5;
-    constexpr double stripeHeight = 0.02;
     constexpr double dashLength = 3.0;
     constexpr double gapLength = RoadStyle::dashPeriod - dashLength;
 
@@ -61,6 +60,7 @@ namespace
 
     struct RoadPath
     {
+        std::array<std::optional<RoadMouthFrame>, 2> caps;
         std::vector<Span> spans;
         std::vector<double> distances{0.0}; // Cumulative 3D centerline length at each station.
         std::vector<Vector3> curveLeft; // One horizontal cross-section axis per Bézier station.
@@ -78,6 +78,7 @@ namespace
         Vector3 center, lateral;
         double distance;
         double bevelSlope = 0.0; // Signed advance along the join per meter from the centerline.
+        Vector3 up{0, 1, 0};
         Vector3 At(double offset) const { return center + lateral * offset; }
     };
 
@@ -86,12 +87,23 @@ namespace
     void VisitOffsetStations(const RoadPath& path, double offset, Visit visit)
     {
         const auto& spans = path.spans;
+        const auto endSection = [&](int end, CrossSection section)
+        {
+            if (const auto& cap = path.caps[end])
+            {
+                section.lateral = cap->left;
+                section.up = cap->up;
+            }
+            visit(section);
+        };
         if (!path.curveLeft.empty())
         {
             // A sampled spline is smooth here. Sweeping both sides from its tangent
             // gives one cross section at this elevation for every part of the road.
-            visit(CrossSection{spans.front().start, path.curveLeft.front(), 0.0});
-            for (std::size_t i = 0; i < spans.size(); ++i) visit(CrossSection{spans[i].end, path.curveLeft[i + 1], path.distances[i + 1]});
+            endSection(0, {spans.front().start, path.curveLeft.front(), 0.0});
+            for (std::size_t i = 0; i + 1 < spans.size(); ++i)
+                visit(CrossSection{spans[i].end, path.curveLeft[i + 1], path.distances[i + 1]});
+            endSection(1, {spans.back().end, path.curveLeft.back(), path.distances.back()});
             return;
         }
 
@@ -108,7 +120,7 @@ namespace
             trim[i] = divisor > 0.0 ? offset * turn / divisor : -1.0;
         }
 
-        visit(CrossSection{spans.front().start, spans.front().left, 0.0});
+        endSection(0, {spans.front().start, spans.front().left, 0.0});
 
         for (std::size_t i = 1; i < spans.size(); ++i)
         {
@@ -134,11 +146,12 @@ namespace
             }
         }
 
-        visit(CrossSection{spans.back().end, spans.back().left, path.distances.back()});
+        endSection(1, {spans.back().end, spans.back().left, path.distances.back()});
     }
 
     struct MarkingPath
     {
+        std::array<std::optional<RoadMouthFrame>, 2> caps;
         std::vector<Vector3> points;
         std::vector<Vector3> curveLeft;
 
@@ -152,6 +165,7 @@ namespace
     MarkingPath OffsetPath(const RoadPath& path, double offset)
     {
         MarkingPath marking;
+        marking.caps = path.caps;
         VisitOffsetStations(path, offset, [&](const CrossSection& station)
         {
             marking.Append(station.center, station.lateral, offset, !path.curveLeft.empty());
@@ -208,14 +222,13 @@ namespace
     void PaintCarriagewayEdges(Road& road, int side, CrossSection a, CrossSection b,
                                double travelStart, double travelEnd)
     {
-        Vector3 up{0, 1, 0};
         const Vector3 delta = b.center - a.center;
         if (delta.x == 0 && delta.z == 0 && delta.y != 0)
         {
-            up = Math::Cross(Math::Normalize(b.lateral) * side, {0, delta.y > 0 ? 1.0 : -1.0, 0});
+            a.up = b.up = Math::Cross(Math::Normalize(b.lateral) * side, {0, delta.y > 0 ? 1.0 : -1.0, 0});
         }
-        a.center = a.center + up * stripeHeight;
-        b.center = b.center + up * stripeHeight;
+        a.center = a.center + a.up * RoadStyle::stripeHeight;
+        b.center = b.center + b.up * RoadStyle::stripeHeight;
         VisitBand(side, a, b, travelStart, travelStart + stripeWidth, BandPosition,
                   [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
         VisitBand(side, a, b, travelEnd - stripeWidth, travelEnd, BandPosition,
@@ -228,9 +241,6 @@ namespace
     // Adjacent spans then meet at the same elevation along the entire join.
     void BuildRoadSide(Road& road, const RoadPath& path, int side, bool hasGradedBend)
     {
-        constexpr SDL_FColor red{1, 0, 0, 1}, black{0, 0, 0, 1};
-        constexpr SDL_FColor apron{0.69f, 0.69f, 0.69f, 1}, riser{0.56f, 0.56f, 0.56f, 1}, top{0.78f, 0.78f, 0.78f, 1};
-
         const RoadEdge edge = road.style.edge;
         const int faces = edge == RoadEdge::Curb ? 3 : (edge == RoadEdge::Transition ? 1 : 0);
         const double pavement = side < 0 ? road.style.RightWidth() : road.style.LeftWidth();
@@ -287,7 +297,7 @@ namespace
 
             if (edge == RoadEdge::Curb)
             {
-                profile[2] = profile[1] + Vector3{0, RoadStyle::curbHeight, 0};
+                profile[2] = profile[1] + current.up * RoadStyle::curbHeight;
                 profile[3] = profile[2] + current.lateral * RoadStyle::curbTopWidth;
             }
 
@@ -323,13 +333,13 @@ namespace
 
                 if (edge == RoadEdge::Transition)
                 {
-                    AddEdgeFace(road, side, previous, profile, 0, red, black);
+                    AddEdgeFace(road, side, previous, profile, 0, RoadEdgeColor::transitionInner, RoadEdgeColor::transitionOuter);
                 }
                 else if (edge == RoadEdge::Curb)
                 {
-                    AddEdgeFace(road, side, previous, profile, 0, apron, apron);
-                    AddEdgeFace(road, side, previous, profile, 1, riser, riser);
-                    AddEdgeFace(road, side, previous, profile, 2, top, top);
+                    AddEdgeFace(road, side, previous, profile, 0, RoadEdgeColor::apron, RoadEdgeColor::apron);
+                    AddEdgeFace(road, side, previous, profile, 1, RoadEdgeColor::riser, RoadEdgeColor::riser);
+                    AddEdgeFace(road, side, previous, profile, 2, RoadEdgeColor::top, RoadEdgeColor::top);
                 }
             }
 
@@ -344,7 +354,11 @@ namespace
         }
 
         AppendBoundary(road, side, boundary);
-        for (const auto& divider : dividers) PaintDashes(divider, road.whiteStripes);
+        for (auto& divider : dividers)
+        {
+            divider.caps = path.caps;
+            PaintDashes(divider, road.whiteStripes);
+        }
     }
 
     // lo and hi are signed distances perpendicular to each span, in meters.
@@ -356,13 +370,17 @@ namespace
 
         VisitSpans(path.points, initialLeft, [&](const Span& span, std::size_t i)
         {
-            const Vector3 leftA = path.curveLeft.empty() ? span.left : path.curveLeft[i - 1];
-            const Vector3 leftB = path.curveLeft.empty() ? span.left : path.curveLeft[i];
+            const auto& startCap = path.caps.front();
+            const auto& endCap = path.caps.back();
+            const bool atStart = i == 1 && startCap.has_value();
+            const bool atEnd = i + 1 == path.points.size() && endCap.has_value();
+            const Vector3 leftA = atStart ? startCap->left : (path.curveLeft.empty() ? span.left : path.curveLeft[i - 1]);
+            const Vector3 leftB = atEnd ? endCap->left : (path.curveLeft.empty() ? span.left : path.curveLeft[i]);
             // A vertical stripe needs a horizontal depth offset from its pavement.
             const Vector3 up = span.length > 0.0 ? Vector3{0, 1, 0}
                 : Math::Cross(leftA, {0, span.end.y > span.start.y ? 1.0 : -1.0, 0});
-            const Vector3 a = span.start + up * stripeHeight;
-            const Vector3 b = span.end + up * stripeHeight;
+            const Vector3 a = span.start + (atStart ? startCap->up : up) * RoadStyle::stripeHeight;
+            const Vector3 b = span.end + (atEnd ? endCap->up : up) * RoadStyle::stripeHeight;
             const Vector3 aLo = a + leftA * lo, aHi = a + leftA * hi;
             const Vector3 bLo = b + leftB * lo, bHi = b + leftB * hi;
 
@@ -402,6 +420,13 @@ namespace
         if (!path.curveLeft.empty()) dash.curveLeft.push_back(path.curveLeft.front());
 
         Vector3 dashLeft = defaultLeft;
+        const auto emitDash = [&]
+        {
+            if (dash.points.size() < 2) return;
+            dash.caps[0] = dash.points.front() == path.points.front() ? path.caps[0] : std::nullopt;
+            dash.caps[1] = dash.points.back() == path.points.back() ? path.caps[1] : std::nullopt;
+            PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
+        };
         VisitSpans(path.points, {}, [&](const Span& span, std::size_t i)
         {
             const Vector3 start = span.start;
@@ -444,7 +469,7 @@ namespace
                 if (painting)
                 {
                     addPoint(boundary, fraction);
-                    PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
+                    emitDash();
                     dash.points.clear();
                     dash.curveLeft.clear();
                 }
@@ -458,7 +483,7 @@ namespace
                 remaining = painting ? dashLength : gapLength;
             }
         });
-        PaintStrip(dash, -stripeWidth * 0.5, stripeWidth * 0.5, mesh, dashLeft);
+        emitDash();
     }
 
     void PaintDoubleYellow(const RoadPath& path, double boundary, std::vector<Road::Triangle>& mesh)
@@ -471,9 +496,11 @@ namespace
     }
 }
 
-void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents)
+void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
+                        const std::array<std::optional<RoadMouthFrame>, 2>& caps)
 {
     RoadPath path;
+    path.caps = caps;
     VisitSpans(samples, {}, [&](const Span& span, std::size_t end)
     {
         if (!tangents.empty())

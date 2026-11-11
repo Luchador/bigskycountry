@@ -144,6 +144,17 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     }
 }
 
+const RoadGeometry* RoadEditor::SelectedGeometry(const WorldDocument& world) const
+{
+    if (state.meshSelection.kind == SelectionKind::Intersection)
+    {
+        const auto& surfaces = world.IntersectionSurfaces();
+        const auto it = surfaces.find(state.meshSelection.index);
+        if (it != surfaces.end()) return &it->second.geometry;
+    }
+    return Selected(world);
+}
+
 const Road* RoadEditor::Selected(const WorldDocument& world) const
 {
     return state.selected >= 0 ? &world.roads[state.selected] : nullptr;
@@ -243,6 +254,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
 
 bool RoadEditor::Save(WorldDocument& world)
 {
+    world.UpdateIntersections();
     saveFailed = !world.Save();
     if (saveFailed)
     {
@@ -357,6 +369,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 {
     auto& picker = rightClick->picker;
     for (const Road& road : world.roads) picker.TestRoad(road);
+    for (const auto& [id, junction] : world.IntersectionSurfaces()) picker.TestRoad(junction.geometry);
     for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
     creationPoint = picker.PlacementPosition();
     if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene))
@@ -443,6 +456,7 @@ void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_F
     }
     ViewportPicker picker(camera, scene, pointer);
     for (const Road& road : world.roads) picker.TestRoad(road);
+    for (const auto& [id, junction] : world.IntersectionSurfaces()) picker.TestRoad(junction.geometry);
     for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
 
     // Respect the model's authored pivot, including meshes centered above or below it.
@@ -757,6 +771,15 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
             return HitTriangle(pos, {t[0].position, t[1].position, t[2].position});
         });
     };
+    for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
+    {
+        const auto& geometry = it->second.geometry;
+        if (hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles))
+        {
+            state.SelectRows({{SceneKind::Intersection, it->first}});
+            return;
+        }
+    }
     // Later roads are drawn last, so pick them first wherever pavement overlaps.
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
@@ -987,13 +1010,18 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
                 return false;
             }
         }
+        if (layer == RoadLayer::Pavement)
+        {
+            for (const auto& [id, junction] : world.IntersectionSurfaces())
+                if (!DrawPlanRoad(renderer, junction.geometry, center, scale, canvas, layer)) return false;
+        }
         if (preview && !DrawPlanRoad(renderer, *preview, center, scale, canvas, layer))
         {
             return false;
         }
     }
 
-    if (const Road* road = Selected(world))
+    if (const RoadGeometry* road = SelectedGeometry(world))
     {
         if (!DrawPlanRoad(renderer, *road, center, scale, canvas, RoadLayer::Outline))
         {

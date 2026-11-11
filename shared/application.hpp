@@ -4,7 +4,7 @@ struct SDL_Window;
 struct SDL_Renderer;
 union SDL_Event;
 class WorldDocument;
-struct Road;
+struct RoadGeometry;
 class FreeCamera;
 class MeshAssets;
 class WorldRenderer;
@@ -26,7 +26,7 @@ public:
     virtual bool Initialize(SDL_Window* window, MeshAssets& models) = 0;
     virtual void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const = 0;
     virtual bool DraggingGizmo() const = 0;
-    virtual const Road* Selected(const WorldDocument& world) const = 0;
+    virtual const RoadGeometry* SelectedGeometry(const WorldDocument& world) const = 0;
     virtual bool WireframeEnabled() const { return false; }
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;

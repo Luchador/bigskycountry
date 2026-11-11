@@ -32,7 +32,8 @@ public:
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
-    const Road* Selected(const WorldDocument& world) const override;
+    const Road* Selected(const WorldDocument& world) const;
+    const RoadGeometry* SelectedGeometry(const WorldDocument& world) const override;
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;

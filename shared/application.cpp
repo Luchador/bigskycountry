@@ -171,12 +171,14 @@ namespace
                     return false;
                 }
 
-                const Road* selected = roadTool ? roadTool->Selected(world) : nullptr;
+                const RoadGeometry* selected = roadTool ? roadTool->SelectedGeometry(world) : nullptr;
 
                 for (const Road& road : world.roads)
                 {
-                    worldRenderer.SubmitRoad(road, &road == selected);
+                    worldRenderer.SubmitRoad(road, road.style.material, &road == selected);
                 }
+                for (const auto& [id, junction] : world.IntersectionSurfaces())
+                    worldRenderer.SubmitRoad(junction.geometry, world.intersections.at(id).material, &junction.geometry == selected);
 
                 for (const auto& instance : world.meshes) worldRenderer.SubmitMesh(instance);
                 for (const auto& chunk : world.Terrain()) worldRenderer.SubmitTerrain(*chunk);

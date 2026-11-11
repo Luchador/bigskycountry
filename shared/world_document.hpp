@@ -22,6 +22,8 @@ public:
     MeshAssets models;
     std::vector<Road> roads;
     std::map<int, Intersection> intersections; // Stable positive IDs, also used by the outliner.
+    void UpdateIntersections();
+    const auto& IntersectionSurfaces() const { return junctions; }
     int CreateIntersection(Vector3 position); // Returns 0 on failure.
     struct ConnectedEnd
     {
@@ -68,6 +70,7 @@ public:
     bool Save() const;
 
 private:
+    std::map<int, IntersectionSurface> junctions; // Derived from the current road ends; never serialized.
     bool ValidConnections() const;
     struct Section
     {

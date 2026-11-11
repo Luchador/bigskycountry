@@ -6,7 +6,7 @@
 #include <SDL3/SDL.h>
 
 class FreeCamera;
-struct Road;
+struct RoadGeometry;
 class TerrainChunk;
 inline constexpr double worldNearDepth = 0.1;
 
@@ -48,7 +48,7 @@ public:
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
     void SubmitTerrain(const TerrainChunk& chunk);
-    void SubmitRoad(const Road& road, bool selected);
+    void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();

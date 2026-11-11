@@ -71,7 +71,7 @@ Vector3 ViewportPicker::PlacementPosition(double modelBaseY) const
     return eye + Math::Normalize(ray) * fallbackDistance;
 }
 
-bool ViewportPicker::TestRoad(const Road& road)
+bool ViewportPicker::TestRoad(const RoadGeometry& road)
 {
     const double previous = depth;
     for (const auto* surface : {&road.whiteStripes, &road.yellowStripes})

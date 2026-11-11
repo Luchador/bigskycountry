@@ -290,6 +290,13 @@ bool Road::SetPose(Vector3 position, Vector3 angles)
     return true;
 }
 
+void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value)
+{
+    if (mouths == value) return;
+    mouths = value;
+    Rebuild();
+}
+
 void Road::Rebuild()
 {
     centerline.clear();
@@ -334,21 +341,80 @@ void Road::Rebuild()
     // Sweep and wind the cross section in the road's own frame, including curbs and paint.
     const bool rotated = rotation != Vector3{};
     const MeshTransform frame = ObjectTransform{points.front().position, rotation}.ToMeshTransform();
+    std::array<std::optional<RoadMouthFrame>, 2> caps{};
+    std::vector<Vector3> trimmed;
+    const std::vector<Vector3>* surfacePath = &centerline;
+    std::size_t first = 0, last = centerline.size() - 1;
+    for (int end = 0; end < 2; ++end)
+    {
+        const auto& mouth = mouths[end];
+        const auto& point = end == 0 ? points.front() : points.back();
+        if (!mouth || !point.anchor || point.position != mouth->anchor) continue;
+        // Only trim the incident end. A later section of the same road may loop back.
+        // The whole cross section must clear the cut. On an oblique approach the
+        // inside shoulder can still cross the junction after the centerline has left it.
+        const double width = std::max(style.LeftWidth(), style.RightWidth()) + style.EdgeWidth();
+        const Vector3 outward = frame.Unrotate(mouth->outward);
+        const auto clearsMouth = [&](std::size_t i)
+        {
+            const double run = Math::Dot(centerline[i] - mouth->center, mouth->outward);
+            if (run <= 1e-7) return false;
+            const auto leftAxis = [&](Vector3 direction)
+            {
+                const Vector3 local = frame.Unrotate(direction);
+                return Math::Normalize(Vector3{-local.z, 0, local.x});
+            };
+            double extent;
+            if (!tangents.empty())
+            {
+                extent = std::abs(Math::Dot(leftAxis(tangents[i]), outward));
+            }
+            else
+            {
+                // Bound both the bevel and the miter at a straight-road control point.
+                const Vector3 a = leftAxis(i == 0 ? centerline[1] - centerline[0] : centerline[i] - centerline[i - 1]);
+                const Vector3 b = i + 1 < centerline.size() ? leftAxis(centerline[i + 1] - centerline[i]) : a;
+                extent = std::max(std::abs(Math::Dot(a, outward)), std::abs(Math::Dot(b, outward)));
+                const double divisor = 1.0 + Math::Dot(a, b);
+                if (divisor > 1e-6) extent = std::max(extent, std::abs(Math::Dot(a + b, outward)) / divisor);
+            }
+            const double height = style.edge == RoadEdge::Curb ? RoadStyle::curbHeight : RoadStyle::stripeHeight;
+            return run > width * extent + std::abs(outward.y) * height + 1e-7;
+        };
+        if (end == 0)
+        {
+            while (first < last && !clearsMouth(first + 1)) ++first;
+        }
+        else
+        {
+            while (last > first && !clearsMouth(last - 1)) --last;
+        }
+        if (first == last) return; // No remaining cross section clears the junction mouth.
+        const Vector3 heading = mouth->outward * (end == 0 ? 1.0 : -1.0);
+        const Vector3 left = Math::Cross(heading, {0,1,0});
+        caps[end] = RoadMouthFrame{frame.Unrotate(left), frame.Unrotate({0,1,0})};
+    }
+    if (caps[0] || caps[1])
+    {
+        trimmed.assign(centerline.begin() + first, centerline.begin() + last + 1);
+        if (!tangents.empty())
+            tangents = std::vector<Vector3>(tangents.begin() + first, tangents.begin() + last + 1);
+        if (caps[0]) trimmed.front() = mouths[0]->center;
+        if (caps[1]) trimmed.back() = mouths[1]->center;
+        if (trimmed.size() == 2 && caps[0] && caps[1] &&
+            (Math::Dot(trimmed.back() - trimmed.front(), mouths[0]->outward) <= 0 ||
+             Math::Dot(trimmed.front() - trimmed.back(), mouths[1]->outward) <= 0)) return;
+        surfacePath = &trimmed;
+    }
     if (rotated)
     {
         std::vector<Vector3> local;
-        local.reserve(centerline.size());
-        for (Vector3 sample : centerline)
-        {
-            local.push_back(frame.Unrotate(sample - frame.origin));
-        }
+        local.reserve(surfacePath->size());
+        for (Vector3 sample : *surfacePath) local.push_back(frame.Unrotate(sample - frame.origin));
         for (Vector3& tangent : tangents) tangent = frame.Unrotate(tangent);
-        BuildSurface(local, tangents);
+        BuildSurface(local, tangents, caps);
     }
-    else
-    {
-        BuildSurface(centerline, tangents);
-    }
+    else BuildSurface(*surfacePath, tangents, caps);
 
     // Bevels can turn either way. Give all top surfaces an upward normal once,
     // when the road changes. Vertical curb risers already face the pavement.

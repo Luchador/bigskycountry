@@ -13,3 +13,27 @@ struct Intersection
 
     bool operator==(const Intersection&) const = default;
 };
+
+// Distances are measured looking out from the junction, regardless of road point order.
+struct IntersectionApproach
+{
+    double left, right; // Pavement including shoulders and any median.
+    RoadEdge edge;
+    bool operator==(const IntersectionApproach&) const = default;
+};
+
+struct IntersectionLayout
+{
+    Vector3 center;
+    double radius;
+    std::array<std::optional<IntersectionApproach>, IntersectionAnchor::sideCount> arms{};
+    bool operator==(const IntersectionLayout&) const = default;
+};
+
+struct IntersectionSurface
+{
+    IntersectionLayout layout{};
+    std::array<double, IntersectionAnchor::sideCount> setbacks{};
+    RoadGeometry geometry;
+    void Build(const IntersectionLayout& input);
+};

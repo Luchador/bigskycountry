@@ -89,6 +89,8 @@ In the 3D viewport, right-click and choose **Create → Create Intersection**. T
 
 Each intersection has four permanent control-point markers, 10 m from its center along the X and Z axes at the intersection elevation. In the 3D or top-down view, select a road and its first or last point, **Shift + left-click** a free anchor, then press **F**. Both markers turn amber before you connect. The editor adds one segment to that end of the road and saves the connection. **Esc** cancels the pending pairing. Each anchor accepts one road end. Moving the intersection carries its attached ends. Moving a road end away, extending past it, or deleting its intersection frees the connection. These edits support undo and redo.
 
+Connecting three distinct roads generates a flat T-junction at the intersection elevation. Connecting the fourth side opens it into a four-way crossing. The surface uses the intersection’s pavement material and corner radius. It matches each approach’s shoulders, curbs and transition strips. Lane markings and divided-road medians end where the road meets the junction. Wide approaches and large corner radii can move that seam beyond the 10 m anchor. Disconnecting roads updates the surface immediately. With fewer than three roads, the four anchor markers remain available for editing.
+
 ### Scene outliner
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or terrain chunk in the list makes its transform available for editing.

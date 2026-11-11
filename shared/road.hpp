@@ -26,6 +26,14 @@ enum class RoadEdge
     Curb = 2 
 };
 
+namespace RoadEdgeColor
+{
+    inline constexpr SDL_FColor transitionInner{1, 0, 0, 1}, transitionOuter{0, 0, 0, 1};
+    inline constexpr SDL_FColor apron{0.69f, 0.69f, 0.69f, 1};
+    inline constexpr SDL_FColor riser{0.56f, 0.56f, 0.56f, 1};
+    inline constexpr SDL_FColor top{0.78f, 0.78f, 0.78f, 1};
+}
+
 enum class RoadMedian { Concrete, Grass };
 
 struct RoadStyle
@@ -35,6 +43,7 @@ struct RoadStyle
     static constexpr double shoulderWidth = 5.0;
     static constexpr double innerShoulderWidth = 1.0;
     static constexpr double minSeparation = 2.0 * innerShoulderWidth;
+    static constexpr double stripeHeight = 0.02; // Road paint offset above the pavement.
     static constexpr double stripWidth = 0.40;
     static constexpr double curbHeight = 0.15;
     static constexpr double curbTopWidth = 0.15;
@@ -89,7 +98,7 @@ struct RoadPoint
     std::optional<IntersectionAnchor> anchor; // Only endpoints can be attached.
 };
 
-struct Road
+struct RoadGeometry
 {
     using Triangle = std::array<Vector3, 3>;
     struct PavementVertex
@@ -103,14 +112,31 @@ struct Road
         SDL_FColor color;
     };
 
-    RoadStyle style;
-    Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
-    std::vector<RoadPoint> points;
     std::vector<std::array<PavementVertex, 3>> pavementTriangles;
     std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
+};
+
+struct RoadMouth
+{
+    Vector3 anchor, center, outward;
+    bool operator==(const RoadMouth&) const = default;
+};
+
+struct RoadMouthFrame
+{
+    Vector3 left, up; // Junction cross-section axes in the road mesh frame.
+};
+
+struct Road : RoadGeometry
+{
+    RoadStyle style;
+    Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
+    std::vector<RoadPoint> points;
+    // Generated cut lines at active intersections. The authored spline stays editable all the way to the anchor.
+    void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths);
 
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
@@ -124,7 +150,9 @@ struct Road
     void Rebuild();
 
 private:
-    void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents);
+    std::array<std::optional<RoadMouth>, 2> mouths;
+    void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
+                      const std::array<std::optional<RoadMouthFrame>, 2>& caps);
     std::vector<Vector3> centerline;
     std::vector<std::size_t> pointSamples; // Centerline index of each control point.
 };

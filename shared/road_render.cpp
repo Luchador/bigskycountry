@@ -18,7 +18,7 @@ namespace
     using ViewGeometry::SidePlanes;
 
     template<typename ViewTransform, typename Emit>
-    void AppendOutline(const Road& road, ViewTransform transform, double focal, SDL_Rect viewport, Emit emit)
+    void AppendOutline(const RoadGeometry& road, ViewTransform transform, double focal, SDL_Rect viewport, Emit emit)
     {
         if (road.outline.empty())
         {
@@ -92,17 +92,17 @@ namespace
         }, focal, viewport);
     }
 
-    using EdgePolygon = ViewGeometry::VertexPolygon<Road::EdgeVertex>;
+    using EdgePolygon = ViewGeometry::VertexPolygon<RoadGeometry::EdgeVertex>;
 
     EdgePolygon ClipEdge(const EdgePolygon& input, Vector3 normal, double offset)
     {
-        return ViewGeometry::ClipPolygon(input, [&](const Road::EdgeVertex& v)
+        return ViewGeometry::ClipPolygon(input, [&](const RoadGeometry::EdgeVertex& v)
         {
             return Math::Dot(v.position, normal) - offset;
-        }, [](const Road::EdgeVertex& a, const Road::EdgeVertex& b, double t)
+        }, [](const RoadGeometry::EdgeVertex& a, const RoadGeometry::EdgeVertex& b, double t)
         {
             const float f = static_cast<float>(t);
-            return Road::EdgeVertex{a.position + (b.position - a.position) * t,
+            return RoadGeometry::EdgeVertex{a.position + (b.position - a.position) * t,
                                     {std::lerp(a.color.r, b.color.r, f), std::lerp(a.color.g, b.color.g, f),
                                      std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)}};
         });
@@ -110,18 +110,18 @@ namespace
 
     template <typename ViewTransform>
 
-    void AppendRoad(const Road& road, RoadLayer layer, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
+    void AppendRoad(const RoadGeometry& road, RoadLayer layer, ViewTransform transform, double focal, SDL_Rect viewport, std::vector<SDL_Vertex>& vertices)
     {
         if (layer == RoadLayer::Pavement)
         {
-            AppendTriangles(road.pavementTriangles, roadColor, [&](const Road::PavementVertex& v)
+            AppendTriangles(road.pavementTriangles, roadColor, [&](const RoadGeometry::PavementVertex& v)
             {
                 return transform(v.position);
             }, focal, viewport, vertices);
-            AppendMesh(road.edgeTriangles, [&](const Road::EdgeVertex& v)
+            AppendMesh(road.edgeTriangles, [&](const RoadGeometry::EdgeVertex& v)
             {
-                return Road::EdgeVertex{transform(v.position), v.color};
-            }, ClipEdge, [&](const Road::EdgeVertex& v)
+                return RoadGeometry::EdgeVertex{transform(v.position), v.color};
+            }, ClipEdge, [&](const RoadGeometry::EdgeVertex& v)
             {
                 vertices.push_back({ScreenPoint(v.position, focal, viewport), v.color, {}});
             }, focal, viewport);
@@ -146,13 +146,13 @@ namespace
     }
 }
 
-void WorldRenderer::SubmitRoad(const Road& road, bool selected)
+void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected)
 {
     // The 2D plan uses display colors. Convert those swatches to albedo for the 3D lighting pass.
     static const auto asphalt = Srgb::ToLinear(roadColor);
     static const auto yellowPaint = Srgb::ToLinear(yellowStripeColor);
     static const auto whitePaint = Srgb::ToLinear(whiteStripeColor);
-    const auto solid = [&](const std::vector<Road::Triangle>& triangles, SDL_FColor color)
+    const auto solid = [&](const std::vector<RoadGeometry::Triangle>& triangles, SDL_FColor color)
     {
         for (const auto& t : triangles)
         {
@@ -168,7 +168,7 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
             SubmitMaterialTriangle({t[0].position, t[1].position, t[2].position}, fallback,
                                    {t[0].uv, t[1].uv, t[2].uv});
         }
-        materialRanges.push_back({start, vertices.size(), road.style.material});
+        materialRanges.push_back({start, vertices.size(), material});
     }
     for (const auto& triangle : road.edgeTriangles)
     {
@@ -194,7 +194,7 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
 }
 
 // Draw a road in the Editor's 2D view
-bool DrawPlanRoad(SDL_Renderer* renderer, const Road& road, Vector3 center, double scale, SDL_Rect viewport, RoadLayer layer)
+bool DrawPlanRoad(SDL_Renderer* renderer, const RoadGeometry& road, Vector3 center, double scale, SDL_Rect viewport, RoadLayer layer)
 {
     std::vector<SDL_Vertex> vertices;
 

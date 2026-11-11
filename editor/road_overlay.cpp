@@ -195,6 +195,10 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     {
         if (picker.TestMesh(world.meshes[i])) hit = {RoadPickKind::Mesh, i};
     }
+    for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
+    {
+        if (picker.TestRoad(it->second.geometry)) hit = {RoadPickKind::Intersection, it->first};
+    }
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         if (picker.TestRoad(world.roads[i])) hit = {RoadPickKind::Road, i};

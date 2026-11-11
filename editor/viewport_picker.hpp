@@ -4,7 +4,7 @@
 #include <limits>
 
 class FreeCamera;
-struct Road;
+struct RoadGeometry;
 
 double ViewportFocalLength(SDL_Rect scene);
 // World-space ray through the center of a viewport-local pixel, with view-space Z equal to one.
@@ -17,7 +17,7 @@ class ViewportPicker
 public:
     ViewportPicker(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse);
     bool TestTriangle(Vector3 a, Vector3 b, Vector3 c);
-    bool TestRoad(const Road& road);
+    bool TestRoad(const RoadGeometry& road);
     // Place the model base on the nearest tested surface or ground, or its pivot on the ray.
     Vector3 PlacementPosition(double modelBaseY = 0.0) const;
     bool TestMesh(const MeshInstance& instance);

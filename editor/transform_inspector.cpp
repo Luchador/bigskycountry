@@ -234,8 +234,12 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
             auto& points = world.roads[end.road].points;
             (end.first ? points.front() : points.back()).position = junction.AnchorPosition(end.anchor.side);
         }
-        for (std::size_t i = 0; i < ends.size(); ++i)
-            if (i == 0 || ends[i].road != ends[i-1].road) world.roads[ends[i].road].Rebuild();
+        world.UpdateIntersections();
+        if (!world.IntersectionSurfaces().contains(target.index))
+        {
+            for (std::size_t i = 0; i < ends.size(); ++i)
+                if (i == 0 || ends[i].road != ends[i-1].road) world.roads[ends[i].road].Rebuild();
+        }
         return true;
     }
     if (target.kind == SelectionKind::Object && index < world.Objects().size())

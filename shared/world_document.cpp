@@ -145,6 +145,55 @@ std::vector<WorldDocument::ConnectedEnd> WorldDocument::ConnectedEnds(int inters
     return ends;
 }
 
+void WorldDocument::UpdateIntersections()
+{
+    if (intersections.empty() && junctions.empty()) return;
+    constexpr int sides = IntersectionAnchor::sideCount;
+    struct End { std::size_t road; int end; };
+    std::map<int, std::array<std::optional<End>, sides>> incident;
+    for (std::size_t i = 0; i < roads.size(); ++i)
+    {
+        const auto& points = roads[i].points;
+        if (points.size() < 2) continue;
+        for (int end = 0; end < 2; ++end)
+        {
+            const auto& point = end == 0 ? points.front() : points.back();
+            if (point.anchor && point.anchor->Valid() && intersections.contains(point.anchor->intersectionId))
+                incident[point.anchor->intersectionId][point.anchor->side] = End{i, end};
+        }
+    }
+    std::vector<std::array<std::optional<RoadMouth>, 2>> mouths(roads.size());
+    std::set<int> active;
+    for (const auto& [id, ends] : incident)
+    {
+        std::set<std::size_t> distinct;
+        const auto& item = intersections.at(id);
+        IntersectionLayout layout{item.position, item.cornerRadius};
+        for (int i = 0; i < sides; ++i)
+        {
+            if (!ends[i]) continue;
+            const auto [road, end] = *ends[i];
+            distinct.insert(road);
+            const auto& s = roads[road].style;
+            layout.arms[i] = IntersectionApproach{end == 0 ? s.LeftWidth() : s.RightWidth(),
+                                                   end == 0 ? s.RightWidth() : s.LeftWidth(), s.edge};
+        }
+        if (distinct.size() < 3) continue;
+        active.insert(id);
+        auto& surface = junctions[id];
+        if (layout != surface.layout) surface.Build(layout);
+        for (int i = 0; i < sides; ++i)
+        {
+            if (!ends[i]) continue;
+            const auto [road, end] = *ends[i];
+            const Vector3 dir = IntersectionAnchor::directions[i];
+            mouths[road][end] = RoadMouth{item.AnchorPosition(i), item.position + dir * surface.setbacks[i], dir};
+        }
+    }
+    std::erase_if(junctions, [&](const auto& entry) { return !active.contains(entry.first); });
+    for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i]);
+}
+
 bool WorldDocument::ValidConnections() const
 {
     std::set<IntersectionAnchor> occupied;
@@ -462,6 +511,7 @@ bool WorldDocument::Open(const char* documentPath)
     {
         road.Rebuild();
     }
+    loaded.UpdateIntersections();
     *this = std::move(loaded);
     return true;
 }
