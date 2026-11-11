@@ -20,10 +20,17 @@ namespace
 #ifndef _WIN32
     constexpr float threeLanePanelHeight = 104.0f;
 
+    SDL_FRect MaterialSlotRect(const RoadStyle& style)
+    {
+        const float y = (style.IsDivided() ? 514.0f : 406.0f) +
+                        (style.GetLaneCount() == 3 ? threeLanePanelHeight : 0.0f);
+        return {12, y, 194, 54};
+    }
+
     float RoadStyleBottom(const RoadStyle& style)
     {
-        return (style.IsDivided() ? 514.0f : 406.0f) +
-               (style.GetLaneCount() == 3 ? threeLanePanelHeight : 0.0f);
+        const auto slot = MaterialSlotRect(style);
+        return slot.y + slot.h + 8;
     }
 #endif
     constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
@@ -260,6 +267,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         EditSnapshot before(state);
         Road road;
         road.style = Style(world);
+        road.style.material = RoadStyle::defaultMaterial;
         road.points = {{creationPoint, {}}, {creationPoint + Vector3{initialLength, 0, 0}, {}}};
         road.Rebuild();
         world.roads.push_back(std::move(road));
@@ -333,6 +341,38 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     }
 }
 
+void RoadEditor::AssignRoadMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
+                                    std::optional<SDL_FPoint> viewportPoint)
+{
+    int index = state.selected;
+    Road* road = nullptr;
+    if (viewportPoint)
+    {
+        if (planView || drag != Drag::None) return;
+        ViewportPicker picker(camera, scene, *viewportPoint);
+        world.ForEachMesh([&](const MeshInstance& mesh) { picker.TestMesh(mesh); });
+        index = -1;
+        for (size_t i = 0; i < world.roads.size(); ++i)
+            if (picker.TestRoad(world.roads[i])) index = static_cast<int>(i);
+    }
+    else if (EditingDraft())
+    {
+        index = -1;
+        road = &*state.draft;
+    }
+    if (index >= 0) road = &world.roads.at(index);
+    if (!road || road->style.material == path) return;
+    Material material;
+    if (!Material::ValidAssetPath(path) || !material.Load(Material::Resolve(browser.Textures().Root(), path)))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    EditSnapshot before(state, index >= 0 ? road : nullptr);
+    road->style.material = path;
+    Commit(world, index, std::move(before), index >= 0 ? road : nullptr);
+}
+
 void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path)
 {
     if (planView || drag != Drag::None || pointer.x < 0 || pointer.y < 0 || pointer.x >= scene.w || pointer.y >= scene.h)
@@ -375,6 +415,7 @@ void RoadEditor::BeginDraft(WorldDocument& world)
         before.emplace(state);
         const RoadStyle style = Style(world);
         state.draft.emplace().style = style;
+        state.draft->style.material = RoadStyle::defaultMaterial;
     }
 
     state.drawing = true;
@@ -895,7 +936,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 }
 
 #ifndef _WIN32
-bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const
+bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world)
 {
     if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h + roadScroll)}, EditorTheme::panel))
     {
@@ -926,6 +967,17 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
             return false;
         }
     }
+    const SDL_FRect slot = MaterialSlotRect(style);
+    const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
+    if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
+        !Text(renderer, slot.x + 55, slot.y + 9, "Pavement material", muted)) return false;
+    if (current)
+    {
+        if (auto* thumbnail = browser.RoadMaterialTexture(style.material, renderer))
+            if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
+    }
+    const auto label = current ? style.material.substr(style.material.rfind('/') + 1) : "Select a road";
+    if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     const float styleBottom = RoadStyleBottom(style);
     if (style.IsDivided() &&
         (!Text(renderer, 12, 406 + offset, "Separation (m)", muted) ||
@@ -1030,8 +1082,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields);
     return true;
 #else
-    if (!draggedModel.empty() && mouse.x >= 0 && mouse.y >= 0 && mouse.x < scene.w && mouse.y < scene.h &&
-        !Text(renderer, mouse.x + 14, mouse.y + 14, draggedModel.c_str(), ink))
+    if (!draggedAsset.empty() && mouse.x >= 0 && mouse.y >= 0 && mouse.x < scene.w && mouse.y < scene.h &&
+        !Text(renderer, mouse.x + 14, mouse.y + 14, draggedAsset.c_str(), ink))
     {
         return false;
     }
@@ -1412,16 +1464,29 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (SDL_GetWindowFromEvent(&event) == window)
     {
         if (browser.HandleMaterialPopup(window, renderer, event, browserPanel)) return EditorEvent::Handled;
-        if (!draggedModel.empty())
+        if (!draggedAsset.empty())
         {
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
             {
                 SDL_Event release = event;
                 if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &release))
                     return EditorEvent::Error;
-                if (std::hypot(event.button.x - modelPress.x, event.button.y - modelPress.y) >= 4.0f)
-                    PlaceProp(world, camera, {release.button.x, release.button.y}, draggedModel);
-                draggedModel.clear();
+                if (std::hypot(event.button.x - assetPress.x, event.button.y - assetPress.y) >= 4.0f)
+                {
+                    const SDL_FPoint point{release.button.x, release.button.y};
+                    if (Material::ValidAssetPath(draggedAsset))
+                    {
+                        const SDL_FPoint local{point.x + scene.x - roadPanel.x,
+                                               point.y + scene.y - roadPanel.y + roadScroll};
+                        const auto slot = MaterialSlotRect(Style(world));
+                        if (local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
+                            AssignRoadMaterial(world, draggedAsset, camera, {});
+                        else if (point.x >= 0 && point.y >= 0 && point.x < scene.w && point.y < scene.h)
+                            AssignRoadMaterial(world, draggedAsset, camera, point);
+                    }
+                    else PlaceProp(world, camera, point, draggedAsset);
+                }
+                draggedAsset.clear();
                 return EditorEvent::Handled;
             }
             if (event.type == SDL_EVENT_MOUSE_MOTION)
@@ -1430,16 +1495,16 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 if (!SetContentViewport(renderer) || !SDL_ConvertEventToRenderCoordinates(renderer, &motion))
                     return EditorEvent::Error;
                 mouse = {motion.motion.x, motion.motion.y};
-                if (!(motion.motion.state & SDL_BUTTON_LMASK)) draggedModel.clear();
+                if (!(motion.motion.state & SDL_BUTTON_LMASK)) draggedAsset.clear();
                 return EditorEvent::Handled;
             }
             if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
-                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.key.key == SDLK_ESCAPE) draggedModel.clear();
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.key.key == SDLK_ESCAPE) draggedAsset.clear();
                 return EditorEvent::Handled;
             }
             if (event.type == SDL_EVENT_MOUSE_WHEEL) return EditorEvent::Handled;
-            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) draggedModel.clear();
+            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) draggedAsset.clear();
         }
         std::optional<EditorCommand> command;
         if (menu.HandleViewportMenu(renderer, scene, event, command) ||
@@ -1473,6 +1538,17 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         return EditorEvent::Handled;
     }
 #ifdef _WIN32
+    if (const auto drop = panels.TakeMaterialDrop(event))
+    {
+        auto point = drop->viewportFraction;
+        if (point)
+        {
+            if (!SetContentViewport(renderer)) return EditorEvent::Error;
+            *point = {point->x * scene.w, point->y * scene.h};
+        }
+        AssignRoadMaterial(world, drop->path, camera, point);
+        return EditorEvent::Handled;
+    }
     if (const auto drop = panels.TakeModelDrop(event))
     {
         if (!SetContentViewport(renderer)) return EditorEvent::Error;
@@ -1668,10 +1744,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             mouse = {-1, -1};
             auto path = browser.HandlePointer(e, pointer, browserPanel.w, browserPanel.h);
-            if (!planView && !path.empty())
+            if (!path.empty() && (!planView || Material::ValidAssetPath(path)))
             {
-                draggedModel = std::move(path);
-                modelPress = {event.button.x, event.button.y};
+                draggedAsset = std::move(path);
+                assetPress = {event.button.x, event.button.y};
             }
             return EditorEvent::Handled;
         }

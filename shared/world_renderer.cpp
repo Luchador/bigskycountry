@@ -95,7 +95,10 @@ bool WorldRenderer::End()
     foregroundStart = outlineStart + outline.size();
     const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
     if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
-    drawAsphalt = wireframeEnd == 0 && !pavement.empty() && asphalt.Prepare(device);
+    if (!wireframeEnd)
+    {
+        for (auto& range : pavement) range.material = roadMaterials.Get(range.path, device);
+    }
     return (device ? DrawGPU() : DrawSoftware()) &&
            SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }

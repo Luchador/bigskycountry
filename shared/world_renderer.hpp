@@ -1,7 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
-#include "asphalt_material.hpp"
+#include "road_material.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
@@ -21,7 +21,7 @@ struct WorldDepthVertex
 class WorldRenderer
 {
 public:
-    WorldRenderer() = default;
+    explicit WorldRenderer(bool authoring = false) : roadMaterials(authoring) {}
     ~WorldRenderer();
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;
@@ -52,11 +52,15 @@ private:
     std::vector<WorldDepthVertex> vertices;
     std::vector<WorldDepthVertex> projectedMesh;
     std::vector<WorldDepthVertex> outline;
-    struct PavementRange { size_t first, end; };
+    struct PavementRange
+    {
+        size_t first, end;
+        std::string path;
+        const RoadMaterial* material = nullptr;
+    };
     std::vector<PavementRange> pavement;
-    AsphaltMaterial asphalt;
+    RoadMaterials roadMaterials;
     Vector3 pavementSun{};
-    bool drawAsphalt = false;
     std::size_t wireframeEnd = 0, foregroundStart = 0;
     std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;

@@ -2,11 +2,12 @@
 #include "editor_theme.hpp"
 #include "texture_loader.hpp"
 #include "material.hpp"
-#include <SDL3_image/SDL_image.h>
+#include "material_editor.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <set>
 
 namespace
 {
@@ -51,43 +52,6 @@ namespace
                            [&](const char* candidate) { return SDL_strcasecmp(ext.c_str(), candidate) == 0; });
     }
 
-    Surface ReadImage(const std::string& root, const std::string& path)
-    {
-        Surface source(nullptr, SDL_DestroySurface);
-        // Use the world loader for RLE true-color TGAs, including right-origin images.
-        const char* extension = SDL_strrchr(path.c_str(), '.');
-        if (extension && SDL_strcasecmp(extension, ".tga") == 0)
-        {
-            source.reset(TextureLoader::LoadTgaSurfaceFromFile((root + path).c_str()));
-        }
-        if (!source)
-        {
-            const std::string file = root + path;
-            // Keep PNG thumbnails in straight alpha on every platform.
-            const bool png = extension && (SDL_strcasecmp(extension, ".png") == 0 || SDL_strcasecmp(extension, ".apng") == 0);
-            source.reset(png ? SDL_LoadPNG(file.c_str()) : IMG_Load(file.c_str()));
-        }
-        if (!source) return source;
-        if (source->format != SDL_PIXELFORMAT_RGBA32)
-        {
-            source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_RGBA32));
-            if (!source) return source;
-        }
-        // WIC and libtiff supply associated alpha. Keep the shared image in straight RGBA.
-        if (extension && (SDL_strcasecmp(extension, ".tif") == 0 || SDL_strcasecmp(extension, ".tiff") == 0))
-        {
-            for (int y = 0; y < source->h; ++y)
-            {
-                auto* pixel = static_cast<Uint8*>(source->pixels) + y * source->pitch;
-                for (int x = 0; x < source->w; ++x, pixel += 4)
-                    if (pixel[3] && pixel[3] < 255)
-                        for (int c = 0; c < 3; ++c) pixel[c] = std::min(255, (pixel[c] * 255 + pixel[3] / 2) / pixel[3]);
-            }
-        }
-        SDL_SetSurfaceBlendMode(source.get(), SDL_BLENDMODE_BLEND);
-        return source;
-    }
-
     Surface MakeThumbnail(SDL_Surface* source)
     {
         constexpr int size = TextureCatalog::thumbnailSize;
@@ -127,32 +91,30 @@ namespace
     }
 }
 
+TextureCatalog::TextureCatalog() : root(Material::TextureRoot(true)) {}
+
 void TextureCatalog::Refresh()
 {
     const auto previousRoot = root;
-    root.clear();
-    fs::path assets;
+    root = Material::TextureRoot(true);
+    if (!roots.empty()) Material::RefreshAssets();
+    roots = {root};
+    const auto runtime = Material::TextureRoot();
+    if (runtime != root) roots.push_back(runtime);
     std::error_code error;
-#ifdef BIGSKY_PROJECT_ASSETS
-    if (fs::is_directory(BIGSKY_PROJECT_ASSETS, error)) assets = BIGSKY_PROJECT_ASSETS;
-#endif
-    if (assets.empty())
+    std::set<std::string, PathLess> paths{""};
+    for (const auto& assetRoot : roots)
     {
-        if (const char* base = SDL_GetBasePath()) assets = FromUtf8(base) / "assets";
-    }
-    folders = {""};
-    if (!assets.empty())
-    {
-        const auto directory = assets / "textures";
-        root = Utf8(directory) + "/";
+        const auto directory = FromUtf8(assetRoot);
         fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
         for (; !error && it != end; it.increment(error))
         {
             std::error_code stat;
             if (!it->is_symlink(stat) && it->is_directory(stat))
-                folders.push_back(Utf8(it->path().lexically_relative(directory)));
+                paths.insert(Utf8(it->path().lexically_relative(directory)));
         }
     }
+    folders.assign(paths.begin(), paths.end());
     // Compare path components so each subtree stays together (including names such as "road-old").
     std::sort(folders.begin(), folders.end(), [](const auto& a, const auto& b) { return FromUtf8(a) < FromUtf8(b); });
     if (std::find(folders.begin(), folders.end(), folder) == folders.end()) folder.clear();
@@ -160,7 +122,7 @@ void TextureCatalog::Refresh()
     const auto removed = std::erase_if(images, [&](const auto& entry)
     {
         SDL_PathInfo info{};
-        return previousRoot != root || !entry.second.image || !SDL_GetPathInfo((root + entry.first).c_str(), &info) ||
+        return previousRoot != root || !entry.second.image || !SDL_GetPathInfo(Material::Resolve(root, entry.first).c_str(), &info) ||
                info.modify_time != entry.second.source.modify_time || info.size != entry.second.source.size;
     });
     if (removed) ++imageRevision;
@@ -194,19 +156,24 @@ void TextureCatalog::ReadFolder()
         return;
     }
 
-    const auto directory = FromUtf8(root) / FromUtf8(folder);
-    std::error_code error;
-    fs::directory_iterator it(directory, error), end;
-    for (; !error && it != end; it.increment(error))
+    std::set<std::string, PathLess> seen;
+    for (const auto& assetRoot : roots)
     {
-        std::error_code stat;
-        if (!it->is_regular_file(stat)) continue;
-        const auto& file = it->path();
-        const bool material = SDL_strcasecmp(Utf8(file.extension()).c_str(), ".bmat") == 0;
-        if (material || IsImage(file))
-            items.push_back({Utf8(file.lexically_relative(FromUtf8(root))), Utf8(material ? file.stem() : file.filename()), material});
+        const auto base = FromUtf8(assetRoot);
+        std::error_code error;
+        fs::directory_iterator it(base / FromUtf8(folder), error), end;
+        for (; !error && it != end; it.increment(error))
+        {
+            std::error_code stat;
+            if (!it->is_regular_file(stat)) continue;
+            const auto& file = it->path();
+            const auto relative = Utf8(file.lexically_relative(base));
+            const bool material = Material::ValidAssetPath(relative);
+            if ((material || IsImage(file)) && seen.insert(relative).second)
+                items.push_back({relative, Utf8(material ? file.stem() : file.filename()), material});
+        }
+        if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folder";
     }
-    if (error && error != std::errc::no_such_file_or_directory) status = "Cannot read texture folder";
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.path < b.path; });
 #ifndef _WIN32
     thumbnailTextures.resize(items.size());
@@ -239,8 +206,13 @@ bool TextureCatalog::CreateMaterial(const std::string& name, std::string& create
     const auto base = FromUtf8(root);
     const auto directory = base / FromUtf8(folder);
     std::error_code ec;
-    // Permit a new project to start with an empty textures directory.
-    if (folder.empty()) fs::create_directories(base, ec);
+    if (std::any_of(items.begin(), items.end(), [&](const Item& item) {
+            return item.material && SDL_strcasecmp(item.name.c_str(), name.c_str()) == 0; }))
+    {
+        error = "That material name is already in use.";
+        return false;
+    }
+    fs::create_directories(directory, ec);
     const auto filename = name + ".bmat";
     fs::directory_iterator it(directory, ec), end;
     for (; !ec && it != end; it.increment(ec))
@@ -284,8 +256,9 @@ SDL_Surface* TextureCatalog::Image(const std::string& path)
     auto [it, inserted] = images.try_emplace(path);
     if (inserted)
     {
-        SDL_GetPathInfo((root + path).c_str(), &it->second.source);
-        it->second.image = ReadImage(root, path);
+        const auto file = Material::Resolve(root, path);
+        SDL_GetPathInfo(file.c_str(), &it->second.source);
+        it->second.image.reset(TextureLoader::LoadImageFile(file));
         if (!it->second.image)
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Texture '%s': %s", path.c_str(), SDL_GetError());
     }

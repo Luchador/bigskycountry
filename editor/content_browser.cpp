@@ -140,6 +140,32 @@ namespace
     }
 }
 
+SDL_Surface* ContentBrowser::RoadMaterialThumbnail(const std::string& path)
+{
+    if (path != roadPreviewPath || roadPreviewRevision != Material::Revision())
+    {
+        roadPreviewPath = path;
+        roadPreviewRevision = Material::Revision();
+        roadThumbnail = roadPreview.Open(textures, path) ?
+            roadPreview.Preview(TextureCatalog::thumbnailSize, TextureCatalog::thumbnailSize) : nullptr;
+#ifndef _WIN32
+        SDL_DestroyTexture(roadThumbnailTexture);
+        roadThumbnailTexture = nullptr;
+#endif
+    }
+    return roadThumbnail;
+}
+
+#ifndef _WIN32
+SDL_Texture* ContentBrowser::RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer)
+{
+    auto* surface = RoadMaterialThumbnail(path);
+    if (surface && !roadThumbnailTexture)
+        roadThumbnailTexture = SDL_CreateTextureFromSurface(renderer, surface);
+    return roadThumbnailTexture;
+}
+#endif
+
 void ContentBrowser::SetTab(Tab next)
 {
     tab = next;
@@ -369,7 +395,8 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
                 if (!materialWindow.Open(owner, textures, item.path))
                     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Material Editor", SDL_GetError(), owner);
             }
-            if (!item.material) materialWindow.StartDrag(item.path);
+            else if (item.material) return item.path;
+            else materialWindow.StartDrag(item.path);
         }
         else if (models && index < count && !rows[index].modelPath.empty())
         {

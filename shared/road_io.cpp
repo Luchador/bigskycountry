@@ -1,5 +1,7 @@
 #include "road_io.hpp"
 
+#include "material.hpp"
+#include <iomanip>
 #include <cmath>
 #include <cstdint>
 #include <istream>
@@ -30,14 +32,16 @@ namespace RoadIO
     {
         const int edge = static_cast<int>(style.edge);
         const int median = static_cast<int>(style.median);
-        if (!ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.DividedGap(), edge, median))
+        if (!Material::ValidAssetPath(style.material) ||
+            !ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.DividedGap(), edge, median))
         {
             out.setstate(std::ios::failbit);
             return;
         }
         out << style.GetLaneCount() << ' ' << style.curved << ' ' << style.leftShoulder << ' '
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
-            << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median << '\n';
+            << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median
+            << ' ' << std::quoted(style.material) << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
@@ -54,7 +58,9 @@ namespace RoadIO
             in >> edge;
         }
         if (version >= 5) in >> median;
-        if (!in || !ValidStyle(lanes, layout, gap, edge, median) ||
+        style.material = RoadStyle::defaultMaterial;
+        if (version >= 6) in >> std::quoted(style.material);
+        if (!in || !Material::ValidAssetPath(style.material) || !ValidStyle(lanes, layout, gap, edge, median) ||
             (version >= 5 && (gap < RoadStyle::minSeparation || (divided && lanes % 2 != 0))))
         {
             in.setstate(std::ios::failbit);

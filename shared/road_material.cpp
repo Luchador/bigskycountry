@@ -1,0 +1,168 @@
+#include "road_material.hpp"
+#include "texture_loader.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <memory>
+
+namespace
+{
+    using Format = DdsTexture::Format;
+    constexpr std::array formats{Format::BaseColor, Format::Normal, Format::Packed, Format::BaseColor, Format::Scalar};
+    constexpr std::array<std::array<Uint8, 4>, materialSlotCount> defaults{{
+        {184,184,184,255}, {128,128,255,255}, {255,128,0,255}, {0,0,0,255}, {255,255,255,255}
+    }};
+}
+
+RoadMaterials::~RoadMaterials()
+{
+    ClearTextures();
+    if (sampler) SDL_ReleaseGPUSampler(device, sampler);
+}
+
+void RoadMaterials::ClearTextures()
+{
+    for (auto& [key, texture] : textures)
+        if (texture && texture->gpu) SDL_ReleaseGPUTexture(device, texture->gpu);
+    textures.clear();
+}
+
+const RoadMaterialTexture* RoadMaterials::Map(const std::string& path, MaterialSlot slot)
+{
+    const auto index = static_cast<size_t>(slot);
+    const auto format = formats[index];
+    // ':' cannot occur in an asset path. Give each neutral map its own cache key.
+    auto [it, inserted] = textures.try_emplace(TextureKey{path.empty() ? ":" + std::to_string(index) : path, format});
+    if (inserted)
+    {
+        DdsTexture image;
+        bool loaded = true;
+        if (path.empty())
+            image.Solid(format, defaults[index]);
+        else
+        {
+            const auto source = Material::Resolve(root, path);
+            const auto dot = path.find_last_of('.');
+            const char* base = SDL_GetBasePath();
+            const std::string cooked = base ? std::string(base) + "assets/cooked/textures/" +
+                                              path.substr(0, dot) + ".dds" : std::string{};
+            SDL_PathInfo src{}, dds{};
+            loaded = !cooked.empty() && SDL_GetPathInfo(cooked.c_str(), &dds) &&
+                     (!SDL_GetPathInfo(source.c_str(), &src) || dds.modify_time >= src.modify_time) &&
+                     image.Load(cooked, format);
+            if (!loaded)
+            {
+                // Newly authored maps may live only in build/assets or have a nonstandard suffix.
+                std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> pixels(
+                    TextureLoader::LoadImageFile(source), SDL_DestroySurface);
+                loaded = pixels && image.FromImage(pixels.get(), format);
+            }
+        }
+        if (loaded)
+        {
+            if (device)
+            {
+                if (auto* gpu = image.Upload(device)) it->second.emplace().gpu = gpu;
+            }
+            else
+            {
+                image.Decode();
+                it->second.emplace().cpu = std::move(image);
+            }
+        }
+        if (!it->second) SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Road material texture '%s': %s", path.c_str(), SDL_GetError());
+    }
+    if (it->second) return &*it->second;
+    return path.empty() ? nullptr : Map({}, slot);
+}
+
+const RoadMaterial* RoadMaterials::Get(const std::string& path, SDL_GPUDevice* target)
+{
+    device = target;
+    if (revision != Material::Revision())
+    {
+        materials.clear();
+        revision = Material::Revision();
+        if (imageRevision != Material::ImageRevision())
+        {
+            ClearTextures();
+            imageRevision = Material::ImageRevision();
+        }
+    }
+    auto [it, inserted] = materials.try_emplace(path);
+    if (inserted)
+    {
+        Material definition;
+        if (!Material::ValidAssetPath(path) || !definition.Load(Material::Resolve(root, path)))
+        {
+            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Road material '%s': %s", path.c_str(), SDL_GetError());
+            return nullptr;
+        }
+        if (device && !sampler)
+        {
+            SDL_GPUSamplerCreateInfo info{};
+            info.min_filter = info.mag_filter = SDL_GPU_FILTER_LINEAR;
+            info.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+            info.address_mode_u = info.address_mode_v = info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+            info.max_lod = 15;
+            sampler = SDL_CreateGPUSampler(device, &info);
+            if (!sampler) return nullptr;
+        }
+        RoadMaterial material;
+        material.type = definition.type;
+        for (size_t i = 0; i < materialSlotCount; ++i)
+        {
+            material.maps[i] = Map(definition.textures[i], static_cast<MaterialSlot>(i));
+            if (!material.maps[i]) return nullptr;
+        }
+        it->second = material;
+    }
+    return it->second ? &*it->second : nullptr;
+}
+
+void RoadMaterials::Bind(const RoadMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const
+{
+    std::array<SDL_GPUTextureSamplerBinding, materialSlotCount> bindings{};
+    for (size_t i = 0; i < bindings.size(); ++i) bindings[i] = {material.maps[i]->gpu, sampler};
+    SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), bindings.size());
+    const Uint32 params[4] = {material.type == MaterialType::AlphaCutout};
+    SDL_PushGPUFragmentUniformData(commands, 0, params, sizeof(params));
+}
+
+SDL_FColor RoadMaterial::Shade(float u, float v, float footprint, const PavementLighting& basis) const
+{
+    const auto sample = [&](MaterialSlot slot) {
+        return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
+    };
+    const auto color = sample(MaterialSlot::BaseColor);
+    if (type == MaterialType::AlphaCutout && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
+        return {};
+    const auto xy = sample(MaterialSlot::Normal);
+    const auto orm = sample(MaterialSlot::ORM);
+    const auto glow = sample(MaterialSlot::Emissive);
+    const float x = xy[0] * 2 - 1, y = xy[1] * 2 - 1;
+    const float z = std::sqrt(std::max(0.0f, 1 - x*x - y*y));
+    const float invLength = 1 / std::sqrt(x*x + y*y + z*z);
+    auto cosine = [&](const std::array<float, 3>& dir)
+    {
+        return std::clamp((x*dir[0] + y*dir[1] + z*dir[2]) * invLength, 0.0f, 1.0f);
+    };
+    auto normalize = [](std::array<float, 3> dir)
+    {
+        const float inv = 1 / std::sqrt(std::max(1.0e-12f, dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]));
+        for (auto& component : dir) component *= inv;
+        return dir;
+    };
+    auto half = normalize(basis.view);
+    for (size_t i = 0; i < half.size(); ++i) half[i] += basis.light[i];
+    const float diffuse = cosine(basis.light), gloss = 1 - orm[1];
+    const float spec = gloss * diffuse * std::pow(cosine(normalize(half)), 4 + 124 * gloss * gloss);
+    auto shade = [&](size_t i)
+    {
+        const float albedo = color[i], metal = orm[2];
+        const float c = std::clamp(glow[i] + albedo * ((1 - metal) * 0.72f * diffuse + 0.28f * orm[0]) +
+                                   std::lerp(0.08f, albedo, metal) * spec, 0.0f, 1.0f);
+        return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+    };
+    return {shade(0), shade(1), shade(2), 1};
+}

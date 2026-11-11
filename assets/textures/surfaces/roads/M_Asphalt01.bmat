@@ -1,0 +1,9 @@
+{
+	"version":	1,
+	"textures":	{
+		"baseColor":	"surfaces/roads/asphalt01_basecolor.png",
+		"normal":	"surfaces/roads/asphalt01_normal.png",
+		"orm":	"surfaces/roads/asphalt01_orm.png"
+	},
+	"type":	"standard"
+}

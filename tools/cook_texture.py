@@ -21,7 +21,7 @@ def encode(data, fmt):
         data = np.concatenate((rgb, data[:, :, 3:4]), axis=2)
     elif fmt == "BC5_UNORM":
         data = data[:, :, :2]
-    else:
+    elif fmt == "BC4_UNORM":
         data = data[:, :, :1]
     h, w, channels = data.shape
     pixels = np.rint(np.clip(data, 0, 1) * 255).astype(np.uint8)
@@ -52,7 +52,7 @@ def cook(source, output, fmt):
     mips = max(w, h).bit_length()
     block_bytes = 8 if fmt == "BC4_UNORM" else 16
     pitch = ((w + 3) // 4) * ((h + 3) // 4) * block_bytes
-    dxgi = {"BC7_UNORM_SRGB": 99, "BC5_UNORM": 83, "BC4_UNORM": 80}[fmt]
+    dxgi = {"BC7_UNORM": 98, "BC7_UNORM_SRGB": 99, "BC5_UNORM": 83, "BC4_UNORM": 80}[fmt]
     with Path(output).open("wb") as out:
         out.write(b"DDS " + struct.pack("<7I", 124, 0xA1007, h, w, pitch, 0, mips) + bytes(44))
         out.write(struct.pack("<II4s", 32, 4, b"DX10") + bytes(20))

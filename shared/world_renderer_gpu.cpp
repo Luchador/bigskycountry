@@ -17,12 +17,13 @@
 namespace
 {
     SDL_GPUShader* CreateWorldShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage, const char* entry,
-                                     std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers = 0)
+                                     std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers = 0, Uint32 uniforms = 0)
     {
         SDL_GPUShaderCreateInfo info{};
         info.stage = stage;
         info.entrypoint = entry;
         info.num_samplers = samplers;
+        info.num_uniform_buffers = uniforms;
         const auto formats = SDL_GetGPUShaderFormats(device);
         if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
         {
@@ -134,9 +135,9 @@ bool WorldRenderer::CreatePipelines()
     ds.back_stencil_state = ds.front_stencil_state;
     surfacePipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
 
-    const auto materialPipeline = [&](const char* entry, std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers) -> SDL_GPUGraphicsPipeline*
+    const auto materialPipeline = [&](const char* entry, std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers, Uint32 uniforms = 0) -> SDL_GPUGraphicsPipeline*
     {
-        auto* shader = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, entry, dxil, spirv, samplers);
+        auto* shader = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, entry, dxil, spirv, samplers, uniforms);
         if (!shader) return nullptr;
         auto material = pipeline;
         material.fragment_shader = shader;
@@ -147,7 +148,7 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        asphaltPipeline = materialPipeline("AsphaltPS", asphalt_frag_dxil, asphalt_frag_spirv, 3);
+        asphaltPipeline = materialPipeline("AsphaltPS", asphalt_frag_dxil, asphalt_frag_spirv, materialSlotCount, 1);
     }
 
     if (asphaltPipeline)
@@ -386,13 +387,14 @@ bool WorldRenderer::DrawGPU()
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
         cursor = wireframeEnd;
     }
-    else if (drawAsphalt)
+    else
     {
         for (const auto& range : pavement)
         {
+            if (!range.material) continue;
             drawSurface(cursor, range.first);
             SDL_BindGPUGraphicsPipeline(pass, asphaltPipeline);
-            asphalt.Bind(pass);
+            roadMaterials.Bind(*range.material, commands, pass);
             drawSurface(range.first, range.end);
             SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
             cursor = range.end;

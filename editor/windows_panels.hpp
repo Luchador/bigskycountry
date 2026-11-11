@@ -27,6 +27,12 @@ public:
         SDL_FPoint viewportFraction;
     };
     std::optional<ModelDrop> TakeModelDrop(const SDL_Event& event);
+    struct MaterialDrop
+    {
+        std::string path;
+        std::optional<SDL_FPoint> viewportFraction; // Empty when dropped on the inspector.
+    };
+    std::optional<MaterialDrop> TakeMaterialDrop(const SDL_Event& event);
     bool Command(const SDL_Event& event, RoadAction& action) const;
     bool HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings);
     SDL_Keymod TakePressModifiers();

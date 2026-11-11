@@ -4,11 +4,13 @@
 #include <cJSON.h>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string_view>
 
 namespace
 {
+    unsigned materialRevision = 0, imageRevision = 0;
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
     constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity"};
 
@@ -47,6 +49,39 @@ bool Material::ValidTexturePath(const std::string& path)
         rest.remove_prefix(slash + 1);
     }
 }
+
+bool Material::ValidAssetPath(const std::string& path)
+{
+    return ValidTexturePath(path) && path.size() > 5 &&
+           SDL_strcasecmp(path.c_str() + path.size() - 5, ".bmat") == 0;
+}
+
+std::string Material::TextureRoot(bool authoring)
+{
+#ifdef BIGSKY_PROJECT_ASSETS
+    std::error_code error;
+    if (authoring && std::filesystem::is_directory(BIGSKY_PROJECT_ASSETS, error))
+    {
+        const auto root = std::filesystem::path(BIGSKY_PROJECT_ASSETS).generic_u8string();
+        return std::string(root.begin(), root.end()) + "/textures/";
+    }
+#endif
+    const char* base = SDL_GetBasePath();
+    return base ? std::string(base) + "assets/textures/" : std::string{};
+}
+
+std::string Material::Resolve(const std::string& root, const std::string& relative)
+{
+    const auto file = root + relative;
+    SDL_PathInfo info{};
+    if (!root.empty() && SDL_GetPathInfo(file.c_str(), &info) && info.type == SDL_PATHTYPE_FILE)
+        return file;
+    return TextureRoot() + relative;
+}
+
+unsigned Material::Revision() { return materialRevision; }
+unsigned Material::ImageRevision() { return imageRevision; }
+void Material::RefreshAssets() { ++materialRevision; ++imageRevision; }
 
 bool Material::Load(const std::string& file)
 {
@@ -123,5 +158,6 @@ bool Material::Save(const std::string& file) const
         SDL_RemovePath(temp.c_str());
         return SDL_SetError("Cannot save material: %s", error.c_str());
     }
+    ++materialRevision;
     return true;
 }

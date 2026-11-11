@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <string>
 
 class TextureLoader
 {
@@ -12,6 +13,8 @@ public:
     // SDL_DestroyTexture. On failure, returns nullptr and sets SDL_GetError().
     static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath);
 
+    // Source image in straight-alpha RGBA32, for uncooked materials and browser previews.
+    static SDL_Surface* LoadImageFile(const std::string& path);
     static SDL_Surface* LoadTgaSurface(const char* relativePath);
 
     // Decode a TGA at the supplied filesystem path for editor previews. The caller owns the surface.

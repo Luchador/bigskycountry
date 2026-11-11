@@ -69,9 +69,11 @@ private:
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
     bool DrawMeasurement(SDL_Renderer* renderer) const;
 #ifndef _WIN32
-    bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world) const;
+    bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world);
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
+    void AssignRoadMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
+                            std::optional<SDL_FPoint> viewportPoint);
     void PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
@@ -123,8 +125,8 @@ private:
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.
 #ifndef _WIN32
     CameraToolbar cameraToolbar;
-    std::string draggedModel;
-    SDL_FPoint modelPress{};
+    std::string draggedAsset;
+    SDL_FPoint assetPress{};
 #endif
     ContentBrowser browser;
 #ifdef _WIN32

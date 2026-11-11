@@ -35,7 +35,7 @@ add_library(BigSkyApplication STATIC
     "${cjson_SOURCE_DIR}/cJSON.c"
     shared/material.cpp
     shared/dds_texture.cpp
-    shared/asphalt_material.cpp
+    shared/road_material.cpp
     shared/bscobject.cpp
     shared/building.cpp
     shared/character.cpp
@@ -75,7 +75,7 @@ include(cmake/shaders.cmake)
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
 
-# SDL_image 3.4.0 for editor thumbnails. Use its built-in decoders to avoid extra runtime DLLs.
+# SDL_image 3.4.0 for source material maps and editor thumbnails. Use its built-in decoders to avoid extra runtime DLLs.
 set(BUILD_SHARED_LIBS OFF)
 set(SDLIMAGE_VENDORED OFF)
 set(SDLIMAGE_PNG_LIBPNG OFF)
@@ -95,6 +95,11 @@ FetchContent_Declare(SDL3_image
 )
 FetchContent_MakeAvailable(SDL3_image)
 
+target_link_libraries(BigSkyApplication PRIVATE SDL3_image::SDL3_image-static)
+if(WIN32)
+    target_link_libraries(BigSkyApplication PRIVATE windowscodecs)
+endif()
+
 add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
@@ -112,7 +117,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/edit_history.cpp
 )
 # Author material assets in the source project so a clean build preserves them.
-set_property(SOURCE editor/texture_catalog.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+set_property(SOURCE shared/material.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     "BIGSKY_PROJECT_ASSETS=u8\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"")
 if(WIN32)
     enable_language(RC)
@@ -134,11 +139,11 @@ if(WIN32)
     else()
         target_compile_definitions(BigSkyCountryEditor PRIVATE BSC_EMBED_MANIFEST)
     endif()
-    target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32 windowscodecs dwmapi uxtheme)
+    target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 gdi32 dwmapi uxtheme)
 else()
     target_sources(BigSkyCountryEditor PRIVATE editor/sdl_material_editor.cpp editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
-target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication SDL3_image::SDL3_image-static)
+target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
 # Both executables use the same runtime directory, including on multi-config builds.
 include(cmake/textures.cmake)

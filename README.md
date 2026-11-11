@@ -2,17 +2,18 @@ My project Big Sky Country
 
 ## Material textures
 
-Put the asphalt sources in `assets/textures/roads/` as `asphalt01_basecolor.tif`, `asphalt01_normal.tif`, and `asphalt01_roughness.tif`. The game and 3D editor share this material across pavement and shoulders. One tile covers 4 m on level pavement. The normal map uses red and green for tangent-space X and Y. The Textures tab shows the original source images.
+New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor apply it to pavement and shoulders at one tile per 4 m. Markings, curbs, transition strips, and medians use their own colors.
 
 The build recursively converts TIFF, PNG, TGA, JPEG, and BMP images under `assets/textures` into DDS files with a full mip chain. Filename matching ignores case and reads the suffix immediately before the extension.
 
 | Filename stem | DDS format | Channels |
 | --- | --- | --- |
-| Ends in `_basecolor` | BC7 sRGB | RGB and alpha |
+| Ends in `_basecolor` or `_emissive` | BC7 sRGB | RGB and alpha |
 | Ends in `_normal` | BC5 linear | Red and green |
+| Ends in `_orm` | BC7 linear | Occlusion (R), roughness (G), metalness (B) |
 | Any other name | BC4 linear | Red |
 
-Runtime materials use `assets/cooked/textures/` beside the executable, with the source folder structure. A development build also stages original images for the editor and existing sky/UI loaders. Rerun the build after adding or editing a material texture.
+Runtime materials use compatible DDS files from `assets/cooked/textures/` beside the executable and can read uncooked images from `assets/textures/` (including files placed directly in the build). A development build also stages original images for the editor and existing sky/UI loaders. Rerun the build after adding or editing a material texture.
 
 On Windows, CMake fetches a pinned DirectXTex `texconv` automatically. An existing host executable can be supplied with `-DBIGSKY_TEXCONV=...`. On Linux, install the libtiff development package and run `python3 -m pip install -r tools/texture-requirements.txt` in the Python environment used by CMake.
 
@@ -31,7 +32,7 @@ A missing world starts empty. The editor writes it on the first save. Finishing 
 
 All framing integers are unsigned and little-endian. The file begins with the four ASCII bytes `BSCW`, a 32-bit format version, and a 32-bit section count. Each section has a four-byte tag, a 32-bit section version, a 64-bit payload length in bytes, and exactly that many payload bytes. Sections are independent of their physical order.
 
-`ROAD` version 5 stores roads in draw order. Its payload is whitespace-separated text in the classic locale. Each road starts with lane count, curved flag, left and right shoulder flags, three-lane layout, divided flag, divided gap, edge treatment (0 for none, 1 for a transition strip, 2 for a curb), and median type (0 for concrete, 1 for grass). Older sections default to concrete. Version 1 roads load with no edge treatment. Version 4 adds the whole-road XYZ rotation (radians) after the style. Next comes the point count, then each point’s world XYZ, manual-tangent flag, heading, pitch, and (since version 4) roll. Older roads start with zero whole-road rotation and point roll. Versions 1 and 2 load with zero pitch for manual tangents. Flags are 0 or 1. The reader rebuilds the meshes from these records. An absent or empty `ROAD` section means the world has no roads.
+`ROAD` version 6 stores roads in draw order. Its payload is whitespace-separated text in the classic locale. Each road starts with lane count, curved flag, left and right shoulder flags, three-lane layout, divided flag, divided gap, edge treatment (0 for none, 1 for a transition strip, 2 for a curb), median type (0 for concrete, 1 for grass), and the quoted material path relative to `assets/textures`. Versions 1–5 use the default asphalt material. Versions 1–4 default to a concrete median. Version 1 roads load with no edge treatment. Version 4 adds the whole-road XYZ rotation (radians) after the style. Next comes the point count, then each point’s world XYZ, manual-tangent flag, heading, pitch, and (since version 4) roll. Older roads start with zero whole-road rotation and point roll. Versions 1 and 2 load with zero pitch for manual tangents. Flags are 0 or 1. The reader rebuilds the meshes from these records. An absent or empty `ROAD` section means the world has no roads.
 
 Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 

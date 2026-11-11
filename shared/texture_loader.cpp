@@ -1,4 +1,5 @@
 #include "texture_loader.hpp"
+#include <SDL3_image/SDL_image.h>
 
 #include <algorithm>
 #include <memory>
@@ -260,4 +261,40 @@ SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePat
 SDL_Texture* TextureLoader::LoadMask(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& discBounds)
 {
     return LoadTexture(renderer, relativePath, &discBounds, DiscOpacity::BrightnessTimesAlpha);
+}
+
+SDL_Surface* TextureLoader::LoadImageFile(const std::string& path)
+{
+    Surface source(nullptr, SDL_DestroySurface);
+    // Use the world loader for RLE true-color TGAs, including right-origin images.
+    const char* extension = SDL_strrchr(path.c_str(), '.');
+    if (extension && SDL_strcasecmp(extension, ".tga") == 0)
+    {
+        source.reset(TextureLoader::LoadTgaSurfaceFromFile(path.c_str()));
+    }
+    if (!source)
+    {
+        // Keep PNG thumbnails in straight alpha on every platform.
+        const bool png = extension && (SDL_strcasecmp(extension, ".png") == 0 || SDL_strcasecmp(extension, ".apng") == 0);
+        source.reset(png ? SDL_LoadPNG(path.c_str()) : IMG_Load(path.c_str()));
+    }
+    if (!source) return nullptr;
+    if (source->format != SDL_PIXELFORMAT_RGBA32)
+    {
+        source.reset(SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_RGBA32));
+        if (!source) return nullptr;
+    }
+    // WIC and libtiff supply associated alpha. Keep the shared image in straight RGBA.
+    if (extension && (SDL_strcasecmp(extension, ".tif") == 0 || SDL_strcasecmp(extension, ".tiff") == 0))
+    {
+        for (int y = 0; y < source->h; ++y)
+        {
+            auto* pixel = static_cast<Uint8*>(source->pixels) + y * source->pitch;
+            for (int x = 0; x < source->w; ++x, pixel += 4)
+                if (pixel[3] && pixel[3] < 255)
+                    for (int c = 0; c < 3; ++c) pixel[c] = std::min(255, (pixel[c] * 255 + pixel[3] / 2) / pixel[3]);
+        }
+    }
+    SDL_SetSurfaceBlendMode(source.get(), SDL_BLENDMODE_BLEND);
+    return source.release();
 }

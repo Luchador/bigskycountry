@@ -18,6 +18,7 @@ public:
         bool material = false;
     };
 
+    TextureCatalog();
     void Refresh();
     const std::vector<std::string>& Folders() const { return folders; } // Relative paths, including the root ("").
     const std::string& Folder() const { return folder; }
@@ -60,7 +61,7 @@ private:
     std::vector<SDL_Texture*> thumbnailTextures;
 #endif
     void ReadFolder();
-    std::vector<std::string> folders;
+    std::vector<std::string> roots, folders;
     std::string folder;
     std::string root;
     std::string status;

@@ -36,7 +36,7 @@ namespace
         }
 
         Sky sky;
-        WorldRenderer worldRenderer;
+        WorldRenderer worldRenderer(mode == ApplicationMode::Editor);
         FreeCamera freeCamera;
 
         if (!world.roads.empty())

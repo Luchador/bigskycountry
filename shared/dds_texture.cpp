@@ -76,6 +76,46 @@ bool DdsTexture::Load(const std::string& path, Format expected)
     return true;
 }
 
+void DdsTexture::Solid(Format expected, std::array<Uint8, 4> rgba)
+{
+    format = expected;
+    blocks.clear();
+    mips = {{1, 1, 0, std::vector<Uint8>(rgba.begin(), rgba.begin() + Channels())}};
+}
+
+bool DdsTexture::FromImage(SDL_Surface* rgba, Format expected)
+{
+    if (!rgba || rgba->format != SDL_PIXELFORMAT_RGBA32 || rgba->w > 16384 || rgba->h > 16384)
+        return SDL_SetError("Invalid material source image");
+    blocks.clear();
+    mips.clear();
+    format = expected;
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> scaled(nullptr, SDL_DestroySurface);
+    for (;;)
+    {
+        const auto w = static_cast<Uint32>(rgba->w), h = static_cast<Uint32>(rgba->h);
+        auto& mip = mips.emplace_back(Mip{w, h, 0, {}});
+        const auto channels = Channels();
+        mip.pixels.resize(size_t(w) * h * channels);
+        for (Uint32 y = 0; y < h; ++y)
+        {
+            const auto* src = static_cast<const Uint8*>(rgba->pixels) + size_t(y) * rgba->pitch;
+            auto* dst = mip.pixels.data() + size_t(y) * w * channels;
+            if (channels == 4)
+                std::memcpy(dst, src, w * 4);
+            else
+            {
+                for (Uint32 x = 0; x < w; ++x)
+                    std::memcpy(dst + x * channels, src + x * 4, channels);
+            }
+        }
+        if (w == 1 && h == 1) return true;
+        scaled.reset(SDL_ScaleSurface(rgba, std::max(1u, w / 2), std::max(1u, h / 2), SDL_SCALEMODE_LINEAR));
+        rgba = scaled.get();
+        if (!rgba) return false;
+    }
+}
+
 void DdsTexture::Decode()
 {
     if (blocks.empty()) return;
@@ -91,6 +131,7 @@ void DdsTexture::Decode()
                 alignas(8) Uint8 tile[64];
                 switch (format)
                 {
+                    case Format::Packed:
                     case Format::BaseColor: bcdec_bc7(src, tile, 16); break;
                     case Format::Normal: bcdec_bc5(src, tile, 8); break;
                     case Format::Scalar: bcdec_bc4(src, tile, 4); break;
@@ -118,6 +159,7 @@ SDL_GPUTexture* DdsTexture::Upload(SDL_GPUDevice* device)
     info.type = SDL_GPU_TEXTURETYPE_2D;
     info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     info.format = format == Format::BaseColor ? SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB :
+                  format == Format::Packed ? SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM :
                   format == Format::Normal ? SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM : SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM;
     // D3D requires a block-aligned base level, even when the BC format is supported.
     const bool blockAligned = mips.front().width % 4 == 0 && mips.front().height % 4 == 0;
@@ -125,6 +167,7 @@ SDL_GPUTexture* DdsTexture::Upload(SDL_GPUDevice* device)
     if (!compressed)
     {
         info.format = format == Format::BaseColor ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB :
+                      format == Format::Packed ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM :
                       format == Format::Normal ? SDL_GPU_TEXTUREFORMAT_R8G8_UNORM : SDL_GPU_TEXTUREFORMAT_R8_UNORM;
         Decode();
     }
@@ -197,7 +240,7 @@ SDL_GPUTexture* DdsTexture::Upload(SDL_GPUDevice* device)
     return texture;
 }
 
-std::array<float, 3> DdsTexture::Sample(float u, float v, float footprint) const
+std::array<float, 4> DdsTexture::Sample(float u, float v, float footprint) const
 {
     const float lod = std::log2(std::max(1.0f, footprint * std::max(mips.front().width, mips.front().height)));
     const auto& mip = mips[static_cast<size_t>(std::min(lod + 0.5f, float(mips.size() - 1)))];
@@ -211,10 +254,10 @@ std::array<float, 3> DdsTexture::Sample(float u, float v, float footprint) const
         return mip.pixels.data() + (size_t(row) * mip.width + col) * Channels();
     };
     const auto a = texel(ix, iy), b = texel(ix + 1, iy), c = texel(ix, iy + 1), d = texel(ix + 1, iy + 1);
-    std::array<float, 3> value{};
-    for (Uint32 i = 0; i < std::min(Channels(), 3u); ++i)
+    std::array<float, 4> value{0, 0, 0, 1};
+    for (Uint32 i = 0; i < Channels(); ++i)
     {
-        auto channel = [&](Uint8 byte) { return format == Format::BaseColor ? linearColor[byte] : byte / 255.0f; };
+        auto channel = [&](Uint8 byte) { return format == Format::BaseColor && i < 3 ? linearColor[byte] : byte / 255.0f; };
         value[i] = std::lerp(std::lerp(channel(a[i]), channel(b[i]), x - ix),
                              std::lerp(channel(c[i]), channel(d[i]), x - ix), y - iy);
     }

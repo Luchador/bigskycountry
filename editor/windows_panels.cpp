@@ -117,6 +117,8 @@ struct WindowsPanels::Impl
     Uint32 transformEvent = 0, modelDropEvent = 0;
     std::string draggedModel;
     std::deque<ModelDrop> modelDrops;
+    Uint32 materialDropEvent = 0;
+    std::deque<MaterialDrop> materialDrops;
     std::optional<TransformFields> inspected;
     std::deque<TransformEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
@@ -196,6 +198,7 @@ struct WindowsPanels::Impl
         bool plan, drawing, draft, canFinish;
         int selected, point;
         double elevation;
+        unsigned materialRevision;
         bool operator==(const Inspector&) const = default;
     };
     std::optional<Inspector> lastInspector;
@@ -592,6 +595,27 @@ struct WindowsPanels::Impl
             MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
     }
 
+    void DrawRoadMaterial(const DRAWITEMSTRUCT& draw)
+    {
+        const RECT r = draw.rcItem;
+        FillRect(draw.hDC, &r, WindowsTheme::Brush(EditorTheme::list));
+        const int pad = DialogSize(road, 3, 0).cx;
+        const RECT thumb{r.left + pad, r.top + pad, r.left + r.bottom - r.top - pad, r.bottom - pad};
+        const bool active = lastInspector && (lastInspector->selected >= 0 || lastInspector->drawing);
+        const auto path = active ? lastInspector->style.material : std::string{};
+        WindowsTheme::DrawPreview(draw.hDC, thumb, active ? browser->RoadMaterialThumbnail(path) : nullptr);
+        SetBkMode(draw.hDC, TRANSPARENT);
+        RECT line{thumb.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
+        constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
+        SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::secondary));
+        DrawTextW(draw.hDC, L"Pavement material", -1, &line, flags);
+        line.top = line.bottom;
+        line.bottom = r.bottom;
+        SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
+        const auto label = active ? Wide(path.substr(path.rfind('/') + 1)) : L"Select a road";
+        DrawTextW(draw.hDC, label.c_str(), -1, &line, flags);
+    }
+
     void CancelTextureDrag(HWND list)
     {
         pressedTexture.clear();
@@ -610,7 +634,7 @@ struct WindowsPanels::Impl
             self.OpenSelectedMaterial();
             return 0;
         }
-        if (msg == WM_LBUTTONDOWN && self.materialEditor.Window())
+        if (msg == WM_LBUTTONDOWN)
         {
             const auto hit = SendMessageW(list, LB_ITEMFROMPOINT, 0, l);
             const auto row = LOWORD(hit);
@@ -618,7 +642,7 @@ struct WindowsPanels::Impl
             POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
             const auto index = static_cast<std::size_t>(SendMessageW(list, LB_GETITEMDATA, row, 0));
             const auto& items = self.browser->Textures().Items();
-            if (!HIWORD(hit) && index < items.size() && !items[index].material &&
+            if (!HIWORD(hit) && index < items.size() && (items[index].material || self.materialEditor.Window()) &&
                 SendMessageW(list, LB_GETITEMRECT, row, reinterpret_cast<LPARAM>(&r)) != LB_ERR && PtInRect(&r, p))
             {
                 SetFocus(list);
@@ -637,18 +661,28 @@ struct WindowsPanels::Impl
                 if (std::abs(point.x - self.texturePress.x) >= GetSystemMetrics(SM_CXDRAG) ||
                     std::abs(point.y - self.texturePress.y) >= GetSystemMetrics(SM_CYDRAG)) self.draggingTexture = true;
                 ClientToScreen(list, &point);
-                const auto slot = self.materialEditor.SlotAt(point);
+                const bool material = Material::ValidAssetPath(self.pressedTexture);
+                const auto slot = material ? std::nullopt : self.materialEditor.SlotAt(point);
+                const bool inspector = material && self.lastInspector &&
+                    (self.lastInspector->selected >= 0 || self.lastInspector->drawing) &&
+                    WindowFromPoint(point) == GetDlgItem(self.road, IDC_ROAD_MATERIAL);
+                const auto viewport = material ? self.ViewportDropPoint(point) : std::nullopt;
                 if (msg == WM_LBUTTONUP)
                 {
                     const auto path = std::move(self.pressedTexture);
-                    const bool drop = self.draggingTexture && slot.has_value();
+                    const bool drop = self.draggingTexture && (slot || inspector || viewport);
                     self.CancelTextureDrag(list);
-                    if (drop) self.materialEditor.Drop(*slot, path);
+                    if (drop && material)
+                    {
+                        self.materialDrops.push_back({path, viewport});
+                        if (!self.Post(self.materialDropEvent, 0)) self.materialDrops.pop_back();
+                    }
+                    else if (drop) self.materialEditor.Drop(*slot, path);
                 }
                 else if (self.draggingTexture)
                 {
                     self.materialEditor.Hover(slot);
-                    SetCursor(LoadCursorW(nullptr, slot ? IDC_CROSS : IDC_NO));
+                    SetCursor(LoadCursorW(nullptr, (slot || inspector || viewport) ? IDC_CROSS : IDC_NO));
                 }
                 return 0;
             }
@@ -722,6 +756,7 @@ struct WindowsPanels::Impl
         }
 
         lastInspector = data;
+        InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
         const int lanes = data.style.GetLaneCount();
         const std::wstring title = data.drawing ? L"Road editor | Draft" : data.selected >= 0 ?
             L"Road editor | Road " + std::to_wstring(data.selected + 1) : L"Road editor";
@@ -783,10 +818,9 @@ struct WindowsPanels::Impl
         EnableWindow(GetDlgItem(road, IDC_CANCEL_DRAFT), data.drawing);
     }
 
-    std::optional<SDL_FPoint> ModelDropPoint(POINT p) const
+    std::optional<SDL_FPoint> ViewportDropPoint(POINT p) const
     {
         if (!lastInspector || lastInspector->plan) return {};
-        ClientToScreen(models, &p);
         const HWND under = WindowFromPoint(p);
         if (under != frame && under != view) return {};
         ScreenToClient(view, &p);
@@ -842,7 +876,9 @@ struct WindowsPanels::Impl
         case WM_LBUTTONUP:
             if (hwnd == self->models && !self->draggedModel.empty())
             {
-                const auto point = self->ModelDropPoint({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
+                POINT screen{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                ClientToScreen(hwnd, &screen);
+                const auto point = self->ViewportDropPoint(screen);
                 if (msg == WM_MOUSEMOVE)
                 {
                     SetCursor(LoadCursorW(nullptr, point ? IDC_CROSS : IDC_NO));
@@ -921,6 +957,11 @@ struct WindowsPanels::Impl
             return FALSE;
         }
         case WM_DRAWITEM:
+            if (w == IDC_ROAD_MATERIAL)
+            {
+                self->DrawRoadMaterial(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
+                return TRUE;
+            }
             if (w == IDC_PREVIEW)
             {
                 const auto& draw = *reinterpret_cast<DRAWITEMSTRUCT*>(l);
@@ -972,7 +1013,11 @@ struct WindowsPanels::Impl
             self.Layout();
             return result;
         }
-        if (msg == WM_ACTIVATEAPP && !w && !self.draggedModel.empty()) self.CancelModelDrag();
+        if (msg == WM_ACTIVATEAPP && !w)
+        {
+            if (!self.draggedModel.empty()) self.CancelModelDrag();
+            if (!self.pressedTexture.empty()) self.CancelTextureDrag(GetDlgItem(self.models, IDC_TEXTURES));
+        }
         // A modifier may already be held in a native control when the user clicks
         // the viewport. Queue the modifier immediately before SDL queues the click.
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
@@ -1011,6 +1056,11 @@ struct WindowsPanels::Impl
             return true;
         }
 
+        if (!self.pressedTexture.empty() && msg->message == WM_KEYDOWN && msg->wParam == VK_ESCAPE)
+        {
+            self.CancelTextureDrag(GetDlgItem(self.models, IDC_TEXTURES));
+            return false;
+        }
         if (!self.draggedModel.empty() && msg->message == WM_KEYDOWN && msg->wParam == VK_ESCAPE)
         {
             self.CancelModelDrag();
@@ -1137,7 +1187,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         return nullptr;
     }
 
-    p.actions = SDL_RegisterEvents(7);
+    p.actions = SDL_RegisterEvents(8);
 
     if (!p.actions)
     {
@@ -1150,6 +1200,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.toolbarEvent = p.actions + 4;
     p.transformEvent = p.actions + 5;
     p.modelDropEvent = p.actions + 6;
+    p.materialDropEvent = p.actions + 7;
     WNDCLASSW wc{};
     wc.hInstance = module;
     wc.lpfnWndProc = ViewProc;
@@ -1252,6 +1303,14 @@ std::optional<WindowsPanels::ModelDrop> WindowsPanels::TakeModelDrop(const SDL_E
     if (event.type != impl->modelDropEvent || impl->modelDrops.empty()) return {};
     auto drop = std::move(impl->modelDrops.front());
     impl->modelDrops.pop_front();
+    return drop;
+}
+
+std::optional<WindowsPanels::MaterialDrop> WindowsPanels::TakeMaterialDrop(const SDL_Event& event)
+{
+    if (event.type != impl->materialDropEvent || impl->materialDrops.empty()) return {};
+    auto drop = std::move(impl->materialDrops.front());
+    impl->materialDrops.pop_front();
     return drop;
 }
 
@@ -1373,7 +1432,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
 
     p.UpdateInspector({current ? current->style : state.defaults, plan, plan && state.drawing,
                        state.draft.has_value(), plan && state.drawing && state.draft->points.size() >= 2,
-                       state.selected, point, point >= 0 ? current->points[point].position.y : 0.0});
+                       state.selected, point, point >= 0 ? current->points[point].position.y : 0.0, Material::Revision()});
 
     const double speed = camera.GetMoveSpeed();
 

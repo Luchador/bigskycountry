@@ -186,13 +186,13 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
             {
                 auto vertex = WorldToClip(p, roadColor);
                 const Vector3 offset = p - frame.origin;
-                vertex.uv = {float(Math::Dot(offset, u) / AsphaltMaterial::tileMeters),
-                             float(Math::Dot(offset, v) / AsphaltMaterial::tileMeters)};
+                vertex.uv = {float(Math::Dot(offset, u) / RoadMaterial::tileMeters),
+                             float(Math::Dot(offset, v) / RoadMaterial::tileMeters)};
                 vertex.lighting = {light, toTangent(camera->GetPosition() - p)};
                 vertices.push_back(vertex);
             }
         }
-        pavement.push_back({start, vertices.size()});
+        pavement.push_back({start, vertices.size(), road.style.material});
     }
     for (const auto& triangle : road.edgeTriangles)
     {

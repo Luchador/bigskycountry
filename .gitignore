@@ -6,3 +6,11 @@
 !/assets/models/terrain/
 /assets/models/terrain/*
 !/assets/models/terrain/test_grid.glb
+
+!/assets/textures/
+/assets/textures/*
+!/assets/textures/surfaces/
+/assets/textures/surfaces/*
+!/assets/textures/surfaces/roads/
+/assets/textures/surfaces/roads/*
+!/assets/textures/surfaces/roads/M_Asphalt01.bmat

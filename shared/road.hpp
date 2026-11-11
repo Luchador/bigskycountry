@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 enum class ThreeLaneLayout
@@ -36,6 +37,8 @@ struct RoadStyle
     static constexpr double curbHeight = 0.15;
     static constexpr double curbTopWidth = 0.15;
     static constexpr int maxLanes = 10;
+    static constexpr const char* defaultMaterial = "surfaces/roads/M_Asphalt01.bmat";
+    std::string material = defaultMaterial;
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = false;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "texture_catalog.hpp"
+#include "material_editor.hpp"
 #include <SDL3/SDL.h>
 #include <memory>
 #ifndef _WIN32
@@ -19,6 +19,10 @@ public:
     Tab ActiveTab() const { return tab; }
     TextureCatalog& Textures() { return textures; }
     void Refresh();
+    SDL_Surface* RoadMaterialThumbnail(const std::string& path);
+#ifndef _WIN32
+    SDL_Texture* RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer);
+#endif
 #ifndef _WIN32
     // A model-row press selects the preview and returns the path available to drag.
     std::string HandlePointer(const SDL_Event& event, SDL_FPoint local, int width, int height);
@@ -43,6 +47,13 @@ public:
     bool UpdatePreview(); // Returns true when the selected model or its preview changed.
 
 private:
+    MaterialEditor roadPreview;
+    std::string roadPreviewPath;
+    unsigned roadPreviewRevision = 0;
+    SDL_Surface* roadThumbnail = nullptr; // Borrowed from roadPreview.
+#ifndef _WIN32
+    SDL_Texture* roadThumbnailTexture = nullptr; // Owned by the main renderer.
+#endif
     Tab tab = Tab::Models;
     TextureCatalog textures;
     bool texturesScanned = false;

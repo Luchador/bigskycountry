@@ -51,21 +51,33 @@ float4 WireframePS(WorldFragment input) : SV_Target0
 #endif
 BSC_COMBINED Texture2D<float4> baseColorMap : register(t0, space2);
 BSC_COMBINED Texture2D<float2> normalMap : register(t1, space2);
-BSC_COMBINED Texture2D<float> roughnessMap : register(t2, space2);
+BSC_COMBINED Texture2D<float4> ormMap : register(t2, space2);
+BSC_COMBINED Texture2D<float4> emissiveMap : register(t3, space2);
+BSC_COMBINED Texture2D<float> opacityMap : register(t4, space2);
 BSC_COMBINED SamplerState colorSampler : register(s0, space2);
 BSC_COMBINED SamplerState normalSampler : register(s1, space2);
-BSC_COMBINED SamplerState roughnessSampler : register(s2, space2);
+BSC_COMBINED SamplerState ormSampler : register(s2, space2);
+
+BSC_COMBINED SamplerState emissiveSampler : register(s3, space2);
+BSC_COMBINED SamplerState opacitySampler : register(s4, space2);
+cbuffer RoadProperties : register(b0, space3)
+{
+    uint alphaCutout;
+};
 
 float4 AsphaltPS(WorldFragment input) : SV_Target0
 {
-    float3 albedo = baseColorMap.Sample(colorSampler, input.uv).rgb;
+    float4 base = baseColorMap.Sample(colorSampler, input.uv);
+    if (alphaCutout) clip(base.a * opacityMap.Sample(opacitySampler, input.uv) - 0.5);
+    float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;
+    float3 glow = emissiveMap.Sample(emissiveSampler, input.uv).rgb;
     float2 xy = normalMap.Sample(normalSampler, input.uv) * 2 - 1;
     float3 normal = normalize(float3(xy, sqrt(saturate(1 - dot(xy, xy)))));
-    float gloss = 1 - roughnessMap.Sample(roughnessSampler, input.uv);
+    float gloss = 1 - orm.g;
     float diffuse = saturate(dot(normal, input.light));
     float3 halfway = normalize(input.light + normalize(input.view));
-    float specular = 0.08 * gloss * diffuse * pow(saturate(dot(normal, halfway)), 4 + 124 * gloss * gloss);
-    float3 c = saturate(albedo * (0.28 + 0.72 * diffuse) + specular);
+    float specular = gloss * diffuse * pow(saturate(dot(normal, halfway)), 4 + 124 * gloss * gloss);
+    float3 c = saturate(glow + base.rgb * ((1 - orm.b) * 0.72 * diffuse + 0.28 * orm.r) + lerp(0.08, base.rgb, orm.b) * specular);
     // The shared SDL color target stores display-encoded colors.
     return float4(lerp(12.92 * c, 1.055 * pow(c, 1.0 / 2.4) - 0.055, step(0.0031308, c)), 1);
 }
