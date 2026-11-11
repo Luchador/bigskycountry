@@ -1,15 +1,13 @@
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
 #include "terrain_chunk.hpp"
-#include "sun.hpp"
-#include "world_state.hpp"
 #include "editor_colors.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
+bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view, const WorldLighting* environment)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
@@ -24,7 +22,8 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view)
     vertices.clear();
     outline.clear();
     materialRanges.clear();
-    sunDirection = Sun::Direction(g_WorldState.GetTimeOfDayMinutes());
+    lightGeometry = environment != nullptr;
+    lights = environment ? *environment : WorldLighting{};
     wireframeEnd = 0;
     foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedStart = selectedEnd = outlineStart = 0;
@@ -40,16 +39,19 @@ WorldDepthVertex WorldRenderer::WorldToClip(Vector3 position, SDL_FColor color) 
 
 void WorldRenderer::SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color)
 {
-    vertices.push_back(WorldToClip(a, color));
-    vertices.push_back(WorldToClip(b, color));
-    vertices.push_back(WorldToClip(c, color));
+    SubmitTriangle({a, b, c}, {color, color, color});
 }
 
 void WorldRenderer::SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors)
 {
+    Vector3 normal{};
+    if (lightGeometry) normal = Math::Normalize(Math::Cross(positions[1] - positions[0], positions[2] - positions[0]));
     for (std::size_t i = 0; i < positions.size(); ++i)
     {
-        vertices.push_back(WorldToClip(positions[i], colors[i]));
+        auto vertex = WorldToClip(positions[i], colors[i]);
+        vertex.normal = normal;
+        vertex.lit = lightGeometry;
+        vertices.push_back(vertex);
     }
 }
 
@@ -62,10 +64,18 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
     const Mesh& mesh = *instance.mesh;
     projectedMesh.clear();
     projectedMesh.reserve(mesh.vertices.size());
+    const auto normals = instance.transform.NormalTransform();
     for (const MeshVertex& v : mesh.vertices)
     {
         const SDL_FColor color{v.color.r * tint.r, v.color.g * tint.g, v.color.b * tint.b, 1};
-        projectedMesh.push_back(WorldToClip(instance.transform.Point(v.position), color));
+        auto vertex = WorldToClip(instance.transform.Point(v.position), color);
+        if (lightGeometry)
+        {
+            // glTF vertex colors and base color factors are already linear.
+            vertex.normal = Math::Normalize(normals.Direction(v.normal));
+            vertex.lit = 1;
+        }
+        projectedMesh.push_back(vertex);
     }
     const bool mirrored = instance.transform.Determinant() < 0;
     for (std::size_t i = 0; i < mesh.indices.size(); i += 3)
@@ -79,7 +89,8 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
 // Project in local meters using the two axes most parallel to the face. This
 // gives roads and chunks the same texel density, including on steep slopes.
 void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
-                                           const std::array<SDL_FColor, 3>& colors, const MeshTransform& frame)
+                                           const std::array<SDL_FColor, 3>& colors, const MeshTransform& frame,
+                                           const std::array<Vector3, 3>* smoothNormals)
 {
     const Vector3 normal = Math::Normalize(Math::Cross(points[1] - points[0], points[2] - points[0]));
     const Vector3 local = frame.Unrotate(normal);
@@ -88,13 +99,7 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
     else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
     Vector3 tangent = Math::Normalize(Math::Cross(normal, v));
     if (Math::Dot(tangent, u) < 0) tangent = tangent * -1;
-    Vector3 bitangent = Math::Cross(normal, tangent);
-    if (Math::Dot(bitangent, v) < 0) bitangent = bitangent * -1;
-    const auto toTangent = [&](Vector3 d) -> std::array<float, 3>
-    {
-        return {float(Math::Dot(d, tangent)), float(Math::Dot(d, bitangent)), float(Math::Dot(d, normal))};
-    };
-    const auto light = toTangent(sunDirection);
+    const float handedness = Math::Dot(Math::Cross(normal, tangent), v) < 0 ? -1.0f : 1.0f;
     for (size_t i = 0; i < points.size(); ++i)
     {
         const Vector3 p = points[i];
@@ -102,7 +107,11 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
         const Vector3 offset = p - frame.origin;
         vertex.uv = {float(Math::Dot(offset, u) / SurfaceMaterial::tileMeters),
                      float(Math::Dot(offset, v) / SurfaceMaterial::tileMeters)};
-        vertex.lighting = {light, toTangent(camera->GetPosition() - p)};
+        vertex.normal = smoothNormals ? (*smoothNormals)[i] : normal;
+        vertex.lit = lightGeometry;
+        vertex.tangent = tangent;
+        vertex.handedness = handedness;
+        vertex.view = camera->GetPosition() - p;
         vertices.push_back(vertex);
     }
 }
@@ -124,7 +133,10 @@ void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
         const auto& c = mesh.vertices[mesh.indices[i + 2]];
         const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
                                    instance.transform.Point(c.position)};
-        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, instance.transform);
+        // Terrain transforms are rigid, so rotating the authored normals preserves length.
+        const std::array normals{instance.transform.Direction(a.normal), instance.transform.Direction(b.normal),
+                                 instance.transform.Direction(c.normal)};
+        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, instance.transform, &normals);
     }
     if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), chunk.material});
 }

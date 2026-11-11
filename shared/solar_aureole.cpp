@@ -1,4 +1,5 @@
 #include "solar_aureole.hpp"
+#include "world_lighting.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,19 +25,9 @@ namespace
         return ratio * std::sqrt(ratio);
     }
 
-    float ToLinear(float c)
-    {
-        return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-    }
-
-    float ToDisplay(float c)
-    {
-        return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-    }
-
     float AddScatteredLight(float base, float linearLight, float weight)
     {
-        const float linearBase = ToLinear(base);
+        const float linearBase = Srgb::ToLinear(base);
 
         if (linearLight <= linearBase)
         {
@@ -44,7 +35,7 @@ namespace
         }
 
         // Use the available brightness headroom in the game's SDR sky palette.
-        return ToDisplay(std::lerp(linearBase, linearLight, weight));
+        return Srgb::ToDisplay(std::lerp(linearBase, linearLight, weight));
     }
 }
 
@@ -53,7 +44,7 @@ SolarAureole::SolarAureole(Vector3 lightDirection, SDL_FColor lightTint, double 
 {
     direction = lightDirection;
 
-    linearTint = {ToLinear(lightTint.r), ToLinear(lightTint.g), ToLinear(lightTint.b), 1.0f};
+    linearTint = Srgb::ToLinear(lightTint);
 
     strength = peakStrength * relativeStrength * SmoothStep(-0.10, 0.04, direction.y);
 }

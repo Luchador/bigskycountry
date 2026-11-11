@@ -14,6 +14,12 @@ MeshTransform MeshTransform::AxisRotation(Vector3 unitAxis, double radians)
     return {{}, rotate({1, 0, 0}), rotate({0, 1, 0}), rotate({0, 0, 1})};
 }
 
+MeshTransform MeshTransform::NormalTransform() const
+{
+    const double sign = Determinant() < 0 ? -1.0 : 1.0;
+    return {{}, Math::Cross(y, z) * sign, Math::Cross(z, x) * sign, Math::Cross(x, y) * sign};
+}
+
 bool MeshTransform::Valid() const
 {
     const auto finite = [](Vector3 v)

@@ -13,15 +13,12 @@ namespace
     WorldDepthVertex Interpolate(const WorldDepthVertex& a, const WorldDepthVertex& b, double t)
     {
         const float f = static_cast<float>(t);
-        auto lighting = a.lighting;
-        for (size_t i = 0; i < lighting.view.size(); ++i)
-        {
-            lighting.view[i] = std::lerp(a.lighting.view[i], b.lighting.view[i], f);
-        }
+        const auto mix = [t](Vector3 from, Vector3 to) { return from + (to - from) * t; };
         return {std::lerp(a.x, b.x, f), std::lerp(a.y, b.y, f), std::lerp(a.z, b.z, f), std::lerp(a.w, b.w, f),
                 {std::lerp(a.color.r, b.color.r, f), std::lerp(a.color.g, b.color.g, f),
                  std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)},
-                {std::lerp(a.uv.x, b.uv.x, f), std::lerp(a.uv.y, b.uv.y, f)}, lighting};
+                {std::lerp(a.uv.x, b.uv.x, f), std::lerp(a.uv.y, b.uv.y, f)},
+                mix(a.normal, b.normal), a.lit, a.tangent, a.handedness, mix(a.view, b.view)};
     }
 
     template<typename Distance>
@@ -43,14 +40,14 @@ namespace
         double x, y, depth, invW;
         SDL_FColor color;
         SDL_FPoint uv;
-        std::array<float, 3> view;
+        Vector3 normal, view;
     };
 
     ScreenVertex Project(const WorldDepthVertex& v, int width, int height)
     {
         const double invW = 1.0 / v.w;
 
-        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color, v.uv, v.lighting.view};
+        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color, v.uv, v.normal, v.view};
     }
 
     double Edge(const ScreenVertex& a, const ScreenVertex& b, double x, double y)
@@ -143,6 +140,14 @@ bool WorldRenderer::DrawSoftware()
                 constexpr double halfWidth = 1.0; // Pixels on either side of a shared edge.
                 threshold = Vector3{std::hypot(dx.x, dy.x), std::hypot(dx.y, dy.y), std::hypot(dx.z, dy.z)} * halfWidth;
             }
+            const auto& face = vertices[first];
+            const bool lit = face.lit && !wire;
+            // A uniformly colored flat triangle needs just one lighting evaluation.
+            const bool flatColor = lit && !textured && a.normal == b.normal && a.normal == c.normal &&
+                a.color.r == b.color.r && a.color.g == b.color.g && a.color.b == b.color.b &&
+                a.color.r == c.color.r && a.color.g == c.color.g && a.color.b == c.color.b;
+            SDL_FColor flat{};
+            if (flatColor) flat = lights.Shade(Math::Normalize(a.normal), {}, a.color);
             for (int y = top; y < bottom; ++y)
             {
                 auto* row = static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch;
@@ -188,12 +193,10 @@ bool WorldRenderer::DrawSoftware()
                                               da*(a.uv.y-tv) + db*(b.uv.y-tv) + dc*(c.uv.y-tv)) / sum;
                         };
                         const float footprint = static_cast<float>(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
-                        auto lighting = vertices[first].lighting;
-                        for (size_t j = 0; j < lighting.view.size(); ++j)
-                        {
-                            lighting.view[j] = static_cast<float>((u*a.view[j] + v*b.view[j] + w*c.view[j]) / sum);
-                        }
-                        const auto color = materialRanges[range].material->Shade(float(tu), float(tv), footprint, lighting);
+                        const Vector3 normal = Math::Normalize(a.normal*u + b.normal*v + c.normal*w);
+                        const Vector3 view = (a.view*u + b.view*v + c.view*w) * (1.0 / sum);
+                        const auto color = materialRanges[range].material->Shade(float(tu), float(tv), footprint, lights,
+                                                                                 normal, face.tangent, face.handedness, view);
                         if (color.a == 0) continue;
                         sample = {depth, selected};
                         pixel[0] = Channel(color.r);
@@ -202,9 +205,17 @@ bool WorldRenderer::DrawSoftware()
                         pixel[3] = 255;
                         continue;
                     }
-                    pixel[0] = Channel((u * a.color.r + v * b.color.r + w * c.color.r) / sum);
-                    pixel[1] = Channel((u * a.color.g + v * b.color.g + w * c.color.g) / sum);
-                    pixel[2] = Channel((u * a.color.b + v * b.color.b + w * c.color.b) / sum);
+                    SDL_FColor color = flat;
+                    if (!flatColor)
+                    {
+                        color = {float((u*a.color.r + v*b.color.r + w*c.color.r) / sum),
+                                 float((u*a.color.g + v*b.color.g + w*c.color.g) / sum),
+                                 float((u*a.color.b + v*b.color.b + w*c.color.b) / sum), 1};
+                        if (lit) color = lights.Shade(Math::Normalize(a.normal*u + b.normal*v + c.normal*w), {}, color);
+                    }
+                    pixel[0] = Channel(color.r);
+                    pixel[1] = Channel(color.g);
+                    pixel[2] = Channel(color.b);
                     pixel[3] = 255;
                 }
             }

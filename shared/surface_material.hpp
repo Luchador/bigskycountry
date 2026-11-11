@@ -3,14 +3,10 @@
 #include "asset_paths.hpp"
 #include "dds_texture.hpp"
 #include "material.hpp"
+#include "world_lighting.hpp"
 #include <map>
 #include <optional>
 #include <utility>
-
-struct SurfaceLighting
-{
-    std::array<float, 3> light{}, view{};
-};
 
 struct SurfaceMaterialTexture
 {
@@ -23,7 +19,8 @@ struct SurfaceMaterial
     static constexpr double tileMeters = 4.0;
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
-    SDL_FColor Shade(float u, float v, float footprint, const SurfaceLighting& basis) const;
+    SDL_FColor Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
+                     Vector3 tangent, float handedness, Vector3 view) const;
 };
 
 // One cache per renderer/device. Different materials can reference the same texture.

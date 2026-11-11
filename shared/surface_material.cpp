@@ -123,10 +123,11 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     for (size_t i = 0; i < bindings.size(); ++i) bindings[i] = {material.maps[i]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), bindings.size());
     const Uint32 params[4] = {material.type == MaterialType::AlphaCutout};
-    SDL_PushGPUFragmentUniformData(commands, 0, params, sizeof(params));
+    SDL_PushGPUFragmentUniformData(commands, 1, params, sizeof(params));
 }
 
-SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const SurfaceLighting& basis) const
+SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
+                                  Vector3 tangent, float handedness, Vector3 view) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
@@ -139,27 +140,10 @@ SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const Surfa
     const auto glow = sample(MaterialSlot::Emissive);
     const float x = xy[0] * 2 - 1, y = xy[1] * 2 - 1;
     const float z = std::sqrt(std::max(0.0f, 1 - x*x - y*y));
-    const float invLength = 1 / std::sqrt(x*x + y*y + z*z);
-    auto cosine = [&](const std::array<float, 3>& dir)
-    {
-        return std::clamp((x*dir[0] + y*dir[1] + z*dir[2]) * invLength, 0.0f, 1.0f);
-    };
-    auto normalize = [](std::array<float, 3> dir)
-    {
-        const float inv = 1 / std::sqrt(std::max(1.0e-12f, dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]));
-        for (auto& component : dir) component *= inv;
-        return dir;
-    };
-    auto half = normalize(basis.view);
-    for (size_t i = 0; i < half.size(); ++i) half[i] += basis.light[i];
-    const float diffuse = cosine(basis.light), gloss = 1 - orm[1];
-    const float spec = gloss * diffuse * std::pow(cosine(normalize(half)), 4 + 124 * gloss * gloss);
-    auto shade = [&](size_t i)
-    {
-        const float albedo = color[i], metal = orm[2];
-        const float c = std::clamp(glow[i] + albedo * ((1 - metal) * 0.72f * diffuse + 0.28f * orm[0]) +
-                                   std::lerp(0.08f, albedo, metal) * spec, 0.0f, 1.0f);
-        return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-    };
-    return {shade(0), shade(1), shade(2), 1};
+    // Re-orthogonalize the projected U axis against the interpolated shading normal.
+    tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
+    const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
+    const Vector3 mapped = Math::Normalize(tangent * x + bitangent * y + normal * z);
+    return lights.Shade(mapped, view, {color[0], color[1], color[2], 1}, {orm[0], orm[1], orm[2]},
+                        {glow[0], glow[1], glow[2]});
 }

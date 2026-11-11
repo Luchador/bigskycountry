@@ -13,17 +13,10 @@
 
 namespace
 {
-    struct Palette
-    {
-        SDL_FColor zenith;
-        SDL_FColor oppositeHorizon;
-        SDL_FColor sunwardHorizon;
-    };
-
     struct SkyStop
     {
         double sunElevationDegrees;
-        Palette colors;
+        SkyPalette colors;
     };
 
     constexpr SDL_FColor Rgb(int r, int g, int b)
@@ -51,7 +44,7 @@ namespace
         return {std::lerp(a.r, b.r, f), std::lerp(a.g, b.g, f), std::lerp(a.b, b.b, f), 1.0f};
     }
 
-    Palette ColorsAt(double elevation)
+    SkyPalette ColorsAt(double elevation)
     {
         for (std::size_t i = 1; i < skyStops.size(); ++i)
         {
@@ -70,7 +63,7 @@ namespace
         return skyStops.back().colors;
     }
 
-    SDL_FColor SampleSky(const Palette& colors, Vector3 horizontalSun, Vector3 ray)
+    SDL_FColor SampleSky(const SkyPalette& colors, Vector3 horizontalSun, Vector3 ray)
     {
         const double facing = std::clamp(0.5 + 0.5 * Math::Dot(ray, horizontalSun), 0.0, 1.0);
         const SDL_FColor horizon = Blend(colors.oppositeHorizon, colors.sunwardHorizon, facing * facing);
@@ -105,6 +98,36 @@ namespace
     }
 }
 
+SkyEnvironment SkyEnvironment::At(double timeOfDayMinutes)
+{
+    SkyEnvironment sky{};
+    const Vector3 sun = Sun::Direction(timeOfDayMinutes);
+    const Vector3 moon = Moon::Direction(sun);
+    const double elevation = std::asin(std::clamp(sun.y, -1.0, 1.0));
+    sky.sunTint = Sun::Tint(elevation);
+    sky.colors = ColorsAt(elevation * 180.0 / std::numbers::pi);
+
+    // Linear intensities relative to a white, fully illuminated diffuse surface.
+    constexpr double sunlight = 0.90, moonlight = 0.12, skylight = 0.60;
+    const auto linearRgb = [](SDL_FColor color) -> Vector3
+    {
+        const auto c = Srgb::ToLinear(color);
+        return {c.r, c.g, c.b};
+    };
+    const auto direct = [&](Vector3 direction, SDL_FColor tint, double intensity) -> DirectionalLight
+    {
+        // Fade the direct light in over the first five degrees above its own horizon.
+        static const double fullHeight = std::sin(Math::DegreesToRadians(5.0));
+        const double t = std::clamp(direction.y / fullHeight, 0.0, 1.0);
+        return {direction, linearRgb(tint) * (intensity * t * t * (3.0 - 2.0 * t))};
+    };
+    sky.lights.sun = direct(sun, sky.sunTint, sunlight);
+    sky.lights.moon = direct(moon, lunarAureoleTint, moonlight);
+    sky.lights.ambient = (linearRgb(sky.colors.zenith) * 0.5 + linearRgb(sky.colors.oppositeHorizon) * 0.25 +
+                          linearRgb(sky.colors.sunwardHorizon) * 0.25) * skylight;
+    return sky;
+}
+
 void Sky::UpdateGrid()
 {
     const int newColumns = static_cast<int>(sampleX.size()) - 1;
@@ -130,7 +153,7 @@ void Sky::UpdateGrid()
     }
 }
 
-bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
+bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const SkyEnvironment& environment)
 {
     SDL_Rect content;
     if (!SDL_GetRenderViewport(renderer, &content))
@@ -145,11 +168,10 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
         return true;
     }
 
-    const Vector3 sunDirection = Sun::Direction(timeOfDayMinutes);
-    const Vector3 moonDirection = Moon::Direction(sunDirection);
-    const double elevation = std::asin(std::clamp(sunDirection.y, -1.0, 1.0));
-    const Palette colors = ColorsAt(elevation * 180.0 / std::numbers::pi);
-    const SolarAureole solarAureole(sunDirection, Sun::Tint(elevation));
+    const Vector3 sunDirection = environment.lights.sun.direction;
+    const Vector3 moonDirection = environment.lights.moon.direction;
+    const SkyPalette& colors = environment.colors;
+    const SolarAureole solarAureole(sunDirection, environment.sunTint);
     const SolarAureole lunarAureole(moonDirection, lunarAureoleTint, lunarAureoleStrengthScale);
     const Vector3 horizontalSun = Math::Normalize({sunDirection.x, 0.0, sunDirection.z});
 

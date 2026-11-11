@@ -146,6 +146,10 @@ namespace
 
 void WorldRenderer::SubmitRoad(const Road& road, bool selected)
 {
+    // The 2D plan uses display colors. Convert those swatches to albedo for the 3D lighting pass.
+    static const auto asphalt = Srgb::ToLinear(roadColor);
+    static const auto yellowPaint = Srgb::ToLinear(yellowStripeColor);
+    static const auto whitePaint = Srgb::ToLinear(whiteStripeColor);
     const auto solid = [&](const std::vector<Road::Triangle>& triangles, SDL_FColor color)
     {
         for (const auto& t : triangles)
@@ -160,17 +164,17 @@ void WorldRenderer::SubmitRoad(const Road& road, bool selected)
         // share UVs, and moving or rotating the road carries the material with it.
         const Vector3 origin = road.points.empty() ? road.triangles.front()[0] : road.points.front().position;
         const auto frame = ObjectTransform{origin, road.rotation}.ToMeshTransform();
-        const std::array fallback{roadColor, roadColor, roadColor};
+        const std::array fallback{asphalt, asphalt, asphalt};
         for (const auto& triangle : road.triangles) SubmitMaterialTriangle(triangle, fallback, frame);
         materialRanges.push_back({start, vertices.size(), road.style.material});
     }
     for (const auto& triangle : road.edgeTriangles)
     {
         SubmitTriangle({triangle[0].position, triangle[1].position, triangle[2].position},
-                       {triangle[0].color, triangle[1].color, triangle[2].color});
+                       {Srgb::ToLinear(triangle[0].color), Srgb::ToLinear(triangle[1].color), Srgb::ToLinear(triangle[2].color)});
     }
-    solid(road.yellowStripes, yellowStripeColor);
-    solid(road.whiteStripes, whiteStripeColor);
+    solid(road.yellowStripes, yellowPaint);
+    solid(road.whiteStripes, whitePaint);
     if (selected && viewport.w > 0 && viewport.h > 0)
     {
         selectedStart = start;

@@ -95,7 +95,7 @@ bool WorldRenderer::CreatePipelines()
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 0, 1);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
@@ -106,8 +106,9 @@ bool WorldRenderer::CreatePipelines()
         {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
         {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, color)},
         {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(WorldDepthVertex, uv)},
-        {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(SurfaceLighting, light)},
-        {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, lighting) + offsetof(SurfaceLighting, view)}
+        {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, normal)},
+        {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, tangent)},
+        {5, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(WorldDepthVertex, view)}
     };
     SDL_GPUColorTargetDescription color{};
     color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
@@ -148,7 +149,7 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, materialSlotCount, 1);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, materialSlotCount, 2);
     }
 
     if (texturedPipeline)
@@ -359,6 +360,11 @@ bool WorldRenderer::DrawGPU()
     }
 
     SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
+    // Matches WorldLights in world.hlsl. Both world surface pipelines read this block.
+    const auto pack = [](Vector3 v) -> SDL_FColor { return {float(v.x), float(v.y), float(v.z), 0}; };
+    const SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
+                                pack(lights.moon.radiance), pack(lights.ambient)};
+    SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
     const SDL_GPUBufferBinding binding{vertexBuffer, 0};
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
 

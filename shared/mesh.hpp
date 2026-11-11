@@ -21,6 +21,8 @@ struct MeshTransform
     // Inverse rotation for an orthonormal basis.
     Vector3 Unrotate(Vector3 p) const { return {Math::Dot(p, x), Math::Dot(p, y), Math::Dot(p, z)}; }
     double Determinant() const { return Math::Dot(x, Math::Cross(y, z)); }
+    // Inverse-transpose up to a positive scalar. Normalize after applying Direction().
+    MeshTransform NormalTransform() const;
     bool Valid() const;
 };
 

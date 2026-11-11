@@ -99,11 +99,6 @@ namespace
                     mesh.vertices[index].normal = mesh.vertices[index].normal + face;
                 }
             }
-
-            if (p.material && p.material->double_sided)
-            {
-                mesh.indices.insert(mesh.indices.end(), {tri[0], tri[2], tri[1]});
-            }
         }
 
         return true;
@@ -138,15 +133,14 @@ namespace
 
         const size_t start = mesh.vertices.size();
 
-        if (pos->count > std::numeric_limits<std::uint32_t>::max() - start)
+        const bool twoSided = p.material && p.material->double_sided;
+        if (pos->count > (std::numeric_limits<std::uint32_t>::max() - start) / (twoSided ? 2 : 1))
         {
             return SDL_SetError("Mesh has too many vertices");
         }
 
         const bool mirrored = transform.Determinant() < 0;
-        const Vector3 nx = Math::Cross(transform.y, transform.z);
-        const Vector3 ny = Math::Cross(transform.z, transform.x);
-        const Vector3 nz = Math::Cross(transform.x, transform.y);
+        const auto normalTransform = transform.NormalTransform();
 
         for (size_t i = 0; i < pos->count; ++i)
         {
@@ -162,8 +156,7 @@ namespace
 
             MeshVertex v;
             v.position = transform.Point({xyz[0], xyz[1], xyz[2]});
-            // Inverse-transpose of the node's linear transform, up to a positive scalar.
-            v.normal = Math::Normalize((nx * n[0] + ny * n[1] + nz * n[2]) * (mirrored ? -1.0 : 1.0));
+            v.normal = Math::Normalize(normalTransform.Direction({n[0], n[1], n[2]}));
             v.uv = {st[0], st[1]};
 
             if (p.material && p.material->has_pbr_metallic_roughness)
@@ -185,6 +178,7 @@ namespace
             mesh.vertices.push_back(v);
         }
 
+        const size_t firstIndex = mesh.indices.size();
         if (!AppendTriangles(p, start, pos->count, mirrored, !normal, mesh))
         {
             return false;
@@ -195,6 +189,23 @@ namespace
             for (size_t i = start; i < mesh.vertices.size(); ++i)
             {
                 mesh.vertices[i].normal = Math::Normalize(mesh.vertices[i].normal);
+            }
+        }
+        if (twoSided)
+        {
+            // Back faces need their own normals for directional lighting.
+            const auto offset = static_cast<std::uint32_t>(pos->count);
+            for (size_t i = start; i < start + offset; ++i)
+            {
+                auto back = mesh.vertices[i];
+                back.normal = back.normal * -1;
+                mesh.vertices.push_back(back);
+            }
+            const size_t end = mesh.indices.size();
+            for (size_t i = firstIndex; i < end; i += 3)
+            {
+                mesh.indices.insert(mesh.indices.end(), {mesh.indices[i] + offset, mesh.indices[i + 2] + offset,
+                                                         mesh.indices[i + 1] + offset});
             }
         }
         return true;

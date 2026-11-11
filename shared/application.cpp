@@ -165,7 +165,8 @@ namespace
 
             if (!roadTool || !roadTool->IsPlanView())
             {
-                if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) || !worldRenderer.Begin(renderer, view))
+                const auto environment = SkyEnvironment::At(g_WorldState.GetTimeOfDayMinutes());
+                if (!sky.Draw(renderer, view, environment) || !worldRenderer.Begin(renderer, view, &environment.lights))
                 {
                     return false;
                 }
@@ -190,6 +191,7 @@ namespace
                     {
                         worldRenderer.WireframeSubmittedGeometry();
                     }
+                    worldRenderer.BeginEditorOverlay();
                     roadTool->SubmitGizmos(worldRenderer, world, view);
                 }
 
