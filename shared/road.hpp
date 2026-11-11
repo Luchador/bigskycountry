@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <compare>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -101,6 +102,11 @@ struct RoadPoint
 
 struct RoadGeometry
 {
+    // Monotonic token shared by all generated road and junction footprints.
+    inline static std::uint64_t latestRevision = 0;
+    std::uint64_t revision = 0;
+    void MarkRebuilt() { revision = ++latestRevision; }
+
     using Triangle = std::array<Vector3, 3>;
     struct PavementVertex
     {
@@ -133,6 +139,7 @@ struct RoadMouthFrame
 
 struct Road : RoadGeometry
 {
+    int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
     RoadStyle style;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;

@@ -29,7 +29,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 2;
+    constexpr Uint32 terrainVersion = 3;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
@@ -95,6 +95,18 @@ namespace
         return out.good() || SDL_SetError("Could not serialize mesh instances");
     }
 
+    bool ReadIds(std::istream& in, std::set<int>& ids)
+    {
+        int count;
+        if (!(in >> count) || count < 0) return false;
+        for (int i = 0; i < count; ++i)
+        {
+            int id;
+            if (!(in >> id) || id <= 0 || !ids.insert(id).second) return false;
+        }
+        return true;
+    }
+
     bool ReadTerrain(std::string payload, Uint32 version, WorldDocument& world)
     {
         std::istringstream in(std::move(payload));
@@ -103,6 +115,22 @@ namespace
         while (!in.eof())
         {
             std::string path;
+            std::string kind = "mesh";
+            if (version >= 3 && !(in >> kind)) return SDL_SetError("Missing terrain kind in TERR");
+            if (kind == "fill")
+            {
+                TerrainBoundary boundary;
+                std::string material;
+                if (!(in >> std::quoted(material)) || (!material.empty() && !Material::ValidAssetPath(material)) ||
+                    !ReadIds(in, boundary.roads) || !ReadIds(in, boundary.intersections) || boundary.roads.empty())
+                    return SDL_SetError("Invalid terrain boundary in TERR");
+                auto* chunk = world.PlaceTerrainFill(std::move(boundary), true);
+                if (!chunk) return false;
+                chunk->material = std::move(material);
+                in >> std::ws;
+                continue;
+            }
+            if (kind != "mesh") return SDL_SetError("Unknown terrain kind in TERR");
             ObjectTransform t;
             if (!(in >> std::quoted(path) >> t.position.x >> t.position.y >> t.position.z
                      >> t.rotation.x >> t.rotation.y >> t.rotation.z))
@@ -151,6 +179,8 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
     if (intersections.empty() && junctions.empty())
     {
         for (int index : changedRoads) roads[index].Rebuild();
+        terrainRevision = 0; // Also covers removal of the last road.
+        RefreshTerrainFills();
         return;
     }
     constexpr int sides = IntersectionAnchor::sideCount;
@@ -197,6 +227,8 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
     }
     std::erase_if(junctions, [&](const auto& entry) { return !active.contains(entry.first); });
     for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i], changedRoads.contains(static_cast<int>(i)));
+    terrainRevision = 0; // Attachment changes can open a junction without rebuilding a road.
+    RefreshTerrainFills();
 }
 
 bool WorldDocument::ValidConnections() const
@@ -220,13 +252,16 @@ bool WorldDocument::ValidConnections() const
 
 int WorldDocument::CreateIntersection(Vector3 position)
 {
-    if (!std::isfinite(Math::Length(position)) ||
-        (!intersections.empty() && intersections.rbegin()->first == std::numeric_limits<int>::max()))
+    int last = intersections.empty() ? 0 : intersections.rbegin()->first;
+    for (const auto& chunk : terrain)
+        if (chunk->boundary && !chunk->boundary->intersections.empty())
+            last = std::max(last, *chunk->boundary->intersections.rbegin());
+    if (!std::isfinite(Math::Length(position)) || last == std::numeric_limits<int>::max())
     {
         SDL_SetError("Cannot place intersection");
         return 0;
     }
-    const int id = intersections.empty() ? 1 : intersections.rbegin()->first + 1;
+    const int id = last + 1;
     intersections.emplace(id, Intersection{position});
     return id;
 }
@@ -524,8 +559,15 @@ bool WorldDocument::Open(const char* documentPath)
         if (!loaded.Contains(key)) return SDL_SetError("Missing OUTL entity in '%s'", loaded.path.c_str());
     }
     if (!loaded.ValidConnections()) return false;
+    std::set<int> used;
+    for (const Road& road : loaded.roads)
+    {
+        if (road.id && !used.insert(road.id).second) return SDL_SetError("Duplicate road ID in ROAD");
+        loaded.lastRoadId = std::max(loaded.lastRoadId, road.id);
+    }
     for (Road& road : loaded.roads)
     {
+        if (!road.id && !(road.id = loaded.AllocateRoadId())) return false;
         // Sine/cosine can differ by an ULP across platforms. Use the local anchor exactly.
         for (RoadPoint* end : {&road.points.front(), &road.points.back()})
             if (end->anchor) end->position = loaded.intersections.at(end->anchor->intersectionId).AnchorPosition(end->anchor->side);
@@ -596,10 +638,23 @@ bool WorldDocument::Save() const
     terrainData << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto& chunk : terrain)
     {
+        if (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material))
+            return SDL_SetError("Cannot save invalid terrain material");
+        if (chunk->boundary)
+        {
+            terrainData << "fill " << std::quoted(chunk->material);
+            for (const auto* ids : {&chunk->boundary->roads, &chunk->boundary->intersections})
+            {
+                terrainData << ' ' << ids->size();
+                for (int id : *ids) terrainData << ' ' << id;
+            }
+            terrainData << '\n';
+            continue;
+        }
         const auto& mesh = chunk->Instance().mesh;
         const auto& t = chunk->GetTransform();
-        if (!mesh || mesh->assetPath.empty() || (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material)) ||
-            !(terrainData << std::quoted(mesh->assetPath) << ' ' << t.position.x << ' ' << t.position.y << ' ' << t.position.z
+        if (!mesh || mesh->assetPath.empty() ||
+            !(terrainData << "mesh " << std::quoted(mesh->assetPath) << ' ' << t.position.x << ' ' << t.position.y << ' ' << t.position.z
                           << ' ' << t.rotation.x << ' ' << t.rotation.y << ' ' << t.rotation.z << ' ' << std::quoted(chunk->material) << '\n'))
         {
             return SDL_SetError("Cannot save terrain chunk");

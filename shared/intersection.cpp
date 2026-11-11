@@ -149,6 +149,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     layout = input;
     const auto directions = Intersection::Directions(layout.yaw);
     geometry = {};
+    geometry.MarkRebuilt();
     setbacks.fill(Intersection::anchorDistance);
     // Provide space for the full facing shoulder of the cross street and the fillet.
     // Only the rendered mouths move. The four authored connection anchors stay put.

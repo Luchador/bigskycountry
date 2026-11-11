@@ -84,6 +84,7 @@ namespace RoadIO
             return;
         }
         out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z << '\n';
+        out << road.id << '\n';
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
@@ -114,6 +115,11 @@ namespace RoadIO
         ReadStyle(in, road.style, version);
         if (version >= 4 && (!(in >> road.rotation.x >> road.rotation.y >> road.rotation.z) ||
                              !std::isfinite(Math::Length(road.rotation))))
+        {
+            in.setstate(std::ios::failbit);
+            return road;
+        }
+        if (version >= 8 && (!(in >> road.id) || road.id < 0))
         {
             in.setstate(std::ios::failbit);
             return road;

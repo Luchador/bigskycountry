@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <utility>
 
 namespace
@@ -123,7 +124,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         return placement;
     }
     const auto fields = Inspect(world, target);
-    if (fields.target.kind == SelectionKind::None) return {};
+    if (fields.target.kind == SelectionKind::None || fields.roadBound) return {};
     auto placement = GizmoPlacement::At(fields.value.position, camera, scene);
     if (placement) placement->yawOnly = target.YawOnly();
     if (placement && gizmo.settings.space == GizmoSpace::Local)
@@ -284,6 +285,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         constexpr double initialLength = 10.0; // meters along world X
         EditSnapshot before(state);
         Road road;
+        if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
         road.style = Style(world);
         road.style.material = RoadStyle::defaultMaterial;
         road.points = {{creationPoint, {}}, {creationPoint + Vector3{initialLength, 0, 0}, {}}};
@@ -554,6 +556,7 @@ void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camer
             return;
         }
         EditSnapshot before(state);
+        if (!(state.draft->id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
         state.draft->Rebuild();
         state.defaults = state.draft->style;
         world.roads.push_back(std::move(*state.draft));
@@ -1106,6 +1109,22 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
+    for (const auto& chunk : world.Terrain())
+    {
+        const auto& mesh = chunk->Instance().mesh;
+        if (!chunk->boundary || !mesh) continue;
+        // Give each projected corner its own index. SDL's software renderer can
+        // otherwise combine adjacent grid triangles into a rectangle across a diagonal.
+        std::vector<SDL_FPoint> corners;
+        corners.reserve(mesh->indices.size());
+        for (auto index : mesh->indices) corners.push_back(ToScreen(mesh->vertices[index].position));
+        std::vector<int> indices(corners.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        const auto count = static_cast<int>(corners.size());
+        if (!SDL_RenderGeometryRaw(renderer, nullptr, &corners.front().x, sizeof(SDL_FPoint), &TerrainChunk::groundColor, 0,
+                                   nullptr, 0, count, indices.data(), count, sizeof(int))) return false;
+    }
+
     std::optional<Road> preview;
 
     if (state.drawing && !state.draft->points.empty())
@@ -1493,6 +1512,36 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
     status.clear();
 }
 
+void RoadEditor::FillSelection(WorldDocument& world)
+{
+    TerrainBoundary boundary;
+    for (SceneKey key : state.outlineSelection)
+    {
+        if (key.kind == SceneKind::Road) boundary.roads.insert(world.roads.at(key.index).id);
+        else boundary.intersections.insert(key.index);
+    }
+    for (std::size_t i = 0; i < world.Terrain().size(); ++i)
+    {
+        if (world.Terrain()[i]->boundary == boundary)
+        {
+            state.SelectRows({{SceneKind::Terrain, static_cast<int>(i)}});
+            status = "Selected existing terrain fill";
+            return;
+        }
+    }
+    EditSnapshot before(state);
+    if (!world.PlaceTerrainFill(boundary))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    state.SelectRows({{SceneKind::Terrain, static_cast<int>(world.Terrain().size()) - 1}});
+    EditSnapshot after(state);
+    after.addedTerrain = EditSnapshot::TerrainPlacement{{}, {}, std::move(boundary)};
+    history.Record(-1, std::move(before), std::move(after));
+    Save(world);
+}
+
 void RoadEditor::ConnectEndpoint(WorldDocument& world)
 {
     if (!state.anchorSelection || EditingDraft() || drag != Drag::None) return;
@@ -1636,6 +1685,22 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
 void RoadEditor::DeleteSelection(WorldDocument& world)
 {
     if (EditingDraft() || drag != Drag::None) return;
+    if (state.meshSelection.kind == SelectionKind::Terrain)
+    {
+        const int index = state.meshSelection.index;
+        const auto& chunk = *world.Terrain().at(index);
+        EditSnapshot before(state);
+        before.hierarchy = world.hierarchy;
+        before.addedTerrain = EditSnapshot::TerrainPlacement{
+            chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary, chunk.material};
+        world.RemoveTerrain(index);
+        state.SelectRows({});
+        EditSnapshot after(state);
+        after.hierarchy = world.hierarchy;
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+        return;
+    }
     if (state.meshSelection.kind == SelectionKind::Intersection)
     {
         const int id = state.meshSelection.index;
@@ -1725,7 +1790,12 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
 void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 {
     Release(world);
-    if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object || cmd.target.kind == SceneKind::Intersection))
+    if (cmd.op == OutlineOp::FillTerrain)
+    {
+        if (state.RoadGroupSelected() && state.outlineSelection == cmd.items) FillSelection(world);
+    }
+    else if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object ||
+             cmd.target.kind == SceneKind::Intersection || cmd.target.kind == SceneKind::Terrain))
     {
         if (state.SelectedRows() == std::set<SceneKey>{cmd.target}) DeleteSelection(world);
     }
@@ -2068,7 +2138,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F && ViewportFocused() &&
         !SDL_GetWindowRelativeMouseMode(window) && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
     {
-        if (!event.key.repeat) ConnectEndpoint(world);
+        if (!event.key.repeat && drag == Drag::None)
+        {
+            if (state.RoadGroupSelected()) FillSelection(world);
+            else ConnectEndpoint(world);
+        }
         return EditorEvent::Handled;
     }
     if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&

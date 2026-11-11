@@ -42,6 +42,12 @@ public:
     bool InsertObject(int index, std::unique_ptr<BSCObject>&& object, int folder);
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
+    int AllocateRoadId();
+    // Loading and history can restore a perimeter before all of its sources exist.
+    TerrainChunk* PlaceTerrainFill(TerrainBoundary boundary, bool allowOpen = false);
+    void RefreshTerrainFills();
+    // Restore history at a specific outliner index after successfully loading the chunk.
+    void MoveLastTerrainTo(std::size_t index);
     bool RemoveTerrain(std::size_t index);
     const std::vector<std::unique_ptr<TerrainChunk>>& Terrain() const { return terrain; }
     void TickObjects(float deltaSeconds);
@@ -72,6 +78,9 @@ public:
 private:
     std::map<int, IntersectionSurface> junctions; // Derived from the current road ends; never serialized.
     bool ValidConnections() const;
+    int lastRoadId = 0;
+    std::uint64_t terrainRevision = 0;
+    void RebuildTerrain(TerrainChunk& chunk, const std::map<int, const Road*>& byId);
     struct Section
     {
         std::array<char, 4> tag;

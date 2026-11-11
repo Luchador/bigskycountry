@@ -36,7 +36,9 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         const auto& chunk = *world.Terrain().at(target.index);
         result.page = PropertiesPage::Terrain;
         result.title = "Terrain " + std::to_string(target.index + 1);
-        result.detail = chunk.Instance().mesh->assetPath;
+        if (chunk.boundary)
+            result.detail = chunk.Instance().mesh ? "Follows road boundary" : "Road boundary is open";
+        else result.detail = chunk.Instance().mesh->assetPath;
         result.material = chunk.material;
         result.materialSlot = true;
     }

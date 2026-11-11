@@ -28,6 +28,7 @@ struct TransformFields
     TransformTarget target;
     ObjectTransform value;
     std::string selectionLabel;
+    bool roadBound = false;
     bool CanEdit(int field) const;
     double DisplayValue(int field) const;
     std::string Text(int field) const;

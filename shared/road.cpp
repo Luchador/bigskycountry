@@ -318,6 +318,7 @@ void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value, bool 
 
 void Road::Rebuild()
 {
+    MarkRebuilt();
     centerline.clear();
     pointSamples.clear();
     pavementTriangles.clear();

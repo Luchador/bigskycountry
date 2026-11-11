@@ -12,6 +12,7 @@ class WindowsOutliner
     void Layout(int x, int y, int width, int height);
     void Sync(const SceneOutliner& model);
     std::optional<OutlineCommand> Take(const SDL_Event& event);
+    bool QueueTerrainFill(bool repeat);
     HWND Window() const { return panel; }
 
   private:

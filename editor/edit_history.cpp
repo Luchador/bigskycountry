@@ -62,9 +62,9 @@ bool RoadEditorState::GeometrySelected(SceneKey key) const
     return outlineSelection.contains(key);
 }
 
-bool RoadEditorState::RoadGroupSelected() const
+bool IsRoadGroup(const std::set<SceneKey>& keys)
 {
-    return outlineSelection.size() > 1 && std::all_of(outlineSelection.begin(), outlineSelection.end(), [](SceneKey key)
+    return keys.size() > 1 && std::all_of(keys.begin(), keys.end(), [](SceneKey key)
     {
         return key.kind == SceneKind::Road || key.kind == SceneKind::Intersection;
     });
@@ -173,12 +173,30 @@ void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& edi
     const int index = editor.selected;
     EditSnapshot before(editor, &world.roads.at(index));
     before.roadFolder = world.hierarchy.Parent({SceneKind::Road, index});
+    for (std::size_t i = 0; i < replacements.size(); ++i)
+    {
+        replacements[i].id = i == 0 ? world.roads[index].id : world.AllocateRoadId();
+        if (i && !replacements[i].id) return;
+    }
+    std::map<int, TerrainBoundary> newBoundaries;
+    if (replacements.size() > 1)
+    {
+        for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+        {
+            auto& boundary = world.Terrain()[i]->boundary;
+            if (!boundary || !boundary->roads.contains(world.roads[index].id)) continue;
+            before.splitBoundaries.emplace(i, *boundary);
+            for (const Road& piece : replacements) boundary->roads.insert(piece.id);
+            newBoundaries.emplace(i, *boundary);
+        }
+    }
     const std::size_t count = replacements.size();
     world.hierarchy.ReplaceRange(SceneKind::Road, index, 1, static_cast<int>(count), before.roadFolder);
     ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
     editor.SelectPoint(count ? index : -1, -1);
     EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
     after.roadFolder = before.roadFolder;
+    after.splitBoundaries = std::move(newBoundaries);
     Record(index, std::move(before), std::move(after));
 }
 
@@ -216,9 +234,14 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
             if (!edit.removed) return Result::Failed;
         }
     }
-    if (to.addedTerrain && !world.PlaceTerrain(to.addedTerrain->modelPath, to.addedTerrain->transform))
+    if (to.addedTerrain)
     {
-        return Result::Failed;
+        const auto& placement = *to.addedTerrain;
+        auto* chunk = placement.boundary ? world.PlaceTerrainFill(*placement.boundary, true) :
+                                           world.PlaceTerrain(placement.modelPath, placement.transform);
+        if (!chunk) return Result::Failed;
+        chunk->material = placement.material;
+        world.MoveLastTerrainTo(to.meshSelection.index);
     }
     if (from.addedTerrain && !world.RemoveTerrain(from.meshSelection.index))
     {
@@ -242,6 +265,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         }
         ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
     }
+    for (const auto& [i, boundary] : to.splitBoundaries) world.Terrain().at(i)->boundary = boundary;
     if (to.junction)
     {
         const auto& [id, value] = *to.junction;

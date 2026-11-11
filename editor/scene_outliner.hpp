@@ -18,6 +18,7 @@ enum class OutlineOp
     Create,
     Rename,
     Remove,
+    FillTerrain,
     Move
 };
 struct OutlineCommand

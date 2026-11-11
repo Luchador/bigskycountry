@@ -137,7 +137,7 @@ void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
     const MeshInstance& instance = chunk.Instance();
     if (chunk.material.empty() || !instance.mesh)
     {
-        SubmitMesh(instance);
+        SubmitMesh(instance, chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
         return;
     }
     const Mesh& mesh = *instance.mesh;

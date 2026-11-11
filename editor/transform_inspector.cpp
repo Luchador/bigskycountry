@@ -46,7 +46,7 @@ namespace
 
 bool TransformFields::CanEdit(int field) const
 {
-    if (target.kind == SelectionKind::None || target.kind == SelectionKind::Anchor || field < 0 || field >= 9)
+    if (roadBound || target.kind == SelectionKind::None || target.kind == SelectionKind::Anchor || field < 0 || field >= 9)
     {
         return false;
     }
@@ -188,6 +188,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         {
             return {};
         }
+        fields.roadBound = world.Terrain()[i]->boundary.has_value();
         fields.value = world.Terrain()[i]->GetTransform();
         break;
     case SelectionKind::Object:

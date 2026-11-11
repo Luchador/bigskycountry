@@ -122,6 +122,14 @@ void WindowsOutliner::Sync(const SceneOutliner& data)
     syncing = false;
 }
 
+bool WindowsOutliner::QueueTerrainFill(bool repeat)
+{
+    auto keys = Selected();
+    if (!IsRoadGroup(keys)) return false;
+    if (!repeat) Queue({OutlineOp::FillTerrain, {}, std::move(keys)});
+    return true;
+}
+
 void WindowsOutliner::Queue(OutlineCommand cmd)
 {
     SDL_Event e{};
@@ -334,7 +342,8 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
             if (vk == VK_DELETE)
             {
                 const auto selected = s.Selected();
-                if (selected.size() == 1 && (selected.begin()->kind == SceneKind::Object || selected.begin()->kind == SceneKind::Intersection))
+                if (selected.size() == 1 && (selected.begin()->kind == SceneKind::Object ||
+                    selected.begin()->kind == SceneKind::Intersection || selected.begin()->kind == SceneKind::Terrain))
                     s.Queue({OutlineOp::Remove, *selected.begin()});
                 else
                     remove();

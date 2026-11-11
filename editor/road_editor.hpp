@@ -82,6 +82,7 @@ private:
     void BeginDraft(WorldDocument& world);
     std::optional<GizmoPlacement> SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const;
     void SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract);
+    void FillSelection(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);

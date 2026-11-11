@@ -26,6 +26,15 @@ namespace
         return SDL_CreateRenderer(window, nullptr);
     }
 
+    const MeshInstance* FirstVisiblePlacement(const WorldDocument& world)
+    {
+        if (!world.meshes.empty()) return &world.meshes.front();
+        if (!world.Objects().empty()) return &world.Objects().front()->Instance();
+        for (const auto& chunk : world.Terrain())
+            if (chunk->Instance().mesh) return &chunk->Instance();
+        return nullptr;
+    }
+
     bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, WorldDocument& world, EditorTool* roadTool)
     {
         Input input(window);
@@ -46,14 +55,12 @@ namespace
             const double distance = std::max(30.0, first.style.LeftWidth() + first.style.RightWidth());
             freeCamera.LookAt(focus + Vector3{0.0, distance, -distance}, focus);
         }
-        else if (!world.meshes.empty() || !world.Objects().empty() || !world.Terrain().empty())
+        else if (const auto* first = FirstVisiblePlacement(world))
         {
-            const MeshInstance& first = !world.meshes.empty() ? world.meshes.front() :
-                !world.Objects().empty() ? world.Objects().front()->Instance() : world.Terrain().front()->Instance();
-            Vector3 lo = first.transform.Point(first.mesh->vertices.front().position), hi = lo;
-            for (const auto& vertex : first.mesh->vertices)
+            Vector3 lo = first->transform.Point(first->mesh->vertices.front().position), hi = lo;
+            for (const auto& vertex : first->mesh->vertices)
             {
-                const Vector3 p = first.transform.Point(vertex.position);
+                const Vector3 p = first->transform.Point(vertex.position);
                 lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
                 hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
             }
@@ -140,6 +147,7 @@ namespace
                 }
             }
 
+            if (roadTool) world.RefreshTerrainFills();
             const Uint64 now = SDL_GetTicksNS();
             const Uint64 elapsedNanoseconds = now - previousTime;
             previousTime = now;

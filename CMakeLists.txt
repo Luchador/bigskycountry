@@ -24,6 +24,14 @@ FetchContent_Declare(bcdec
     SOURCE_SUBDIR header_only)
 FetchContent_MakeAvailable(bcdec)
 
+# Constrained Delaunay triangulation for road-bounded terrain (CDT 2.0.2).
+FetchContent_Declare(cdt
+    GIT_REPOSITORY https://github.com/artem-ogre/CDT.git
+    GIT_TAG b4413ee44affb489099ed4d6ec65e94788cb6708
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR header_only)
+FetchContent_MakeAvailable(cdt)
+
 # Read and update versioned .bmat JSON in both the engine and editor.
 FetchContent_Declare(cjson
     URL https://codeload.github.com/DaveGamble/cJSON/tar.gz/c859b25da02955fef659d658b8f324b5cde87be3
@@ -53,6 +61,8 @@ add_library(BigSkyApplication STATIC
     shared/road_io.cpp
     shared/scene_hierarchy.cpp
     shared/world_document.cpp
+    shared/terrain_fill.cpp
+    shared/world_terrain.cpp
     shared/road_render.cpp
     shared/world_renderer_gpu.cpp
     shared/world_renderer_software.cpp
@@ -71,7 +81,7 @@ add_library(BigSkyApplication STATIC
 )
 set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20)
-target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
+target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
 include(cmake/shaders.cmake)
 

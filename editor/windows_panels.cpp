@@ -1175,6 +1175,10 @@ struct WindowsPanels::Impl
             return false;
         }
 
+        if (msg->message == WM_KEYDOWN && msg->wParam == 'F' && GetDlgCtrlID(focus) == IDC_OUTLINE_LIST &&
+            !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+            self.outline.QueueTerrainFill((msg->lParam & (1L << 30)) != 0)) return false;
+
         const int field = GetDlgCtrlID(focus) - IDC_LOC_X;
         if (IsChild(self.road, focus) && field >= 0 && field < 9 &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)

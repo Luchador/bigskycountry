@@ -10,6 +10,8 @@
 #include <span>
 #include <string>
 
+bool IsRoadGroup(const std::set<SceneKey>& keys);
+
 // Editable tool state. Camera, view, hover and generated geometry stay out of history.
 struct RoadEditorState
 {
@@ -26,7 +28,7 @@ struct RoadEditorState
     std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
     std::set<SceneKey> SelectedRows() const;
     bool GeometrySelected(SceneKey key) const;
-    bool RoadGroupSelected() const;
+    bool RoadGroupSelected() const { return IsRoadGroup(outlineSelection); }
     void PickElement(SceneKey key, bool add, bool subtract);
     void SelectRows(const std::set<SceneKey>& keys);
     TransformTarget Target() const
@@ -78,6 +80,8 @@ struct EditSnapshot
     {
         std::string modelPath;
         ObjectTransform transform;
+        std::optional<TerrainBoundary> boundary;
+        std::string material;
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
@@ -88,6 +92,7 @@ struct EditSnapshot
         bool operator==(const TerrainMaterial&) const = default;
     };
     std::optional<TerrainMaterial> terrainMaterial;
+    std::map<int, TerrainBoundary> splitBoundaries; // Perimeters affected by splitting an existing road.
     struct Junction
     {
         int id;

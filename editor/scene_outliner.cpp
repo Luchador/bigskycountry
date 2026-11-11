@@ -103,7 +103,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     }
     for (int i = 0; i < static_cast<int>(sizes[1]); ++i)
     {
-        add(SceneKind::Terrain, i, ModelLabel(world.Terrain()[i]->Instance(), i), "Terrain");
+        const auto& chunk = *world.Terrain()[i];
+        const auto label = chunk.boundary ? "Road-bounded terrain #" + std::to_string(i + 1) : ModelLabel(chunk.Instance(), i);
+        add(SceneKind::Terrain, i, label, "Terrain");
     }
     for (int i = 0; i < static_cast<int>(sizes[2]); ++i)
     {
