@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 #include <filesystem>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -21,6 +22,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
+    constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
@@ -126,6 +128,19 @@ namespace
     }
 }
 
+int WorldDocument::CreateIntersection(Vector3 position)
+{
+    if (!std::isfinite(Math::Length(position)) ||
+        (!intersections.empty() && intersections.rbegin()->first == std::numeric_limits<int>::max()))
+    {
+        SDL_SetError("Cannot place intersection");
+        return 0;
+    }
+    const int id = intersections.empty() ? 1 : intersections.rbegin()->first + 1;
+    intersections.emplace(id, Intersection{position});
+    return id;
+}
+
 BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform)
 {
     std::unique_ptr<BSCObject> object;
@@ -222,6 +237,7 @@ bool WorldDocument::Contains(SceneKey key) const
     {
     case SceneKind::World: return key.index == 0;
     case SceneKind::Folder: return hierarchy.Folders().contains(key.index);
+    case SceneKind::Intersection: return intersections.contains(key.index);
     case SceneKind::Road: return index < roads.size();
     case SceneKind::Terrain: return index < terrain.size();
     case SceneKind::Object: return index < objects.size();
@@ -286,6 +302,7 @@ bool WorldDocument::Open(const char* documentPath)
         return SDL_SetError("Unsupported world version %u in '%s'", version, loaded.path.c_str());
     }
 
+    bool sawIntersections = false;
     bool sawRoads = false;
     bool sawMeshes = false;
     bool sawObjects = false;
@@ -341,6 +358,23 @@ bool WorldDocument::Open(const char* documentPath)
                 return SDL_SetError("Invalid or unsupported OUTL section in '%s'", loaded.path.c_str());
             }
             sawOutliner = true;
+        }
+        else if (section.tag == intersectionTag)
+        {
+            if (sawIntersections || section.version != 1) return SDL_SetError("Duplicate or unsupported INTS section");
+            sawIntersections = true;
+            std::istringstream data(std::move(section.payload));
+            data.imbue(std::locale::classic());
+            while (!(data >> std::ws).eof())
+            {
+                int id;
+                Intersection item;
+                auto& p = item.position;
+                if (!(data >> id >> p.x >> p.y >> p.z >> item.cornerRadius >> std::quoted(item.material)) ||
+                    id <= 0 || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
+                    !Material::ValidAssetPath(item.material) || !loaded.intersections.emplace(id, std::move(item)).second)
+                    return SDL_SetError("Invalid intersection in INTS");
+            }
         }
         else if (section.tag == roadTag)
         {
@@ -409,7 +443,7 @@ bool WorldDocument::Save() const
     std::ostringstream outlinerData;
     outlinerData.imbue(std::locale::classic());
     if (hasOutliner && !hierarchy.Write(outlinerData)) return SDL_SetError("Could not serialize the outliner");
-    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty() + hasOutliner;
+    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty() + !intersections.empty() + hasOutliner;
     if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
@@ -427,6 +461,18 @@ bool WorldDocument::Save() const
         }
     }
 
+    std::ostringstream junctionData;
+    junctionData.imbue(std::locale::classic());
+    junctionData << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const auto& [id, item] : intersections)
+    {
+        const auto p = item.position;
+        if (id <= 0 || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
+            !Material::ValidAssetPath(item.material) ||
+            !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
+                          << ' ' << std::quoted(item.material) << '\n'))
+            return SDL_SetError("Cannot save invalid intersection");
+    }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))
     {
@@ -466,6 +512,7 @@ bool WorldDocument::Save() const
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
+                    (intersections.empty() || WriteSection(output, intersectionTag, 1, std::move(junctionData).str())) &&
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
                     (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str())) &&
                     (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str())) &&

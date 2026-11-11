@@ -13,7 +13,8 @@ enum class SceneKind
     Road,
     Terrain,
     Object,
-    Mesh
+    Mesh,
+    Intersection
 };
 
 struct SceneKey

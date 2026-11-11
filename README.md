@@ -83,9 +83,13 @@ Drag a material from the Content Browser’s **Textures** tab onto a chunk in th
 
 A terrain chunk is a placed mesh with a world position and rotation. Call `world.PlaceTerrain(modelPath, transform)` with a GLB path relative to `assets/models`. The optional `TERR` version 2 section stores the quoted model path, position XYZ in meters, rotation XYZ in radians, and a quoted material path relative to `assets/textures` for each chunk. An empty material path or a version 1 record uses the mesh’s original colors. Chunks use the mesh’s authored scale.
 
+### Intersection anchors
+
+In the 3D viewport, right-click and choose **Create → Create Intersection**. The editor places a selected cross at the nearest road or terrain surface under the cursor, with the same ground-plane and camera-ray fallback as road creation. Pick the cross or its Outliner row to edit it again. Use **W** or the Transform fields to move the center. The intersection inspector lets you adjust the corner radius and assign a pavement material. The horizontal ring previews the radius. The optional `INTS` section in the world file stores these settings for future road connections.
+
 ### Scene outliner
 
-The **Outliner** above Transform lists the world’s roads, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or terrain chunk in the list makes its transform available for editing.
+The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or terrain chunk in the list makes its transform available for editing.
 
 Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. You can also move a folder with its descendants. Multi-selection is for organizing entries.
 
@@ -93,7 +97,7 @@ With a folder selected, **Delete** moves its contents to its parent and removes 
 
 ### Transform panel
 
-The Transform panel sits above the road inspector. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. The title identifies the selection. Locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
+The Transform panel sits above a selection-sensitive properties inspector. Roads and control points show the road settings. Terrain chunks show their mesh and material slot, and objects show their mesh and Invincible setting. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. The title identifies the selection. Locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
 
 Type a value in one axis field and press **Enter** to apply it. **Esc** or leaving the field discards uncommitted text. Each change saves the world and supports **Ctrl+Z** and **Ctrl+Y**. The other axes keep their full precision.
 

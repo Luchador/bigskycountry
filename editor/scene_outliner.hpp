@@ -46,7 +46,7 @@ class SceneOutliner
     std::set<int> collapsed;
     std::set<std::string> siblingNames;
     int parentForNew = 0;
-    std::array<std::size_t, 4> counts{};
+    std::array<std::size_t, 5> counts{};
     bool dirty = true;
     unsigned version = 0;
 };

@@ -50,6 +50,7 @@ bool TransformFields::CanEdit(int field) const
         return false;
     }
 
+    if (target.kind == SelectionKind::Intersection) return field < 3;
     return field < 6 || target.kind == SelectionKind::Object;
 }
 
@@ -80,6 +81,7 @@ std::string TransformFields::Title() const
     const std::string n = std::to_string(target.index + 1);
     switch (target.kind)
     {
+    case SelectionKind::Intersection: return "Intersection " + std::to_string(target.index);
     case SelectionKind::Road: return "Road " + n;
     case SelectionKind::Point: return "Road " + n + " / Point " + std::to_string(target.point + 1);
     case SelectionKind::Object: return "Object " + n;
@@ -153,6 +155,10 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         }
         break;
     }
+    case SelectionKind::Intersection:
+        if (!world.intersections.contains(target.index)) return {};
+        fields.value.position = world.intersections.at(target.index).position;
+        break;
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
         {
@@ -172,9 +178,15 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     return fields;
 }
 
-bool SetMeshTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform)
+bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform)
 {
     const auto index = static_cast<std::size_t>(target.index);
+    if (target.kind == SelectionKind::Intersection && world.intersections.contains(target.index) &&
+        std::isfinite(Math::Length(transform.position)) && transform.rotation == Vector3{} && transform.scale == Vector3{1,1,1})
+    {
+        world.intersections.at(target.index).position = transform.position;
+        return true;
+    }
     if (target.kind == SelectionKind::Object && index < world.Objects().size())
     {
         return world.Objects()[index]->SetTransform(transform);
@@ -197,9 +209,9 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
     Component(Row(t, field), field % 3) = field >= 3 && field < 6 ? value / degrees : value;
     const TransformTarget target = fields.target;
 
-    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain)
+    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection)
     {
-        return SetMeshTransform(world, target, t);
+        return SetPlacementTransform(world, target, t);
     }
 
     Road& road = world.roads[target.index];

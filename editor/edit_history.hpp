@@ -1,6 +1,6 @@
 #pragma once
 
-#include "road.hpp"
+#include "intersection.hpp"
 #include "bscobject.hpp"
 #include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
@@ -68,6 +68,14 @@ struct EditSnapshot
         bool operator==(const TerrainMaterial&) const = default;
     };
     std::optional<TerrainMaterial> terrainMaterial;
+    struct Junction
+    {
+        int id;
+        std::optional<Intersection> value; // Empty on the unplaced side of a create/delete.
+        bool operator==(const Junction&) const = default;
+    };
+    std::optional<Junction> junction;
+    std::optional<bool> objectInvincible;
     std::optional<SceneHierarchy> hierarchy;
     std::set<SceneKey> outlineSelection;
     bool operator==(const EditSnapshot&) const = default;

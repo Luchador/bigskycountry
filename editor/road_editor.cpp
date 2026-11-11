@@ -18,6 +18,7 @@ namespace
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
 #ifndef _WIN32
+    constexpr SDL_FRect propertyMaterialSlot{12, 118, 194, 54};
     constexpr float threeLanePanelHeight = 104.0f;
 
     SDL_FRect MaterialSlotRect(const RoadStyle& style)
@@ -97,6 +98,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         return {};
     }
     const auto target = state.Target();
+    if (target.kind == SelectionKind::Intersection && gizmo.mode != GizmoMode::Translate) return {};
     if (target.kind == SelectionKind::Point)
     {
         const Road* road = Selected(world);
@@ -128,6 +130,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const
 {
+    overlay.DrawIntersections(renderer, world, state.meshSelection.kind == SelectionKind::Intersection ? state.meshSelection.index : -1, camera, scene);
     if (const Road* road = Selected(world))
     {
         overlay.Draw(renderer, *road, state, camera, scene);
@@ -175,8 +178,14 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
 }
 
 #ifndef _WIN32
-std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world) const
+std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, const PropertiesInspector& properties) const
 {
+    if (properties.page == PropertiesPage::Intersection)
+        return {{Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
+                {Action::LargerRadius, {174, 73, 32, 28}, "+"}};
+    if (properties.page == PropertiesPage::Object)
+        return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
+    if (properties.page != PropertiesPage::Road) return {};
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
     const int laneCount = style.GetLaneCount();
@@ -277,6 +286,19 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
+    if (command == EditorCommand::CreateIntersection)
+    {
+        EditSnapshot before(state);
+        const int id = world.CreateIntersection(creationPoint);
+        if (!id) { status = SDL_GetError(); return; }
+        before.junction = EditSnapshot::Junction{id, {}};
+        state.SelectRows({{SceneKind::Intersection, id}});
+        EditSnapshot after(state);
+        after.junction = EditSnapshot::Junction{id, world.intersections.at(id)};
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+        return;
+    }
     if (command == EditorCommand::CreateTestTerrain)
     {
         constexpr char modelPath[] = "terrain/test_grid.glb";
@@ -334,6 +356,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 {
     auto& picker = rightClick->picker;
     for (const Road& road : world.roads) picker.TestRoad(road);
+    for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
     creationPoint = picker.PlacementPosition();
     if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene))
     {
@@ -345,6 +368,11 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
                                 std::optional<SDL_FPoint> viewportPoint)
 {
     RoadPick target{RoadPickKind::Road, EditingDraft() ? -1 : state.selected};
+    if (!viewportPoint && !EditingDraft())
+    {
+        if (state.meshSelection.kind == SelectionKind::Terrain) target = {RoadPickKind::Terrain, state.meshSelection.index};
+        if (state.meshSelection.kind == SelectionKind::Intersection) target = {RoadPickKind::Intersection, state.meshSelection.index};
+    }
     if (viewportPoint)
     {
         if (planView || drag != Drag::None) return;
@@ -352,8 +380,10 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
         target = overlay.Pick(picker, world, nullptr, camera, scene);
     }
     Road* road = nullptr;
+    Intersection* junction = nullptr;
     TerrainChunk* chunk = nullptr;
-    if (target.kind == RoadPickKind::Terrain)
+    if (target.kind == RoadPickKind::Intersection) junction = &world.intersections.at(target.index);
+    else if (target.kind == RoadPickKind::Terrain)
         chunk = world.Terrain().at(target.index).get();
     else if (target.kind == RoadPickKind::Road && target.index >= 0)
         road = &world.roads.at(target.index);
@@ -362,7 +392,7 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     else
         return;
 
-    auto& current = chunk ? chunk->material : road->style.material;
+    auto& current = junction ? junction->material : chunk ? chunk->material : road->style.material;
     if (current == path) return;
     Material material;
     if (!Material::ValidAssetPath(path) || !material.Load(browser.Textures().Root() + path))
@@ -370,7 +400,16 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
         status = SDL_GetError();
         return;
     }
-    if (chunk)
+    if (junction)
+    {
+        EditSnapshot before(state), after(state);
+        before.junction = EditSnapshot::Junction{target.index, *junction};
+        current = path;
+        after.junction = EditSnapshot::Junction{target.index, *junction};
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+    }
+    else if (chunk)
     {
         EditSnapshot before(state), after(state);
         before.terrainMaterial = EditSnapshot::TerrainMaterial{target.index, current};
@@ -446,6 +485,32 @@ void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camer
 {
     switch (action)
     {
+    case Action::SmallerRadius:
+    case Action::LargerRadius:
+    {
+        const auto target = state.Target();
+        if (target.kind != SelectionKind::Intersection) return;
+        auto& item = world.intersections.at(target.index);
+        EditSnapshot before(state), after(state);
+        before.junction = EditSnapshot::Junction{target.index, item};
+        item.cornerRadius = std::max(0.0, item.cornerRadius + (action == Action::LargerRadius ? 1.0 : -1.0));
+        after.junction = EditSnapshot::Junction{target.index, item};
+        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        return;
+    }
+    case Action::ToggleInvincible:
+    {
+        const auto target = state.Target();
+        if (target.kind != SelectionKind::Object) return;
+        auto& object = *world.Objects().at(target.index);
+        EditSnapshot before(state), after(state);
+        before.objectInvincible = object.invincible;
+        object.invincible = !object.invincible;
+        after.objectInvincible = object.invincible;
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+        return;
+    }
     case Action::ChangeView:
         ChangeView(world, camera);
         return;
@@ -485,7 +550,7 @@ void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camer
         return;
     }
     default:
-        ChangeStyle(action, world);
+        if (InspectProperties(world, state, EditingDraft()).page == PropertiesPage::Road) ChangeStyle(action, world);
         return;
     }
 }
@@ -641,6 +706,14 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
 void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
 {
     state.SelectPoint(-1, -1);
+    for (const auto& [id, item] : world.intersections)
+    {
+        if (Near(ToScreen(pos), ToScreen(item.position)))
+        {
+            state.SelectRows({{SceneKind::Intersection, id}});
+            return;
+        }
+    }
     const auto hitSurface = [&](const auto& surface)
     {
         return std::any_of(surface.begin(), surface.end(), [&](const auto& t)
@@ -890,6 +963,13 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
+    for (const auto& [id, item] : world.intersections)
+    {
+        const auto p = ToScreen(item.position);
+        const auto color = state.meshSelection == TransformTarget{SelectionKind::Intersection, id} ? amber : blue;
+        if (!Fill(renderer, {p.x-7, p.y-2, 14, 4}, color) || !Fill(renderer, {p.x-2, p.y-7, 4, 14}, color)) return false;
+    }
+
     auto drawPoints = [&](const Road& road, bool active)
     {
         for (size_t i = 0; i < road.points.size(); ++i)
@@ -948,14 +1028,14 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 }
 
 #ifndef _WIN32
-bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world)
+bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocument& world, const PropertiesInspector& properties)
 {
     if (!Fill(renderer, {0, 0, static_cast<float>(roadPanel.w), static_cast<float>(roadPanel.h + roadScroll)}, EditorTheme::panel))
     {
         return false;
     }
 
-    for (const Button& b : Buttons(world))
+    for (const Button& b : Buttons(world, properties))
     {
         const SDL_Color fill = b.active ? EditorTheme::selected : EditorTheme::button;
         if (!Fill(renderer, b.rect, b.enabled ? fill : EditorTheme::header) ||
@@ -966,6 +1046,28 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
     }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
+    if (properties.materialSlot || properties.page == PropertiesPage::Road)
+    {
+        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(style) : propertyMaterialSlot;
+        const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
+        const char* caption = properties.page == PropertiesPage::Terrain ? "Terrain material" : "Pavement material";
+        if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
+            !Text(renderer, slot.x + 55, slot.y + 9, caption, muted)) return false;
+        if (!properties.material.empty())
+        {
+            if (auto* thumbnail = browser.RoadMaterialTexture(properties.material, renderer))
+                if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
+        }
+        const auto label = !properties.materialSlot ? "Select a road" : properties.material.empty() ? "Mesh colors" :
+                           properties.material.substr(properties.material.rfind('/') + 1);
+        if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
+    }
+    if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
+    if (properties.page == PropertiesPage::Intersection)
+        return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius);
+    if (properties.page != PropertiesPage::Road)
+        return Text(renderer, 12, 48, properties.detail.c_str(), muted);
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
     if (laneCount == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
@@ -979,17 +1081,6 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
             return false;
         }
     }
-    const SDL_FRect slot = MaterialSlotRect(style);
-    const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
-    if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
-        !Text(renderer, slot.x + 55, slot.y + 9, "Pavement material", muted)) return false;
-    if (current)
-    {
-        if (auto* thumbnail = browser.RoadMaterialTexture(style.material, renderer))
-            if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
-    }
-    const auto label = current ? style.material.substr(style.material.rfind('/') + 1) : "Select a road";
-    if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     const float styleBottom = RoadStyleBottom(style);
     if (style.IsDivided() &&
         (!Text(renderer, 12, 406 + offset, "Separation (m)", muted) ||
@@ -1014,16 +1105,7 @@ bool RoadEditor::RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& wo
             return false;
         }
     }
-    if (EditingDraft())
-    {
-        return Text(renderer, 14, 18, "Road editor | Draft", ink);
-    }
-    if (state.selected >= 0)
-    {
-        return SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, 255) &&
-               SDL_RenderDebugTextFormat(renderer, 14, 18, "Road editor | Road %d", state.selected + 1);
-    }
-    return Text(renderer, 14, 18, "Road editor", ink);
+    return true;
 }
 
 #endif
@@ -1077,6 +1159,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
 
     outliner.Update(world, state);
     auto fields = Inspect(world, state.Target());
+    const auto properties = InspectProperties(world, state, EditingDraft());
 
     if (state.outlineSelection.size() > 1)
     {
@@ -1091,7 +1174,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
 #ifdef _WIN32
     panels.SyncOutliner(outliner);
-    panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields);
+    panels.Sync(state, EditingDraft() ? &*state.draft : Selected(world), planView, camera, gizmo.settings, fields, properties);
     return true;
 #else
     if (!draggedAsset.empty() && mouse.x >= 0 && mouse.y >= 0 && mouse.x < scene.w && mouse.y < scene.h &&
@@ -1105,7 +1188,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
-    const int contentHeight = static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50);
+    const int contentHeight = properties.page == PropertiesPage::Road ?
+        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;
@@ -1116,7 +1200,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
            SDL_SetRenderViewport(renderer, &outlineArea) && outlinePanel.Draw(renderer, outliner, outlineArea.w, outlineArea.h) &&
            SDL_SetRenderViewport(renderer, &transformArea) && transformPanel.Draw(renderer, transformArea.w, fields) &&
            SDL_SetRenderViewport(renderer, &shifted) && SDL_SetRenderClipRect(renderer, &clip) &&
-           RenderRoadPanel(renderer, world) && SDL_SetRenderClipRect(renderer, nullptr) &&
+           RenderPropertiesPanel(renderer, world, properties) && SDL_SetRenderClipRect(renderer, nullptr) &&
            SDL_SetRenderViewport(renderer, &toolbar) && cameraToolbar.Draw(renderer, width, camera, gizmo.settings) &&
            SDL_SetRenderViewport(renderer, nullptr) && menu.DrawBar(renderer, width);
 #endif
@@ -1214,6 +1298,9 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         state.SelectPoint(hit.index, -1);
         break;
     }
+    case RoadPickKind::Intersection:
+        state.SelectRows({{SceneKind::Intersection, hit.index}});
+        break;
     case RoadPickKind::Object:
     case RoadPickKind::Terrain:
         state.drawing = false;
@@ -1232,6 +1319,22 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
 void RoadEditor::DeleteSelection(WorldDocument& world)
 {
     if (EditingDraft() || drag != Drag::None) return;
+    if (state.meshSelection.kind == SelectionKind::Intersection)
+    {
+        const int id = state.meshSelection.index;
+        EditSnapshot before(state);
+        before.junction = EditSnapshot::Junction{id, world.intersections.at(id)};
+        before.hierarchy = world.hierarchy;
+        world.hierarchy.Move({{SceneKind::Intersection, id}}, 0);
+        world.intersections.erase(id);
+        state.SelectPoint(-1, -1);
+        EditSnapshot after(state);
+        after.hierarchy = world.hierarchy;
+        after.junction = EditSnapshot::Junction{id, {}};
+        history.Record(-1, std::move(before), std::move(after));
+        Save(world);
+        return;
+    }
     if (state.meshSelection.kind == SelectionKind::Object)
     {
         const int index = state.meshSelection.index;
@@ -1299,9 +1402,9 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
 void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 {
     Release(world);
-    if (cmd.op == OutlineOp::Remove && cmd.target.kind == SceneKind::Object)
+    if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object || cmd.target.kind == SceneKind::Intersection))
     {
-        if (state.meshSelection == TransformTarget{SelectionKind::Object, cmd.target.index}) DeleteSelection(world);
+        if (state.SelectedRows() == std::set<SceneKey>{cmd.target}) DeleteSelection(world);
     }
     else if (outliner.Apply(cmd, world, state, history))
     {
@@ -1383,7 +1486,7 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         }
         if (mesh)
         {
-            if (SetMeshTransform(world, state.meshSelection, pose))
+            if (SetPlacementTransform(world, state.meshSelection, pose))
             {
                 dragChanged = pose != start;
             }
@@ -1490,8 +1593,9 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     {
                         const SDL_FPoint local{point.x + scene.x - roadPanel.x,
                                                point.y + scene.y - roadPanel.y + roadScroll};
-                        const auto slot = MaterialSlotRect(Style(world));
-                        if (local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
+                        const auto properties = InspectProperties(world, state, EditingDraft());
+                        const auto slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(Style(world)) : propertyMaterialSlot;
+                        if (properties.materialSlot && local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
                             AssignMaterial(world, draggedAsset, camera, {});
                         else if (point.x >= 0 && point.y >= 0 && point.x < scene.w && point.y < scene.h)
                             AssignMaterial(world, draggedAsset, camera, point);
@@ -1552,6 +1656,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifdef _WIN32
     if (const auto drop = panels.TakeMaterialDrop(event))
     {
+        if (drop->inspectorTarget && *drop->inspectorTarget != state.Target()) return EditorEvent::Handled;
         auto point = drop->viewportFraction;
         if (point)
         {
@@ -1643,7 +1748,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             if (dragStart->meshTransform)
             {
-                SetMeshTransform(world, state.meshSelection, *dragStart->meshTransform);
+                SetPlacementTransform(world, state.meshSelection, *dragStart->meshTransform);
             }
             else
             {
@@ -1780,7 +1885,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     return EditorEvent::Handled;
                 }
                 const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y - outlineArea.h - transformArea.h + roadScroll};
-                for (const Button& button : Buttons(world))
+                for (const Button& button : Buttons(world, InspectProperties(world, state, EditingDraft())))
                 {
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
                     {

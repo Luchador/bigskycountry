@@ -48,6 +48,7 @@ std::set<SceneKey> RoadEditorState::SelectedRows() const
 {
     if (!outlineSelection.empty()) return outlineSelection;
     if (selected >= 0) return {{SceneKind::Road, selected}};
+    if (meshSelection.kind == SelectionKind::Intersection) return {{SceneKind::Intersection, meshSelection.index}};
     if (meshSelection.kind == SelectionKind::Object) return {{SceneKind::Object, meshSelection.index}};
     if (meshSelection.kind == SelectionKind::Terrain) return {{SceneKind::Terrain, meshSelection.index}};
     return {};
@@ -61,6 +62,7 @@ void RoadEditorState::SelectRows(const std::set<SceneKey>& keys)
     {
         const auto key = *keys.begin();
         if (key.kind == SceneKind::Road) { selected = key.index; return; }
+        if (key.kind == SceneKind::Intersection) { meshSelection = {SelectionKind::Intersection, key.index}; return; }
         if (key.kind == SceneKind::Object) { meshSelection = {SelectionKind::Object, key.index}; return; }
         if (key.kind == SceneKind::Terrain) { meshSelection = {SelectionKind::Terrain, key.index}; return; }
     }
@@ -208,19 +210,26 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         }
         ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
     }
+    if (to.junction)
+    {
+        const auto& [id, value] = *to.junction;
+        if (value) world.intersections.insert_or_assign(id, *value);
+        else world.intersections.erase(id);
+    }
+    if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
     if (to.terrainMaterial)
     {
         const auto& target = *to.terrainMaterial;
         if (!world.Contains({SceneKind::Terrain, target.index})) return Result::Failed;
         world.Terrain()[target.index]->material = target.path;
     }
-    if (to.meshTransform && !SetMeshTransform(world, to.meshSelection, *to.meshTransform))
+    if (to.meshTransform && !SetPlacementTransform(world, to.meshSelection, *to.meshTransform))
     {
         return Result::Failed;
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
+    const bool mapChanged = to.junction || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 

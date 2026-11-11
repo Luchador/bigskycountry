@@ -8,30 +8,54 @@
 #include "world_renderer.hpp"
 
 #include <cmath>
+#include <numbers>
 
 namespace
 {
     constexpr Vector3 markerOffsetPixels{0, 6, 0};
-    constexpr float ROAD_SPLINE_THICKNESS = 1.5f;
+    constexpr float overlayStrokeWidth = 1.5f;
+
+    // Reuse the same constant-pixel-width stroke for the spline and radius guides.
+    struct OverlayStroke
+    {
+        double focal;
+        SDL_Rect viewport;
+        std::array<Vector3, 4> sides;
+        Vector3 eye, forward, right, up;
+
+        OverlayStroke(const FreeCamera& camera, SDL_Rect scene, double focalLength)
+            : focal(focalLength), viewport{0, 0, scene.w, scene.h},
+              sides(ViewGeometry::SidePlanes(focal, viewport)), eye(camera.GetPosition()),
+              forward(camera.ViewRay(0, 0)), right((camera.ViewRay(1, 0) - forward) * (1.0 / focal)),
+              up((camera.ViewRay(0, 1) - forward) * (1.0 / focal)) {}
+
+        template<typename Visit>
+        void Triangles(Vector3 viewStart, Vector3 viewEnd, Visit visit) const
+        {
+            const auto stroke = ViewGeometry::ProjectStroke(viewStart, viewEnd, sides, focal, viewport,
+                                                             worldNearDepth, overlayStrokeWidth);
+            if (!stroke) return;
+            std::array<Vector3, 4> corners;
+            for (int j = 0; j < 4; ++j)
+            {
+                const SDL_FPoint p = stroke->corners[j];
+                const Vector3 ray = forward + right * (p.x - viewport.w * 0.5) + up * (viewport.h * 0.5 - p.y);
+                // Bias toward the eye so coincident pavement cannot hide the stroke.
+                const double depth = j < 2 ? stroke->startDepth : stroke->endDepth;
+                corners[j] = eye + ray * std::max(worldNearDepth, depth / 1.0001);
+            }
+            visit(corners[0], corners[1], corners[2]);
+            visit(corners[0], corners[2], corners[3]);
+        }
+    };
 
     template<typename Visit>
     void VisitSegmentTriangles(const Road& road, const FreeCamera& camera, SDL_Rect scene, Visit visit)
     {
         const double focal = ViewportFocalLength(scene);
-
-        if (focal <= 0)
-        {
-            return;
-        }
-
-        const SDL_Rect viewport{0, 0, scene.w, scene.h};
-        const auto sides = ViewGeometry::SidePlanes(focal, viewport);
-        const Vector3 eye = camera.GetPosition();
-        const Vector3 forward = camera.ViewRay(0, 0);
-        const Vector3 right = (camera.ViewRay(1, 0) - forward) * (1.0 / focal);
-        const Vector3 up = (camera.ViewRay(0, 1) - forward) * (1.0 / focal);
+        if (focal <= 0) return;
+        const OverlayStroke stroke(camera, scene, focal);
         const Vector3 lift = camera.WorldDirectionToView(markerOffsetPixels);
-
         const auto display = [&](Vector3 point)
         {
             const Vector3 v = camera.WorldToView(point);
@@ -41,41 +65,13 @@ namespace
         for (int i = 0; i + 1 < static_cast<int>(road.points.size()); ++i)
         {
             const auto samples = road.SegmentSamples(i);
-
-            if (samples.empty())
-            {
-                continue;
-            }
-
-            Vector3 a = display(samples.front());
-
+            if (samples.empty()) continue;
+            Vector3 previous = display(samples.front());
             for (Vector3 sample : samples.subspan(1))
             {
-                const Vector3 b = display(sample);
-
-                const auto stroke = ViewGeometry::ProjectStroke(a, b, sides, focal, viewport, worldNearDepth, ROAD_SPLINE_THICKNESS);
-
-                a = b;
-
-                if (!stroke)
-                {
-                    continue;
-                }
-
-                std::array<Vector3, 4> corners;
-
-                for (int j = 0; j < 4; ++j)
-                {
-                    const SDL_FPoint p = stroke->corners[j];
-                    const Vector3 ray = forward + right * (p.x - scene.w * 0.5) + up * (scene.h * 0.5 - p.y);
-                    // Bias toward the eye as for road outlines. A vertical span can
-                    // still be coplanar with the pavement after the marker lift.
-                    const double depth = j < 2 ? stroke->startDepth : stroke->endDepth;
-                    corners[j] = eye + ray * std::max(worldNearDepth, depth / 1.0001);
-                }
-
-                visit(i, corners[0], corners[1], corners[2]);
-                visit(i, corners[0], corners[2], corners[3]);
+                const Vector3 next = display(sample);
+                stroke.Triangles(previous, next, [&](Vector3 a, Vector3 b, Vector3 c) { visit(i, a, b, c); });
+                previous = next;
             }
         }
     }
@@ -137,6 +133,41 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
     });
 }
 
+std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement& placement) const
+{
+    const double length = 14.0 * placement.metersPerPixel;
+    const double width = 3.85 * placement.metersPerPixel;
+    return {MeshInstance{marker, {placement.origin, {length, 0, 0}, {0, width, 0}, {0, 0, width}}},
+            MeshInstance{marker, {placement.origin, {width, 0, 0}, {0, width, 0}, {0, 0, length}}}};
+}
+
+void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, int selected,
+                                    const FreeCamera& camera, SDL_Rect scene) const
+{
+    for (const auto& [id, item] : world.intersections)
+    {
+        const auto placement = PointPlacement(item.position, camera, scene);
+        if (!placement) continue;
+        for (const auto& mesh : IntersectionMarker(*placement))
+            renderer.SubmitMesh(mesh, id == selected ? EditorColors::amber : EditorColors::blue);
+        if (id != selected || item.cornerRadius == 0) continue;
+
+        const OverlayStroke stroke(camera, scene, ViewportFocalLength(scene));
+        auto previous = camera.WorldToView(item.position + Vector3{item.cornerRadius, 0, 0});
+        for (int i = 1; i <= 64; ++i)
+        {
+            const double angle = (2.0 * std::numbers::pi / 64) * i;
+            const Vector3 offset{item.cornerRadius * std::cos(angle), 0, item.cornerRadius * std::sin(angle)};
+            const auto next = camera.WorldToView(item.position + offset);
+            stroke.Triangles(previous, next, [&](Vector3 a, Vector3 b, Vector3 c)
+            {
+                renderer.SubmitTriangle(a, b, c, EditorColors::amber);
+            });
+            previous = next;
+        }
+    }
+}
+
 RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene) const
 {
     RoadPick hit;
@@ -160,6 +191,12 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         if (picker.TestRoad(world.roads[i])) hit = {RoadPickKind::Road, i};
     }
 
+    for (const auto& [id, item] : world.intersections)
+    {
+        if (const auto placement = PointPlacement(item.position, camera, scene))
+            for (const auto& mesh : IntersectionMarker(*placement))
+                if (picker.TestMesh(mesh)) hit = {RoadPickKind::Intersection, id};
+    }
     if (selected)
     {
         VisitSegmentTriangles(*selected, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)

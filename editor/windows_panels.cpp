@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "properties_inspector.hpp"
 #include "windows_material_editor.hpp"
 #include "windows_theme.hpp"
 #include "windows_outliner.hpp"
@@ -199,6 +200,7 @@ struct WindowsPanels::Impl
         int selected, point;
         double elevation;
         unsigned materialRevision;
+        PropertiesInspector properties;
         bool operator==(const Inspector&) const = default;
     };
     std::optional<Inspector> lastInspector;
@@ -300,17 +302,26 @@ struct WindowsPanels::Impl
 
         LayoutBrowserLists();
 
-        SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
-        si.nMax = DialogSize(road, 0, ROAD_PANEL_HEIGHT).cy - 1;
-        si.nPage = static_cast<UINT>(h - outlineHeight);
-        si.nPos = scroll;
-        const int next = SetScrollInfo(road, SB_VERT, &si, TRUE);
-        ScrollTo(next);
+        LayoutInspectorScroll();
         // Repaint children after their final positions and scrollbar ranges are known.
         for (HWND panel : {models, outline.Window(), road})
         {
             RedrawWindow(panel, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
+    }
+
+    void LayoutInspectorScroll()
+    {
+        RECT client{};
+        GetClientRect(road, &client);
+        const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
+        const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT :
+                           (page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150);
+        SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
+        si.nMax = DialogSize(road, 0, height).cy - 1;
+        si.nPage = static_cast<UINT>(client.bottom);
+        si.nPos = scroll;
+        ScrollTo(SetScrollInfo(road, SB_VERT, &si, TRUE));
     }
 
     void ScrollTo(int pos)
@@ -601,18 +612,19 @@ struct WindowsPanels::Impl
         FillRect(draw.hDC, &r, WindowsTheme::Brush(EditorTheme::list));
         const int pad = DialogSize(road, 3, 0).cx;
         const RECT thumb{r.left + pad, r.top + pad, r.left + r.bottom - r.top - pad, r.bottom - pad};
-        const bool active = lastInspector && (lastInspector->selected >= 0 || lastInspector->drawing);
-        const auto path = active ? lastInspector->style.material : std::string{};
+        const bool active = lastInspector && lastInspector->properties.materialSlot;
+        const auto path = active ? lastInspector->properties.material : std::string{};
         WindowsTheme::DrawPreview(draw.hDC, thumb, active ? browser->RoadMaterialThumbnail(path) : nullptr);
         SetBkMode(draw.hDC, TRANSPARENT);
         RECT line{thumb.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
         constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::secondary));
-        DrawTextW(draw.hDC, L"Pavement material", -1, &line, flags);
+        const bool terrain = lastInspector && lastInspector->properties.page == PropertiesPage::Terrain;
+        DrawTextW(draw.hDC, terrain ? L"Terrain material" : L"Pavement material", -1, &line, flags);
         line.top = line.bottom;
         line.bottom = r.bottom;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
-        const auto label = active ? Wide(path.substr(path.rfind('/') + 1)) : L"Select a road";
+        const auto label = !active ? L"Select a road" : path.empty() ? L"Mesh colors" : Wide(path.substr(path.rfind('/') + 1));
         DrawTextW(draw.hDC, label.c_str(), -1, &line, flags);
     }
 
@@ -664,7 +676,7 @@ struct WindowsPanels::Impl
                 const bool material = Material::ValidAssetPath(self.pressedTexture);
                 const auto slot = material ? std::nullopt : self.materialEditor.SlotAt(point);
                 const bool inspector = material && self.lastInspector &&
-                    (self.lastInspector->selected >= 0 || self.lastInspector->drawing) &&
+                    self.lastInspector->properties.materialSlot &&
                     WindowFromPoint(point) == GetDlgItem(self.road, IDC_ROAD_MATERIAL);
                 const auto viewport = material ? self.ViewportDropPoint(point) : std::nullopt;
                 if (msg == WM_LBUTTONUP)
@@ -674,7 +686,8 @@ struct WindowsPanels::Impl
                     self.CancelTextureDrag(list);
                     if (drop && material)
                     {
-                        self.materialDrops.push_back({path, viewport});
+                        const auto target = inspector && self.inspected ? std::optional{self.inspected->target} : std::nullopt;
+                        self.materialDrops.push_back({path, viewport, target});
                         if (!self.Post(self.materialDropEvent, 0)) self.materialDrops.pop_back();
                     }
                     else if (drop) self.materialEditor.Drop(*slot, path);
@@ -714,6 +727,9 @@ struct WindowsPanels::Impl
             case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
             case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
             case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
+            case IDC_RADIUS_LESS: Post(actions, int(RoadAction::SmallerRadius)); return;
+            case IDC_RADIUS_MORE: Post(actions, int(RoadAction::LargerRadius)); return;
+            case IDC_INVINCIBLE: Post(actions, int(RoadAction::ToggleInvincible)); return;
             case IDC_FEWER: Post(actions, int(RoadAction::Fewer)); return;
             case IDC_MORE: Post(actions, int(RoadAction::More)); return;
             case IDC_DIVIDED: Post(actions, int(RoadAction::Divide)); return;
@@ -755,12 +771,43 @@ struct WindowsPanels::Impl
             return;
         }
 
+        const auto& properties = data.properties;
+        const bool pageChanged = !lastInspector || lastInspector->properties.page != properties.page;
         lastInspector = data;
+        const bool roadPage = properties.page == PropertiesPage::Road;
+        const bool junction = properties.page == PropertiesPage::Intersection;
+        if (pageChanged)
+        {
+            ScrollTo(0);
+            LayoutInspectorScroll();
+            for (int id : {IDC_VIEW, IDC_NEW, IDC_ALIGNMENT, IDC_FEWER, IDC_LANE_COUNT, IDC_MORE, IDC_LAYOUT,
+                           IDC_LEFT, IDC_RIGHT, IDC_EDGE, IDC_WIDTH, IDC_POINT, IDC_FINISH, IDC_CANCEL_DRAFT,
+                           IDC_LAYOUT_LABEL, IDC_LANE_DETAIL, IDC_DIVIDED, IDC_GAP_LESS, IDC_GAP_VALUE,
+                           IDC_GAP_MORE, IDC_MEDIAN, IDC_CAPTION_ALIGN, IDC_CAPTION_LANES, IDC_CAPTION_SHOULDERS,
+                           IDC_CAPTION_EDGES, IDC_CAPTION_GAP, IDC_CAPTION_MEDIAN})
+                ShowWindow(GetDlgItem(road, id), roadPage ? SW_SHOWNA : SW_HIDE);
+            for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
+                ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), properties.page == PropertiesPage::Object ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
+        }
+        SetDlgItemTextW(road, IDC_ROAD_TITLE, Wide(properties.title).c_str());
         InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
         const int lanes = data.style.GetLaneCount();
-        const std::wstring title = data.drawing ? L"Road editor | Draft" : data.selected >= 0 ?
-            L"Road editor | Road " + std::to_wstring(data.selected + 1) : L"Road editor";
-        SetDlgItemTextW(road, IDC_ROAD_TITLE, title.c_str());
+        if (!roadPage)
+        {
+            SetDlgItemTextW(road, IDC_PROPERTY_DETAIL, junction ? L"Corner radius (m)" : Wide(properties.detail).c_str());
+            if (junction)
+            {
+                wchar_t radius[48];
+                swprintf(radius, 48, L"%.2f", properties.radius);
+                SetDlgItemTextW(road, IDC_RADIUS_VALUE, radius);
+                EnableWindow(GetDlgItem(road, IDC_RADIUS_LESS), properties.radius > 0);
+            }
+            CheckDlgButton(road, IDC_INVINCIBLE, properties.invincible ? BST_CHECKED : BST_UNCHECKED);
+            return;
+        }
         SetDlgItemTextW(road, IDC_VIEW, data.plan ? L"Back to 3D  [R]" : L"Top-down view  [R]");
         SetDlgItemTextW(road, IDC_NEW, data.draft && !data.drawing ? L"Resume draft" : L"New road");
         EnableWindow(GetDlgItem(road, IDC_NEW), !data.drawing);
@@ -1406,7 +1453,7 @@ SDL_Keymod WindowsPanels::TakePressModifiers()
     return std::exchange(impl->pressModifiers, std::nullopt).value_or(SDL_GetModState());
 }
 
-void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields)
+void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields, const PropertiesInspector& properties)
 {
     auto& p = *impl;
     p.SyncFields(fields);
@@ -1432,7 +1479,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
 
     p.UpdateInspector({current ? current->style : state.defaults, plan, plan && state.drawing,
                        state.draft.has_value(), plan && state.drawing && state.draft->points.size() >= 2,
-                       state.selected, point, point >= 0 ? current->points[point].position.y : 0.0, Material::Revision()});
+                       state.selected, point, point >= 0 ? current->points[point].position.y : 0.0, Material::Revision(), properties});
 
     const double speed = camera.GetMoveSpeed();
 

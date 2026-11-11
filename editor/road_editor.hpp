@@ -2,6 +2,7 @@
 
 #include "application.hpp"
 #include "road_action.hpp"
+#include "properties_inspector.hpp"
 #include "scene_outliner.hpp"
 #ifdef _WIN32
 #include "windows_panels.hpp"
@@ -59,7 +60,7 @@ private:
         bool enabled = true;
     };
 
-    std::vector<Button> Buttons(const WorldDocument& world) const;
+    std::vector<Button> Buttons(const WorldDocument& world, const PropertiesInspector& properties) const;
 #endif
     RoadStyle& Style(WorldDocument& world);
     bool EditingDraft() const { return planView && state.drawing; }
@@ -69,7 +70,7 @@ private:
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
     bool DrawMeasurement(SDL_Renderer* renderer) const;
 #ifndef _WIN32
-    bool RenderRoadPanel(SDL_Renderer* renderer, const WorldDocument& world);
+    bool RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocument& world, const PropertiesInspector& properties);
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,

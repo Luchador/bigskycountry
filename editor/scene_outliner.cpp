@@ -42,7 +42,7 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
 {
     const auto primary = state.outlineSelection.empty() ? state.SelectedRows() : std::set<SceneKey>{};
     const auto& selected = state.outlineSelection.empty() ? primary : state.outlineSelection;
-    const std::array sizes{world.roads.size(), world.Terrain().size(), world.Objects().size(), world.meshes.size()};
+    const std::array sizes{world.roads.size(), world.Terrain().size(), world.Objects().size(), world.meshes.size(), world.intersections.size()};
     if (dirty || selected != selection)
     {
         parentForNew = 0;
@@ -114,6 +114,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     {
         add(SceneKind::Mesh, i, ModelLabel(world.meshes[i], i), "Static mesh");
     }
+
+    for (const auto& [id, item] : world.intersections)
+        add(SceneKind::Intersection, id, "Intersection " + std::to_string(id), "Intersection");
 
     rows.clear();
     std::vector<OutlineRow> stack{{{}, Stem(world.Path()), "World", 0, true, true}};

@@ -215,6 +215,7 @@ bool SceneHierarchy::Write(std::ostream& out) const
     for (const auto& [key, id] : members)
     {
         const char tag = key.kind == SceneKind::Road      ? 'R'
+                         : key.kind == SceneKind::Intersection ? 'I'
                          : key.kind == SceneKind::Terrain ? 'T'
                          : key.kind == SceneKind::Object  ? 'O'
                                                           : 'M';
@@ -249,6 +250,9 @@ bool SceneHierarchy::Read(std::istream& in)
             SceneKind kind;
             switch (tag)
             {
+            case 'I':
+                kind = SceneKind::Intersection;
+                break;
             case 'R':
                 kind = SceneKind::Road;
                 break;

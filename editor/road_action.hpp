@@ -22,5 +22,8 @@ enum class RoadAction
     NarrowerGap,
     WiderGap,
     ConcreteMedian,
-    GrassMedian
+    GrassMedian,
+    SmallerRadius,
+    LargerRadius,
+    ToggleInvincible
 };

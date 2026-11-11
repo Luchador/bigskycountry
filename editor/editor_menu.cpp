@@ -29,7 +29,7 @@ namespace
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
-    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_TEST_TERRAIN, L"&Test Terrain"}};
+    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_TEST_TERRAIN, L"&Test Terrain"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
     {
@@ -341,6 +341,7 @@ namespace
         EditorCommand command;
     };
     constexpr CreateItem createItems[] = {{"Create Road", EditorCommand::CreateRoad},
+                                          {"Create Intersection", EditorCommand::CreateIntersection},
                                           {"Test Terrain", EditorCommand::CreateTestTerrain}};
     constexpr int createItemCount = static_cast<int>(std::size(createItems));
     constexpr float itemHeight = 26;
@@ -393,13 +394,14 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;
     if (choice == BSC_CREATE_TEST_TERRAIN)
     {
         return EditorCommand::CreateTestTerrain;
     }
 #else
     rootItem = {0, 0, 104, itemHeight};
-    submenu = {0, 0, 120, itemHeight * createItemCount};
+    submenu = {0, 0, 170, itemHeight * createItemCount};
     const auto fit = [](float start, float extent, int limit)
     {
         return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));

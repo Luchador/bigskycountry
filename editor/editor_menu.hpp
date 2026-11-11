@@ -3,7 +3,7 @@
 #include <SDL3/SDL.h>
 #include <optional>
 
-enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateTestTerrain };
+enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateTestTerrain, CreateIntersection };
 
 class EditorMenu
 {

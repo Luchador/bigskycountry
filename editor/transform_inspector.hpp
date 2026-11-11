@@ -6,7 +6,7 @@
 
 class WorldDocument;
 
-enum class SelectionKind { None, Road, Point, Object, Terrain };
+enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection };
 struct TransformTarget
 {
     SelectionKind kind = SelectionKind::None;
@@ -35,6 +35,6 @@ struct TransformEdit
 };
 
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
-bool SetMeshTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
+bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, double value);
 std::optional<double> ParseTransformValue(std::string_view text);

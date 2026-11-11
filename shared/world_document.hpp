@@ -1,6 +1,7 @@
 #pragma once
 
-#include "road.hpp"
+#include "intersection.hpp"
+#include <map>
 #include "scene_hierarchy.hpp"
 #include "bscobject.hpp"
 #include "terrain_chunk.hpp"
@@ -20,6 +21,8 @@ public:
     const std::string& Path() const { return path; }
     MeshAssets models;
     std::vector<Road> roads;
+    std::map<int, Intersection> intersections; // Stable positive IDs, also used by the outliner.
+    int CreateIntersection(Vector3 position); // Returns 0 on failure.
     std::vector<MeshInstance> meshes; // Static MESH placements, including arbitrary affine transforms.
 
     // Returns a world-owned object, or nullptr with an SDL error and no object added.

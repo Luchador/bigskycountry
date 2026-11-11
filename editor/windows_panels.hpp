@@ -4,6 +4,7 @@
 #include <memory>
 #include "scene_outliner.hpp"
 
+struct PropertiesInspector;
 class ContentBrowser;
 class FreeCamera;
 struct RoadEditorState;
@@ -31,6 +32,7 @@ public:
     {
         std::string path;
         std::optional<SDL_FPoint> viewportFraction; // Empty when dropped on the inspector.
+        std::optional<TransformTarget> inspectorTarget;
     };
     std::optional<MaterialDrop> TakeMaterialDrop(const SDL_Event& event);
     bool Command(const SDL_Event& event, RoadAction& action) const;
@@ -39,7 +41,7 @@ public:
     std::optional<TransformEdit> TakeTransformEdit(const SDL_Event& event);
     void SyncOutliner(const SceneOutliner& model);
     std::optional<OutlineCommand> TakeOutlineCommand(const SDL_Event& event);
-    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields);
+    void Sync(const RoadEditorState& state, const Road* current, bool plan, const FreeCamera& camera, const TransformSettings& settings, const TransformFields& fields, const PropertiesInspector& properties);
 
 private:
     struct Impl;

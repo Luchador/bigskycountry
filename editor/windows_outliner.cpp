@@ -334,7 +334,7 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
             if (vk == VK_DELETE)
             {
                 const auto selected = s.Selected();
-                if (selected.size() == 1 && selected.begin()->kind == SceneKind::Object)
+                if (selected.size() == 1 && (selected.begin()->kind == SceneKind::Object || selected.begin()->kind == SceneKind::Intersection))
                     s.Queue({OutlineOp::Remove, *selected.begin()});
                 else
                     remove();
