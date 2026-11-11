@@ -1,18 +1,25 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "scene_hierarchy.hpp"
 #include <optional>
 #include <string_view>
 
 class WorldDocument;
 struct Road;
 
-enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor };
+enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor, RoadGroup };
 struct TransformTarget
 {
     SelectionKind kind = SelectionKind::None;
     int index = -1;
     int point = -1;
+    std::set<SceneKey> members; // Identifies the exact group, including for queued inspector edits.
+    bool YawOnly() const
+    {
+        return kind == SelectionKind::Intersection ||
+            (kind == SelectionKind::RoadGroup && members.lower_bound({SceneKind::Intersection, 0}) != members.end());
+    }
     bool operator==(const TransformTarget&) const = default;
 };
 

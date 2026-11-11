@@ -21,6 +21,7 @@ struct GizmoPlacement
     GizmoAxes localAxes = worldAxes; // Orthonormal X, Y, Z supplied by the selected object.
 
     // A fixed-size gizmo centered on any visible world-space pivot.
+    bool yawOnly = false; // Keep intersections horizontal.
     static std::optional<GizmoPlacement> At(Vector3 pivot, const FreeCamera& camera, SDL_Rect scene);
 };
 

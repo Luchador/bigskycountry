@@ -119,6 +119,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/viewport_picker.cpp
     editor/editor_menu.cpp
     editor/edit_history.cpp
+    editor/road_group_transform.cpp
 )
 if(WIN32)
     enable_language(RC)

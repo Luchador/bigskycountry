@@ -91,6 +91,7 @@ struct IntersectionAnchor
 
 struct RoadPoint
 {
+    bool operator==(const RoadPoint&) const = default;
     Vector3 position;
     std::optional<double> heading; // Radians from +X toward +Z; empty follows the neighboring points.
     double pitch = 0.0; // Radians above the XZ plane for a manual tangent.
@@ -136,7 +137,7 @@ struct Road : RoadGeometry
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     // Generated cut lines at active intersections. The authored spline stays editable all the way to the anchor.
-    void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths);
+    void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths, bool rebuild = false);
 
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
@@ -146,6 +147,7 @@ struct Road : RoadGeometry
     void RotatePoint(std::size_t index, double heading);
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
     bool SetPose(Vector3 position, Vector3 angles);
+    bool TransformControlPoints(Vector3 position, Vector3 angles); // Authored data only, for batch edits.
     // An independent run of surviving segments, including both endpoint control points.
     Road Section(std::size_t first, std::size_t last) const;
     void Rebuild();

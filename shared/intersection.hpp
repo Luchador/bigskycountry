@@ -12,7 +12,9 @@ struct Intersection
     std::bitset<IntersectionAnchor::sideCount> stopLines{0b1111}; // One setting per anchor, including free anchors.
     static constexpr double stopLineWidth = 0.6; // Meters along the direction of travel.
     static constexpr double anchorDistance = 10.0; // Approach centerlines, in meters from the junction center.
-    Vector3 AnchorPosition(int side) const { return position + IntersectionAnchor::directions.at(side) * anchorDistance; }
+    double yaw = 0; // Radians around world Y.
+    static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw);
+    Vector3 AnchorPosition(int side) const { return position + Directions(yaw).at(side) * anchorDistance; }
 
     bool operator==(const Intersection&) const = default;
 };
@@ -37,6 +39,7 @@ struct IntersectionLayout
     Vector3 center;
     double radius;
     std::array<std::optional<IntersectionApproach>, IntersectionAnchor::sideCount> arms{};
+    double yaw = 0;
     bool operator==(const IntersectionLayout&) const = default;
 };
 

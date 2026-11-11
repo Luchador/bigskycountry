@@ -95,7 +95,9 @@ double Road::ThreeLaneDividerOffset() const
     // Use the authored road frame so trimming its ends at junctions cannot swap lane directions.
     const auto frame = ObjectTransform{{}, rotation}.ToMeshTransform();
     const Vector3 travel = frame.Unrotate(points.back().position - points.front().position);
-    const bool northFollowsPoints = travel.z == 0.0 ? travel.x >= 0.0 : travel.z > 0.0;
+    // Whole-road rotations can leave a rounding residual on an east-west road.
+    const bool eastWest = std::abs(travel.z) <= 1e-12 * std::hypot(travel.x, travel.z);
+    const bool northFollowsPoints = eastWest ? travel.x >= 0.0 : travel.z > 0.0;
     const bool twoNorthbound = style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound;
     constexpr double halfLane = RoadStyle::laneWidth * 0.5;
     return twoNorthbound == northFollowsPoints ? halfLane : -halfLane;
@@ -261,6 +263,13 @@ Road Road::Section(std::size_t first, std::size_t last) const
 
 bool Road::SetPose(Vector3 position, Vector3 angles)
 {
+    if (!TransformControlPoints(position, angles)) return false;
+    Rebuild();
+    return true;
+}
+
+bool Road::TransformControlPoints(Vector3 position, Vector3 angles)
+{
     if (points.empty() || !std::isfinite(Math::Length(angles)) || !std::isfinite(Math::Length(position)))
     {
         return false;
@@ -297,13 +306,12 @@ bool Road::SetPose(Vector3 position, Vector3 angles)
         points[i].roll = std::atan2(Math::Dot(up[i], base[2]), Math::Dot(up[i], base[1]));
     }
     rotation = angles;
-    Rebuild();
     return true;
 }
 
-void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value)
+void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value, bool rebuild)
 {
-    if (mouths == value) return;
+    if (!rebuild && mouths == value) return;
     mouths = value;
     Rebuild();
 }

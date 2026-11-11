@@ -33,7 +33,7 @@ public:
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
     const Road* Selected(const WorldDocument& world) const;
-    const RoadGeometry* SelectedGeometry(const WorldDocument& world) const override;
+    bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
@@ -90,7 +90,11 @@ private:
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void ApplyOutline(const OutlineCommand& cmd, WorldDocument& world);
     void ApplyInspectorEdit(WorldDocument& world, const TransformEdit& edit);
-    void SelectAt(const WorldDocument& world, Vector3 pos);
+    std::optional<SceneKey> PlanElementAt(const WorldDocument& world, Vector3 pos) const;
+    SDL_FPoint PlanGroupHandle(const ObjectTransform& frame) const;
+    void BeginGroupDrag(const WorldDocument& world, Drag kind);
+    void TransformGroup(WorldDocument& world, Vector3 offset, Vector3 axis, double angle);
+    void UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer);
     void Activate(Action action, WorldDocument& world, FreeCamera& camera);
     void ChangeStyle(Action action, WorldDocument& world);
     void PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers);
@@ -135,6 +139,7 @@ private:
     bool snapRotation = false;
     std::vector<RoadPoint> originalPoints;
     Vector3 originalRotation{};
+    Vector3 groupPivot{}, groupOffset{};
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.
 #ifndef _WIN32
     CameraToolbar cameraToolbar;

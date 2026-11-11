@@ -25,7 +25,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
     }
     else if (target.kind == SelectionKind::Anchor)
     {
-        static constexpr std::array names{"East (+X) anchor", "North (+Z) anchor", "West (-X) anchor", "South (-Z) anchor"};
+        static constexpr std::array names{"Local +X anchor", "Local +Z anchor", "Local -X anchor", "Local -Z anchor"};
         result.page = PropertiesPage::Anchor;
         result.title = "Intersection " + std::to_string(target.index);
         result.detail = names.at(target.point);

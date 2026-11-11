@@ -4,6 +4,7 @@
 #include "bscobject.hpp"
 #include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
+#include "road_group_transform.hpp"
 
 #include <set>
 #include <span>
@@ -24,9 +25,13 @@ struct RoadEditorState
     TransformTarget meshSelection;
     std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
     std::set<SceneKey> SelectedRows() const;
+    bool GeometrySelected(SceneKey key) const;
+    bool RoadGroupSelected() const;
+    void PickElement(SceneKey key, bool add, bool subtract);
     void SelectRows(const std::set<SceneKey>& keys);
     TransformTarget Target() const
     {
+        if (RoadGroupSelected()) return {SelectionKind::RoadGroup, -1, -1, outlineSelection};
         if (selected < 0) return meshSelection;
         return {point < 0 ? SelectionKind::Road : SelectionKind::Point, selected, point};
     }
@@ -68,6 +73,7 @@ struct EditSnapshot
     EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads);
     TransformTarget meshSelection;
     std::optional<ObjectTransform> meshTransform;
+    std::optional<RoadGroupPose> roadGroup;
     struct TerrainPlacement
     {
         std::string modelPath;

@@ -1,5 +1,6 @@
 #include "transform_inspector.hpp"
 #include "world_document.hpp"
+#include "road_group_transform.hpp"
 #include "world_renderer.hpp"
 
 #include <algorithm>
@@ -50,7 +51,7 @@ bool TransformFields::CanEdit(int field) const
         return false;
     }
 
-    if (target.kind == SelectionKind::Intersection) return field < 3;
+    if (target.YawOnly()) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
 }
 
@@ -156,6 +157,23 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         }
         break;
     }
+    case SelectionKind::RoadGroup:
+    {
+        if (target.members.size() < 2) return {};
+        const auto firstJunction = target.members.lower_bound({SceneKind::Intersection, 0});
+        const auto reference = firstJunction == target.members.end() ? *target.members.begin() : *firstJunction;
+        for (const auto key : target.members)
+        {
+            if (key.kind != SceneKind::Road && key.kind != SceneKind::Intersection) return {};
+            const auto kind = key.kind == SceneKind::Road ? SelectionKind::Road : SelectionKind::Intersection;
+            const auto member = Inspect(world, {kind, key.index});
+            if (member.target.kind == SelectionKind::None) return {};
+            fields.value.position = fields.value.position + member.value.position;
+            if (key == reference) fields.value.rotation = member.value.rotation;
+        }
+        fields.value.position = fields.value.position * (1.0 / target.members.size());
+        break;
+    }
     case SelectionKind::Anchor:
         if (!world.intersections.contains(target.index) || !IntersectionAnchor{target.index, target.point}.Valid()) return {};
         fields.value.position = world.intersections.at(target.index).AnchorPosition(target.point);
@@ -163,6 +181,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     case SelectionKind::Intersection:
         if (!world.intersections.contains(target.index)) return {};
         fields.value.position = world.intersections.at(target.index).position;
+        fields.value.rotation.y = world.intersections.at(target.index).yaw;
         break;
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
@@ -213,39 +232,12 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
 {
     const auto index = static_cast<std::size_t>(target.index);
     if (target.kind == SelectionKind::Intersection && world.intersections.contains(target.index) &&
-        std::isfinite(Math::Length(transform.position)) && transform.rotation == Vector3{} && transform.scale == Vector3{1,1,1})
+        transform.rotation.x == 0 && transform.rotation.z == 0 && transform.scale == Vector3{1,1,1})
     {
-        auto& junction = world.intersections.at(target.index);
-        if (junction.position == transform.position) return true;
-        Intersection moved = junction;
-        moved.position = transform.position;
-        const auto ends = world.ConnectedEnds(target.index);
-        // Validate all incident spans before changing any of them.
-        const auto position = [&](const RoadPoint& p)
-        {
-            return p.anchor && p.anchor->intersectionId == target.index ? moved.AnchorPosition(p.anchor->side) : p.position;
-        };
-        for (const auto& end : ends)
-        {
-            const Road& road = world.roads[end.road];
-            const auto& points = road.points;
-            const auto neighbor = end.first ? 1 : points.size() - 2;
-            const auto& point = end.first ? points.front() : points.back();
-            if (!ValidRoadSpan(road, position(point), position(points[neighbor]))) return false;
-        }
-        junction.position = transform.position;
-        for (const auto& end : ends)
-        {
-            auto& points = world.roads[end.road].points;
-            (end.first ? points.front() : points.back()).position = junction.AnchorPosition(end.anchor.side);
-        }
-        world.UpdateIntersections();
-        if (!world.IntersectionSurfaces().contains(target.index))
-        {
-            for (std::size_t i = 0; i < ends.size(); ++i)
-                if (i == 0 || ends[i].road != ends[i-1].road) world.roads[ends[i].road].Rebuild();
-        }
-        return true;
+        const auto& junction = world.intersections.at(target.index);
+        const std::set<SceneKey> selection{{SceneKind::Intersection, target.index}};
+        return RoadGroupPose::Capture(world, selection).Transform(world, selection, junction.position,
+                   transform.position - junction.position, {0, 1, 0}, transform.rotation.y - junction.yaw);
     }
     if (target.kind == SelectionKind::Object && index < world.Objects().size())
     {
@@ -267,7 +259,20 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
 
     ObjectTransform t = fields.value;
     Component(Row(t, field), field % 3) = field >= 3 && field < 6 ? value / degrees : value;
-    const TransformTarget target = fields.target;
+    const TransformTarget& target = fields.target;
+    if (target.kind == SelectionKind::RoadGroup)
+    {
+        const RoadGroupPose original = RoadGroupPose::Capture(world, target.members);
+        const auto& start = fields.value;
+        if (field < 3) return original.Transform(world, target.members, start.position, t.position - start.position, {}, 0);
+
+        // For Rz * Ry * Rx, X turns about the reference's local X, Y about Z-rotated Y, and Z about world Z.
+        Vector3 axis{0, 0, 1};
+        if (field == 3) axis = ObjectTransform{{}, start.rotation}.ToMeshTransform().x;
+        if (field == 4) axis = {-std::sin(start.rotation.z), std::cos(start.rotation.z), 0};
+        const double delta = (value - fields.DisplayValue(field)) / degrees;
+        return original.Transform(world, target.members, start.position, {}, axis, delta);
+    }
 
     if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection)
     {

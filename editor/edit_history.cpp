@@ -55,6 +55,35 @@ std::set<SceneKey> RoadEditorState::SelectedRows() const
     return {};
 }
 
+bool RoadEditorState::GeometrySelected(SceneKey key) const
+{
+    if (key.kind == SceneKind::Road && key.index == selected) return true;
+    if (key.kind == SceneKind::Intersection && meshSelection == TransformTarget{SelectionKind::Intersection, key.index}) return true;
+    return outlineSelection.contains(key);
+}
+
+bool RoadEditorState::RoadGroupSelected() const
+{
+    return outlineSelection.size() > 1 && std::all_of(outlineSelection.begin(), outlineSelection.end(), [](SceneKey key)
+    {
+        return key.kind == SceneKind::Road || key.kind == SceneKind::Intersection;
+    });
+}
+
+void RoadEditorState::PickElement(SceneKey key, bool add, bool subtract)
+{
+    if (subtract && !GeometrySelected(key)) return;
+    auto keys = SelectedRows();
+    if (subtract) keys.erase(key);
+    else
+    {
+        if (!add) keys.clear();
+        std::erase_if(keys, [](SceneKey k) { return k.kind != SceneKind::Road && k.kind != SceneKind::Intersection; });
+        keys.insert(key);
+    }
+    SelectRows(keys);
+}
+
 void RoadEditorState::SelectRows(const std::set<SceneKey>& keys)
 {
     drawing = false;
@@ -225,6 +254,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
             (end.first ? points.front() : points.back()).anchor = value ? std::optional{end.anchor} : std::nullopt;
         }
     }
+    if (to.roadGroup) to.roadGroup->Restore(world);
     if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
     if (to.terrainMaterial)
     {
@@ -238,7 +268,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = to.junction || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
+    const bool mapChanged = to.roadGroup || to.junction || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
     return mapChanged ? Result::MapChanged : Result::ToolChanged;
 }
 

@@ -8,7 +8,6 @@
 namespace
 {
     constexpr int sides = IntersectionAnchor::sideCount;
-    constexpr auto directions = IntersectionAnchor::directions;
     constexpr Vector3 up{0, 1, 0};
     constexpr int cornerIntervals = 12;
 
@@ -52,12 +51,12 @@ namespace
                 Mix(a.inner, b.inner, t), Mix(a.outer, b.outer, t)};
     }
 
-    void Pavement(IntersectionSurface& surface, Vector3 a, Vector3 b, Vector3 c)
+    void Pavement(IntersectionSurface& surface, const std::array<Vector3, sides>& axes, Vector3 a, Vector3 b, Vector3 c)
     {
         const auto vertex = [&](Vector3 p)
         {
             const Vector3 d = p - surface.layout.center;
-            return RoadGeometry::PavementVertex{p, {static_cast<float>(d.x / RoadStyle::laneWidth), static_cast<float>(d.z / RoadStyle::laneWidth)}};
+            return RoadGeometry::PavementVertex{p, {static_cast<float>(Math::Dot(d, axes[0]) / RoadStyle::laneWidth), static_cast<float>(Math::Dot(d, axes[1]) / RoadStyle::laneWidth)}};
         };
         const double area = Math::Cross(b - a, c - a).y;
         if (std::abs(area) < 1e-12) return;
@@ -120,6 +119,13 @@ namespace
     }
 }
 
+std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(double yaw)
+{
+    if (yaw == 0) return IntersectionAnchor::directions;
+    const double c = std::cos(yaw), s = std::sin(yaw);
+    return {{{c, 0, -s}, {s, 0, c}, {-c, 0, s}, {-s, 0, -c}}};
+}
+
 IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first, bool paintStopLine)
 {
     const auto& style = road.style;
@@ -141,6 +147,7 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
 void IntersectionSurface::Build(const IntersectionLayout& input)
 {
     layout = input;
+    const auto directions = Intersection::Directions(layout.yaw);
     geometry = {};
     setbacks.fill(Intersection::anchorDistance);
     // Provide space for the full facing shoulder of the cross street and the fillet.
@@ -173,8 +180,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         if (adjacent)
         {
             // Split each mouth at the centerline, including across a median tip.
-            Pavement(*this, center, mouth, mouth + n * a.left);
-            Pavement(*this, center, nextMouth + d * b.right, nextMouth);
+            Pavement(*this, directions, center, mouth, mouth + n * a.left);
+            Pavement(*this, directions, center, nextMouth + d * b.right, nextMouth);
         }
         Vector3 lastBase = mouth;
         std::optional<Rim> previous;
@@ -182,13 +189,13 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         {
             if (previous)
             {
-                if (adjacent) Pavement(*this, center, previous->p[0], rim.p[0]);
+                if (adjacent) Pavement(*this, directions, center, previous->p[0], rim.p[0]);
                 else
                 {
                     // A widening T back may be concave relative to the junction center.
                     const Vector3 base = mouth + (nextMouth - mouth) * t;
-                    Pavement(*this, lastBase, base, rim.p[0]);
-                    Pavement(*this, lastBase, rim.p[0], previous->p[0]);
+                    Pavement(*this, directions, lastBase, base, rim.p[0]);
+                    Pavement(*this, directions, lastBase, rim.p[0], previous->p[0]);
                     lastBase = base;
                 }
                 Join(*this, *previous, rim);

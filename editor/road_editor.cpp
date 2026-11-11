@@ -92,6 +92,13 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     return true;
 }
 
+SDL_FPoint RoadEditor::PlanGroupHandle(const ObjectTransform& frame) const
+{
+    const Vector3 axis = frame.ToMeshTransform().x;
+    const double heading = std::atan2(axis.z, axis.x);
+    return ToScreen(frame.position + Vector3{std::cos(heading), 0, std::sin(heading)} * (handleLength / scale));
+}
+
 std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const
 {
     if (!state.segments.empty())
@@ -100,7 +107,6 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     }
     const auto target = state.Target();
     if (target.kind == SelectionKind::Anchor) return {};
-    if (target.kind == SelectionKind::Intersection && gizmo.mode != GizmoMode::Translate) return {};
     if (target.kind == SelectionKind::Point)
     {
         const Road* road = Selected(world);
@@ -116,12 +122,10 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         }
         return placement;
     }
-    const TransformFields fields = Inspect(world, target);
-    if (fields.target.kind == SelectionKind::None)
-    {
-        return {};
-    }
+    const auto fields = Inspect(world, target);
+    if (fields.target.kind == SelectionKind::None) return {};
     auto placement = GizmoPlacement::At(fields.value.position, camera, scene);
+    if (placement) placement->yawOnly = target.YawOnly();
     if (placement && gizmo.settings.space == GizmoSpace::Local)
     {
         const auto frame = ObjectTransform{{}, fields.value.rotation}.ToMeshTransform();
@@ -139,21 +143,10 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     }
     if (const auto placement = SelectedGizmoPlacement(world, camera))
     {
-        // A building or other centered mesh can completely enclose its own handles.
-        if (state.meshSelection.kind == SelectionKind::Object) renderer.BeginForeground();
+        // A centered mesh can enclose its pivot. A group pivot can also land inside terrain.
+        if (state.meshSelection.kind == SelectionKind::Object || state.RoadGroupSelected()) renderer.BeginForeground();
         gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
     }
-}
-
-const RoadGeometry* RoadEditor::SelectedGeometry(const WorldDocument& world) const
-{
-    if (state.meshSelection.kind == SelectionKind::Intersection)
-    {
-        const auto& surfaces = world.IntersectionSurfaces();
-        const auto it = surfaces.find(state.meshSelection.index);
-        if (it != surfaces.end()) return &it->second.geometry;
-    }
-    return Selected(world);
 }
 
 const Road* RoadEditor::Selected(const WorldDocument& world) const
@@ -667,6 +660,20 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         return;
     }
 
+    if (!shift && state.RoadGroupSelected())
+    {
+        const auto frame = Inspect(world, state.Target()).value;
+        const bool rotate = Near(cursor, PlanGroupHandle(frame));
+        if (rotate || (!subtract && Near(cursor, ToScreen(frame.position))))
+        {
+            BeginGroupDrag(world, rotate ? Drag::Rotate : Drag::Move);
+            grabOffset = pos;
+            const Vector3 radial = pos - groupPivot;
+            planRotation = DragAngle(std::atan2(radial.z, radial.x));
+            snapRotation = subtract;
+            return;
+        }
+    }
     if (!shift && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
         Road& road = world.roads[state.selected];
@@ -682,7 +689,6 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     float best = pickRadius;
     for (const auto& [id, item] : world.intersections)
     {
-        if (!shift && !subtract)
         {
             const auto p = ToScreen(item.position);
             const float distance = std::hypot(p.x - x, p.y - y);
@@ -705,6 +711,11 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     }
     if (closest && (shift || subtract))
     {
+        if (state.point < 0 && !state.anchorSelection)
+        {
+            state.PickElement({SceneKind::Intersection, closest->intersectionId}, shift, subtract);
+            return;
+        }
         const Road* road = Selected(world);
         const bool ownEnd = road && state.point >= 0 && road->points[state.point].anchor == closest;
         if (subtract || !ownEnd)
@@ -758,6 +769,15 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         status.clear();
         return;
     }
+    if (shift || subtract)
+    {
+        if (const auto key = PlanElementAt(world, pos))
+        {
+            if (key->kind != SceneKind::Road || key->index != state.selected || state.point < 0)
+                state.PickElement(*key, shift, subtract);
+        }
+        return;
+    }
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         if (pickPoint(i))
@@ -765,21 +785,17 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
             return;
         }
     }
-    if (state.point < 0 || (!shift && !subtract))
-    {
-        SelectAt(world, pos);
-    }
+    if (const auto key = PlanElementAt(world, pos)) state.SelectRows({*key});
+    else state.SelectPoint(-1, -1);
 }
 
-void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
+std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Vector3 pos) const
 {
-    state.SelectPoint(-1, -1);
     for (const auto& [id, item] : world.intersections)
     {
         if (Near(ToScreen(pos), ToScreen(item.position)))
         {
-            state.SelectRows({{SceneKind::Intersection, id}});
-            return;
+            return SceneKey{SceneKind::Intersection, id};
         }
     }
     const auto hitSurface = [&](const auto& surface)
@@ -794,8 +810,7 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
         const auto& geometry = it->second.geometry;
         if (hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles))
         {
-            state.SelectRows({{SceneKind::Intersection, it->first}});
-            return;
+            return SceneKey{SceneKind::Intersection, it->first};
         }
     }
     // Later roads are drawn last, so pick them first wherever pavement overlaps.
@@ -804,10 +819,10 @@ void RoadEditor::SelectAt(const WorldDocument& world, Vector3 pos)
         const Road& road = world.roads[i];
         if (hitSurface(road.pavementTriangles) || hitSurface(road.edgeTriangles))
         {
-            state.selected = i;
-            return;
+            return SceneKey{SceneKind::Road, i};
         }
     }
+    return {};
 }
 
 void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
@@ -822,6 +837,26 @@ void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
     }
     originalPoints = road.points;
     originalRotation = road.rotation;
+}
+
+void RoadEditor::BeginGroupDrag(const WorldDocument& world, Drag kind)
+{
+    dragStart.emplace(state);
+    dragStart->roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
+    groupPivot = Inspect(world, state.Target()).value.position;
+    groupOffset = {};
+    drag = kind;
+}
+
+void RoadEditor::TransformGroup(WorldDocument& world, Vector3 offset, Vector3 axis, double angle)
+{
+    if (offset == groupOffset && angle == appliedAngle) return;
+    if (dragStart->roadGroup->Transform(world, state.SelectedRows(), groupPivot, offset, axis, angle))
+    {
+        groupOffset = offset;
+        appliedAngle = angle;
+        dragChanged = offset != Vector3{} || angle != 0;
+    }
 }
 
 void RoadEditor::MovePoint(Road& road, Vector3 position)
@@ -890,14 +925,29 @@ void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion
         center.x -= motion.xrel / scale;
         center.z += motion.yrel / scale;
     }
-    else if (drag == Drag::Move)
+    else if (drag == Drag::Move || drag == Drag::Rotate)
     {
-        MovePoint(world.roads[state.selected], ToWorld(mouse.x, mouse.y) + grabOffset);
+        UpdatePlanDrag(world, mouse);
     }
-    else if (drag == Drag::Rotate)
+}
+
+void RoadEditor::UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer)
+{
+    mouse = pointer;
+    const Vector3 pos = ToWorld(mouse.x, mouse.y);
+    if (dragStart->roadGroup)
     {
-        RotatePlanPoint(world.roads[state.selected]);
+        if (drag == Drag::Move) TransformGroup(world, pos - grabOffset, {}, 0);
+        else
+        {
+            const Vector3 radial = pos - groupPivot;
+            if (std::hypot(radial.x, radial.z) * scale >= 2)
+                planRotation.Update(std::atan2(radial.z, radial.x));
+            TransformGroup(world, {}, {0,1,0}, -planRotation.Amount(snapRotation));
+        }
     }
+    else if (drag == Drag::Move) MovePoint(world.roads[state.selected], pos + grabOffset);
+    else RotatePlanPoint(world.roads[state.selected]);
 }
 
 void RoadEditor::RotatePlanPoint(Road& road)
@@ -945,14 +995,19 @@ bool RoadEditor::DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) co
     char label[96];
     if (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate))
     {
-        const double degrees = appliedAngle / Math::DegreesToRadians(1.0);
+        const double angle = drag == Drag::Rotate && dragStart->roadGroup ? -appliedAngle : appliedAngle;
+        const double degrees = angle / Math::DegreesToRadians(1.0);
         SDL_snprintf(label, sizeof(label), "%+.1f\xC2\xB0", std::abs(degrees) < 0.05 ? 0.0 : degrees);
     }
     else
     {
-        const int source = extensionSource.value_or(std::max(0, state.point));
-        const Vector3 start = dragStart->meshTransform ? dragStart->meshTransform->position : originalPoints[source].position;
-        const Vector3 delta = position - start;
+        Vector3 delta = groupOffset;
+        if (!dragStart->roadGroup)
+        {
+            const int source = extensionSource.value_or(std::max(0, state.point));
+            const Vector3 start = dragStart->meshTransform ? dragStart->meshTransform->position : originalPoints[source].position;
+            delta = position - start;
+        }
         const auto meters = [](double d) { return std::abs(d) < 0.005 ? 0.0 : d; };
         if (DraggingGizmo())
             SDL_snprintf(label, sizeof(label), "%c %+.2f m", gizmoDrag->AxisName(), meters(Math::Dot(delta, gizmoDrag->axis)));
@@ -1082,11 +1137,16 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
-    if (const RoadGeometry* road = SelectedGeometry(world))
+    for (const SceneKey key : state.SelectedRows())
     {
-        if (!DrawPlanRoad(renderer, *road, center, scale, canvas, RoadLayer::Outline))
-        {
+        if (!GeometrySelected(key)) continue;
+        if (key.kind == SceneKind::Road && !DrawPlanRoad(renderer, world.roads[key.index], center, scale, canvas, RoadLayer::Outline))
             return false;
+        if (key.kind == SceneKind::Intersection)
+        {
+            const auto it = world.IntersectionSurfaces().find(key.index);
+            if (it != world.IntersectionSurfaces().end() && !DrawPlanRoad(renderer, it->second.geometry, center, scale, canvas, RoadLayer::Outline))
+                return false;
         }
     }
 
@@ -1103,8 +1163,18 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
             if (!drawPoint(ToScreen(item.AnchorPosition(side)), 5.0f, active ? amber : blue)) return false;
         }
         const auto p = ToScreen(item.position);
-        const auto color = state.meshSelection == TransformTarget{SelectionKind::Intersection, id} ? amber : blue;
-        if (!Fill(renderer, {p.x-7, p.y-2, 14, 4}, color) || !Fill(renderer, {p.x-2, p.y-7, 4, 14}, color)) return false;
+        const auto color = GeometrySelected({SceneKind::Intersection, id}) ? amber : blue;
+        if (!EditorTheme::SetColor(renderer, color)) return false;
+        const auto axes = Intersection::Directions(item.yaw);
+        for (int arm : {0, 1})
+        {
+            const float x = static_cast<float>(axes[arm].x), y = static_cast<float>(-axes[arm].z);
+            for (int k = -1; k <= 1; ++k)
+            {
+                if (!SDL_RenderLine(renderer, p.x - 7*x - k*y, p.y - 7*y + k*x,
+                                    p.x + 7*x - k*y, p.y + 7*y + k*x)) return false;
+            }
+        }
     }
 
     auto drawPoints = [&](const Road& road, bool active)
@@ -1140,6 +1210,13 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         return false;
     }
 
+    if (state.RoadGroupSelected())
+    {
+        const auto frame = Inspect(world, state.Target()).value;
+        const auto pivot = ToScreen(frame.position), handle = PlanGroupHandle(frame);
+        if (!EditorTheme::SetColor(renderer, amber) || !SDL_RenderLine(renderer, pivot.x, pivot.y, handle.x, handle.y) ||
+            !drawPoint(pivot, 6, blue) || !drawPoint(handle, 4, amber)) return false;
+    }
     if (!state.drawing && state.selected >= 0 && state.point >= 0)
     {
         const Road& road = world.roads[state.selected];
@@ -1363,7 +1440,7 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     planView = !planView;
     if (planView && !initialized)
     {
-        if (state.meshSelection.kind != SelectionKind::None)
+        if (state.meshSelection.kind != SelectionKind::None || state.RoadGroupSelected())
         {
             center = Inspect(world, state.Target()).value.position;
         }
@@ -1441,7 +1518,7 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
         previous.heading = std::atan2(tangent.z, tangent.x);
         previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
-    const Vector3 tangent = IntersectionAnchor::directions[anchor.side] * (first ? 1.0 : -1.0);
+    const Vector3 tangent = Intersection::Directions(junction->second.yaw)[anchor.side] * (first ? 1.0 : -1.0);
     RoadPoint point{position, std::atan2(tangent.z, tangent.x), 0, 0, anchor};
     const int index = first ? 0 : static_cast<int>(road.points.size());
     road.points.insert(road.points.begin() + index, point);
@@ -1463,14 +1540,21 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     // A marker at the road pivot must still be selectable when the handles overlap it.
     const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
     const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
-    if (placement && !addSegment && (snapPick || (!subtract && !anchorHit && !pickPoint)))
+    const bool group = state.RoadGroupSelected();
+    const bool addElement = shift && state.point < 0 &&
+        (hit.kind == RoadPickKind::Intersection || (hit.kind == RoadPickKind::Road && hit.index != state.selected));
+    if (placement && !addElement && !addSegment && (snapPick || (!subtract && (!anchorHit || group) && !pickPoint)))
     {
         ViewportPicker handles(camera, scene, mouse);
-        gizmoDrag = gizmo.BeginDrag(state.meshSelection.kind == SelectionKind::Object ? handles : picker, *placement);
+        gizmoDrag = gizmo.BeginDrag((state.meshSelection.kind == SelectionKind::Object || group) ? handles : picker, *placement);
         if (gizmoDrag)
         {
             snapRotation = subtract;
-            if (selected)
+            if (group || state.meshSelection.kind == SelectionKind::Intersection)
+            {
+                BeginGroupDrag(world, Drag::Gizmo);
+            }
+            else if (selected)
             {
                 BeginRoadDrag(*selected, Drag::Gizmo, shift);
             }
@@ -1487,7 +1571,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     if (anchorHit)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
-        if (shift || subtract) SelectAnchor(world, anchor, subtract);
+        if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
+        else if (shift || subtract) state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
         else
         {
             state.InspectAnchor(anchor);
@@ -1497,7 +1582,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     }
 
     // Keep the current point or segment selection when a modified click misses it.
-    if ((!state.segments.empty() || state.point >= 0) && (shift || subtract) && (hit.kind == RoadPickKind::Road || hit.kind == RoadPickKind::Empty))
+    if ((!state.segments.empty() || state.point >= 0) && (shift || subtract) && ((hit.kind == RoadPickKind::Road && hit.index == state.selected) || hit.kind == RoadPickKind::Empty))
     {
         return;
     }
@@ -1527,11 +1612,11 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     {
         state.drawing = false;
         center = picker.HitPosition();
-        state.SelectPoint(hit.index, -1);
+        state.PickElement({SceneKind::Road, hit.index}, shift, subtract);
         break;
     }
     case RoadPickKind::Intersection:
-        state.SelectRows({{SceneKind::Intersection, hit.index}});
+        state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
         break;
     case RoadPickKind::Object:
     case RoadPickKind::Terrain:
@@ -1543,7 +1628,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         state.SelectRows({{SceneKind::Mesh, hit.index}});
         break;
     case RoadPickKind::Empty:
-        state.SelectPoint(-1, -1);
+        if (!shift && !subtract) state.SelectPoint(-1, -1);
         break;
     }
 }
@@ -1674,7 +1759,9 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& e
     if (*number == fields.DisplayValue(edit.field)) return;
     const Road* road = Selected(world);
     EditSnapshot before(state, road);
-    if (!road) before.meshTransform = fields.value;
+    if (edit.target.kind == SelectionKind::Intersection || edit.target.kind == SelectionKind::RoadGroup)
+        before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
+    else if (!road) before.meshTransform = fields.value;
     if (!ApplyTransform(world, fields, edit.field, *number))
     {
         status = SDL_GetError();
@@ -1685,7 +1772,13 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const TransformEdit& e
 
 void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
 {
-    if (before.meshTransform)
+    if (before.roadGroup)
+    {
+        EditSnapshot after(state);
+        after.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
+        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+    }
+    else if (before.meshTransform)
     {
         EditSnapshot after(state);
         after.meshTransform = Inspect(world, state.meshSelection).value;
@@ -1717,6 +1810,11 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
     const bool rotating = gizmo.mode == GizmoMode::Rotate;
     if (!amount || (rotating && *amount == appliedAngle))
     {
+        return;
+    }
+    if (dragStart->roadGroup)
+    {
+        TransformGroup(world, rotating ? Vector3{} : gizmoDrag->axis * *amount, gizmoDrag->axis, rotating ? *amount : 0);
         return;
     }
     if (state.point < 0)
@@ -1964,7 +2062,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         snapRotation = (event.key.mod & SDL_KMOD_CTRL) != 0;
         if (DraggingGizmo()) MoveGizmo(world, camera, mouse);
-        else RotatePlanPoint(world.roads[state.selected]);
+        else UpdatePlanDrag(world, mouse);
         return EditorEvent::Handled;
     }
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F && ViewportFocused() &&
@@ -2015,7 +2113,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (dragStart && event.key.key == SDLK_ESCAPE)
         {
-            if (dragStart->meshTransform)
+            if (dragStart->roadGroup) dragStart->roadGroup->Restore(world);
+            else if (dragStart->meshTransform)
             {
                 SetPlacementTransform(world, state.meshSelection, *dragStart->meshTransform);
             }
@@ -2238,14 +2337,9 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             {
                 MoveGizmo(world, camera, pointer);
             }
-            else if (drag == Drag::Rotate)
+            else if (drag == Drag::Rotate || drag == Drag::Move)
             {
-                mouse = pointer;
-                RotatePlanPoint(world.roads[state.selected]);
-            }
-            else if (drag == Drag::Move)
-            {
-                MovePoint(world.roads[state.selected], ToWorld(pointer.x, pointer.y) + grabOffset);
+                UpdatePlanDrag(world, pointer);
             }
             Release(world);
         }

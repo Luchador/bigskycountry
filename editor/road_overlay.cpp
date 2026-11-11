@@ -133,12 +133,13 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
     });
 }
 
-std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement& placement) const
+std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement& placement, double yaw) const
 {
     const double length = 14.0 * placement.metersPerPixel;
     const double width = 3.85 * placement.metersPerPixel;
-    return {MeshInstance{marker, {placement.origin, {length, 0, 0}, {0, width, 0}, {0, 0, width}}},
-            MeshInstance{marker, {placement.origin, {width, 0, 0}, {0, width, 0}, {0, 0, length}}}};
+    const auto axes = Intersection::Directions(yaw);
+    return {MeshInstance{marker, {placement.origin, axes[0] * length, {0, width, 0}, axes[1] * width}},
+            MeshInstance{marker, {placement.origin, axes[0] * width, {0, width, 0}, axes[1] * length}}};
 }
 
 void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
@@ -154,10 +155,10 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
                 renderer.SubmitMesh(Marker(*anchor), active ? EditorColors::amber : EditorColors::blue);
             }
         }
-        const bool selected = selection.meshSelection == TransformTarget{SelectionKind::Intersection, id};
+        const bool selected = selection.GeometrySelected({SceneKind::Intersection, id});
         const auto placement = PointPlacement(item.position, camera, scene);
         if (!placement) continue;
-        for (const auto& mesh : IntersectionMarker(*placement))
+        for (const auto& mesh : IntersectionMarker(*placement, item.yaw))
             renderer.SubmitMesh(mesh, selected ? EditorColors::amber : EditorColors::blue);
         if (!selected || item.cornerRadius == 0) continue;
 
@@ -207,7 +208,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     for (const auto& [id, item] : world.intersections)
     {
         if (const auto placement = PointPlacement(item.position, camera, scene))
-            for (const auto& mesh : IntersectionMarker(*placement))
+            for (const auto& mesh : IntersectionMarker(*placement, item.yaw))
                 if (picker.TestMesh(mesh)) hit = {RoadPickKind::Intersection, id};
     }
     // A joined endpoint and its anchor share one marker. Shift gives the anchor the tie.

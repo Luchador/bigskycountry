@@ -28,7 +28,7 @@ public:
                   const FreeCamera& camera, SDL_Rect scene, bool preferAnchor = false) const;
 
 private:
-    std::array<MeshInstance, 2> IntersectionMarker(const GizmoPlacement& placement) const;
+    std::array<MeshInstance, 2> IntersectionMarker(const GizmoPlacement& placement, double yaw) const;
     MeshInstance Marker(const GizmoPlacement& placement) const;
     std::shared_ptr<const Mesh> marker;
 };

@@ -103,6 +103,7 @@ void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placeme
 
     for (int axis = 0; axis < 3; ++axis)
     {
+        if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
         renderer.SubmitMesh(Handle(placement, axes, axis), axisColors[axis]);
     }
 }
@@ -114,6 +115,7 @@ std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const
 
     for (int axis = 0; axis < 3; ++axis)
     {
+        if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
         if (picker.TestMesh(Handle(placement, axes, axis)))
         {
             hit = axis;

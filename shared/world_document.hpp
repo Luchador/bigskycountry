@@ -22,7 +22,7 @@ public:
     MeshAssets models;
     std::vector<Road> roads;
     std::map<int, Intersection> intersections; // Stable positive IDs, also used by the outliner.
-    void UpdateIntersections();
+    void UpdateIntersections(const std::set<int>& changedRoads = {});
     const auto& IntersectionSurfaces() const { return junctions; }
     int CreateIntersection(Vector3 position); // Returns 0 on failure.
     struct ConnectedEnd

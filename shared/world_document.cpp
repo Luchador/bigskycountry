@@ -23,7 +23,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 2;
+    constexpr Uint32 intersectionVersion = 3;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -146,9 +146,13 @@ std::vector<WorldDocument::ConnectedEnd> WorldDocument::ConnectedEnds(int inters
     return ends;
 }
 
-void WorldDocument::UpdateIntersections()
+void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
 {
-    if (intersections.empty() && junctions.empty()) return;
+    if (intersections.empty() && junctions.empty())
+    {
+        for (int index : changedRoads) roads[index].Rebuild();
+        return;
+    }
     constexpr int sides = IntersectionAnchor::sideCount;
     struct End { std::size_t road; int end; };
     std::map<int, std::array<std::optional<End>, sides>> incident;
@@ -170,6 +174,7 @@ void WorldDocument::UpdateIntersections()
         std::set<std::size_t> distinct;
         const auto& item = intersections.at(id);
         IntersectionLayout layout{item.position, item.cornerRadius};
+        layout.yaw = item.yaw;
         for (int i = 0; i < sides; ++i)
         {
             if (!ends[i]) continue;
@@ -181,16 +186,17 @@ void WorldDocument::UpdateIntersections()
         active.insert(id);
         auto& surface = junctions[id];
         if (layout != surface.layout) surface.Build(layout);
+        const auto directions = Intersection::Directions(item.yaw);
         for (int i = 0; i < sides; ++i)
         {
             if (!ends[i]) continue;
             const auto [road, end] = *ends[i];
-            const Vector3 dir = IntersectionAnchor::directions[i];
-            mouths[road][end] = RoadMouth{item.AnchorPosition(i), item.position + dir * surface.setbacks[i], dir};
+            const Vector3 dir = directions[i];
+            mouths[road][end] = RoadMouth{item.position + dir * Intersection::anchorDistance, item.position + dir * surface.setbacks[i], dir};
         }
     }
     std::erase_if(junctions, [&](const auto& entry) { return !active.contains(entry.first); });
-    for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i]);
+    for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i], changedRoads.contains(static_cast<int>(i)));
 }
 
 bool WorldDocument::ValidConnections() const
@@ -205,7 +211,7 @@ bool WorldDocument::ValidConnections() const
             const auto ref = *point->anchor;
             const auto it = intersections.find(ref.intersectionId);
             if (!ref.Valid() || it == intersections.end() || !occupied.insert(ref).second ||
-                point->position != it->second.AnchorPosition(ref.side))
+                !(Math::Length(point->position - it->second.AnchorPosition(ref.side)) <= 1e-8))
                 return SDL_SetError("Invalid road connection to intersection %d, side %d", ref.intersectionId, ref.side);
         }
     }
@@ -466,6 +472,8 @@ bool WorldDocument::Open(const char* documentPath)
                         return SDL_SetError("Invalid intersection stop lines in INTS");
                     item.stopLines = decltype(item.stopLines){mask};
                 }
+                if (section.version >= 3 && (!(data >> item.yaw) || !std::isfinite(item.yaw)))
+                    return SDL_SetError("Invalid intersection heading in INTS");
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -518,6 +526,9 @@ bool WorldDocument::Open(const char* documentPath)
     if (!loaded.ValidConnections()) return false;
     for (Road& road : loaded.roads)
     {
+        // Sine/cosine can differ by an ULP across platforms. Use the local anchor exactly.
+        for (RoadPoint* end : {&road.points.front(), &road.points.back()})
+            if (end->anchor) end->position = loaded.intersections.at(end->anchor->intersectionId).AnchorPosition(end->anchor->side);
         road.Rebuild();
     }
     loaded.UpdateIntersections();
@@ -564,10 +575,10 @@ bool WorldDocument::Save() const
     for (const auto& [id, item] : intersections)
     {
         const auto p = item.position;
-        if (id <= 0 || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
+        if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
             !Material::ValidAssetPath(item.material) ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
-                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << '\n'))
+                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << '\n'))
             return SDL_SetError("Cannot save invalid intersection");
     }
     std::ostringstream meshData;
