@@ -202,7 +202,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
     std::set<int> active;
     for (const auto& [id, ends] : incident)
     {
-        std::set<std::size_t> distinct;
+        int connectedArms = 0;
         const auto& item = intersections.at(id);
         IntersectionLayout layout{item.position, item.cornerRadius};
         layout.yaw = item.yaw;
@@ -210,10 +210,10 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         {
             if (!ends[i]) continue;
             const auto [road, end] = *ends[i];
-            distinct.insert(road);
+            ++connectedArms; // A loop occupies a separate anchor at each end.
             layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
-        if (distinct.size() < 3) continue;
+        if (connectedArms < 3) continue;
         active.insert(id);
         auto& surface = junctions[id];
         if (layout != surface.layout) surface.Build(layout);
