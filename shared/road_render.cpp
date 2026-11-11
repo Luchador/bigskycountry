@@ -177,16 +177,20 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
     }
     solid(road.yellowStripes, yellowPaint);
     solid(road.whiteStripes, whitePaint);
-    if (selected && viewport.w > 0 && viewport.h > 0)
+    if (selected && start < vertices.size() && viewport.w > 0 && viewport.h > 0)
     {
-        selectedStart = start;
-        selectedEnd = vertices.size();
+        if (!selectedRanges.empty() && selectedRanges.back().end == start)
+            selectedRanges.back().end = vertices.size();
+        else
+            selectedRanges.push_back({start, vertices.size()});
         const auto transform = [&](Vector3 p) { return camera->WorldToView(p); };
         AppendOutline(road, transform, focal, viewport, [&](SDL_FPoint p, double depth)
         {
             const double x = (2.0 * p.x / viewport.w - 1.0) * depth;
             const double y = (1.0 - 2.0 * p.y / viewport.h) * depth;
-            const double biased = std::min(depth, worldNearDepth * 1.0001);
+            // Keep the outline visible over raised edge paint at close range.
+            const double strokeDepth = std::max(worldNearDepth, depth - RoadStyle::stripeHeight);
+            const double biased = std::min(depth, worldNearDepth * 1.0001 * depth / strokeDepth);
             outline.push_back({static_cast<float>(x), static_cast<float>(y),
                                static_cast<float>(biased), static_cast<float>(depth), EditorColors::orange});
         });

@@ -1185,15 +1185,26 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         return Fill(renderer, {p.x-r-1, p.y-r-1, 2*r+2, 2*r+2}, EditorTheme::border) &&
                Fill(renderer, {p.x-r, p.y-r, 2*r, 2*r}, color);
     };
+    const bool group = state.RoadGroupSelected();
     for (const auto& [id, item] : world.intersections)
     {
+        const auto anchors = item.AnchorPositions();
+        const bool selected = GeometrySelected({SceneKind::Intersection, id});
+        if (group && selected && !world.IntersectionSurfaces().contains(id))
+        {
+            std::array<SDL_FPoint, IntersectionAnchor::sideCount + 1> perimeter;
+            std::transform(anchors.begin(), anchors.end(), perimeter.begin(), [&](Vector3 p) { return ToScreen(p); });
+            perimeter.back() = perimeter.front();
+            if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange)) ||
+                !SDL_RenderLines(renderer, perimeter.data(), static_cast<int>(perimeter.size()))) return false;
+        }
         for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
         {
             const bool active = state.AnchorHighlighted({id, side});
-            if (!drawPoint(ToScreen(item.AnchorPosition(side)), 5.0f, active ? amber : blue)) return false;
+            if (!drawPoint(ToScreen(anchors[side]), 5.0f, active ? amber : blue)) return false;
         }
         const auto p = ToScreen(item.position);
-        const auto color = GeometrySelected({SceneKind::Intersection, id}) ? amber : blue;
+        const auto color = selected ? amber : blue;
         if (!EditorTheme::SetColor(renderer, color)) return false;
         const auto axes = Intersection::Directions(item.yaw);
         for (int arm : {0, 1})
@@ -1240,7 +1251,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         return false;
     }
 
-    if (state.RoadGroupSelected())
+    if (group)
     {
         const auto frame = Inspect(world, state.Target()).value;
         const auto pivot = ToScreen(frame.position), handle = PlanGroupHandle(frame);

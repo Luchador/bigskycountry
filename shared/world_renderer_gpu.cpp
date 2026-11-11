@@ -128,7 +128,7 @@ bool WorldRenderer::CreatePipelines()
     ds.enable_depth_test = true;
     ds.enable_depth_write = true;
     ds.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
-    // The nearest surface marks whether this pixel belongs to the selected road.
+    // The nearest surface marks whether this pixel belongs to selected geometry.
     ds.enable_stencil_test = true;
     ds.compare_mask = ds.write_mask = 1;
     ds.front_stencil_state = {SDL_GPU_STENCILOP_KEEP, SDL_GPU_STENCILOP_REPLACE,
@@ -377,11 +377,19 @@ bool WorldRenderer::DrawGPU()
         }
     };
 
+    auto selected = selectedRanges.begin();
     const auto drawSurface = [&](size_t first, size_t end)
     {
-        draw(first, std::min(end, selectedStart), 0);
-        draw(std::max(first, selectedStart), std::min(end, selectedEnd), 1);
-        draw(std::max(first, selectedEnd), end, 0);
+        // A selection can span material draws, and a draw can span several selections.
+        while (selected != selectedRanges.end() && selected->first < end)
+        {
+            draw(first, selected->first, 0);
+            draw(std::max(first, selected->first), std::min(end, selected->end), 1);
+            if (end < selected->end) return;
+            first = selected->end;
+            ++selected;
+        }
+        draw(first, end, 0);
     };
 
     size_t cursor = 0;

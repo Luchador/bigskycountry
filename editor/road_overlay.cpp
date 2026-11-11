@@ -15,7 +15,7 @@ namespace
     constexpr Vector3 markerOffsetPixels{0, 6, 0};
     constexpr float overlayStrokeWidth = 1.5f;
 
-    // Reuse the same constant-pixel-width stroke for the spline and radius guides.
+    // Use a constant-pixel-width stroke for splines and intersection guides.
     struct OverlayStroke
     {
         double focal;
@@ -46,6 +46,11 @@ namespace
             }
             visit(corners[0], corners[1], corners[2]);
             visit(corners[0], corners[2], corners[3]);
+        }
+
+        void Draw(WorldRenderer& renderer, Vector3 viewStart, Vector3 viewEnd, SDL_FColor color) const
+        {
+            Triangles(viewStart, viewEnd, [&](Vector3 a, Vector3 b, Vector3 c) { renderer.SubmitTriangle(a, b, c, color); });
         }
     };
 
@@ -145,34 +150,46 @@ std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement
 void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
                                     const FreeCamera& camera, SDL_Rect scene) const
 {
+    const double focal = ViewportFocalLength(scene);
+    if (focal <= 0 || world.intersections.empty()) return;
+    const bool group = selection.RoadGroupSelected();
+    const OverlayStroke stroke(camera, scene, focal);
     for (const auto& [id, item] : world.intersections)
     {
+        const auto anchors = item.AnchorPositions();
+        const bool selected = selection.GeometrySelected({SceneKind::Intersection, id});
+        if (group && selected && !world.IntersectionSurfaces().contains(id))
+        {
+            // Until the junction has pavement, outline its four authoring anchors.
+            auto previous = camera.WorldToView(anchors.back());
+            for (Vector3 anchor : anchors)
+            {
+                const auto next = camera.WorldToView(anchor);
+                stroke.Draw(renderer, previous, next, EditorColors::orange);
+                previous = next;
+            }
+        }
         for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
         {
-            if (const auto anchor = PointPlacement(item.AnchorPosition(side), camera, scene))
+            if (const auto anchor = PointPlacement(anchors[side], camera, scene))
             {
                 const bool active = selection.AnchorHighlighted({id, side});
                 renderer.SubmitMesh(Marker(*anchor), active ? EditorColors::amber : EditorColors::blue);
             }
         }
-        const bool selected = selection.GeometrySelected({SceneKind::Intersection, id});
         const auto placement = PointPlacement(item.position, camera, scene);
         if (!placement) continue;
         for (const auto& mesh : IntersectionMarker(*placement, item.yaw))
             renderer.SubmitMesh(mesh, selected ? EditorColors::amber : EditorColors::blue);
         if (!selected || item.cornerRadius == 0) continue;
 
-        const OverlayStroke stroke(camera, scene, ViewportFocalLength(scene));
         auto previous = camera.WorldToView(item.position + Vector3{item.cornerRadius, 0, 0});
         for (int i = 1; i <= 64; ++i)
         {
             const double angle = (2.0 * std::numbers::pi / 64) * i;
             const Vector3 offset{item.cornerRadius * std::cos(angle), 0, item.cornerRadius * std::sin(angle)};
             const auto next = camera.WorldToView(item.position + offset);
-            stroke.Triangles(previous, next, [&](Vector3 a, Vector3 b, Vector3 c)
-            {
-                renderer.SubmitTriangle(a, b, c, EditorColors::amber);
-            });
+            stroke.Draw(renderer, previous, next, EditorColors::amber);
             previous = next;
         }
     }

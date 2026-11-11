@@ -15,6 +15,7 @@ struct Intersection
     double yaw = 0; // Radians around world Y.
     static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw);
     Vector3 AnchorPosition(int side) const { return position + Directions(yaw).at(side) * anchorDistance; }
+    std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;
 
     bool operator==(const Intersection&) const = default;
 };

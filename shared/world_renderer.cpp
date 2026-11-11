@@ -26,7 +26,8 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view, const Wo
     lights = environment ? *environment : WorldLighting{};
     wireframeEnd = 0;
     foregroundStart = std::numeric_limits<std::size_t>::max();
-    selectedStart = selectedEnd = outlineStart = 0;
+    selectedRanges.clear();
+    outlineStart = 0;
     return true;
 }
 

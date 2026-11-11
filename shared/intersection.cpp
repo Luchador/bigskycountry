@@ -126,6 +126,13 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(doub
     return {{{c, 0, -s}, {s, 0, c}, {-c, 0, s}, {-s, 0, -c}}};
 }
 
+std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions() const
+{
+    auto anchors = Directions(yaw);
+    for (auto& anchor : anchors) anchor = position + anchor * anchorDistance;
+    return anchors;
+}
+
 IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first, bool paintStopLine)
 {
     const auto& style = road.style;

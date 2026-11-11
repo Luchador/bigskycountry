@@ -84,7 +84,9 @@ private:
     WorldLighting lights{};
     bool lightGeometry = false;
     std::size_t wireframeEnd = 0, foregroundStart = 0;
-    std::size_t selectedStart = 0, selectedEnd = 0, outlineStart = 0;
+    struct VertexRange { std::size_t first, end; };
+    std::vector<VertexRange> selectedRanges; // Ordered, disjoint spans of selected world geometry.
+    std::size_t outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
 
     SDL_GPUDevice* device = nullptr; // Borrowed from the SDL renderer.

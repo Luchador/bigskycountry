@@ -80,6 +80,7 @@ bool WorldRenderer::DrawSoftware()
     }
 
     size_t range = 0;
+    auto selection = selectedRanges.begin();
     for (std::size_t first = 0; first < vertices.size(); first += 3)
     {
         while (range < materialRanges.size() && first >= materialRanges[range].end) ++range;
@@ -87,7 +88,8 @@ bool WorldRenderer::DrawSoftware()
         const bool wire = first < wireframeEnd;
         if (first == foregroundStart) std::fill(softwareDepth.begin(), softwareDepth.end(), Sample{});
         const bool outline = first >= outlineStart && first < foregroundStart;
-        const bool selected = first >= selectedStart && first < selectedEnd;
+        if (selection != selectedRanges.end() && first >= selection->end) ++selection;
+        const bool selected = selection != selectedRanges.end() && first >= selection->first;
         Polygon p{};
         p.count = 3;
         std::copy_n(vertices.data() + first, 3, p.points.begin());
