@@ -470,9 +470,9 @@ namespace
 
 void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface, SDL_Color background)
 {
-    FillRect(dc, &area, WindowsTheme::Brush(background));
     if (!surface)
     {
+        FillRect(dc, &area, WindowsTheme::Brush(background));
         return;
     }
     BITMAPINFO info{};
@@ -486,6 +486,9 @@ void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface, SDL_Color backg
     const int h = area.bottom - area.top;
     const double scale = std::min(double(w) / surface->w, double(h) / surface->h);
     const int iw = static_cast<int>(surface->w * scale), ih = static_cast<int>(surface->h * scale);
+    // A full-size preview already contains its background. Present it in one operation.
+    if (iw != w || ih != h)
+        FillRect(dc, &area, WindowsTheme::Brush(background));
     StretchDIBits(dc, area.left + (w - iw) / 2, area.top + (h - ih) / 2, iw, ih,
                   0, 0, surface->w, surface->h, surface->pixels, &info, DIB_RGB_COLORS, SRCCOPY);
 }

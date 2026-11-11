@@ -131,6 +131,9 @@ LRESULT CALLBACK WindowsMaterialEditor::PreviewInput(HWND view, UINT message, WP
     auto& self = *reinterpret_cast<WindowsMaterialEditor*>(data);
     switch (message)
     {
+    case WM_ERASEBKGND:
+        // The owner-drawn frame covers the entire viewport.
+        return 1;
     case WM_LBUTTONDOWN:
         SetFocus(view);
         self.lastOrbitPoint = {GET_X_LPARAM(l), GET_Y_LPARAM(l)};
