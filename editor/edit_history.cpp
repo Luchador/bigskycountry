@@ -157,14 +157,23 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> 
     }
 }
 
+bool EditHistory::Action::ChangesWorld() const
+{
+    return roadIndex >= 0 || object || after.meshTransform || after.roadGroup || after.junction ||
+           after.objectInvincible || after.markerText || after.hierarchy || after.terrainMaterial ||
+           before.addedTerrain || after.addedTerrain;
+}
+
 bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object)
 {
     if (!object && before == after)
     {
         return false;
     }
+    Action action{roadIndex, std::move(before), std::move(after), std::move(object)};
+    action.worldRevision = action.ChangesWorld() ? ++lastWorldRevision : WorldRevision();
     actions.erase(actions.begin() + cursor, actions.end());
-    actions.push_back({roadIndex, std::move(before), std::move(after), std::move(object)});
+    actions.push_back(std::move(action));
     cursor = actions.size();
     return true;
 }
@@ -298,8 +307,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     }
     if (to.hierarchy) world.hierarchy = *to.hierarchy;
     editor = std::move(restored);
-    const bool mapChanged = to.roadGroup || to.junction || to.markerText || to.objectInvincible || action.object || index >= 0 || to.meshTransform || from.addedTerrain || to.addedTerrain || to.terrainMaterial || to.hierarchy;
-    return mapChanged ? Result::MapChanged : Result::ToolChanged;
+    return action.ChangesWorld() ? Result::MapChanged : Result::ToolChanged;
 }
 
 EditHistory::Result EditHistory::Undo(WorldDocument& world, RoadEditorState& editor)

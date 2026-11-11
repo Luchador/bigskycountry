@@ -107,6 +107,7 @@ private:
     {
         return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
     }
+    bool UpdateWindowTitle();
     bool Save(WorldDocument& world);
     void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
     void CommitTransform(WorldDocument& world, EditSnapshot before);
@@ -154,6 +155,10 @@ private:
 #endif
     bool planView = false;
     bool dragChanged = false;
+    SDL_Window* frame = nullptr;
+    std::string cleanTitle;
+    std::uint64_t savedRevision = 0;
+    bool titleShowsChanges = false;
     bool saveFailed = false;
     std::optional<EditSnapshot> dragStart;
     bool initialized = false;

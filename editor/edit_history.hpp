@@ -6,6 +6,7 @@
 #include "transform_inspector.hpp"
 #include "road_group_transform.hpp"
 
+#include <cstdint>
 #include <set>
 #include <span>
 #include <string>
@@ -120,6 +121,7 @@ class EditHistory
 public:
     enum class Result { Unavailable, ToolChanged, MapChanged, Failed };
 
+    std::uint64_t WorldRevision() const { return cursor ? actions[cursor - 1].worldRevision : 0; }
     bool CanUndo() const { return cursor != 0; }
     bool CanRedo() const { return cursor < actions.size(); }
     struct ObjectEdit
@@ -140,8 +142,11 @@ private:
         EditSnapshot before;
         EditSnapshot after;
         std::optional<ObjectEdit> object;
+        std::uint64_t worldRevision = 0;
+        bool ChangesWorld() const;
     };
     static Result Restore(WorldDocument& world, RoadEditorState& editor, Action& action, bool undo);
     std::vector<Action> actions;
+    std::uint64_t lastWorldRevision = 0;
     std::size_t cursor = 0; // Number of applied actions.
 };

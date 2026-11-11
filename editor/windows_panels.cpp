@@ -122,6 +122,7 @@ struct WindowsPanels::Impl
     Uint32 materialDropEvent = 0;
     std::deque<MaterialDrop> materialDrops;
     std::optional<TransformFields> inspected;
+    bool pendingFieldEdit = false;
     std::deque<InspectorEdit> pendingEdits;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
@@ -253,18 +254,28 @@ struct WindowsPanels::Impl
         return DefSubclassProc(hwnd, msg, w, l);
     }
 
-    void RestoreField(int id)
+    std::optional<std::string> FieldText(int id) const
     {
         if (id == IDC_MARKER_TEXT && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
-        {
-            SetDlgItemTextW(road, id, Wide(lastInspector->properties.markerText).c_str());
-            SendDlgItemMessageW(road, id, EM_SETMODIFY, FALSE, 0);
-            return;
-        }
+            return lastInspector->properties.markerText;
         const int field = id - IDC_LOC_X;
-        if (inspected && field >= 0 && field <= TransformFields::geographicLocation)
+        if (inspected && field >= 0 && field <= TransformFields::geographicLocation) return inspected->Text(field);
+        return {};
+    }
+
+    static std::string ReadEdit(HWND control)
+    {
+        std::wstring text(GetWindowTextLengthW(control) + 1, L'\0');
+        const int length = GetWindowTextW(control, text.data(), static_cast<int>(text.size()));
+        text.resize(length);
+        return WindowsNameDialog::Utf8(text);
+    }
+
+    void RestoreField(int id)
+    {
+        if (const auto value = FieldText(id))
         {
-            SetDlgItemTextW(road, id, Wide(inspected->Text(field)).c_str());
+            SetDlgItemTextW(road, id, Wide(*value).c_str());
             SendDlgItemMessageW(road, id, EM_SETMODIFY, FALSE, 0);
         }
     }
@@ -287,11 +298,7 @@ struct WindowsPanels::Impl
         const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
         if (inspected && (marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
         {
-            std::wstring text(GetWindowTextLengthW(control) + 1, L'\0');
-            const int length = GetWindowTextW(control, text.data(), static_cast<int>(text.size()));
-            text.resize(length);
-            auto input = WindowsNameDialog::Utf8(text);
-            pendingEdits.push_back({inspected->target, field, std::move(input)});
+            pendingEdits.push_back({inspected->target, field, ReadEdit(control)});
             SDL_Event event{};
             event.type = transformEvent;
             event.user.windowID = SDL_GetWindowID(frameWindow);
@@ -962,8 +969,15 @@ struct WindowsPanels::Impl
         switch (msg)
         {
         case WM_COMMAND:
+            if (HIWORD(w) == EN_CHANGE && hwnd == self->road && reinterpret_cast<HWND>(l) == GetFocus())
+            {
+                if (const auto initial = self->FieldText(LOWORD(w)))
+                    self->pendingFieldEdit = self->ReadEdit(reinterpret_cast<HWND>(l)) != *initial;
+                return TRUE;
+            }
             if (HIWORD(w) == EN_KILLFOCUS)
             {
+                self->pendingFieldEdit = false;
                 self->RestoreField(LOWORD(w));
                 return TRUE;
             }
@@ -1429,6 +1443,11 @@ std::optional<WindowsPanels::MaterialDrop> WindowsPanels::TakeMaterialDrop(const
     auto drop = std::move(impl->materialDrops.front());
     impl->materialDrops.pop_front();
     return drop;
+}
+
+bool WindowsPanels::HasPendingEdit() const
+{
+    return impl->pendingFieldEdit;
 }
 
 bool WindowsPanels::ViewportFocused() const

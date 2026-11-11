@@ -21,6 +21,7 @@ public:
     ~WindowsPanels();
     SDL_Window* Create(SDL_Window* frame, ContentBrowser& browser);
     bool ViewportFocused() const;
+    bool HasPendingEdit() const;
     void ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Rect& scene) const;
     struct ModelDrop
     {

@@ -85,6 +85,7 @@ void SdlTransformPanel::StartEdit(SDL_Window* window, TransformTarget selection,
 {
     target = selection;
     field = id;
+    initialText = value;
     buffer = std::move(value);
     selectAll = true;
     dirty = false;

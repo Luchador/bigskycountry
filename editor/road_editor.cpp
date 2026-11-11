@@ -83,6 +83,8 @@ namespace
 
 bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
 {
+    frame = window;
+    cleanTitle = SDL_GetWindowTitle(window);
     if (!menu.Attach(window))
     {
         return false;
@@ -251,18 +253,36 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
 
 #endif
 
+bool RoadEditor::UpdateWindowTitle()
+{
+#ifdef _WIN32
+    const bool pendingText = panels.HasPendingEdit();
+#else
+    const bool pendingText = transformPanel.HasPendingEdit();
+#endif
+    const bool dirty = history.WorldRevision() != savedRevision || dragChanged || pendingText ||
+                       (state.draft && !state.draft->points.empty());
+    if (dirty == titleShowsChanges || !frame) return true;
+    if (!SDL_SetWindowTitle(frame, dirty ? (cleanTitle + " *").c_str() : cleanTitle.c_str())) return false;
+    titleShowsChanges = dirty;
+    return true;
+}
+
 bool RoadEditor::Save(WorldDocument& world)
 {
+    UpdateWindowTitle();
     world.UpdateIntersections();
     saveFailed = !world.Save();
     if (saveFailed)
     {
         status = "Save failed - use File > Save to retry";
-        SDL_Log("%s", SDL_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save world", SDL_GetError(), nullptr);
+        const std::string error = SDL_GetError();
+        SDL_Log("%s", error.c_str());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save world", error.c_str(), frame);
         return false;
     }
-    status = "Saved";
+    savedRevision = history.WorldRevision();
+    status.clear();
     return true;
 }
 
@@ -346,7 +366,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
     if (result != EditHistory::Result::Unavailable &&
         (result != EditHistory::Result::MapChanged || Save(world)))
     {
-        status = undo ? "Undone" : "Redone";
+        status.clear();
     }
 }
 
@@ -896,7 +916,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
 
     road.points[state.point].position = position;
     road.Rebuild();
-    dragChanged = true;
+    dragChanged = extensionSource.has_value() || position != originalPoints[state.point].position;
 }
 
 void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
@@ -1242,7 +1262,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
-    if (!SDL_RenderDebugTextFormat(renderer, 12, static_cast<float>(scene.h) - 20, "Grid: %.0f m    Roads: %zu    %s", spacing, world.roads.size(), StatusText()))
+    if (!SDL_RenderDebugTextFormat(renderer, 12, 12, "Grid: %.0f m    Roads: %zu", spacing, world.roads.size()))
     {
         return false;
     }
@@ -1375,6 +1395,7 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 
 bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
 {
+    if (!UpdateWindowTitle()) return false;
     menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
 
     if (planView)
@@ -1389,13 +1410,14 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
         const int minutes = static_cast<int>(g_WorldState.GetTimeOfDayMinutes());
 
         if (!SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a) ||
-            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT", minutes / 60, minutes % 60) ||
-            !Text(renderer, 12, static_cast<float>(scene.h) - 20, StatusText(), ink))
+            !SDL_RenderDebugTextFormat(renderer, 12, 12, "Sky %02d:%02d CDT", minutes / 60, minutes % 60))
         {
             return false;
         }
     }
 
+    const char* message = StatusText();
+    if (*message && !Text(renderer, 12, 28, message, ink)) return false;
     outliner.Update(world, state);
     const auto fields = Inspect(world, state.Target());
     if (!DrawTransformDelta(renderer, fields.value.position)) return false;

@@ -6,6 +6,7 @@ class SdlTransformPanel
 {
 public:
     static constexpr int height = 112;
+    bool HasPendingEdit() const { return Focused() && dirty && buffer != initialText; }
     bool Focused() const { return field >= 0; }
     void Blur(SDL_Window* window);
     void Click(SDL_Window* window, SDL_FPoint pos, int width, const TransformFields& fields);
@@ -19,7 +20,7 @@ private:
     bool geographic = false;
     int field = -1;
     TransformTarget target;
-    std::string buffer;
+    std::string buffer, initialText;
     bool selectAll = false, dirty = false;
     std::size_t caret = 0;
 };
