@@ -65,7 +65,9 @@ class TransformGizmo
 {
 public:
     void Load(MeshAssets& assets);
-    void Draw(WorldRenderer& renderer, const GizmoPlacement& placement, const GizmoDrag* drag = nullptr) const;
+    void Draw(WorldRenderer& renderer, const GizmoPlacement& placement, const GizmoDrag* drag = nullptr,
+              std::optional<int> hoveredAxis = {}) const;
+    std::optional<int> PickAxis(ViewportPicker& picker, const GizmoPlacement& placement, const GizmoDrag* drag = nullptr) const;
     // Starts a drag only if a handle is closer than the scene geometry already tested.
     std::optional<GizmoDrag> BeginDrag(ViewportPicker& picker, const GizmoPlacement& placement) const;
 

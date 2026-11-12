@@ -19,6 +19,7 @@ public:
     bool DrawBar(SDL_Renderer* renderer, int width) const;
     bool HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, const SDL_Event& event, std::optional<EditorCommand>& command);
     bool DrawViewportMenu(SDL_Renderer* renderer) const;
+    bool IsOpen() const { return openMenu >= 0 || popup != Popup::Closed; }
 #endif
     bool WireframeEnabled() const { return wireframe; }
     void ToggleWireframe();

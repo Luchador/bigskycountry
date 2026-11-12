@@ -139,7 +139,52 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     return placement;
 }
 
-void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const
+std::optional<SDL_FPoint> RoadEditor::GizmoPointer() const
+{
+    if (!frame || SDL_GetWindowRelativeMouseMode(frame)) return {};
+#ifdef _WIN32
+    return panels.ViewportPointer(scene);
+#else
+    if (SDL_GetMouseFocus() != frame || !(SDL_GetWindowFlags(frame) & SDL_WINDOW_INPUT_FOCUS) ||
+        menu.IsOpen() || browser.MaterialPopupOpen() || !draggedAsset.empty()) return {};
+    SDL_FPoint cursor, point;
+    SDL_GetMouseState(&cursor.x, &cursor.y);
+    if (!SDL_RenderCoordinatesFromWindow(SDL_GetRenderer(frame), cursor.x, cursor.y, &point.x, &point.y) ||
+        point.x < 0 || point.y < 0 || point.x >= scene.w || point.y >= scene.h) return {};
+    return point;
+#endif
+}
+
+bool RoadEditor::GizmoInForeground() const
+{
+    // An object can enclose its pivot, and a group pivot can land inside terrain.
+    return state.meshSelection.kind == SelectionKind::Object || state.RoadGroupSelected();
+}
+
+void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& camera, const GizmoPlacement& placement)
+{
+    const auto pointer = GizmoPointer();
+    if (!pointer)
+    {
+        hoveredAxis.reset();
+        lastHoverPoint = {-1, -1};
+        return;
+    }
+    if (pointer->x == lastHoverPoint.x && pointer->y == lastHoverPoint.y) return;
+    lastHoverPoint = *pointer;
+    ViewportPicker handles(camera, scene, *pointer);
+    hoveredAxis = gizmo.PickAxis(handles, placement, gizmoDrag ? &*gizmoDrag : nullptr);
+    if (!hoveredAxis) return;
+
+    const auto modifiers = SDL_GetModState();
+    ViewportPicker surfaces(camera, scene, *pointer);
+    const RoadPick hit = overlay.Pick(surfaces, world, Selected(world), camera, scene,
+                                      (modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0);
+    if ((!gizmoDrag && !GizmoTakesClick(hit, modifiers)) || (!GizmoInForeground() && !handles.CloserThan(surfaces)))
+        hoveredAxis.reset();
+}
+
+void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera)
 {
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world))
@@ -148,9 +193,9 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     }
     if (const auto placement = SelectedGizmoPlacement(world, camera))
     {
-        // A centered mesh can enclose its pivot. A group pivot can also land inside terrain.
-        if (state.meshSelection.kind == SelectionKind::Object || state.RoadGroupSelected()) renderer.BeginForeground();
-        gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr);
+        UpdateGizmoHover(world, camera, *placement);
+        if (GizmoInForeground()) renderer.BeginForeground();
+        gizmo.Draw(renderer, *placement, gizmoDrag ? &*gizmoDrag : nullptr, hoveredAxis);
     }
 }
 
@@ -1592,6 +1637,21 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
     Commit(world, state.selected, std::move(before), &road);
 }
 
+bool RoadEditor::GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const
+{
+    const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    const bool subtract = (modifiers & SDL_KMOD_CTRL) != 0;
+    const bool anchorHit = hit.kind == RoadPickKind::Intersection && hit.side >= 0;
+    const bool snapPick = subtract && !shift && gizmo.mode == GizmoMode::Rotate;
+    // A marker at the road pivot must still be selectable when the handles overlap it.
+    const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
+    const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
+    const bool addElement = shift && state.point < 0 &&
+        (hit.kind == RoadPickKind::Intersection || (hit.kind == RoadPickKind::Road && hit.index != state.selected));
+    return !addElement && !addSegment &&
+           (snapPick || (!subtract && (!anchorHit || state.RoadGroupSelected()) && !pickPoint));
+}
+
 void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers)
 {
     const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
@@ -1599,23 +1659,15 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, shift || subtract);
-    const bool anchorHit = hit.kind == RoadPickKind::Intersection && hit.side >= 0;
-    const bool snapPick = subtract && !shift && gizmo.mode == GizmoMode::Rotate;
     const auto placement = SelectedGizmoPlacement(world, camera);
-    // A marker at the road pivot must still be selectable when the handles overlap it.
-    const bool pickPoint = hit.kind == RoadPickKind::Point && (state.point < 0 || (shift && hit.index != state.point));
-    const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
-    const bool group = state.RoadGroupSelected();
-    const bool addElement = shift && state.point < 0 &&
-        (hit.kind == RoadPickKind::Intersection || (hit.kind == RoadPickKind::Road && hit.index != state.selected));
-    if (placement && !addElement && !addSegment && (snapPick || (!subtract && (!anchorHit || group) && !pickPoint)))
+    if (placement && GizmoTakesClick(hit, modifiers))
     {
         ViewportPicker handles(camera, scene, mouse);
-        gizmoDrag = gizmo.BeginDrag((state.meshSelection.kind == SelectionKind::Object || group) ? handles : picker, *placement);
+        gizmoDrag = gizmo.BeginDrag(GizmoInForeground() ? handles : picker, *placement);
         if (gizmoDrag)
         {
             snapRotation = subtract;
-            if (group || state.meshSelection.kind == SelectionKind::Intersection)
+            if (state.RoadGroupSelected() || state.meshSelection.kind == SelectionKind::Intersection)
             {
                 BeginGroupDrag(world, Drag::Gizmo);
             }
@@ -1633,7 +1685,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         }
     }
 
-    if (anchorHit)
+    if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
         if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
@@ -1977,6 +2029,9 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
 EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event,
                                    WorldDocument& world, FreeCamera& camera)
 {
+    // Input can change the selection, tool, projection or scene under a stationary cursor.
+    // Recheck once after the event queue is drained, even if several events arrived.
+    lastHoverPoint = {-1, -1};
 #ifndef _WIN32
     if (browser.MaterialWindow().Handle(event)) return EditorEvent::Handled;
 #endif

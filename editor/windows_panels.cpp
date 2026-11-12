@@ -931,9 +931,8 @@ struct WindowsPanels::Impl
         EnableWindow(GetDlgItem(road, IDC_CANCEL_DRAFT), data.drawing);
     }
 
-    std::optional<SDL_FPoint> ViewportDropPoint(POINT p) const
+    std::optional<SDL_FPoint> ViewportFraction(POINT p) const
     {
-        if (!lastInspector || lastInspector->plan) return {};
         const HWND under = WindowFromPoint(p);
         if (under != frame && under != view) return {};
         ScreenToClient(view, &p);
@@ -941,6 +940,11 @@ struct WindowsPanels::Impl
         GetClientRect(view, &rect);
         if (!PtInRect(&rect, p)) return {};
         return SDL_FPoint{float(p.x) / rect.right, float(p.y) / rect.bottom};
+    }
+
+    std::optional<SDL_FPoint> ViewportDropPoint(POINT p) const
+    {
+        return lastInspector && !lastInspector->plan ? ViewportFraction(p) : std::nullopt;
     }
 
     void CancelModelDrag()
@@ -1453,6 +1457,16 @@ bool WindowsPanels::HasPendingEdit() const
 bool WindowsPanels::ViewportFocused() const
 {
     return GetFocus() == impl->frame;
+}
+
+std::optional<SDL_FPoint> WindowsPanels::ViewportPointer(const SDL_Rect& scene) const
+{
+    POINT cursor;
+    if (GetForegroundWindow() != impl->frame || !GetCursorPos(&cursor) ||
+        !impl->draggedModel.empty() || !impl->pressedTexture.empty()) return {};
+    const auto p = impl->ViewportFraction(cursor);
+    if (!p) return {};
+    return SDL_FPoint{p->x * scene.w, p->y * scene.h};
 }
 
 void WindowsPanels::ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Rect& scene) const

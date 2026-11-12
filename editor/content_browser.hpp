@@ -29,6 +29,7 @@ public:
     SdlMaterialEditor& MaterialWindow() { return materialWindow; }
     const SdlMaterialEditor& MaterialWindow() const { return materialWindow; }
     bool HandleMaterialPopup(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, SDL_Rect panel);
+    bool MaterialPopupOpen() const { return popup != MaterialPopup::Closed; }
     bool Draw(SDL_Renderer* renderer, int width, int height);
 #endif
 

@@ -23,6 +23,7 @@ public:
     bool TestMesh(const MeshInstance& instance);
     // Valid after a successful test.
     Vector3 HitPosition() const { return eye + ray * depth; }
+    bool CloserThan(const ViewportPicker& other) const { return depth < other.depth; }
 
     const FreeCamera& camera;
     const SDL_FPoint mouse;

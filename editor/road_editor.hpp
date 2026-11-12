@@ -30,7 +30,7 @@ public:
     bool ViewportFocused() const override { return !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused(); }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
-    void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const override;
+    void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
     const Road* Selected(const WorldDocument& world) const;
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
@@ -82,6 +82,10 @@ private:
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);
     std::optional<GizmoPlacement> SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const;
+    std::optional<SDL_FPoint> GizmoPointer() const;
+    bool GizmoInForeground() const;
+    bool GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const;
+    void UpdateGizmoHover(const WorldDocument& world, const FreeCamera& camera, const GizmoPlacement& placement);
     void SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract);
     void FillSelection(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
@@ -137,6 +141,8 @@ private:
     RoadOverlay overlay;
     TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
+    std::optional<int> hoveredAxis;
+    SDL_FPoint lastHoverPoint{-1, -1};
     DragAngle planRotation;
     double appliedAngle = 0; // Signed radians actually applied since mouse-down.
     bool snapRotation = false;

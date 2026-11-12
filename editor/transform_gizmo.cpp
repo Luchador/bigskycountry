@@ -1,4 +1,5 @@
 #include "transform_gizmo.hpp"
+#include "editor_colors.hpp"
 #include "viewport_picker.hpp"
 #include "free_camera.hpp"
 #include "world_renderer.hpp"
@@ -97,20 +98,21 @@ MeshInstance TransformGizmo::Handle(const GizmoPlacement& placement, const Gizmo
     return {mode == GizmoMode::Translate ? arrow : ring, transform};
 }
 
-void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placement, const GizmoDrag* drag) const
+void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placement, const GizmoDrag* drag,
+                          std::optional<int> hoveredAxis) const
 {
     const GizmoAxes& axes = drag ? drag->startAxes : Axes(placement);
 
     for (int axis = 0; axis < 3; ++axis)
     {
         if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
-        renderer.SubmitMesh(Handle(placement, axes, axis), axisColors[axis]);
+        renderer.SubmitMesh(Handle(placement, axes, axis), hoveredAxis == axis ? EditorColors::amber : axisColors[axis]);
     }
 }
 
-std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const GizmoPlacement& placement) const
+std::optional<int> TransformGizmo::PickAxis(ViewportPicker& picker, const GizmoPlacement& placement, const GizmoDrag* drag) const
 {
-    const GizmoAxes& axes = Axes(placement);
+    const GizmoAxes& axes = drag ? drag->startAxes : Axes(placement);
     std::optional<int> hit;
 
     for (int axis = 0; axis < 3; ++axis)
@@ -122,9 +124,14 @@ std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const
         }
     }
 
-    if (hit)
+    return hit;
+}
+
+std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const GizmoPlacement& placement) const
+{
+    if (const auto hit = PickAxis(picker, placement))
     {
-        return GizmoDrag(mode, axes, *hit, placement, picker);
+        return GizmoDrag(mode, Axes(placement), *hit, placement, picker);
     }
 
     return {};
