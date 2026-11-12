@@ -2,6 +2,7 @@
 
 #include "world_document.hpp"
 #include "bscobject.hpp"
+#include "marker.hpp"
 #include "scene_hierarchy.hpp"
 #include "transform_inspector.hpp"
 #include "road_group_transform.hpp"
@@ -89,13 +90,13 @@ struct EditSnapshot
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
-    struct TerrainMaterial
+    struct PlacedMaterial
     {
-        int index;
+        SceneKey target;
         std::string path;
-        bool operator==(const TerrainMaterial&) const = default;
+        bool operator==(const PlacedMaterial&) const = default;
     };
-    std::optional<TerrainMaterial> terrainMaterial;
+    std::optional<PlacedMaterial> placedMaterial;
     std::map<int, TerrainBoundary> splitBoundaries; // Perimeters affected by splitting an existing road.
     struct Junction
     {
@@ -108,6 +109,7 @@ struct EditSnapshot
     std::optional<IntersectionAnchor> anchorSelection;
     std::optional<bool> objectInvincible;
     std::optional<std::string> markerText;
+    std::optional<Marker::TextColor> markerTextColor;
     std::optional<SceneHierarchy> hierarchy;
     std::set<SceneKey> outlineSelection;
     bool operator==(const EditSnapshot&) const = default;

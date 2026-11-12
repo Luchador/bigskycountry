@@ -142,6 +142,36 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
     }
 }
 
+void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping)
+{
+    if (material.empty() || !instance.mesh)
+    {
+        SubmitMesh(instance);
+        return;
+    }
+    const Mesh& mesh = *instance.mesh;
+    const auto normalMatrix = instance.transform.NormalTransform();
+    const auto worldNormal = [&](Vector3 n) {
+        // Terrain placements are rigid. Object scale can be nonuniform or mirrored.
+        if (mapping == MeshUVs::TerrainProjection) return instance.transform.Direction(n);
+        return Math::Normalize(normalMatrix.Direction(n));
+    };
+    const bool mirrored = instance.transform.Determinant() < 0;
+    const auto start = vertices.size();
+    for (size_t i = 0; i < mesh.indices.size(); i += 3)
+    {
+        const auto& a = mesh.vertices[mesh.indices[i]];
+        const auto& b = mesh.vertices[mesh.indices[i + (mirrored ? 2 : 1)]];
+        const auto& c = mesh.vertices[mesh.indices[i + (mirrored ? 1 : 2)]];
+        const std::array normals{worldNormal(a.normal), worldNormal(b.normal), worldNormal(c.normal)};
+        const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
+                                   instance.transform.Point(c.position)};
+        const auto uv = mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) : std::array{a.uv, b.uv, c.uv};
+        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, uv, &normals);
+    }
+    if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), material});
+}
+
 void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
 {
     const MeshInstance& instance = chunk.Instance();
@@ -150,21 +180,7 @@ void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
         SubmitMesh(instance, chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
         return;
     }
-    const Mesh& mesh = *instance.mesh;
-    const auto start = vertices.size();
-    for (size_t i = 0; i < mesh.indices.size(); i += 3)
-    {
-        const auto& a = mesh.vertices[mesh.indices[i]];
-        const auto& b = mesh.vertices[mesh.indices[i + 1]];
-        const auto& c = mesh.vertices[mesh.indices[i + 2]];
-        const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
-                                   instance.transform.Point(c.position)};
-        // Terrain transforms are rigid, so rotating the authored normals preserves length.
-        const std::array normals{instance.transform.Direction(a.normal), instance.transform.Direction(b.normal),
-                                 instance.transform.Direction(c.normal)};
-        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, TerrainUVs(positions, instance.transform), &normals);
-    }
-    if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), chunk.material});
+    SubmitMaterialMesh(instance, chunk.material, MeshUVs::TerrainProjection);
 }
 
 void WorldRenderer::WireframeSubmittedGeometry()

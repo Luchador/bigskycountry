@@ -194,7 +194,10 @@ namespace
                 for (const auto& chunk : world.Terrain()) worldRenderer.SubmitTerrain(*chunk);
                 for (const auto& object : world.Objects())
                 {
-                    if (object->IsLoaded()) worldRenderer.SubmitMesh(object->Instance());
+                    if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
+                        worldRenderer.SubmitMaterialMesh(marker->Instance(), marker->material);
+                    else
+                        worldRenderer.SubmitMesh(object->Instance());
                 }
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();

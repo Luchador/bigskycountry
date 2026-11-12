@@ -1,5 +1,5 @@
 #include "edit_history.hpp"
-#include "marker.hpp"
+#include "properties_inspector.hpp"
 #include "road_io.hpp"
 #include "world_document.hpp"
 
@@ -160,7 +160,7 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> 
 bool EditHistory::Action::ChangesWorld() const
 {
     return roadIndex >= 0 || object || after.meshTransform || after.roadGroup || after.junction ||
-           after.objectInvincible || after.markerText || after.hierarchy || after.terrainMaterial ||
+           after.objectInvincible || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
            before.addedTerrain || after.addedTerrain;
 }
 
@@ -289,17 +289,18 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         }
     }
     if (to.roadGroup) to.roadGroup->Restore(world);
-    if (to.markerText)
+    if (to.markerText || to.markerTextColor)
     {
         auto* marker = dynamic_cast<Marker*>(world.Objects().at(to.meshSelection.index).get());
-        if (!marker || !marker->SetText(*to.markerText)) return Result::Failed;
+        if (!marker || (to.markerText && !marker->SetText(*to.markerText))) return Result::Failed;
+        if (to.markerTextColor) marker->textColor = *to.markerTextColor;
     }
     if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
-    if (to.terrainMaterial)
+    if (to.placedMaterial)
     {
-        const auto& target = *to.terrainMaterial;
-        if (!world.Contains({SceneKind::Terrain, target.index})) return Result::Failed;
-        world.Terrain()[target.index]->material = target.path;
+        auto* path = FindPlacedMaterial(world, to.placedMaterial->target);
+        if (!path) return Result::Failed;
+        *path = to.placedMaterial->path;
     }
     if (to.meshTransform && !SetPlacementTransform(world, to.meshSelection, *to.meshTransform))
     {

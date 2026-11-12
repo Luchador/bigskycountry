@@ -370,7 +370,8 @@ struct WindowsPanels::Impl
         GetClientRect(road, &client);
         const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT :
-                           (page == PropertiesPage::Intersection || page == PropertiesPage::Terrain || page == PropertiesPage::Marker ? 192 : 150);
+                           page == PropertiesPage::Marker ? 267 :
+                           page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, height).cy - 1;
         si.nPage = static_cast<UINT>(client.bottom);
@@ -673,8 +674,8 @@ struct WindowsPanels::Impl
         RECT line{thumb.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
         constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::secondary));
-        const bool terrain = lastInspector && lastInspector->properties.page == PropertiesPage::Terrain;
-        DrawTextW(draw.hDC, terrain ? L"Terrain material" : L"Pavement material", -1, &line, flags);
+        const auto caption = lastInspector ? lastInspector->properties.MaterialCaption() : "Pavement material";
+        DrawTextW(draw.hDC, Wide(caption).c_str(), -1, &line, flags);
         line.top = line.bottom;
         line.bottom = r.bottom;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
@@ -774,6 +775,26 @@ struct WindowsPanels::Impl
         {
             switch (id)
             {
+            case IDC_MARKER_CLEAR_MATERIAL:
+                if (inspected && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
+                {
+                    materialDrops.push_back({{}, {}, inspected->target});
+                    if (!Post(materialDropEvent, 0)) materialDrops.pop_back();
+                }
+                return;
+            case IDC_MARKER_TEXT_COLOR:
+                if (inspected && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
+                {
+                    const auto target = inspected->target;
+                    const auto& c = lastInspector->properties.textColor;
+                    if (const auto color = WindowsTheme::PickColor(frame, RGB(c[0], c[1], c[2])))
+                    {
+                        pendingEdits.push_back({target, InspectorEdit::markerTextColor,
+                            FormatTextColor({GetRValue(*color), GetGValue(*color), GetBValue(*color)})});
+                        if (!Post(transformEvent, 0)) pendingEdits.pop_back();
+                    }
+                }
+                return;
             case IDC_USE_GEOGRAPHIC:
                 SetGeographicLayout(IsDlgButtonChecked(road, id) == BST_CHECKED);
                 return;
@@ -851,12 +872,17 @@ struct WindowsPanels::Impl
                 ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
-            ShowWindow(GetDlgItem(road, IDC_MARKER_TEXT_LABEL), marker ? SW_SHOWNA : SW_HIDE);
-            ShowWindow(GetDlgItem(road, IDC_MARKER_TEXT), marker ? SW_SHOWNA : SW_HIDE);
+            for (int id : {IDC_MARKER_TEXT_LABEL, IDC_MARKER_TEXT, IDC_MARKER_TEXT_COLOR, IDC_MARKER_CLEAR_MATERIAL})
+                ShowWindow(GetDlgItem(road, id), marker ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
         }
-        if (refreshText) RestoreField(IDC_MARKER_TEXT);
+        if (marker)
+        {
+            EnableWindow(GetDlgItem(road, IDC_MARKER_CLEAR_MATERIAL), !properties.material.empty());
+            InvalidateRect(GetDlgItem(road, IDC_MARKER_TEXT_COLOR), nullptr, FALSE);
+            if (refreshText) RestoreField(IDC_MARKER_TEXT);
+        }
         SetDlgItemTextW(road, IDC_ROAD_TITLE, Wide(properties.title).c_str());
         InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
         const int lanes = data.style.GetLaneCount();
@@ -1081,6 +1107,12 @@ struct WindowsPanels::Impl
             return FALSE;
         }
         case WM_DRAWITEM:
+            if (w == IDC_MARKER_TEXT_COLOR && self->lastInspector)
+            {
+                const auto& c = self->lastInspector->properties.textColor;
+                WindowsTheme::DrawColorButton(*reinterpret_cast<DRAWITEMSTRUCT*>(l), L"Text color", RGB(c[0], c[1], c[2]));
+                return TRUE;
+            }
             if (w == IDC_ROAD_MATERIAL)
             {
                 self->DrawRoadMaterial(*reinterpret_cast<DRAWITEMSTRUCT*>(l));

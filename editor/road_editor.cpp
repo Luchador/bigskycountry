@@ -21,7 +21,10 @@ namespace
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
 #ifndef _WIN32
-    constexpr SDL_FRect markerTextBox{12, 127, 194, 22};
+    constexpr SDL_FRect markerTextBox{12, 219, 194, 22};
+    constexpr SDL_FRect markerColorBox{115, 249, 91, 22};
+    constexpr SDL_FRect markerColorSwatch{96, markerColorBox.y + 3, 15, 15};
+    constexpr SDL_FRect markerClearButton{12, 178, 128, 21};
     constexpr SDL_FRect propertyMaterialSlot{12, 118, 194, 54};
     constexpr float threeLanePanelHeight = 104.0f;
 
@@ -469,6 +472,7 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     RoadPick target{RoadPickKind::Road, EditingDraft() ? -1 : state.selected};
     if (!viewportPoint && !EditingDraft())
     {
+        if (state.meshSelection.kind == SelectionKind::Object) target = {RoadPickKind::Object, state.meshSelection.index};
         if (state.meshSelection.kind == SelectionKind::Terrain) target = {RoadPickKind::Terrain, state.meshSelection.index};
         if (state.meshSelection.kind == SelectionKind::Intersection) target = {RoadPickKind::Intersection, state.meshSelection.index};
     }
@@ -479,51 +483,40 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
         target = overlay.Pick(picker, world, nullptr, camera, scene);
     }
     Road* road = nullptr;
-    Intersection* junction = nullptr;
-    TerrainChunk* chunk = nullptr;
-    if (target.kind == RoadPickKind::Intersection) junction = &world.intersections.at(target.index);
-    else if (target.kind == RoadPickKind::Terrain)
-        chunk = world.Terrain().at(target.index).get();
-    else if (target.kind == RoadPickKind::Road && target.index >= 0)
-        road = &world.roads.at(target.index);
-    else if (!viewportPoint && EditingDraft())
-        road = &*state.draft;
-    else
-        return;
-
-    auto& current = junction ? junction->material : chunk ? chunk->material : road->style.material;
-    if (current == path) return;
-    Material material;
-    if (!Material::ValidAssetPath(path) || !material.Load(browser.Textures().Root() + path))
+    SceneKey key;
+    switch (target.kind)
+    {
+    case RoadPickKind::Road:
+        if (target.index >= 0) road = &world.roads.at(target.index);
+        else if (!viewportPoint && EditingDraft()) road = &*state.draft;
+        break;
+    case RoadPickKind::Terrain: key = {SceneKind::Terrain, target.index}; break;
+    case RoadPickKind::Intersection: key = {SceneKind::Intersection, target.index}; break;
+    case RoadPickKind::Object: key = {SceneKind::Object, target.index}; break;
+    default: return;
+    }
+    auto* current = road ? &road->style.material : FindPlacedMaterial(world, key);
+    if (!current || *current == path || (path.empty() && key.kind != SceneKind::Object)) return;
+    Material definition;
+    if (!path.empty() && (!Material::ValidAssetPath(path) || !definition.Load(browser.Textures().Root() + path)))
     {
         status = SDL_GetError();
         return;
     }
-    if (junction)
-    {
-        EditSnapshot before(state), after(state);
-        before.junction = EditSnapshot::Junction{target.index, *junction};
-        current = path;
-        after.junction = EditSnapshot::Junction{target.index, *junction};
-        history.Record(-1, std::move(before), std::move(after));
-        Save(world);
-    }
-    else if (chunk)
-    {
-        EditSnapshot before(state), after(state);
-        before.terrainMaterial = EditSnapshot::TerrainMaterial{target.index, current};
-        after.terrainMaterial = EditSnapshot::TerrainMaterial{target.index, path};
-        current = path;
-        history.Record(-1, std::move(before), std::move(after));
-        Save(world);
-    }
-    else
+    if (road)
     {
         const Road* placed = target.index >= 0 ? road : nullptr;
         EditSnapshot before(state, placed);
-        current = path;
+        *current = path;
         Commit(world, target.index, std::move(before), placed);
+        return;
     }
+    EditSnapshot before(state), after(state);
+    before.placedMaterial = EditSnapshot::PlacedMaterial{key, *current};
+    after.placedMaterial = EditSnapshot::PlacedMaterial{key, path};
+    *current = path;
+    history.Record(-1, std::move(before), std::move(after));
+    Save(world);
 }
 
 void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path)
@@ -1401,7 +1394,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     {
         const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(style) : propertyMaterialSlot;
         const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
-        const char* caption = properties.page == PropertiesPage::Terrain ? "Terrain material" : "Pavement material";
+        const char* caption = properties.MaterialCaption();
         if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
             !Text(renderer, slot.x + 55, slot.y + 9, caption, muted)) return false;
         if (!properties.material.empty())
@@ -1413,9 +1406,18 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                            properties.material.substr(properties.material.rfind('/') + 1);
         if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     }
-    if (properties.page == PropertiesPage::Marker &&
-        (!Text(renderer, 12, 111, "Marker text", muted) ||
-         !transformPanel.DrawField(renderer, markerTextBox, state.Target(), InspectorEdit::markerText, properties.markerText, true))) return false;
+    if (properties.page == PropertiesPage::Marker)
+    {
+        const auto& rgb = properties.textColor;
+        if (!Fill(renderer, markerClearButton, properties.material.empty() ? EditorTheme::header : EditorTheme::button) ||
+            !Text(renderer, markerClearButton.x + 6, markerClearButton.y + 7, "Clear material", properties.material.empty() ? muted : ink) ||
+            !Text(renderer, 12, markerTextBox.y - 15, "Marker text", muted) ||
+            !transformPanel.DrawField(renderer, markerTextBox, state.Target(), InspectorEdit::markerText, properties.markerText, true) ||
+            !Text(renderer, 12, markerColorBox.y + 6, "Text color", muted) ||
+            !Fill(renderer, markerColorSwatch, {rgb[0], rgb[1], rgb[2], 255}) ||
+            !transformPanel.DrawField(renderer, markerColorBox, state.Target(), InspectorEdit::markerTextColor, FormatTextColor(rgb), true))
+            return false;
+    }
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
     if (properties.page == PropertiesPage::Intersection)
         return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
@@ -1535,7 +1537,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const RoadStyle& style = current ? current->style : state.defaults;
     const int contentHeight = properties.page == PropertiesPage::Road ?
-        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) : properties.materialSlot ? 182 : properties.page == PropertiesPage::Marker ? 158 : 110;
+        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) :
+        properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;
@@ -2007,17 +2010,30 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
-    if (edit.field == InspectorEdit::markerText)
+    if (edit.field == InspectorEdit::markerText || edit.field == InspectorEdit::markerTextColor)
     {
         if (edit.target.kind != SelectionKind::Object) return;
         auto* marker = dynamic_cast<Marker*>(world.Objects().at(edit.target.index).get());
-        if (!marker || edit.text == marker->Text()) return;
+        if (!marker) return;
         EditSnapshot before(state), after(state);
-        before.markerText = marker->Text();
-        if (!marker->SetText(edit.text)) { status = SDL_GetError(); return; }
-        after.markerText = marker->Text();
+        if (edit.field == InspectorEdit::markerTextColor)
+        {
+            const auto color = ParseTextColor(edit.text);
+            if (!color) { status = "Enter a text color as #RRGGBB"; return; }
+            if (marker->textColor == *color) return;
+            before.markerTextColor = marker->textColor;
+            marker->textColor = *color;
+            after.markerTextColor = marker->textColor;
+        }
+        else
+        {
+            if (edit.text == marker->Text()) return;
+            before.markerText = marker->Text();
+            if (!marker->SetText(edit.text)) { status = SDL_GetError(); return; }
+            after.markerText = marker->Text();
+            outliner.Invalidate();
+        }
         history.Record(-1, std::move(before), std::move(after));
-        outliner.Invalidate();
         Save(world);
         return;
     }
@@ -2546,6 +2562,17 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 if (properties.page == PropertiesPage::Marker && SDL_PointInRectFloat(&local, &markerTextBox))
                 {
                     transformPanel.StartEdit(window, state.Target(), InspectorEdit::markerText, properties.markerText);
+                    return EditorEvent::Handled;
+                }
+                if (properties.page == PropertiesPage::Marker &&
+                    (SDL_PointInRectFloat(&local, &markerColorBox) || SDL_PointInRectFloat(&local, &markerColorSwatch)))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::markerTextColor, FormatTextColor(properties.textColor));
+                    return EditorEvent::Handled;
+                }
+                if (properties.page == PropertiesPage::Marker && SDL_PointInRectFloat(&local, &markerClearButton))
+                {
+                    AssignMaterial(world, {}, camera, {});
                     return EditorEvent::Handled;
                 }
                 for (const Button& button : Buttons(world, properties))

@@ -136,5 +136,5 @@ void Marker::SubmitLabel(WorldRenderer& renderer, const FreeCamera& camera) cons
 {
     const auto label = Label(camera);
     if (label.mesh && renderer.SphereVisible(label.transform.origin, labelRadius))
-        renderer.SubmitMesh(label);
+        renderer.SubmitMesh(label, {textColor[0] / 255.f, textColor[1] / 255.f, textColor[2] / 255.f, 1});
 }

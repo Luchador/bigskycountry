@@ -1,6 +1,7 @@
 #include "object_io.hpp"
 #include "vehicle.hpp"
 #include "marker.hpp"
+#include "material.hpp"
 #include "world_document.hpp"
 
 #include <cmath>
@@ -54,7 +55,23 @@ namespace ObjectIO
             {
                 vehicle->acceleration = acceleration;
             }
-            if (auto* marker = dynamic_cast<Marker*>(object); marker && !marker->SetText(std::move(label))) return false;
+            if (auto* marker = dynamic_cast<Marker*>(object))
+            {
+                if (!marker->SetText(std::move(label))) return false;
+                if (version >= 3)
+                {
+                    if ((in >> std::ws).peek() != '"' || !(in >> std::quoted(marker->material)) ||
+                        (!marker->material.empty() && !Material::ValidAssetPath(marker->material)))
+                        return SDL_SetError("Invalid marker material in OBJS");
+                    for (auto& channel : marker->textColor)
+                    {
+                        int value;
+                        if (!(in >> value) || value < 0 || value > 255)
+                            return SDL_SetError("Invalid marker text color in OBJS");
+                        channel = static_cast<Uint8>(value);
+                    }
+                }
+            }
             in >> std::ws;
         }
         return true;
@@ -86,7 +103,12 @@ namespace ObjectIO
                 out << ' ' << vehicle->acceleration;
             }
             if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
-                out << ' ' << std::quoted(marker->Text());
+            {
+                if (!marker->material.empty() && !Material::ValidAssetPath(marker->material))
+                    return SDL_SetError("Cannot save an invalid marker material path");
+                out << ' ' << std::quoted(marker->Text()) << ' ' << std::quoted(marker->material);
+                for (auto channel : marker->textColor) out << ' ' << int(channel);
+            }
             out << '\n';
         }
         return out.good() || SDL_SetError("Could not serialize world objects");

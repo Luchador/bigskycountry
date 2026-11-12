@@ -1,6 +1,7 @@
 #include "windows_theme.hpp"
 #include "panel_ids.h"
 #include <commctrl.h>
+#include <commdlg.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <algorithm>
@@ -494,6 +495,33 @@ void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface, SDL_Color backg
 }
 
 HBRUSH Brush(SDL_Color color) { return Solid(Color(color)); }
+
+void DrawColorButton(const DRAWITEMSTRUCT& draw, const wchar_t* label, COLORREF color)
+{
+    RECT area = draw.rcItem;
+    FillRect(draw.hDC, &area, Brush(EditorTheme::button));
+    InflateRect(&area, -4, -3);
+    SetBkMode(draw.hDC, TRANSPARENT);
+    SetTextColor(draw.hDC, Color(EditorTheme::text));
+    DrawTextW(draw.hDC, label, -1, &area, DT_SINGLELINE | DT_VCENTER);
+    RECT swatch = area;
+    swatch.left = swatch.right - Scale(draw.hwndItem, 52);
+    SetDCBrushColor(draw.hDC, color);
+    FillRect(draw.hDC, &swatch, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    if (draw.itemState & ODS_FOCUS) DrawFocusRect(draw.hDC, &draw.rcItem);
+}
+
+std::optional<COLORREF> PickColor(HWND owner, COLORREF current)
+{
+    static COLORREF custom[16]{};
+    CHOOSECOLORW picker{sizeof(picker)};
+    picker.hwndOwner = owner;
+    picker.lpCustColors = custom;
+    picker.rgbResult = current;
+    picker.Flags = CC_FULLOPEN | CC_RGBINIT;
+    if (ChooseColorW(&picker)) return picker.rgbResult;
+    return {};
+}
 
 void TitleBar(HWND window)
 {

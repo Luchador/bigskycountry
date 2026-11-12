@@ -1,7 +1,44 @@
 #include "properties_inspector.hpp"
 #include "edit_history.hpp"
-#include "marker.hpp"
 #include "world_document.hpp"
+#include <charconv>
+
+const char* PropertiesInspector::MaterialCaption() const
+{
+    if (page == PropertiesPage::Marker) return "Mesh material";
+    if (page == PropertiesPage::Terrain) return "Terrain material";
+    return "Pavement material";
+}
+
+std::string* FindPlacedMaterial(WorldDocument& world, SceneKey key)
+{
+    if (!world.Contains(key)) return nullptr;
+    if (key.kind == SceneKind::Intersection) return &world.intersections.at(key.index).material;
+    if (key.kind == SceneKind::Terrain) return &world.Terrain()[key.index]->material;
+    if (key.kind == SceneKind::Object)
+    {
+        if (auto* marker = dynamic_cast<Marker*>(world.Objects()[key.index].get())) return &marker->material;
+    }
+    return nullptr;
+}
+
+std::string FormatTextColor(Marker::TextColor color)
+{
+    char hex[8];
+    SDL_snprintf(hex, sizeof(hex), "#%02X%02X%02X", unsigned(color[0]), unsigned(color[1]), unsigned(color[2]));
+    return hex;
+}
+
+std::optional<Marker::TextColor> ParseTextColor(std::string_view text)
+{
+    if (text.starts_with('#')) text.remove_prefix(1);
+    if (text.size() != 6) return {};
+    unsigned rgb;
+    const auto end = text.data() + text.size();
+    const auto [ptr, error] = std::from_chars(text.data(), end, rgb, 16);
+    if (error != std::errc{} || ptr != end) return {};
+    return Marker::TextColor{Uint8(rgb >> 16), Uint8(rgb >> 8), Uint8(rgb)};
+}
 
 PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEditorState& state, bool editingDraft)
 {
@@ -66,6 +103,9 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.page = PropertiesPage::Marker;
             result.title = "Marker " + std::to_string(target.index + 1);
             result.markerText = marker->Text();
+            result.textColor = marker->textColor;
+            result.material = marker->material;
+            result.materialSlot = true;
         }
     }
     else

@@ -4,7 +4,6 @@
 #include "panel_ids.h"
 #include <algorithm>
 #include <commctrl.h>
-#include <commdlg.h>
 #include <cmath>
 #include <windowsx.h>
 
@@ -15,6 +14,12 @@ namespace
         RECT r{0, 0, units, units};
         MapDialogRect(window, &r);
         return horizontal ? r.right : r.bottom;
+    }
+
+    COLORREF TintColor(const Material& material)
+    {
+        const auto& c = material.emissiveTint;
+        return RGB(std::lround(c[0] * 255), std::lround(c[1] * 255), std::lround(c[2] * 255));
     }
 }
 
@@ -198,18 +203,7 @@ void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
 {
     if (draw.CtlID == IDC_MAT_TINT)
     {
-        RECT area = draw.rcItem;
-        FillRect(draw.hDC, &area, WindowsTheme::Brush(EditorTheme::button));
-        InflateRect(&area, -4, -3);
-        SetBkMode(draw.hDC, TRANSPARENT);
-        SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
-        DrawTextW(draw.hDC, L"Emissive tint", -1, &area, DT_SINGLELINE | DT_VCENTER);
-        RECT swatch = area;
-        swatch.left = swatch.right - Units(window, 32, true);
-        const auto& c = editor.Current().emissiveTint;
-        SetDCBrushColor(draw.hDC, RGB(std::lround(c[0]*255), std::lround(c[1]*255), std::lround(c[2]*255)));
-        FillRect(draw.hDC, &swatch, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
-        if (draw.itemState & ODS_FOCUS) DrawFocusRect(draw.hDC, &draw.rcItem);
+        WindowsTheme::DrawColorButton(draw, L"Emissive tint", TintColor(editor.Current()));
         return;
     }
     if (draw.CtlID == IDC_MAT_PREVIEW)
@@ -288,17 +282,9 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
     case WM_COMMAND:
         if (LOWORD(w) == IDC_MAT_TINT && HIWORD(w) == BN_CLICKED)
         {
-            static COLORREF custom[16]{};
-            const auto& c = self->editor.Current().emissiveTint;
-            CHOOSECOLORW picker{sizeof(picker)};
-            picker.hwndOwner = hwnd;
-            picker.lpCustColors = custom;
-            picker.rgbResult = RGB(std::lround(c[0]*255), std::lround(c[1]*255), std::lround(c[2]*255));
-            picker.Flags = CC_FULLOPEN | CC_RGBINIT;
-            if (ChooseColorW(&picker))
+            if (const auto color = WindowsTheme::PickColor(hwnd, TintColor(self->editor.Current())))
             {
-                const auto rgb = picker.rgbResult;
-                if (!self->editor.SetTint({GetRValue(rgb)/255.f, GetGValue(rgb)/255.f, GetBValue(rgb)/255.f}))
+                if (!self->editor.SetTint({GetRValue(*color)/255.f, GetGValue(*color)/255.f, GetBValue(*color)/255.f}))
                     MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
                 self->Sync();
             }

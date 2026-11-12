@@ -51,6 +51,8 @@ public:
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     bool SphereVisible(Vector3 center, double radius) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
+    enum class MeshUVs { Authored, TerrainProjection };
+    void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored);
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();
     // Subsequent solid editor handles depth-test against each other in front of the world.
