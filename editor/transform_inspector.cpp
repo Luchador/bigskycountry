@@ -234,7 +234,7 @@ bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b)
 {
     const double span = Math::Length(a - b);
 
-    if (span < 0.05)
+    if (span < Road::minPointSpacing)
     {
         return SDL_SetError("Road points must be at least 0.05 m apart");
     }

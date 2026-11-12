@@ -16,6 +16,7 @@
 #include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
+#include "road_intersection.hpp"
 #include "viewport_picker.hpp"
 #include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
@@ -148,6 +149,13 @@ private:
     };
     std::optional<ViewportClick> rightClick;
     Vector3 creationPoint{};
+    struct RoadMenuTarget
+    {
+        int index;
+        std::uint64_t revision;
+        std::optional<RoadIntersectionInsertion> insertion;
+    };
+    std::optional<RoadMenuTarget> roadMenuTarget;
     RoadEditorState state;
     EditHistory history;
     SceneOutliner outliner;

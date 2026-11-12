@@ -13,6 +13,7 @@
 namespace
 {
     constexpr Vector3 markerOffsetPixels{0, 6, 0};
+    constexpr double strokeDepthBias = 1.0001;
     constexpr float overlayStrokeWidth = 1.5f;
 
     // Use a constant-pixel-width stroke for splines and intersection guides.
@@ -42,7 +43,7 @@ namespace
                 const Vector3 ray = forward + right * (p.x - viewport.w * 0.5) + up * (viewport.h * 0.5 - p.y);
                 // Bias toward the eye so coincident pavement cannot hide the stroke.
                 const double depth = j < 2 ? stroke->startDepth : stroke->endDepth;
-                corners[j] = eye + ray * std::max(worldNearDepth, depth / 1.0001);
+                corners[j] = eye + ray * std::max(worldNearDepth, depth / strokeDepthBias);
             }
             visit(corners[0], corners[1], corners[2]);
             visit(corners[0], corners[2], corners[3]);
@@ -102,6 +103,16 @@ std::optional<GizmoPlacement> RoadOverlay::PointPlacement(Vector3 point, const F
         placement->origin = point + markerOffsetPixels * placement->metersPerPixel;
     }
     return placement;
+}
+
+Vector3 RoadOverlay::SplinePosition(const ViewportPicker& pick, SDL_Rect scene)
+{
+    // Invert the stroke's depth bias and its depth-scaled vertical lift.
+    const double focal = ViewportFocalLength(scene);
+    const Vector3 stroke = pick.eye + (pick.HitPosition() - pick.eye) * strokeDepthBias;
+    const double scale = pick.camera.WorldToView(stroke).z /
+                         (focal + pick.camera.WorldDirectionToView(markerOffsetPixels).z);
+    return stroke - markerOffsetPixels * scale;
 }
 
 RoadOverlay::RoadOverlay()
@@ -195,7 +206,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
     }
 }
 
-RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene, bool preferAnchor) const
+RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene, bool preferAnchor, Vector3* placement) const
 {
     RoadPick hit;
 
@@ -220,6 +231,20 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         if (picker.TestRoad(world.roads[i])) hit = {RoadPickKind::Road, i};
+    }
+
+    if (placement)
+    {
+        // World creation uses roads and terrain beneath the click, independently of editor handles.
+        if (hit.kind == RoadPickKind::Object || hit.kind == RoadPickKind::Mesh)
+        {
+            ViewportPicker ground(camera, scene, picker.mouse);
+            for (const Road& road : world.roads) ground.TestRoad(road);
+            for (const auto& [id, surface] : world.IntersectionSurfaces()) ground.TestRoad(surface.geometry);
+            for (const auto& chunk : world.Terrain()) ground.TestMesh(chunk->Instance());
+            *placement = ground.PlacementPosition();
+        }
+        else *placement = picker.PlacementPosition();
     }
 
     for (const auto& [id, item] : world.intersections)

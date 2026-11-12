@@ -13,6 +13,7 @@ struct Intersection
     static constexpr double stopLineWidth = 0.6; // Meters along the direction of travel.
     static constexpr double anchorDistance = 10.0; // Approach centerlines, in meters from the junction center.
     double yaw = 0; // Radians around world Y.
+    bool pavedThrough = false; // Keep pavement between opposite arms of an intersection inserted in a road.
     static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw);
     Vector3 AnchorPosition(int side) const { return position + Directions(yaw).at(side) * anchorDistance; }
     std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;

@@ -12,7 +12,7 @@ public:
     static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY);
 #endif
     bool Attach(SDL_Window* window);
-    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene);
+    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection);
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -34,6 +34,7 @@ private:
     void* editMenu = nullptr;
     void* viewMenu = nullptr;
 #else
+    bool intersectionEnabled = true;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;
     enum class Popup { Closed, Create, Submenu };

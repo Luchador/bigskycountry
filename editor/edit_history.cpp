@@ -178,15 +178,30 @@ bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after,
     return true;
 }
 
-void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& editor, std::vector<Road> replacements)
+bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int index,
+                              std::vector<Road> replacements, const Intersection* inserted)
 {
-    const int index = editor.selected;
     EditSnapshot before(editor, &world.roads.at(index));
     before.roadFolder = world.hierarchy.Parent({SceneKind::Road, index});
     for (std::size_t i = 0; i < replacements.size(); ++i)
     {
         replacements[i].id = i == 0 ? world.roads[index].id : world.AllocateRoadId();
-        if (i && !replacements[i].id) return;
+        if (i && !replacements[i].id) return false;
+    }
+    int junctionId = 0;
+    if (inserted)
+    {
+        junctionId = world.CreateIntersection(inserted->position);
+        if (!junctionId) return false;
+        world.intersections.at(junctionId) = *inserted;
+        before.junction = EditSnapshot::Junction{junctionId, {}};
+        replacements.front().points.back().anchor = IntersectionAnchor{junctionId, 2};
+        replacements.back().points.front().anchor = IntersectionAnchor{junctionId, 0};
+        if (before.roadFolder)
+        {
+            before.hierarchy = world.hierarchy;
+            world.hierarchy.Move({{SceneKind::Intersection, junctionId}}, before.roadFolder);
+        }
     }
     std::map<int, TerrainBoundary> newBoundaries;
     if (replacements.size() > 1)
@@ -197,17 +212,21 @@ void EditHistory::ReplaceSelectedRoad(WorldDocument& world, RoadEditorState& edi
             if (!boundary || !boundary->roads.contains(world.roads[index].id)) continue;
             before.splitBoundaries.emplace(i, *boundary);
             for (const Road& piece : replacements) boundary->roads.insert(piece.id);
+            if (inserted) boundary->intersections.insert(junctionId);
             newBoundaries.emplace(i, *boundary);
         }
     }
     const std::size_t count = replacements.size();
     world.hierarchy.ReplaceRange(SceneKind::Road, index, 1, static_cast<int>(count), before.roadFolder);
     ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
-    editor.SelectPoint(count ? index : -1, -1);
+    if (inserted) editor.SelectRows({{SceneKind::Intersection, junctionId}});
+    else editor.SelectPoint(count ? index : -1, -1);
     EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
     after.roadFolder = before.roadFolder;
     after.splitBoundaries = std::move(newBoundaries);
-    Record(index, std::move(before), std::move(after));
+    if (inserted) after.junction = EditSnapshot::Junction{junctionId, *inserted};
+    if (before.hierarchy) after.hierarchy = world.hierarchy;
+    return Record(index, std::move(before), std::move(after));
 }
 
 EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& editor, Action& action, bool undo)

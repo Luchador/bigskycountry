@@ -20,12 +20,13 @@ class RoadOverlay
 public:
     RoadOverlay();
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
+    static Vector3 SplinePosition(const ViewportPicker& pick, SDL_Rect scene);
     void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection,
               const FreeCamera& camera, SDL_Rect scene) const;
     void DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
                            const FreeCamera& camera, SDL_Rect scene) const;
     RoadPick Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected,
-                  const FreeCamera& camera, SDL_Rect scene, bool preferAnchor = false) const;
+                  const FreeCamera& camera, SDL_Rect scene, bool preferAnchor = false, Vector3* placement = nullptr) const;
 
 private:
     std::array<MeshInstance, 2> IntersectionMarker(const GizmoPlacement& placement, double yaw) const;

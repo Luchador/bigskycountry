@@ -364,7 +364,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY)
 }
 #endif
 
-std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene)
+std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -386,6 +386,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     UINT choice = 0;
     if (ClientToScreen(hwnd, &at) && AddSubmenu(root, create, createItems))
     {
+        if (!canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
                                   at.x, at.y, hwnd, nullptr);
     }
@@ -400,6 +401,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return EditorCommand::CreateMarker;
     }
 #else
+    intersectionEnabled = canCreateIntersection;
     rootItem = {0, 0, 104, itemHeight};
     submenu = {0, 0, 170, itemHeight * createItemCount};
     const auto fit = [](float start, float extent, int limit)
@@ -433,6 +435,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
 #ifndef _WIN32
 bool EditorMenu::Enabled(EditorCommand command) const
 {
+    if (command == EditorCommand::CreateIntersection) return intersectionEnabled;
     if (command == EditorCommand::Undo) return undoEnabled;
     if (command == EditorCommand::Redo) return redoEnabled;
     return true;
@@ -559,7 +562,8 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
             if (popup == Popup::Submenu)
             {
                 const int step = event.key.key == SDLK_DOWN ? 1 : -1;
-                activeItem = (activeItem + createItemCount + step) % createItemCount;
+                do { activeItem = (activeItem + createItemCount + step) % createItemCount; }
+                while (!Enabled(createItems[activeItem].command));
             }
             break;
         case SDLK_RIGHT: popup = Popup::Submenu; break;
@@ -567,7 +571,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         case SDLK_KP_ENTER:
             if (popup == Popup::Submenu)
             {
-                command = createItems[activeItem].command;
+                if (Enabled(createItems[activeItem].command)) command = createItems[activeItem].command;
                 popup = Popup::Closed;
             }
             else
@@ -596,7 +600,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
                 activeItem = std::min(static_cast<int>((at.y - submenu.y) / itemHeight), createItemCount - 1);
                 if (press && event.button.button == SDL_BUTTON_LEFT)
                 {
-                    command = createItems[activeItem].command;
+                    if (Enabled(createItems[activeItem].command)) command = createItems[activeItem].command;
                 }
             }
         }
@@ -617,12 +621,12 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
 
 bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
 {
-    const auto item = [&](SDL_FRect rect, const char* label, bool active)
+    const auto item = [&](SDL_FRect rect, const char* label, bool active, bool enabled = true)
     {
-        return EditorTheme::SetColor(renderer, active ? EditorTheme::selected : EditorTheme::panel) &&
+        return EditorTheme::SetColor(renderer, active && enabled ? EditorTheme::selected : EditorTheme::panel) &&
                SDL_RenderFillRect(renderer, &rect) &&
                EditorTheme::SetColor(renderer, EditorTheme::border) && SDL_RenderRect(renderer, &rect) &&
-               EditorTheme::SetColor(renderer, EditorTheme::text) &&
+               EditorTheme::SetColor(renderer, enabled ? EditorTheme::text : EditorTheme::disabled) &&
                SDL_RenderDebugText(renderer, rect.x + 8, rect.y + 9, label);
     };
     if (popup == Popup::Closed)
@@ -638,7 +642,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < createItemCount; ++i)
         {
-            if (!item(row, createItems[i].label, i == activeItem))
+            if (!item(row, createItems[i].label, i == activeItem, Enabled(createItems[i].command)))
             {
                 return false;
             }

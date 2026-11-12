@@ -133,6 +133,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
+    editor/road_intersection.cpp
     editor/properties_inspector.cpp
     editor/transform_inspector.cpp
     editor/road_overlay.cpp

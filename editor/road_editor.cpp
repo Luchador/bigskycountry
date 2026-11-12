@@ -406,6 +406,21 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
     }
     if (command == EditorCommand::CreateIntersection)
     {
+        if (roadMenuTarget)
+        {
+            auto target = std::move(*roadMenuTarget);
+            roadMenuTarget.reset();
+            if (!target.insertion || target.index >= static_cast<int>(world.roads.size()) ||
+                world.roads[target.index].revision != target.revision) return;
+            if (history.ReplaceRoad(world, state, target.index, std::move(target.insertion->approaches),
+                                    &target.insertion->junction))
+            {
+                outliner.Invalidate();
+                Save(world);
+            }
+            else status = SDL_GetError();
+            return;
+        }
         EditSnapshot before(state);
         const int id = world.CreateIntersection(creationPoint);
         if (!id) { status = SDL_GetError(); return; }
@@ -457,15 +472,27 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
 
 void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 {
-    auto& picker = rightClick->picker;
-    for (const Road& road : world.roads) picker.TestRoad(road);
-    for (const auto& [id, junction] : world.IntersectionSurfaces()) picker.TestRoad(junction.geometry);
-    for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
-    creationPoint = picker.PlacementPosition();
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene))
+    roadMenuTarget.reset();
+    auto picker = rightClick->picker;
+    const RoadPick hit = overlay.Pick(picker, world, Selected(world), camera, scene, false, &creationPoint);
+    bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
+    if (hit.kind == RoadPickKind::Road || hit.kind == RoadPickKind::Segment || hit.kind == RoadPickKind::Point)
+    {
+        const int index = hit.kind == RoadPickKind::Road ? hit.index : state.selected;
+        const Road& road = world.roads[index];
+        const auto position = hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) :
+                                                                 picker.HitPosition();
+        roadMenuTarget = RoadMenuTarget{index, road.revision, PlanRoadIntersection(road, hit, position)};
+        canCreate = roadMenuTarget->insertion.has_value();
+    }
+
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate))
     {
         RunCommand(*command, world, camera);
     }
+#ifdef _WIN32
+    roadMenuTarget.reset(); // The native popup closes before OpenViewport returns.
+#endif
 }
 
 void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
@@ -2002,8 +2029,8 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         }
     }
 
-    history.ReplaceSelectedRoad(world, state, std::move(remaining));
-    Save(world);
+    if (history.ReplaceRoad(world, state, state.selected, std::move(remaining))) Save(world);
+    else status = SDL_GetError();
 }
 
 void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
@@ -2289,6 +2316,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifndef _WIN32
     if (SDL_GetWindowFromEvent(&event) == window)
     {
+        if (!menu.IsOpen()) roadMenuTarget.reset();
         if (browser.HandleMaterialPopup(window, renderer, event, browserPanel)) return EditorEvent::Handled;
         if (!draggedAsset.empty())
         {

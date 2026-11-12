@@ -1,4 +1,5 @@
 #include "road.hpp"
+#include "road_curve.hpp"
 #include "mesh.hpp"
 
 #include <algorithm>
@@ -19,48 +20,7 @@ namespace
         point.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
 
-    struct Cubic
-    {
-        Vector3 a, b, c, d;
-    };
-
-    Cubic SegmentCurve(const RoadPoint& start, const RoadPoint& end, Vector3 startTangent, Vector3 endTangent)
-    {
-        const double chord = Math::Length(end.position - start.position);
-        return {start.position, start.position + startTangent * (chord * start.outgoingHandle),
-                end.position - endTangent * (chord * end.incomingHandle), end.position};
-    }
-
-    // De Casteljau subdivision gives the control polygons of both exact child curves.
-    std::pair<Cubic, Cubic> Split(const Cubic& curve, double t)
-    {
-        const auto lerp = [t](Vector3 a, Vector3 b) { return a + (b - a) * t; };
-        const auto [a, b, c, d] = curve;
-        const Vector3 ab = lerp(a, b), bc = lerp(b, c), cd = lerp(c, d);
-        const Vector3 abc = lerp(ab, bc), bcd = lerp(bc, cd);
-        const Vector3 middle = lerp(abc, bcd);
-        return {{a, ab, abc, middle}, {middle, bcd, cd, d}};
-    }
-
-    template<typename Visit>
-    void SampleCubic(const Cubic& curve, double tolerance, int depth, double t0, double t1, const Visit& visit)
-    {
-        const auto& [a, b, c, d] = curve;
-        const Vector3 chord = d - a;
-        const double error = std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
-
-        if (error <= tolerance || depth == 12)
-        {
-            // The derivative at this subcurve's endpoint is parallel to its last control-polygon edge.
-            visit(d, d - c, t1);
-            return;
-        }
-
-        const auto [left, right] = Split(curve, 0.5);
-        const double middle = (t0 + t1) * 0.5;
-        SampleCubic(left, tolerance, depth + 1, t0, middle, visit);
-        SampleCubic(right, tolerance, depth + 1, middle, t1, visit);
-    }
+    using namespace RoadSpline;
 
     double HalfLengthParameter(const Cubic& curve)
     {

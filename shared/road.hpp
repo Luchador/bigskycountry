@@ -143,12 +143,15 @@ struct RoadMouthFrame
 
 struct Road : RoadGeometry
 {
+    static constexpr double minPointSpacing = 0.05; // Meters between neighboring control points.
     int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
     RoadStyle style;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     // Generated cut lines at active intersections. The authored spline stays editable all the way to the anchor.
     void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths, bool rebuild = false);
+
+    const std::optional<RoadMouth>& EndpointMouth(bool first) const { return mouths[first ? 0 : 1]; }
 
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;

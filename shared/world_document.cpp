@@ -24,7 +24,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 3;
+    constexpr Uint32 intersectionVersion = 4;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -213,7 +213,8 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
             ++connectedArms; // A loop occupies a separate anchor at each end.
             layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
-        if (connectedArms < 3) continue;
+        const bool through = item.pavedThrough && ((ends[0] && ends[2]) || (ends[1] && ends[3]));
+        if (connectedArms < 3 && !through) continue;
         active.insert(id);
         auto& surface = junctions[id];
         if (layout != surface.layout) surface.Build(layout);
@@ -518,6 +519,8 @@ bool WorldDocument::Open(const char* documentPath)
                 }
                 if (section.version >= 3 && (!(data >> item.yaw) || !std::isfinite(item.yaw)))
                     return SDL_SetError("Invalid intersection heading in INTS");
+                if (section.version >= 4 && !(data >> item.pavedThrough))
+                    return SDL_SetError("Invalid through pavement flag in INTS");
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -629,7 +632,7 @@ bool WorldDocument::Save() const
         if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
             !Material::ValidAssetPath(item.material) ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
-                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << '\n'))
+                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough << '\n'))
             return SDL_SetError("Cannot save invalid intersection");
     }
     std::ostringstream meshData;
