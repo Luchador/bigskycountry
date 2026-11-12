@@ -20,7 +20,8 @@ class SdlOutliner
     void StartName(SDL_Window* window, bool create, const SceneOutliner& model);
     bool focused = false, dragging = false, singleOnRelease = false, selectText = false;
     int scroll = 0;
-    std::optional<SceneKey> anchor, pressed, drop, previousClick;
+    std::optional<SceneKey> anchor, pressed, previousClick;
+    std::optional<OutlineDrop> drop;
     std::optional<OutlineCommand> edit;
     std::string text;
     SDL_FPoint start{}, cursor{};

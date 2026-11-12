@@ -22,7 +22,9 @@ class WindowsOutliner
     void Name(bool create);
     void BeginDrag(int row);
     void EndDrag();
-    void Hover(POINT p);
+    void Hover(POINT p, bool scroll = true);
+    void SetDrop(std::optional<OutlineDrop> next);
+    static LRESULT CALLBACK DrawInsertion(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
     static LRESULT CALLBACK BadgeProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
     HWND panel = nullptr, list = nullptr, badge = nullptr;
@@ -37,6 +39,6 @@ class WindowsOutliner
     std::deque<OutlineCommand> pending;
     Uint32 eventType = 0;
     unsigned version = 0;
-    int drop = -1;
+    std::optional<OutlineDrop> drop;
     bool syncing = false;
 };

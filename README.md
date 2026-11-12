@@ -115,7 +115,9 @@ The **Outliner** above Transform lists the world’s roads, intersections, terra
 
 Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. A label follows the cursor with the dragged row’s name and a green check for an allowed move or a red blocked icon. When dragging several rows, the label also shows how many others are selected. You can also move a folder with its descendants. Multi-selection is for organizing entries.
 
-With a folder selected, **Delete** moves its contents to its parent and removes the folder. Folder edits save immediately and support **Ctrl+Z** and **Ctrl+Y**. The optional `OUTL` section in each `.wld` stores its hierarchy and folder assignments. Worlds without that section open with all entries at the root.
+To reorder folders, drag a folder to the gap above or below another folder and release when the black insertion line appears. The line’s indentation shows the destination level. Dropping on the middle of a folder moves the selection inside it. Several selected folders move together in their displayed order.
+
+With a folder selected, **Delete** moves its contents to its parent and removes the folder. Folder edits save immediately and support **Ctrl+Z** and **Ctrl+Y**. The optional `OUTL` section in each `.wld` stores its hierarchy, folder order, and item assignments. Worlds without that section open with all entries at the root.
 
 ### Transform panel
 

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <istream>
+#include <iterator>
 #include <limits>
 #include <ostream>
 #include <utility>
@@ -25,6 +26,22 @@ int SceneHierarchy::Parent(SceneKey key) const
     }
     const auto it = members.find(key);
     return it == members.end() ? 0 : it->second;
+}
+
+std::vector<int> SceneHierarchy::OrderedFolderIds() const
+{
+    std::vector<int> result;
+    result.reserve(folders.size());
+    std::vector<int> stack(rootFolders.rbegin(), rootFolders.rend());
+    while (!stack.empty())
+    {
+        const int id = stack.back();
+        stack.pop_back();
+        result.push_back(id);
+        const auto& children = folders.at(id).children;
+        stack.insert(stack.end(), children.rbegin(), children.rend());
+    }
+    return result;
 }
 
 bool SceneHierarchy::ValidName(int parent, const std::string& name, int except) const
@@ -51,6 +68,7 @@ int SceneHierarchy::Create(int parent, std::string name)
     }
     const int id = folders.empty() ? 1 : folders.rbegin()->first + 1;
     folders.emplace(id, SceneFolder{parent, std::move(name)});
+    Children(parent).push_back(id);
     return id;
 }
 
@@ -73,25 +91,27 @@ bool SceneHierarchy::Remove(int id)
         return false;
     }
     const int parent = it->second.parent;
+    const auto children = std::move(it->second.children);
+    auto& siblings = Children(parent);
+    const auto slot = siblings.erase(std::find(siblings.begin(), siblings.end(), id));
+    siblings.insert(slot, children.begin(), children.end());
     folders.erase(it);
-    for (auto& [child, folder] : folders)
+    for (int child : children)
     {
-        if (folder.parent == id)
+        auto& folder = folders.at(child);
+        // Promoting a child can collide with an existing sibling name.
+        const std::string base = folder.name;
+        for (int n = 2; !ValidName(parent, folder.name, child); ++n)
         {
-            // Promoting a child can collide with an existing sibling name.
-            const std::string base = folder.name;
-            for (int n = 2; !ValidName(parent, folder.name, child); ++n)
+            const std::string suffix = " (" + std::to_string(n) + ")";
+            auto length = std::min(base.size(), 255 - suffix.size());
+            while (length < base.size() && (static_cast<unsigned char>(base[length]) & 0xc0) == 0x80)
             {
-                const std::string suffix = " (" + std::to_string(n) + ")";
-                auto length = std::min(base.size(), 255 - suffix.size());
-                while (length < base.size() && (static_cast<unsigned char>(base[length]) & 0xc0) == 0x80)
-                {
-                    --length;
-                }
-                folder.name = base.substr(0, length) + suffix;
+                --length;
             }
-            folder.parent = parent;
+            folder.name = base.substr(0, length) + suffix;
         }
+        folder.parent = parent;
     }
     for (auto member = members.begin(); member != members.end();)
     {
@@ -111,82 +131,89 @@ bool SceneHierarchy::Remove(int id)
     return true;
 }
 
-std::vector<SceneKey> SceneHierarchy::ItemsToMove(const std::set<SceneKey>& keys, int destination) const
+SceneHierarchy::MovePlan SceneHierarchy::PlanMove(const std::set<SceneKey>& keys, int target, FolderPlacement placement) const
 {
-    if (destination != 0 && !folders.contains(destination))
+    const bool insert = placement != FolderPlacement::Into;
+    if ((target || insert) && !folders.contains(target)) return {};
+    if (keys.empty() || keys.contains({SceneKind::World, 0})) return {};
+    MovePlan plan;
+    plan.parent = insert ? folders.at(target).parent : target;
+    for (int p = plan.parent; p; p = folders.at(p).parent)
     {
-        return {};
+        if (keys.contains({SceneKind::Folder, p})) return {};
     }
-    if (keys.contains({SceneKind::World, 0}))
-    {
-        return {};
-    }
-    for (int p = destination; p != 0; p = folders.at(p).parent)
-    {
-        if (keys.contains({SceneKind::Folder, p}))
-        {
-            return {};
-        }
-    }
-    // A selected folder carries its descendants, including any also selected.
+
     std::set<std::string> names;
-    std::vector<SceneKey> moves;
+    std::set<int> movingFolders;
     for (SceneKey key : keys)
     {
-        if (key.kind == SceneKind::Folder && !folders.contains(key.index))
-        {
-            return {};
-        }
+        const bool folder = key.kind == SceneKind::Folder;
+        if ((insert && !folder) || (folder && !folders.contains(key.index))) return {};
         int parent = Parent(key);
-        if (parent == destination)
+        if (!insert && parent == plan.parent) continue;
+        // Moving a folder carries its whole subtree, including selected descendants.
+        while (parent && !keys.contains({SceneKind::Folder, parent})) parent = folders.at(parent).parent;
+        if (parent) continue;
+        if (folder)
         {
-            continue;
+            const auto& value = folders.at(key.index);
+            if ((value.parent != plan.parent && !ValidName(plan.parent, value.name, key.index)) ||
+                !names.insert(value.name).second) return {};
+            movingFolders.insert(key.index);
         }
-        while (parent && !keys.contains({SceneKind::Folder, parent}))
-        {
-            parent = folders.at(parent).parent;
-        }
-        if (parent)
-        {
-            continue;
-        }
-        if (key.kind == SceneKind::Folder)
-        {
-            const auto& name = folders.at(key.index).name;
-            if (!ValidName(destination, name, key.index) || !names.insert(name).second)
-            {
-                return {};
-            }
-        }
-        moves.push_back(key);
+        plan.items.push_back(key);
     }
-    return moves;
+    if (movingFolders.empty()) return plan;
+
+    std::vector<int> block;
+    if (movingFolders.size() == 1) block.push_back(*movingFolders.begin());
+    else
+    {
+        for (int id : OrderedFolderIds())
+            if (movingFolders.contains(id)) block.push_back(id);
+    }
+    const auto& current = plan.parent ? folders.at(plan.parent).children : rootFolders;
+    auto slot = current.end();
+    if (insert)
+    {
+        slot = std::find(current.begin(), current.end(), target);
+        if (placement == FolderPlacement::After) ++slot;
+    }
+    const auto stays = [&](int id) { return !movingFolders.contains(id); };
+    std::copy_if(current.begin(), slot, std::back_inserter(plan.siblings), stays);
+    plan.siblings.insert(plan.siblings.end(), block.begin(), block.end());
+    std::copy_if(slot, current.end(), std::back_inserter(plan.siblings), stays);
+    if (insert && plan.siblings == current) return {};
+    return plan;
 }
 
-bool SceneHierarchy::CanMove(const std::set<SceneKey>& keys, int destination) const
+bool SceneHierarchy::CanMove(const std::set<SceneKey>& keys, int target, FolderPlacement placement) const
 {
-    return !ItemsToMove(keys, destination).empty();
+    return !PlanMove(keys, target, placement).items.empty();
 }
 
-bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int destination)
+bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int target, FolderPlacement placement)
 {
-    const auto moves = ItemsToMove(keys, destination);
-    for (SceneKey key : moves)
+    auto plan = PlanMove(keys, target, placement);
+    for (SceneKey key : plan.items)
     {
         if (key.kind == SceneKind::Folder)
         {
-            folders.at(key.index).parent = destination;
+            auto& folder = folders.at(key.index);
+            if (folder.parent != plan.parent) std::erase(Children(folder.parent), key.index);
+            folder.parent = plan.parent;
         }
-        else if (destination)
+        else if (plan.parent)
         {
-            members[key] = destination;
+            members[key] = plan.parent;
         }
         else
         {
             members.erase(key);
         }
     }
-    return !moves.empty();
+    if (!plan.siblings.empty()) Children(plan.parent) = std::move(plan.siblings);
+    return !plan.items.empty();
 }
 
 void SceneHierarchy::ReplaceRange(SceneKind kind, int first, int removed, int inserted, int parent)
@@ -219,8 +246,10 @@ void SceneHierarchy::ReplaceRange(SceneKind kind, int first, int removed, int in
 
 bool SceneHierarchy::Write(std::ostream& out) const
 {
-    for (const auto& [id, f] : folders)
+    // F record order carries sibling order. Older worlds wrote these records in ID order.
+    for (int id : OrderedFolderIds())
     {
+        const auto& f = folders.at(id);
         out << "F " << id << ' ' << f.parent << ' ' << std::quoted(f.name) << '\n';
     }
     for (const auto& [key, id] : members)
@@ -238,6 +267,7 @@ bool SceneHierarchy::Write(std::ostream& out) const
 bool SceneHierarchy::Read(std::istream& in)
 {
     SceneHierarchy parsed;
+    std::vector<int> order;
     std::set<std::pair<int, std::string>> names;
     while ((in >> std::ws) && !in.eof())
     {
@@ -255,6 +285,7 @@ bool SceneHierarchy::Read(std::istream& in)
             {
                 return false;
             }
+            order.push_back(index);
         }
         else
         {
@@ -305,6 +336,7 @@ bool SceneHierarchy::Read(std::istream& in)
             return false;
         }
     }
+    for (int id : order) parsed.Children(parsed.folders.at(id).parent).push_back(id);
     *this = std::move(parsed);
     return true;
 }

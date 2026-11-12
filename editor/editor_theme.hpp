@@ -17,6 +17,7 @@ namespace EditorTheme
     inline constexpr SDL_Color button{84, 84, 84, 255};
     inline constexpr SDL_Color hover{98, 98, 98, 255};
     inline constexpr SDL_Color pressed{61, 61, 61, 255};
+    inline constexpr SDL_Color insertionLine{0, 0, 0, 255};
     inline constexpr SDL_Color border{27, 27, 27, 255};
     inline constexpr SDL_Color text{232, 232, 232, 255};
     inline constexpr SDL_Color secondary{190, 190, 190, 255};

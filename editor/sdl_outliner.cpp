@@ -283,17 +283,14 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     if (dragging)
     {
         cursor = p;
-        drop.reset();
-        if (row && m.CanDrop(dragged, row->key))
-        {
-            drop = row->key;
-        }
+        const int rowTop = header + (i - scroll) * rowHeight;
+        drop = m.DropAt(dragged, i, static_cast<int>(p.y) - rowTop, rowHeight, 3);
     }
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT)
     {
         if (dragging && drop)
         {
-            cmd = OutlineCommand{OutlineOp::Move, *drop, dragged};
+            cmd = drop->Move(dragged);
         }
         else if (singleOnRelease && !dragging && pressed && row && row->key == *pressed)
         {
@@ -431,7 +428,7 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
     for (int i = scroll, y = header; i < static_cast<int>(m.Rows().size()) && y < height; ++i, y += rowHeight)
     {
         const auto& row = m.Rows()[i];
-        if (drop == row.key)
+        if (drop && !drop->IsInsertion() && drop->target == row.key)
         {
             if (!Fill(r, 0, y, width, rowHeight, EditorTheme::hover))
             {
@@ -459,6 +456,13 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         {
             return false;
         }
+    }
+    if (drop && drop->IsInsertion())
+    {
+        const int y = header + (drop->row - scroll) * rowHeight;
+        const int left = Indent(drop->depth, width);
+        if (y >= header && y <= height &&
+            !Fill(r, left, std::max(header, y - 1), width - left, 2, EditorTheme::insertionLine)) return false;
     }
     return true;
 }

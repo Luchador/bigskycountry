@@ -31,6 +31,18 @@ struct OutlineCommand
     SceneKey target{};
     std::set<SceneKey> items;
     std::string name;
+    FolderPlacement placement = FolderPlacement::Into;
+};
+
+struct OutlineDrop
+{
+    SceneKey target;
+    FolderPlacement placement;
+    int row; // Destination row for nesting, or the gap immediately before this visible row.
+    int depth;
+    bool IsInsertion() const { return placement != FolderPlacement::Into; }
+    OutlineCommand Move(const std::set<SceneKey>& items) const { return {OutlineOp::Move, target, items, {}, placement}; }
+    bool operator==(const OutlineDrop&) const = default;
 };
 
 class SceneOutliner
@@ -39,7 +51,8 @@ class SceneOutliner
     void Invalidate() { dirty = true; }
     void Update(const WorldDocument& world, const RoadEditorState& state);
     bool Apply(const OutlineCommand& command, WorldDocument& world, RoadEditorState& state, EditHistory& history);
-    bool CanDrop(const std::set<SceneKey>& items, SceneKey target) const;
+    bool CanDrop(const std::set<SceneKey>& items, SceneKey target, FolderPlacement placement = FolderPlacement::Into) const;
+    std::optional<OutlineDrop> DropAt(const std::set<SceneKey>& items, int row, int yInRow, int height, int edge) const;
     int NewFolderParent() const { return parentForNew; }
     std::string NewFolderName() const;
     const auto& Rows() const { return rows; }

@@ -58,12 +58,52 @@ SDL_Surface* LoadOutlineMoveIcon(bool allowed)
     return icon;
 }
 
-bool SceneOutliner::CanDrop(const std::set<SceneKey>& items, SceneKey target) const
+bool SceneOutliner::CanDrop(const std::set<SceneKey>& items, SceneKey target, FolderPlacement placement) const
 {
     return document && (target.kind == SceneKind::Folder || target.kind == SceneKind::World) &&
            document->Contains(target) &&
            std::all_of(items.begin(), items.end(), [&](SceneKey key) { return document->Contains(key); }) &&
-           document->hierarchy.CanMove(items, target.index);
+           document->hierarchy.CanMove(items, target.index, placement);
+}
+
+std::optional<OutlineDrop> SceneOutliner::DropAt(const std::set<SceneKey>& items, int row, int yInRow, int height, int edge) const
+{
+    const int count = static_cast<int>(rows.size());
+    if (!document || items.empty() || row < 0 || row > count || yInRow < 0 || yInRow >= height) return {};
+    std::optional<OutlineDrop> drop;
+    if (row < count) drop = OutlineDrop{rows[row].key, FolderPlacement::Into, row, rows[row].depth};
+
+    const bool nearTop = yInRow < edge;
+    if ((nearTop || yInRow >= height - edge) &&
+        std::all_of(items.begin(), items.end(), [](SceneKey key) { return key.kind == SceneKind::Folder; }))
+    {
+        const int gap = nearTop ? row : row + 1;
+        if (gap > count) return {};
+        const auto& hierarchy = document->hierarchy;
+        const int sourceParent = hierarchy.Parent(*items.begin());
+        std::optional<OutlineDrop> insertion;
+        if (gap < count && rows[gap].key.kind == SceneKind::Folder)
+            insertion = OutlineDrop{rows[gap].key, FolderPlacement::Before, gap, rows[gap].depth};
+
+        // At the end of an expanded subtree several sibling lists can share one visible gap.
+        // Prefer the dragged folder's level so dropping its sibling here preserves the nesting.
+        if (gap > 0)
+        {
+            SceneKey above = rows[gap - 1].key;
+            const int nextDepth = gap < count ? rows[gap].depth : 1;
+            for (int depth = rows[gap - 1].depth; depth >= nextDepth && depth > 0; --depth)
+            {
+                const int parent = hierarchy.Parent(above);
+                if (above.kind == SceneKind::Folder &&
+                    (!insertion || (parent == sourceParent && hierarchy.Parent(insertion->target) != sourceParent)))
+                    insertion = OutlineDrop{above, FolderPlacement::After, gap, depth};
+                above = {SceneKind::Folder, parent};
+            }
+        }
+        if (insertion) drop = insertion;
+    }
+    if (drop && CanDrop(items, drop->target, drop->placement)) return drop;
+    return {};
 }
 
 void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& state)
@@ -117,8 +157,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     ++version;
 
     std::map<int, std::vector<OutlineRow>> children;
-    for (const auto& [id, f] : world.hierarchy.Folders())
+    for (int id : world.hierarchy.OrderedFolderIds())
     {
+        const auto& f = world.hierarchy.Folders().at(id);
         children[f.parent].push_back({{SceneKind::Folder, id}, f.name, "Folder", 0, false, false});
     }
     const auto add = [&](SceneKind kind, int index, std::string name, std::string type)
@@ -248,11 +289,11 @@ bool SceneOutliner::Apply(const OutlineCommand& cmd, WorldDocument& world, RoadE
         state.SelectRows({});
         break;
     case OutlineOp::Move:
-        if (!world.hierarchy.Move(cmd.items, id))
+        if (!world.hierarchy.Move(cmd.items, id, cmd.placement))
         {
             return false;
         }
-        collapsed.erase(id);
+        if (cmd.placement == FolderPlacement::Into) collapsed.erase(id);
         state.SelectRows(cmd.items);
         break;
     default:

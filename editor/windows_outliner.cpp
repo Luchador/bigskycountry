@@ -21,6 +21,7 @@ HWND WindowsOutliner::Create(HWND frame, HINSTANCE module)
         return nullptr;
     }
     list = GetDlgItem(panel, IDC_OUTLINE_LIST);
+    if (!SetWindowSubclass(panel, DrawInsertion, 1, reinterpret_cast<DWORD_PTR>(this))) return nullptr;
     ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     LVCOLUMNW col{};
     col.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -233,9 +234,9 @@ LRESULT CALLBACK WindowsOutliner::BadgeProc(HWND hwnd, UINT msg, WPARAM w, LPARA
     SetTextColor(dc, WindowsTheme::Color(EditorTheme::text));
     const int top = (box.bottom - s.iconSize) / 2;
     RECT icon{s.padding, top, s.padding + s.iconSize, top + s.iconSize};
-    auto* surface = s.drop >= 0 ? s.checkIcon.get() : s.blockIcon.get();
+    auto* surface = s.drop ? s.checkIcon.get() : s.blockIcon.get();
     if (surface) WindowsTheme::DrawPreview(dc, icon, surface, EditorTheme::panel);
-    else DrawTextW(dc, s.drop >= 0 ? L"\u2713" : L"\u00D7", 1, &icon, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    else DrawTextW(dc, s.drop ? L"\u2713" : L"\u00D7", 1, &icon, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     box.left = icon.right + s.padding;
     box.right -= s.padding;
     DrawTextW(dc, s.dragLabel.c_str(), -1, &box, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -275,12 +276,54 @@ void WindowsOutliner::EndDrag()
 {
     dragged.clear();
     if (badge) ShowWindow(badge, SW_HIDE);
-    if (drop >= 0) ListView_SetItemState(list, drop, 0, LVIS_DROPHILITED);
-    drop = -1;
+    SetDrop({});
     if (GetCapture() == panel) ReleaseCapture();
 }
 
-void WindowsOutliner::Hover(POINT p)
+LRESULT CALLBACK WindowsOutliner::DrawInsertion(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR data)
+{
+    if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, DrawInsertion, id);
+    const auto result = DefSubclassProc(hwnd, msg, w, l); // Keep the theme's list-view drawing.
+    const auto& s = *reinterpret_cast<WindowsOutliner*>(data);
+    if (msg != WM_NOTIFY || !s.drop || !s.drop->IsInsertion()) return result;
+    const auto* notification = reinterpret_cast<const NMHDR*>(l);
+    if (notification->hwndFrom != s.list || notification->code != NM_CUSTOMDRAW) return result;
+    const auto* draw = reinterpret_cast<const NMCUSTOMDRAW*>(l);
+    if (draw->dwDrawStage == CDDS_PREPAINT) return result | CDRF_NOTIFYPOSTPAINT;
+    if (draw->dwDrawStage == CDDS_POSTPAINT)
+    {
+        const int gap = s.drop->row;
+        const int last = static_cast<int>(s.rows.size()) - 1;
+        RECT row{}, line{}, header{};
+        if (last >= 0 && ListView_GetItemRect(s.list, std::min(gap, last), &row, LVIR_BOUNDS))
+        {
+            const int y = gap > last ? row.bottom : row.top;
+            const int dpi = GetDpiForWindow(s.list);
+            GetClientRect(s.list, &line);
+            GetWindowRect(ListView_GetHeader(s.list), &header);
+            MapWindowPoints(nullptr, s.list, reinterpret_cast<POINT*>(&header), 2);
+            line.top = std::max<LONG>(header.bottom, y - 1);
+            line.bottom = std::min<LONG>(line.bottom, y + std::max(1, MulDiv(1, dpi, 96)));
+            line.left += MulDiv(5 + 12 * std::min(32, s.drop->depth), dpi, 96);
+            if (line.top < line.bottom)
+                FillRect(draw->hdc, &line, WindowsTheme::Brush(EditorTheme::insertionLine));
+        }
+    }
+    return result;
+}
+
+void WindowsOutliner::SetDrop(std::optional<OutlineDrop> next)
+{
+    if (next == drop) return;
+    if (badge && next.has_value() != drop.has_value()) InvalidateRect(badge, nullptr, FALSE);
+    if (drop && !drop->IsInsertion()) ListView_SetItemState(list, drop->row, 0, LVIS_DROPHILITED);
+    const bool repaint = (drop && drop->IsInsertion()) || (next && next->IsInsertion());
+    drop = next;
+    if (drop && !drop->IsInsertion()) ListView_SetItemState(list, drop->row, LVIS_DROPHILITED, LVIS_DROPHILITED);
+    if (repaint) InvalidateRect(list, nullptr, FALSE);
+}
+
+void WindowsOutliner::Hover(POINT p, bool scroll)
 {
     POINT cursor = p;
     ClientToScreen(panel, &cursor);
@@ -288,7 +331,7 @@ void WindowsOutliner::Hover(POINT p)
     RECT area{};
     GetClientRect(list, &area);
     const bool inside = PtInRect(&area, p) && WindowFromPoint(cursor) == list;
-    if (inside)
+    if (inside && scroll)
     {
         if (p.y < 28)
         {
@@ -299,26 +342,23 @@ void WindowsOutliner::Hover(POINT p)
             ListView_Scroll(list, 0, 16);
         }
     }
-    LVHITTESTINFO hit{};
-    hit.pt = p;
-    int next = inside ? ListView_SubItemHitTest(list, &hit) : -1;
-    if (next >= 0 && (next >= static_cast<int>(rows.size()) || !model->CanDrop(dragged, rows[next].key)))
+    std::optional<OutlineDrop> next;
+    if (inside && !rows.empty())
     {
-        next = -1;
-    }
-    if (drop != next)
-    {
-        if (drop >= 0)
+        LVHITTESTINFO hit{};
+        hit.pt = p;
+        const int i = ListView_SubItemHitTest(list, &hit);
+        const int count = static_cast<int>(rows.size());
+        RECT bounds{};
+        if (i < count && ListView_GetItemRect(list, i < 0 ? count - 1 : i, &bounds, LVIR_BOUNDS))
         {
-            ListView_SetItemState(list, drop, 0, LVIS_DROPHILITED);
-        }
-        if (badge && (drop >= 0) != (next >= 0)) InvalidateRect(badge, nullptr, FALSE);
-        drop = next;
-        if (drop >= 0)
-        {
-            ListView_SetItemState(list, drop, LVIS_DROPHILITED, LVIS_DROPHILITED);
+            // The first few blank pixels below the final row also belong to its bottom gap.
+            const int top = i < 0 ? bounds.bottom : bounds.top;
+            const int edge = std::max(1, MulDiv(3, GetDpiForWindow(list), 96));
+            next = model->DropAt(dragged, i < 0 ? count : i, p.y - top, bounds.bottom - bounds.top, edge);
         }
     }
+    SetDrop(next);
     if (badge)
     {
         const int gap = 4 * padding;
@@ -447,13 +487,10 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         if (msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP)
         {
             if (msg == WM_MOUSEMOVE && !(w & MK_LBUTTON)) { s.EndDrag(); return TRUE; }
-            s.Hover({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
+            s.Hover({GET_X_LPARAM(l), GET_Y_LPARAM(l)}, msg == WM_MOUSEMOVE);
             if (msg == WM_LBUTTONUP)
             {
-                if (s.drop >= 0)
-                {
-                    s.Queue({OutlineOp::Move, s.rows[s.drop].key, s.dragged});
-                }
+                if (s.drop) s.Queue(s.drop->Move(s.dragged));
                 s.EndDrag();
             }
             return TRUE;
