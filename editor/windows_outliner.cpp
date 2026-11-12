@@ -30,6 +30,15 @@ HWND WindowsOutliner::Create(HWND frame, HINSTANCE module)
     col.cx = 75;
     col.pszText = const_cast<wchar_t*>(L"Type");
     ListView_InsertColumn(list, 1, &col);
+    checkIcon.reset(LoadOutlineMoveIcon(true));
+    blockIcon.reset(LoadOutlineMoveIcon(false));
+    badge = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, L"STATIC", L"",
+                            WS_POPUP | WS_DISABLED, 0, 0, 0, 0, frame, nullptr, module, nullptr);
+    if (badge && !SetWindowSubclass(badge, BadgeProc, 1, reinterpret_cast<DWORD_PTR>(this)))
+    {
+        DestroyWindow(badge);
+        badge = nullptr;
+    }
     return panel;
 }
 
@@ -206,12 +215,80 @@ void WindowsOutliner::Name(bool create)
     SetFocus(list);
 }
 
+LRESULT CALLBACK WindowsOutliner::BadgeProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR data)
+{
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg != WM_PAINT) return DefSubclassProc(hwnd, msg, w, l);
+
+    const auto& s = *reinterpret_cast<WindowsOutliner*>(data);
+    PAINTSTRUCT paint{};
+    HDC dc = BeginPaint(hwnd, &paint);
+    RECT box{};
+    GetClientRect(hwnd, &box);
+    FillRect(dc, &box, WindowsTheme::Brush(EditorTheme::panel));
+    FrameRect(dc, &box, WindowsTheme::Brush(EditorTheme::border));
+    auto font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(s.list, WM_GETFONT, 0, 0)));
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, WindowsTheme::Color(EditorTheme::text));
+    const int top = (box.bottom - s.iconSize) / 2;
+    RECT icon{s.padding, top, s.padding + s.iconSize, top + s.iconSize};
+    auto* surface = s.drop >= 0 ? s.checkIcon.get() : s.blockIcon.get();
+    if (surface) WindowsTheme::DrawPreview(dc, icon, surface, EditorTheme::panel);
+    else DrawTextW(dc, s.drop >= 0 ? L"\u2713" : L"\u00D7", 1, &icon, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    box.left = icon.right + s.padding;
+    box.right -= s.padding;
+    DrawTextW(dc, s.dragLabel.c_str(), -1, &box, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    SelectObject(dc, font);
+    EndPaint(hwnd, &paint);
+    return 0;
+}
+
+void WindowsOutliner::BeginDrag(int row)
+{
+    if (!model || row < 0 || row >= static_cast<int>(rows.size())) return;
+    auto items = Selected();
+    if (!items.contains(rows[row].key) || items.contains({})) return;
+    dragged = std::move(items);
+    dragLabel = Wide(rows[row].DragLabel(dragged.size()));
+    const int dpi = GetDpiForWindow(list);
+    iconSize = MulDiv(16, dpi, 96);
+    padding = MulDiv(3, dpi, 96);
+    HDC dc = GetDC(list);
+    auto font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(list, WM_GETFONT, 0, 0)));
+    SIZE text{};
+    GetTextExtentPoint32W(dc, dragLabel.c_str(), static_cast<int>(dragLabel.size()), &text);
+    SelectObject(dc, font);
+    ReleaseDC(list, dc);
+    badgeSize = {std::min<LONG>(text.cx, MulDiv(320, dpi, 96)) + iconSize + 3 * padding,
+                 std::max<LONG>(text.cy, iconSize) + 2 * padding};
+    SetCapture(panel);
+    if (GetCapture() != panel) { EndDrag(); return; }
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    ScreenToClient(panel, &cursor);
+    Hover(cursor);
+    if (badge) InvalidateRect(badge, nullptr, FALSE);
+}
+
+void WindowsOutliner::EndDrag()
+{
+    dragged.clear();
+    if (badge) ShowWindow(badge, SW_HIDE);
+    if (drop >= 0) ListView_SetItemState(list, drop, 0, LVIS_DROPHILITED);
+    drop = -1;
+    if (GetCapture() == panel) ReleaseCapture();
+}
+
 void WindowsOutliner::Hover(POINT p)
 {
+    POINT cursor = p;
+    ClientToScreen(panel, &cursor);
     MapWindowPoints(panel, list, &p, 1);
     RECT area{};
     GetClientRect(list, &area);
-    if (PtInRect(&area, p))
+    const bool inside = PtInRect(&area, p) && WindowFromPoint(cursor) == list;
+    if (inside)
     {
         if (p.y < 28)
         {
@@ -224,8 +301,8 @@ void WindowsOutliner::Hover(POINT p)
     }
     LVHITTESTINFO hit{};
     hit.pt = p;
-    int next = ListView_HitTest(list, &hit);
-    if (next >= 0 && rows[next].key.kind != SceneKind::Folder && rows[next].key.kind != SceneKind::World)
+    int next = inside ? ListView_SubItemHitTest(list, &hit) : -1;
+    if (next >= 0 && (next >= static_cast<int>(rows.size()) || !model->CanDrop(dragged, rows[next].key)))
     {
         next = -1;
     }
@@ -235,11 +312,24 @@ void WindowsOutliner::Hover(POINT p)
         {
             ListView_SetItemState(list, drop, 0, LVIS_DROPHILITED);
         }
+        if (badge && (drop >= 0) != (next >= 0)) InvalidateRect(badge, nullptr, FALSE);
         drop = next;
         if (drop >= 0)
         {
             ListView_SetItemState(list, drop, LVIS_DROPHILITED, LVIS_DROPHILITED);
         }
+    }
+    if (badge)
+    {
+        const int gap = 4 * padding;
+        int x = cursor.x + gap, y = cursor.y + gap;
+        MONITORINFO monitor{sizeof(monitor)};
+        if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitor))
+        {
+            if (x + badgeSize.cx > monitor.rcWork.right) x = std::max(monitor.rcWork.left, cursor.x - gap - badgeSize.cx);
+            if (y + badgeSize.cy > monitor.rcWork.bottom) y = std::max(monitor.rcWork.top, cursor.y - gap - badgeSize.cy);
+        }
+        SetWindowPos(badge, HWND_TOP, x, y, badgeSize.cx, badgeSize.cy, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 }
 
@@ -294,15 +384,7 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         }
         else if (code == LVN_BEGINDRAG)
         {
-            s.dragged = s.Selected();
-            if (!s.dragged.empty() && !s.dragged.contains({}))
-            {
-                SetCapture(hwnd);
-            }
-            else
-            {
-                s.dragged.clear();
-            }
+            s.BeginDrag(reinterpret_cast<NMLISTVIEW*>(l)->iItem);
         }
         else if (code == NM_CLICK || code == NM_DBLCLK)
         {
@@ -364,6 +446,7 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
     {
         if (msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP)
         {
+            if (msg == WM_MOUSEMOVE && !(w & MK_LBUTTON)) { s.EndDrag(); return TRUE; }
             s.Hover({GET_X_LPARAM(l), GET_Y_LPARAM(l)});
             if (msg == WM_LBUTTONUP)
             {
@@ -371,18 +454,14 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
                 {
                     s.Queue({OutlineOp::Move, s.rows[s.drop].key, s.dragged});
                 }
-                ReleaseCapture();
+                s.EndDrag();
             }
             return TRUE;
         }
-        if (msg == WM_CAPTURECHANGED || msg == WM_CANCELMODE)
+        if (msg == WM_CAPTURECHANGED || msg == WM_CANCELMODE || (msg == WM_COMMAND && LOWORD(w) == IDCANCEL))
         {
-            s.dragged.clear();
-            if (s.drop >= 0)
-            {
-                ListView_SetItemState(s.list, s.drop, 0, LVIS_DROPHILITED);
-            }
-            s.drop = -1;
+            s.EndDrag();
+            return TRUE;
         }
     }
     return FALSE;

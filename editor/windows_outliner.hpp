@@ -20,9 +20,17 @@ class WindowsOutliner
     void Queue(OutlineCommand cmd);
     std::set<SceneKey> Selected() const;
     void Name(bool create);
+    void BeginDrag(int row);
+    void EndDrag();
     void Hover(POINT p);
+    static LRESULT CALLBACK BadgeProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
-    HWND panel = nullptr, list = nullptr;
+    HWND panel = nullptr, list = nullptr, badge = nullptr;
+    using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
+    Surface checkIcon{nullptr, SDL_DestroySurface}, blockIcon{nullptr, SDL_DestroySurface};
+    std::wstring dragLabel;
+    SIZE badgeSize{};
+    int iconSize = 16, padding = 3;
     const SceneOutliner* model = nullptr;
     std::vector<OutlineRow> rows;
     std::set<SceneKey> displayed, dragged;

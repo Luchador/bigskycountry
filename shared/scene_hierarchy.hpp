@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 enum class SceneKind
 {
@@ -41,6 +42,7 @@ class SceneHierarchy
     int Create(int parent, std::string name);
     bool Rename(int id, std::string name);
     bool Remove(int id);
+    bool CanMove(const std::set<SceneKey>& keys, int destination) const;
     bool Move(const std::set<SceneKey>& keys, int destination);
     void ReplaceRange(SceneKind kind, int first, int removed, int inserted, int folder = 0);
     bool Write(std::ostream& out) const;
@@ -48,6 +50,7 @@ class SceneHierarchy
     bool operator==(const SceneHierarchy&) const = default;
 
   private:
+    std::vector<SceneKey> ItemsToMove(const std::set<SceneKey>& keys, int destination) const;
     bool ValidName(int parent, const std::string& name, int except = 0) const;
     std::map<int, SceneFolder> folders;
     std::map<SceneKey, int> members;

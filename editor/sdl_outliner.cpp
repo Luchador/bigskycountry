@@ -35,6 +35,48 @@ namespace
     }
 } // namespace
 
+void SdlOutliner::LoadIcons(SDL_Renderer* renderer)
+{
+    const auto load = [&](bool allowed) -> SDL_Texture*
+    {
+        SDL_Surface* image = LoadOutlineMoveIcon(allowed);
+        if (!image) return nullptr;
+        SDL_Texture* result = SDL_CreateTextureFromSurface(renderer, image);
+        SDL_DestroySurface(image);
+        return result;
+    };
+    checkIcon = load(true);
+    blockIcon = load(false);
+}
+
+bool SdlOutliner::DrawDragBadge(SDL_Renderer* r, SDL_Rect panel) const
+{
+    if (!dragging) return true;
+    int width, height;
+    if (!SDL_GetCurrentRenderOutputSize(r, &width, &height)) return false;
+    const float x = panel.x + cursor.x, y = panel.y + cursor.y;
+    if (x < 0 || x >= width || y < 0 || y >= height) return true;
+    constexpr float pad = 3, icon = 16, gap = 12, h = icon + 2 * pad;
+    const float w = std::min<float>(width, 3 * pad + icon + 8 * std::min<std::size_t>(40, SDL_utf8strlen(dragLabel.c_str())));
+    const float left = x + gap + w <= width ? x + gap : std::max(0.0f, x - gap - w);
+    const float top = y + gap + h <= height ? y + gap : std::max(0.0f, y - gap - h);
+    const SDL_FRect image{left + pad, top + pad, icon, icon};
+    if (!Fill(r, left, top, w, h, EditorTheme::border) ||
+        !Fill(r, left + 1, top + 1, w - 2, h - 2, EditorTheme::panel)) return false;
+
+    SDL_Texture* texture = drop ? checkIcon : blockIcon;
+    if (texture)
+    {
+        if (!SDL_RenderTexture(r, texture, nullptr, &image)) return false;
+    }
+    else if (!Text(r, image.x + 4, image.y + 4, drop ? "+" : "x", EditorTheme::text)) return false;
+    const SDL_Rect clip{static_cast<int>(left + 2 * pad + icon), static_cast<int>(top),
+                        std::max(0, static_cast<int>(w - 3 * pad - icon)), static_cast<int>(h)};
+    if (!SDL_SetRenderClipRect(r, &clip)) return false;
+    const bool drawn = Text(r, clip.x, top + (h - 8) / 2, dragLabel, EditorTheme::text);
+    return SDL_SetRenderClipRect(r, nullptr) && drawn;
+}
+
 void SdlOutliner::Blur(SDL_Window* window)
 {
     if (edit)
@@ -45,6 +87,7 @@ void SdlOutliner::Blur(SDL_Window* window)
     focused = dragging = singleOnRelease = false;
     previousClick.reset();
     pressed.reset();
+    dragged.clear();
     drop.reset();
 }
 
@@ -155,6 +198,11 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
         }
         return true;
     }
+    if (dragging)
+    {
+        if (k == SDLK_ESCAPE) Blur(window);
+        return true;
+    }
     if ((e.key.mod & SDL_KMOD_CTRL) && (k == SDLK_Z || k == SDLK_Y || k == SDLK_S))
     {
         return false;
@@ -208,6 +256,11 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     {
         const float delta = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
         scroll = std::clamp(scroll - static_cast<int>(std::round(3 * delta)), 0, Limit(height, m));
+        if (!dragging) return;
+    }
+    if (pressed && e.type == SDL_EVENT_MOUSE_MOTION && !(e.motion.state & SDL_BUTTON_LMASK))
+    {
+        Blur(window);
         return;
     }
     if (pressed && e.type == SDL_EVENT_MOUSE_MOTION && std::hypot(p.x - start.x, p.y - start.y) >= 4)
@@ -229,8 +282,9 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     const OutlineRow* row = i >= 0 && i < static_cast<int>(rows.size()) ? &rows[i] : nullptr;
     if (dragging)
     {
+        cursor = p;
         drop.reset();
-        if (row && (row->key.kind == SceneKind::World || row->key.kind == SceneKind::Folder))
+        if (row && m.CanDrop(dragged, row->key))
         {
             drop = row->key;
         }
@@ -239,13 +293,14 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     {
         if (dragging && drop)
         {
-            cmd = OutlineCommand{OutlineOp::Move, *drop, m.Selection()};
+            cmd = OutlineCommand{OutlineOp::Move, *drop, dragged};
         }
         else if (singleOnRelease && !dragging && pressed && row && row->key == *pressed)
         {
             cmd = OutlineCommand{OutlineOp::Select, {}, {*pressed}};
         }
         pressed.reset();
+        dragged.clear();
         drop.reset();
         dragging = singleOnRelease = false;
         return;
@@ -322,8 +377,10 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
         }
         anchor = row->key;
     }
-    if (sel.contains(row->key))
+    if (sel.contains(row->key) && !sel.contains({}))
     {
+        dragged = sel;
+        dragLabel = row->DragLabel(sel.size());
         pressed = row->key;
         start = p;
     }

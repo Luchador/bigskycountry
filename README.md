@@ -113,7 +113,7 @@ Click an intersection anchor in the 3D or top-down view to edit its **Stop line*
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or imported terrain chunk in the list makes its transform available for editing.
 
-Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. You can also move a folder with its descendants. Multi-selection is for organizing entries.
+Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. A label follows the cursor with the dragged row’s name and a green check for an allowed move or a red blocked icon. When dragging several rows, the label also shows how many others are selected. You can also move a folder with its descendants. Multi-selection is for organizing entries.
 
 With a folder selected, **Delete** moves its contents to its parent and removes the folder. Folder edits save immediately and support **Ctrl+Z** and **Ctrl+Y**. The optional `OUTL` section in each `.wld` stores its hierarchy and folder assignments. Worlds without that section open with all entries at the root.
 

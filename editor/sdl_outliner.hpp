@@ -5,6 +5,8 @@
 class SdlOutliner
 {
   public:
+    void LoadIcons(SDL_Renderer* renderer);
+    bool DrawDragBadge(SDL_Renderer* renderer, SDL_Rect panel) const;
     bool Draw(SDL_Renderer* renderer, const SceneOutliner& model, int width, int height);
     bool Key(SDL_Window* window, const SDL_Event& event, const SceneOutliner& model,
              std::optional<OutlineCommand>& cmd);
@@ -21,6 +23,10 @@ class SdlOutliner
     std::optional<SceneKey> anchor, pressed, drop, previousClick;
     std::optional<OutlineCommand> edit;
     std::string text;
-    SDL_FPoint start{};
+    SDL_FPoint start{}, cursor{};
+    std::set<SceneKey> dragged;
+    std::string dragLabel;
+    SDL_Texture* checkIcon = nullptr;
+    SDL_Texture* blockIcon = nullptr; // Both textures are owned by the main renderer.
     std::optional<SceneKey> lastSingle;
 };

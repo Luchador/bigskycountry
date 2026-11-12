@@ -9,7 +9,11 @@ struct OutlineRow
     std::string label, type;
     int depth;
     bool branch, expanded;
+    std::string DragLabel(std::size_t count) const;
 };
+
+// The caller owns the BGRA32 surface. Both editor backends use the source PNG.
+SDL_Surface* LoadOutlineMoveIcon(bool allowed);
 
 enum class OutlineOp
 {
@@ -35,6 +39,7 @@ class SceneOutliner
     void Invalidate() { dirty = true; }
     void Update(const WorldDocument& world, const RoadEditorState& state);
     bool Apply(const OutlineCommand& command, WorldDocument& world, RoadEditorState& state, EditHistory& history);
+    bool CanDrop(const std::set<SceneKey>& items, SceneKey target) const;
     int NewFolderParent() const { return parentForNew; }
     std::string NewFolderName() const;
     const auto& Rows() const { return rows; }
@@ -42,6 +47,7 @@ class SceneOutliner
     unsigned Version() const { return version; }
 
   private:
+    const WorldDocument* document = nullptr; // The live world whose rows this view displays.
     std::vector<OutlineRow> rows;
     std::set<SceneKey> selection;
     std::set<int> collapsed;

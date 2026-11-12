@@ -129,6 +129,7 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     gizmo.Load(models);
 #ifndef _WIN32
     cameraToolbar.LoadIcons(SDL_GetRenderer(window));
+    outlinePanel.LoadIcons(SDL_GetRenderer(window));
 #endif
     return true;
 }
@@ -1551,7 +1552,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
            SDL_SetRenderViewport(renderer, &shifted) && SDL_SetRenderClipRect(renderer, &clip) &&
            RenderPropertiesPanel(renderer, world, properties) && SDL_SetRenderClipRect(renderer, nullptr) &&
            SDL_SetRenderViewport(renderer, &toolbar) && cameraToolbar.Draw(renderer, width, camera, gizmo.settings) &&
-           SDL_SetRenderViewport(renderer, nullptr) && menu.DrawBar(renderer, width);
+           SDL_SetRenderViewport(renderer, nullptr) && menu.DrawBar(renderer, width) && outlinePanel.DrawDragBadge(renderer, outlineArea);
 #endif
 }
 
@@ -2312,7 +2313,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         std::optional<EditorCommand> command;
         if (menu.HandleViewportMenu(renderer, scene, event, command) ||
-            (drag == Drag::None && !SDL_GetWindowRelativeMouseMode(window) && menu.HandleBar(renderer, event, command)))
+            (drag == Drag::None && !outlinePanel.Tracking() && !SDL_GetWindowRelativeMouseMode(window) && menu.HandleBar(renderer, event, command)))
         {
             if (command)
             {

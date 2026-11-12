@@ -1,4 +1,5 @@
 #include "scene_outliner.hpp"
+#include "asset_paths.hpp"
 #include "marker.hpp"
 #include "world_document.hpp"
 
@@ -41,8 +42,33 @@ namespace
     }
 } // namespace
 
+std::string OutlineRow::DragLabel(std::size_t count) const
+{
+    return count > 1 ? label + " (+" + std::to_string(count - 1) + ")" : label;
+}
+
+SDL_Surface* LoadOutlineMoveIcon(bool allowed)
+{
+    const auto path = AssetPaths::Root(AssetRoot::Project) +
+                      (allowed ? "textures/editor/move_check.png" : "textures/editor/move_block.png");
+    SDL_Surface* image = SDL_LoadPNG(path.c_str());
+    if (!image) return nullptr;
+    SDL_Surface* icon = SDL_ConvertSurface(image, SDL_PIXELFORMAT_BGRA32);
+    SDL_DestroySurface(image);
+    return icon;
+}
+
+bool SceneOutliner::CanDrop(const std::set<SceneKey>& items, SceneKey target) const
+{
+    return document && (target.kind == SceneKind::Folder || target.kind == SceneKind::World) &&
+           document->Contains(target) &&
+           std::all_of(items.begin(), items.end(), [&](SceneKey key) { return document->Contains(key); }) &&
+           document->hierarchy.CanMove(items, target.index);
+}
+
 void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& state)
 {
+    document = &world;
     const auto primary = state.outlineSelection.empty() ? state.SelectedRows() : std::set<SceneKey>{};
     const auto& selected = state.outlineSelection.empty() ? primary : state.outlineSelection;
     const std::array sizes{world.roads.size(), world.Terrain().size(), world.Objects().size(), world.meshes.size(), world.intersections.size()};

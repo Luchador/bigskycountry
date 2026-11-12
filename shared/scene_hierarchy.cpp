@@ -111,21 +111,21 @@ bool SceneHierarchy::Remove(int id)
     return true;
 }
 
-bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int destination)
+std::vector<SceneKey> SceneHierarchy::ItemsToMove(const std::set<SceneKey>& keys, int destination) const
 {
     if (destination != 0 && !folders.contains(destination))
     {
-        return false;
+        return {};
     }
     if (keys.contains({SceneKind::World, 0}))
     {
-        return false;
+        return {};
     }
     for (int p = destination; p != 0; p = folders.at(p).parent)
     {
         if (keys.contains({SceneKind::Folder, p}))
         {
-            return false;
+            return {};
         }
     }
     // A selected folder carries its descendants, including any also selected.
@@ -135,7 +135,7 @@ bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int destination)
     {
         if (key.kind == SceneKind::Folder && !folders.contains(key.index))
         {
-            return false;
+            return {};
         }
         int parent = Parent(key);
         if (parent == destination)
@@ -155,11 +155,22 @@ bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int destination)
             const auto& name = folders.at(key.index).name;
             if (!ValidName(destination, name, key.index) || !names.insert(name).second)
             {
-                return false;
+                return {};
             }
         }
         moves.push_back(key);
     }
+    return moves;
+}
+
+bool SceneHierarchy::CanMove(const std::set<SceneKey>& keys, int destination) const
+{
+    return !ItemsToMove(keys, destination).empty();
+}
+
+bool SceneHierarchy::Move(const std::set<SceneKey>& keys, int destination)
+{
+    const auto moves = ItemsToMove(keys, destination);
     for (SceneKey key : moves)
     {
         if (key.kind == SceneKind::Folder)
