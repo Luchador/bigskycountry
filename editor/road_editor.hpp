@@ -9,6 +9,7 @@
 #endif
 #ifndef _WIN32
 #include "camera_toolbar.hpp"
+#include "outliner_splitter.hpp"
 #include "sdl_transform_panel.hpp"
 #include "sdl_outliner.hpp"
 #endif
@@ -129,7 +130,12 @@ private:
     Vector3 center{};
     SDL_Rect scene{};
 #ifndef _WIN32
-    SDL_Rect browserPanel{}, roadPanel{}, transformArea{}, outlineArea{};
+    void LayoutSidebar(int windowWidth, std::optional<int> dragHeight = {});
+    void SetSplitterCursor(bool active);
+    SDL_Rect browserPanel{}, roadPanel{}, transformArea{}, outlineArea{}, splitterArea{};
+    OutlinerSplitter outlinerSplit;
+    std::optional<float> splitterGrab;
+    SDL_Cursor* resizeCursor = nullptr; // Released by SDL on video shutdown.
     SdlOutliner outlinePanel;
     SdlTransformPanel transformPanel;
     int roadScroll = 0, roadScrollMax = 0;

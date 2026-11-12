@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "outliner_splitter.hpp"
 #include "marker.hpp"
 #include "properties_inspector.hpp"
 #include "windows_material_editor.hpp"
@@ -114,6 +115,10 @@ struct WindowsPanels::Impl
     SDL_Window* frameWindow = nullptr;
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
     WindowsOutliner outline;
+    HWND splitter = nullptr;
+    OutlinerSplitter outlinerSplit;
+    RECT sidebar{};
+    int splitterGrab = 0;
     HACCEL shortcuts = nullptr;
     Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, toolbarEvent = 0;
     Uint32 transformEvent = 0, modelDropEvent = 0;
@@ -321,6 +326,80 @@ struct WindowsPanels::Impl
         return true;
     }
 
+    void LayoutSidebar(std::optional<int> dragHeight = {})
+    {
+        const int height = sidebar.bottom - sidebar.top;
+        const int width = sidebar.right - sidebar.left;
+        const int bar = std::min<int>(DialogSize(road, 0, 4).cy, height);
+        const int available = height - bar;
+        const int upper = outlinerSplit.Height(available, DialogSize(road, 0, 140).cy,
+            DialogSize(road, 0, 44).cy, DialogSize(road, 0, 70).cy, dragHeight);
+        if (dragHeight)
+        {
+            RECT current{};
+            GetClientRect(outline.Window(), &current);
+            if (current.bottom == upper) return;
+        }
+        outline.Layout(sidebar.left, sidebar.top, width, upper);
+        MoveWindow(splitter, sidebar.left, sidebar.top + upper, width, bar, TRUE);
+        MoveWindow(road, sidebar.left, sidebar.top + upper + bar, width, available - upper, TRUE);
+        LayoutInspectorScroll();
+    }
+
+    static LRESULT CALLBACK SplitterProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR data)
+    {
+        auto& self = *reinterpret_cast<Impl*>(data);
+        switch (msg)
+        {
+        case WM_SETCURSOR:
+            SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+            return TRUE;
+        case WM_SIZE:
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps{};
+            HDC dc = BeginPaint(hwnd, &ps);
+            RECT rect{};
+            GetClientRect(hwnd, &rect);
+            FillRect(dc, &rect, WindowsTheme::Brush(EditorTheme::chrome));
+            const SIZE grip = DialogSize(self.road, 18, 1);
+            const LONG x = (rect.right - grip.cx) / 2, y = (rect.bottom - grip.cy) / 2;
+            RECT handle{x, y, x + grip.cx, y + grip.cy};
+            FillRect(dc, &handle, WindowsTheme::Brush(EditorTheme::disabled));
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_LBUTTONDOWN:
+            self.splitterGrab = GET_Y_LPARAM(l);
+            SetCapture(hwnd);
+            return 0;
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONUP:
+            if (GetCapture() == hwnd)
+            {
+                if (msg == WM_LBUTTONUP || (w & MK_LBUTTON))
+                {
+                    POINT pointer{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                    MapWindowPoints(hwnd, self.frame, &pointer, 1);
+                    self.LayoutSidebar(pointer.y - self.sidebar.top - self.splitterGrab);
+                }
+                if (msg == WM_LBUTTONUP || !(w & MK_LBUTTON)) ReleaseCapture();
+            }
+            return 0;
+        case WM_CANCELMODE:
+            if (GetCapture() == hwnd) ReleaseCapture();
+            return 0;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hwnd, SplitterProc, id);
+            break;
+        }
+        return DefSubclassProc(hwnd, msg, w, l);
+    }
+
     void Layout()
     {
         RECT rect{};
@@ -334,9 +413,8 @@ struct WindowsPanels::Impl
         const int h = rect.bottom - top;
         SetWindowPos(toolbar, nullptr, 0, 0, rect.right, top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
         MoveWindow(models, 0, top, left, h, TRUE);
-        const int outlineHeight = std::min<int>(h / 3, DialogSize(road, 0, 140).cy);
-        outline.Layout(rect.right - right, top, right, outlineHeight);
-        MoveWindow(road, rect.right - right, top + outlineHeight, right, h - outlineHeight, TRUE);
+        sidebar = {rect.right - right, top, rect.right, rect.bottom};
+        LayoutSidebar();
         MoveWindow(view, left, top, std::max<int>(1, rect.right - left - right), std::max(1, h), TRUE);
 
         auto moveTool = [&](int id, int rightOffset, int y, int w, int height)
@@ -356,7 +434,6 @@ struct WindowsPanels::Impl
 
         LayoutBrowserLists();
 
-        LayoutInspectorScroll();
         // Repaint children after their final positions and scrollbar ranges are known.
         for (HWND panel : {models, outline.Window(), road})
         {
@@ -1171,6 +1248,7 @@ struct WindowsPanels::Impl
         }
         if (msg == WM_ACTIVATEAPP && !w)
         {
+            if (GetCapture() == self.splitter) ReleaseCapture();
             if (!self.draggedModel.empty()) self.CancelModelDrag();
             if (!self.pressedTexture.empty()) self.CancelTextureDrag(GetDlgItem(self.models, IDC_TEXTURES));
         }
@@ -1385,6 +1463,13 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     p.toolbar = panel(IDD_TOOLBAR);
     p.models = panel(IDD_BROWSER);
     p.road = panel(IDD_ROAD);
+    p.splitter = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"Resize Scene Outliner",
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_NOTIFY, 0, 0, 0, 0, p.frame, nullptr, module, nullptr);
+    if (!p.splitter || !SetWindowSubclass(p.splitter, Impl::SplitterProc, 1, reinterpret_cast<DWORD_PTR>(&p)))
+    {
+        WinError("Cannot create Outliner splitter");
+        return nullptr;
+    }
 
     if (!p.view || !p.toolbar || !p.models || !p.road || !p.outline.Create(p.frame, module) || !SetWindowSubclass(p.frame, Impl::FrameProc, 2, reinterpret_cast<DWORD_PTR>(&p)))
     {

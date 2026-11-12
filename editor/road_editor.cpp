@@ -128,6 +128,7 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     browser.Refresh();
     gizmo.Load(models);
 #ifndef _WIN32
+    resizeCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
     cameraToolbar.LoadIcons(SDL_GetRenderer(window));
     outlinePanel.LoadIcons(SDL_GetRenderer(window));
 #endif
@@ -1467,6 +1468,27 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
 
 #endif
 
+#ifndef _WIN32
+void RoadEditor::LayoutSidebar(int windowWidth, std::optional<int> dragHeight)
+{
+    const int x = scene.x + scene.w, width = windowWidth - x;
+    const int bar = std::min(8, scene.h);
+    const int available = scene.h - bar;
+    const int upper = outlinerSplit.Height(available, 250, 68, SdlTransformPanel::height + 60, dragHeight);
+    outlineArea = {x, scene.y, width, upper};
+    splitterArea = {x, scene.y + upper, width, bar};
+    const int transformHeight = std::min(available - upper, SdlTransformPanel::height);
+    transformArea = {x, splitterArea.y + bar, width, transformHeight};
+    roadPanel = {x, transformArea.y + transformHeight, width, available - upper - transformHeight};
+}
+
+void RoadEditor::SetSplitterCursor(bool active)
+{
+    if (resizeCursor && active != (SDL_GetCursor() == resizeCursor))
+        SDL_SetCursor(active ? resizeCursor : SDL_GetDefaultCursor());
+}
+#endif
+
 bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 {
     int width, height;
@@ -1481,12 +1503,8 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
     const int right = std::min(322, width / 2);
     const int left = std::min(panelWidth, (width - right) / 2);
     browserPanel = {0, top, left, height - top};
-    const int outlineHeight = std::min(250, (height - top) / 3);
-    outlineArea = {width - right, top, right, outlineHeight};
-    const int transformHeight = std::min(height - top - outlineHeight, SdlTransformPanel::height);
-    transformArea = {width - right, top + outlineHeight, right, transformHeight};
-    roadPanel = {width - right, transformArea.y + transformHeight, right, height - transformArea.y - transformHeight};
     scene = {left, top, width - left - right, height - top};
+    LayoutSidebar(width);
 #endif
     return SDL_SetRenderViewport(renderer, &scene);
 }
@@ -1544,10 +1562,14 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;
     const SDL_Rect toolbar{0, EditorMenu::barHeight, width, CameraToolbar::height};
+    const SDL_FRect grip{(splitterArea.w - 32) * 0.5f, (splitterArea.h - 2) * 0.5f, 32, 2};
     const SDL_Rect shifted{roadPanel.x, roadPanel.y - roadScroll, roadPanel.w, roadPanel.h + roadScroll};
     const SDL_Rect clip{0, roadScroll, roadPanel.w, roadPanel.h};
     return SDL_SetRenderViewport(renderer, &browserPanel) && browser.Draw(renderer, browserPanel.w, browserPanel.h) &&
            SDL_SetRenderViewport(renderer, &outlineArea) && outlinePanel.Draw(renderer, outliner, outlineArea.w, outlineArea.h) &&
+           SDL_SetRenderViewport(renderer, &splitterArea) &&
+           Fill(renderer, {0, 0, static_cast<float>(splitterArea.w), static_cast<float>(splitterArea.h)}, EditorTheme::chrome) &&
+           Fill(renderer, grip, EditorTheme::disabled) &&
            SDL_SetRenderViewport(renderer, &transformArea) && transformPanel.Draw(renderer, transformArea.w, fields) &&
            SDL_SetRenderViewport(renderer, &shifted) && SDL_SetRenderClipRect(renderer, &clip) &&
            RenderPropertiesPanel(renderer, world, properties) && SDL_SetRenderClipRect(renderer, nullptr) &&
@@ -2313,7 +2335,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         std::optional<EditorCommand> command;
         if (menu.HandleViewportMenu(renderer, scene, event, command) ||
-            (drag == Drag::None && !outlinePanel.Tracking() && !SDL_GetWindowRelativeMouseMode(window) && menu.HandleBar(renderer, event, command)))
+            (drag == Drag::None && !splitterGrab && !outlinePanel.Tracking() && !SDL_GetWindowRelativeMouseMode(window) &&
+             menu.HandleBar(renderer, event, command)))
         {
             if (command)
             {
@@ -2333,8 +2356,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (edit) ApplyInspectorEdit(world, *edit);
             return EditorEvent::Handled;
         }
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
-            transformPanel.Blur(window);
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) transformPanel.Blur(window);
     }
 #endif
     if (const auto command = menu.Command(event))
@@ -2390,11 +2412,20 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE && drag == Drag::None)
     {
         mouse = {-1, -1};
+#ifndef _WIN32
+        if (!splitterGrab) SetSplitterCursor(false);
+#endif
     }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
     {
 #ifndef _WIN32
         cameraToolbar.CancelDrag();
+        if (splitterGrab)
+        {
+            splitterGrab.reset();
+            SDL_CaptureMouse(false);
+        }
+        SetSplitterCursor(false);
 #endif
         Release(world);
         return EditorEvent::Pass;
@@ -2556,6 +2587,34 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             return EditorEvent::Handled;
         }
 #else
+        const float windowY = pointer.y + scene.y;
+        const SDL_Point position{static_cast<int>(std::floor(pointer.x)), static_cast<int>(std::floor(windowY))};
+        const auto onBar = [&] { return SDL_PointInRect(&position, &splitterArea); };
+        const bool leftPress = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT;
+        const bool leftRelease = e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT;
+        if (onBar() && leftPress && !outlinePanel.Tracking())
+        {
+            splitterGrab = windowY - splitterArea.y;
+            SDL_CaptureMouse(true);
+            SetSplitterCursor(true);
+        }
+        if (splitterGrab)
+        {
+            const bool heldMotion = e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & SDL_BUTTON_LMASK);
+            if (heldMotion || leftRelease)
+                LayoutSidebar(windowWidth, static_cast<int>(std::lround(pointer.y - *splitterGrab)));
+            if (leftRelease || (e.type == SDL_EVENT_MOUSE_MOTION && !heldMotion))
+            {
+                splitterGrab.reset();
+                SDL_CaptureMouse(false);
+                SetSplitterCursor(onBar());
+            }
+            mouse = {-1, -1};
+            return EditorEvent::Handled;
+        }
+        if (e.type == SDL_EVENT_MOUSE_MOTION)
+            SetSplitterCursor(onBar() && !outlinePanel.Tracking() && !e.motion.state);
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) transformPanel.Blur(window);
         const SDL_FPoint localOutline{pointer.x - outlineArea.x, pointer.y};
         if (outlinePanel.Tracking() || (localOutline.x >= 0 && localOutline.x < outlineArea.w &&
                                        localOutline.y >= 0 && localOutline.y < outlineArea.h))
@@ -2577,7 +2636,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             mouse = {-1, -1};
             return EditorEvent::Handled;
         }
-        if (pointer.y < 0 || pointer.y >= scene.h || pointer.x < 0 || pointer.x >= windowWidth)
+        if (onBar() || pointer.y < 0 || pointer.y >= scene.h || pointer.x < 0 || pointer.x >= windowWidth)
         {
             mouse = {-1, -1};
             return EditorEvent::Handled;
@@ -2596,7 +2655,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (pointer.x >= roadPanel.x)
         {
             mouse = {-1, -1};
-            if (e.type == SDL_EVENT_MOUSE_WHEEL && roadScrollMax > 0 && pointer.y >= outlineArea.h + transformArea.h)
+            if (e.type == SDL_EVENT_MOUSE_WHEEL && roadScrollMax > 0 && windowY >= roadPanel.y)
             {
                 const float wheel = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                 roadScroll = std::clamp(roadScroll - static_cast<int>(wheel * 32), 0, roadScrollMax);
@@ -2604,12 +2663,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
             {
-                if (pointer.y < outlineArea.h + transformArea.h)
+                if (windowY < roadPanel.y)
                 {
-                    transformPanel.Click(window, {pointer.x - transformArea.x, pointer.y - outlineArea.h}, transformArea.w, Inspect(world, state.Target()));
+                    transformPanel.Click(window, {pointer.x - transformArea.x, windowY - transformArea.y}, transformArea.w, Inspect(world, state.Target()));
                     return EditorEvent::Handled;
                 }
-                const SDL_FPoint local{pointer.x - roadPanel.x, pointer.y - outlineArea.h - transformArea.h + roadScroll};
+                const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
                 if (properties.page == PropertiesPage::Marker && SDL_PointInRectFloat(&local, &markerTextBox))
                 {
