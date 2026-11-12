@@ -16,6 +16,7 @@ public:
     static constexpr int maxCharacters = 120;
 
     ObjectType Type() const override { return ObjectType::Marker; }
+    std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Marker>(*this); }
     const std::string& Text() const { return text; }
     bool SetText(std::string value);
     void SubmitLabel(WorldRenderer& renderer, const FreeCamera& camera) const;

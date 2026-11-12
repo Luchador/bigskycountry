@@ -1743,6 +1743,9 @@ bool RoadEditor::GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const
 {
     const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
     const bool subtract = (modifiers & SDL_KMOD_CTRL) != 0;
+    // The object's foreground translation handle also takes Shift-drags over roads and anchors.
+    if (shift && !subtract && state.meshSelection.kind == SelectionKind::Object && gizmo.mode == GizmoMode::Translate)
+        return true;
     const bool anchorHit = hit.kind == RoadPickKind::Intersection && hit.side >= 0;
     const bool snapPick = subtract && !shift && gizmo.mode == GizmoMode::Rotate;
     // A marker at the road pivot must still be selectable when the handles overlap it.
@@ -1781,7 +1784,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
             {
                 dragStart.emplace(state);
                 dragStart->meshTransform = Inspect(world, state.meshSelection).value;
-                drag = Drag::Gizmo;
+                drag = shift && state.meshSelection.kind == SelectionKind::Object && gizmo.mode == GizmoMode::Translate
+                           ? Drag::DuplicateObject : Drag::Gizmo;
             }
             return;
         }
@@ -2061,7 +2065,16 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
 
 void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
 {
-    if (before.roadGroup)
+    if (drag == Drag::DuplicateObject)
+    {
+        const int index = state.meshSelection.index;
+        const int folder = world.hierarchy.Parent({SceneKind::Object, index});
+        // Undo removes the copy at its final pose. The original transform was only a drag reference.
+        before.meshTransform.reset();
+        history.Record(-1, std::move(before), EditSnapshot(state), EditHistory::ObjectEdit{index, folder, {}});
+        Save(world);
+    }
+    else if (before.roadGroup)
     {
         EditSnapshot after(state);
         after.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
@@ -2092,6 +2105,38 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
     }
 }
 
+void RoadEditor::MoveObjectCopy(WorldDocument& world, const ObjectTransform& pose)
+{
+    const int source = dragStart->meshSelection.index;
+    if (pose == *dragStart->meshTransform)
+    {
+        if (dragChanged)
+        {
+            world.TakeObject(state.meshSelection.index);
+            state.SelectRows({{SceneKind::Object, source}});
+            dragChanged = false;
+        }
+        return;
+    }
+
+    if (dragChanged)
+    {
+        if (!SetPlacementTransform(world, state.meshSelection, pose)) status = SDL_GetError();
+        return;
+    }
+
+    const int index = static_cast<int>(world.Objects().size());
+    const int folder = world.hierarchy.Parent({SceneKind::Object, source});
+    auto copy = world.Objects().at(source)->Clone();
+    if (!copy->SetTransform(pose) || !world.InsertObject(index, std::move(copy), folder))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    state.SelectRows({{SceneKind::Object, index}});
+    dragChanged = true;
+}
+
 void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
 {
     mouse = pointer;
@@ -2115,6 +2160,11 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         if (gizmo.mode == GizmoMode::Translate)
         {
             pose.position = start.position + gizmoDrag->axis * amount.value();
+            if (drag == Drag::DuplicateObject)
+            {
+                MoveObjectCopy(world, pose);
+                return;
+            }
         }
         else
         {
@@ -2417,7 +2467,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (dragStart && event.key.key == SDLK_ESCAPE)
         {
-            if (dragStart->roadGroup) dragStart->roadGroup->Restore(world);
+            if (drag == Drag::DuplicateObject) MoveObjectCopy(world, *dragStart->meshTransform);
+            else if (dragStart->roadGroup) dragStart->roadGroup->Restore(world);
             else if (dragStart->meshTransform)
             {
                 SetPlacementTransform(world, state.meshSelection, *dragStart->meshTransform);

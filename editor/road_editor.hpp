@@ -31,7 +31,7 @@ public:
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) override;
-    bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
+    bool DraggingGizmo() const override { return gizmoDrag.has_value(); }
     const Road* Selected(const WorldDocument& world) const;
     const Road* PreviewRoad() const override { return anchorRoad && dragChanged ? &*anchorRoad : nullptr; }
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
@@ -50,7 +50,8 @@ private:
         Pan,
         Measure,
         AnchorRoad,
-        Gizmo
+        Gizmo,
+        DuplicateObject
     };
     using Action = RoadAction;
 #ifndef _WIN32
@@ -112,6 +113,7 @@ private:
     void PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers);
     void DeleteSelection(WorldDocument& world);
     void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);
+    void MoveObjectCopy(WorldDocument& world, const ObjectTransform& pose);
     void Release(WorldDocument& world);
     const char* StatusText() const
     {

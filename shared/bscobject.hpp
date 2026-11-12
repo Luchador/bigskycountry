@@ -19,6 +19,8 @@ class BSCObject : public MeshPlacement
 public:
     virtual ~BSCObject() = default;
     virtual ObjectType Type() const { return ObjectType::Object; }
+    // Override alongside Type() so editor copies preserve the concrete object and its properties.
+    virtual std::unique_ptr<BSCObject> Clone() const { return std::make_unique<BSCObject>(*this); }
     virtual void Tick(float deltaSeconds);
     virtual void TakeDamage(float damage);
 
