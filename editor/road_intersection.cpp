@@ -198,9 +198,7 @@ std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, 
     {
         const bool forward = i == 1;
         if ((atStart && !forward) || (atEnd && forward)) continue;
-        Road& piece = plan.approaches.emplace_back();
-        piece.style = road.style;
-        piece.rotation = road.rotation;
+        Road& piece = plan.approaches.emplace_back(road.NewSection());
         if (!Approach(road, at, plan.junction, forward, piece.points)) return {};
 
         // Use the renderer's own trimming rules. The full cross section, including

@@ -61,7 +61,12 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.title = editingDraft ? "Road editor | Draft" : "Road defaults";
         }
         result.materialSlot = road != nullptr;
-        if (road) result.material = road->style.material;
+        if (road)
+        {
+            result.material = road->style.material;
+            result.roadNames = road->NameList();
+            result.paintMarkings = road->paintMarkings;
+        }
     }
     else if (target.kind == SelectionKind::Intersection)
     {

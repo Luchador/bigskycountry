@@ -169,7 +169,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     };
     for (int i = 0; i < static_cast<int>(sizes[0]); ++i)
     {
-        add(SceneKind::Road, i, "Road " + std::to_string(i + 1), "Road");
+        auto label = world.roads[i].NameList();
+        if (label.empty()) label = "Road " + std::to_string(i + 1);
+        add(SceneKind::Road, i, std::move(label), "Road");
     }
     for (int i = 0; i < static_cast<int>(sizes[1]); ++i)
     {

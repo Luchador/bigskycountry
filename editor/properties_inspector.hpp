@@ -13,6 +13,8 @@ struct PropertiesInspector
 {
     PropertiesPage page = PropertiesPage::Road;
     std::string title, detail, material, markerText;
+    std::optional<std::string> roadNames; // Also present for an unnamed road or draft.
+    bool paintMarkings = true;
     Marker::TextColor textColor{255, 255, 255};
     const char* MaterialCaption() const;
     bool materialSlot = false, invincible = false;

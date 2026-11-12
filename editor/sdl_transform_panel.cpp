@@ -138,7 +138,8 @@ bool SdlTransformPanel::Key(SDL_Window* window, const SDL_Event& event, std::opt
     {
         const auto current = selectAll ? 0 : SDL_utf8strlen(buffer.c_str());
         const auto limit = field == InspectorEdit::markerText ? Marker::maxCharacters : 120;
-        if (current + SDL_utf8strnlen(text.data(), text.size()) > limit) return;
+        if (field != InspectorEdit::roadNames && current + SDL_utf8strnlen(text.data(), text.size()) > limit) return;
+        if (field == InspectorEdit::roadNames && text.find_first_of("\r\n") != text.npos) return;
         if (selectAll)
         {
             buffer.clear();

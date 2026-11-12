@@ -12,6 +12,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 enum class ThreeLaneLayout
@@ -145,6 +146,7 @@ struct Road : RoadGeometry
 {
     static constexpr double minPointSpacing = 0.05; // Meters between neighboring control points.
     int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
+    bool paintMarkings = true;
     RoadStyle style;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
@@ -163,12 +165,16 @@ struct Road : RoadGeometry
     void RotatePoint(std::size_t index, Vector3 unitAxis, double angle);
     bool SetPose(Vector3 position, Vector3 angles);
     bool TransformControlPoints(Vector3 position, Vector3 angles); // Authored data only, for batch edits.
+    std::string NameList() const;
+    bool SetNameList(std::string_view text);
+    Road NewSection() const; // Inherit road properties before supplying the section's points.
     // An independent run of surviving segments, including both endpoint control points.
     Road Section(std::size_t first, std::size_t last) const;
     bool SubdivideSegments(const std::set<int>& segments);
     void Rebuild();
 
 private:
+    std::vector<std::string> names;
     std::array<std::optional<RoadMouth>, 2> mouths;
     void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
                       const std::array<std::optional<RoadMouthFrame>, 2>& caps);

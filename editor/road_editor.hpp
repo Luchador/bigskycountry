@@ -110,7 +110,7 @@ private:
     void BeginGroupDrag(const WorldDocument& world, Drag kind);
     void TransformGroup(WorldDocument& world, Vector3 offset, Vector3 axis, double angle);
     void UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer);
-    void Activate(Action action, WorldDocument& world, FreeCamera& camera);
+    void Activate(Action action, WorldDocument& world);
     void ChangeStyle(Action action, WorldDocument& world);
     void PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers);
     void DeleteSelection(WorldDocument& world);

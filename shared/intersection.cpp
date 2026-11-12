@@ -138,7 +138,7 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
     const auto& style = road.style;
     IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
                              first ? style.RightWidth() : style.LeftWidth(), style.edge, {}};
-    if (!paintStopLine) return arm;
+    if (!paintStopLine || !road.paintMarkings) return arm;
 
     const int lanes = style.GetLaneCount();
     const double halfLane = RoadStyle::laneWidth * 0.5;

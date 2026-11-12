@@ -226,11 +226,48 @@ std::span<const Vector3> Road::SegmentSamples(std::size_t segment) const
     return std::span<const Vector3>(centerline).subspan(start, pointSamples[segment + 1] - start + 1);
 }
 
-Road Road::Section(std::size_t first, std::size_t last) const
+std::string Road::NameList() const
+{
+    std::string list;
+    for (const auto& name : names)
+    {
+        if (!list.empty()) list += ", ";
+        list += name;
+    }
+    return list;
+}
+
+bool Road::SetNameList(std::string_view text)
+{
+    if (std::ranges::any_of(text, [](unsigned char c) { return (c < ' ' && c != '\t') || c == 127; }))
+        return false;
+    names.clear();
+    while (!text.empty())
+    {
+        const auto comma = text.find(',');
+        const auto name = text.substr(0, comma);
+        const auto first = name.find_first_not_of(" \t");
+        if (first != name.npos)
+            names.emplace_back(name.substr(first, name.find_last_not_of(" \t") - first + 1));
+        if (comma == text.npos) break;
+        text.remove_prefix(comma + 1);
+    }
+    return true;
+}
+
+Road Road::NewSection() const
 {
     Road result;
+    result.names = names;
+    result.paintMarkings = paintMarkings;
     result.style = style;
     result.rotation = rotation;
+    return result;
+}
+
+Road Road::Section(std::size_t first, std::size_t last) const
+{
+    Road result = NewSection();
     result.points.assign(points.begin() + first, points.begin() + last + 1);
     // An automatic tangent at a cut may depend on the neighbor we just removed.
     // Keep the surviving Bézier span's original shape at that new endpoint.

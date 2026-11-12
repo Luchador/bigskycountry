@@ -90,7 +90,7 @@ namespace RoadIO
             return;
         }
         out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z << '\n';
-        out << road.id << '\n';
+        out << road.id << ' ' << road.paintMarkings << ' ' << std::quoted(road.NameList()) << '\n';
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
@@ -129,6 +129,15 @@ namespace RoadIO
         {
             in.setstate(std::ios::failbit);
             return road;
+        }
+        if (version >= 10)
+        {
+            std::string names;
+            if (!(in >> road.paintMarkings >> std::quoted(names)) || !road.SetNameList(names))
+            {
+                in.setstate(std::ios::failbit);
+                return road;
+            }
         }
         std::int64_t count;
         if (!(in >> count) || count < 0)

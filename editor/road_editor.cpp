@@ -21,6 +21,7 @@ namespace
     constexpr float pickRadius = 9.0f;
     constexpr float handleLength = 35.0f;
 #ifndef _WIN32
+    constexpr SDL_FRect roadNamesBox{12, 55, 194, 22};
     constexpr SDL_FRect markerTextBox{12, 219, 194, 22};
     constexpr SDL_FRect markerColorBox{115, 249, 91, 22};
     constexpr SDL_FRect markerColorSwatch{96, markerColorBox.y + 3, 15, 15};
@@ -288,8 +289,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
 
     std::vector<Button> buttons{
-        {Action::ChangeView, {12, 44, 194, 28}, planView ? "Back to 3D   [R]" : "Top-down view   [R]"},
-        {Action::New, {12, 84, 194, 28}, state.draft && !EditingDraft() ? "Resume draft" : "New road", false, !EditingDraft()},
+        {Action::TogglePaintMarkings, {12, 84, 194, 28}, "Paint markings", properties.paintMarkings, current != nullptr},
         {Action::Straight, {12, 148, 94, 28}, "Straight", !style.curved},
         {Action::Curve, {112, 148, 94, 28}, "Bezier", style.curved},
         {Action::Fewer, {12, 210, 32, 28}, "-", false, laneCount > (style.IsDivided() ? 2 : 1)},
@@ -446,7 +446,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
                 status = "Place at least two points to save the draft";
                 return;
             }
-            Activate(Action::Finish, world, camera);
+            Activate(Action::Finish, world);
         }
         else
         {
@@ -607,7 +607,7 @@ void RoadEditor::BeginDraft(WorldDocument& world)
     }
 }
 
-void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camera)
+void RoadEditor::Activate(Action action, WorldDocument& world)
 {
     switch (action)
     {
@@ -640,19 +640,18 @@ void RoadEditor::Activate(Action action, WorldDocument& world, FreeCamera& camer
         Save(world);
         return;
     }
-    case Action::ChangeView:
-        ChangeView(world, camera);
+    case Action::TogglePaintMarkings:
+    {
+        const int index = EditingDraft() ? -1 : state.selected;
+        Road* placed = index >= 0 ? &world.roads.at(index) : nullptr;
+        Road* road = EditingDraft() ? &*state.draft : placed;
+        if (!road) return;
+        EditSnapshot before(state, placed);
+        road->paintMarkings = !road->paintMarkings;
+        road->Rebuild();
+        Commit(world, index, std::move(before), placed);
         return;
-    case Action::New:
-        if (!planView)
-        {
-            ChangeView(world, camera);
-        }
-        if (!state.drawing)
-        {
-            BeginDraft(world);
-        }
-        return;
+    }
     case Action::Cancel:
     {
         EditSnapshot before(state);
@@ -1397,12 +1396,12 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
 
     for (const Button& b : Buttons(world, properties))
     {
-        if (b.action == Action::ToggleStopLine)
+        if (b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings)
         {
             const SDL_FRect box{b.rect.x + 2, b.rect.y + 6, 16, 16};
             if (!Fill(renderer, box, b.active ? EditorTheme::selected : EditorTheme::field) ||
                 !EditorTheme::SetColor(renderer, muted) || !SDL_RenderRect(renderer, &box) ||
-                !Text(renderer, box.x + 23, b.rect.y + 10, b.label, ink)) return false;
+                !Text(renderer, box.x + 23, b.rect.y + 10, b.label, b.enabled ? ink : muted)) return false;
             if (b.active)
             {
                 const SDL_FPoint tick[]{{box.x + 3, box.y + 8}, {box.x + 7, box.y + 12}, {box.x + 13, box.y + 4}};
@@ -1453,6 +1452,9 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius);
     if (properties.page != PropertiesPage::Road)
         return Text(renderer, 12, 48, properties.detail.c_str(), muted);
+    if (!Text(renderer, 12, roadNamesBox.y - 15, "Road names", muted) ||
+        !transformPanel.DrawField(renderer, roadNamesBox, state.Target(), InspectorEdit::roadNames,
+                                  properties.roadNames.value_or(""), properties.roadNames.has_value())) return false;
     const int laneCount = style.GetLaneCount();
     const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
     if (laneCount == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
@@ -2012,9 +2014,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
     }
     else if (state.point >= 0)
     {
-        Road connected;
-        connected.style = road->style;
-        connected.rotation = road->rotation;
+        Road connected = road->NewSection();
         for (int i = 0; i < static_cast<int>(road->points.size()); ++i)
         {
             if (!state.PointSelected(i))
@@ -2064,6 +2064,18 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
+    if (edit.field == InspectorEdit::roadNames)
+    {
+        const int index = EditingDraft() ? -1 : state.selected;
+        Road* placed = index >= 0 ? &world.roads.at(index) : nullptr;
+        Road* road = EditingDraft() ? &*state.draft : placed;
+        if (!road) return;
+        EditSnapshot before(state, placed);
+        if (!road->SetNameList(edit.text)) return;
+        if (placed) outliner.Invalidate();
+        Commit(world, index, std::move(before), placed);
+        return;
+    }
     if (edit.field == InspectorEdit::markerText || edit.field == InspectorEdit::markerTextColor)
     {
         if (edit.target.kind != SelectionKind::Object) return;
@@ -2425,7 +2437,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (panels.Command(event, action))
     {
         Release(world);
-        Activate(action, world, camera);
+        Activate(action, world);
         return EditorEvent::Handled;
     }
     if (panels.HandleInput(event, camera, gizmo.settings))
@@ -2559,7 +2571,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (event.key.key == SDLK_ESCAPE && EditingDraft())
         {
-            Activate(Action::Cancel, world, camera);
+            Activate(Action::Cancel, world);
             return EditorEvent::Handled;
         }
         if (event.key.key == SDLK_R || (event.key.key == SDLK_ESCAPE && planView))
@@ -2569,7 +2581,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (event.key.key == SDLK_RETURN && planView)
         {
-            Activate(Action::Finish, world, camera);
+            Activate(Action::Finish, world);
+            return EditorEvent::Handled;
+        }
+        if (event.key.key == SDLK_N && planView && drag == Drag::None && ViewportFocused() &&
+            !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
+        {
+            if (!state.drawing) BeginDraft(world);
             return EditorEvent::Handled;
         }
     }
@@ -2698,6 +2716,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 }
                 const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
+                if (properties.roadNames && SDL_PointInRectFloat(&local, &roadNamesBox))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::roadNames, *properties.roadNames);
+                    return EditorEvent::Handled;
+                }
                 if (properties.page == PropertiesPage::Marker && SDL_PointInRectFloat(&local, &markerTextBox))
                 {
                     transformPanel.StartEdit(window, state.Target(), InspectorEdit::markerText, properties.markerText);
@@ -2718,7 +2741,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 {
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
                     {
-                        Activate(button.action, world, camera);
+                        Activate(button.action, world);
                         break;
                     }
                 }

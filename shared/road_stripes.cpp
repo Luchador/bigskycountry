@@ -275,7 +275,8 @@ namespace
         };
 
         // Divided markings follow the same cross sections as their carriageway.
-        std::vector<MarkingPath> dividers(road.style.IsDivided() ? lanes / 2 - 1 : 0);
+        const bool paintDivided = road.paintMarkings && road.style.IsDivided();
+        std::vector<MarkingPath> dividers(paintDivided ? lanes / 2 - 1 : 0);
         CrossSection last{};
         EdgeProfile previous{};
         std::vector<Vector3> boundary;
@@ -326,7 +327,7 @@ namespace
                 }
                 VisitBand(side, last, current, inner, pavement, pavementVertex, asphalt);
 
-                if (road.style.IsDivided())
+                if (paintDivided)
                 {
                     PaintCarriagewayEdges(road, side, last, current, halfGap, travelEdge);
                 }
@@ -527,14 +528,14 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     for (int side : {-1, 1})
     {
         BuildRoadSide(*this, path, side, hasGradedBend);
-        if (!style.IsDivided())
+        if (paintMarkings && !style.IsDivided())
         {
             // Place the white stripe wholly inside the travel edge, beside any shoulder.
             const auto edge = OffsetPath(path, side * halfTravelWidth);
             PaintStrip(edge, side > 0 ? -stripeWidth : 0.0, side > 0 ? 0.0 : stripeWidth, whiteStripes);
         }
     }
-    if (style.IsDivided()) return;
+    if (!paintMarkings || style.IsDivided()) return;
 
     constexpr double halfLane = RoadStyle::laneWidth * 0.5;
     const bool centerTurn = style.HasCenterTurnLane();

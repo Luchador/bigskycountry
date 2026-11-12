@@ -2,8 +2,7 @@
 
 enum class RoadAction
 {
-    ChangeView,
-    New,
+    TogglePaintMarkings,
     Finish,
     Cancel,
     Straight,

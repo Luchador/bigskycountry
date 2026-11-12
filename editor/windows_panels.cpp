@@ -203,7 +203,7 @@ struct WindowsPanels::Impl
     struct Inspector
     {
         RoadStyle style;
-        bool plan, drawing, draft, canFinish;
+        bool plan, drawing, canFinish;
         int selected, point;
         double elevation;
         unsigned materialRevision;
@@ -261,6 +261,8 @@ struct WindowsPanels::Impl
 
     std::optional<std::string> FieldText(int id) const
     {
+        if (id == IDC_ROAD_NAMES && lastInspector)
+            return lastInspector->properties.roadNames.value_or("");
         if (id == IDC_MARKER_TEXT && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
             return lastInspector->properties.markerText;
         const int field = id - IDC_LOC_X;
@@ -301,7 +303,8 @@ struct WindowsPanels::Impl
     void SubmitField(HWND control, int field)
     {
         const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
-        if (inspected && (marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
+        const bool roadNames = field == InspectorEdit::roadNames && lastInspector && lastInspector->properties.roadNames;
+        if (inspected && (roadNames || marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
         {
             pendingEdits.push_back({inspected->target, field, ReadEdit(control)});
             SDL_Event event{};
@@ -878,8 +881,7 @@ struct WindowsPanels::Impl
             case IDC_TRANSFORM_SPACE:
             case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
             case IDC_REFRESH: RefreshBrowser(); return;
-            case IDC_VIEW: Post(actions, int(RoadAction::ChangeView)); SetFocus(frame); return;
-            case IDC_NEW: Post(actions, int(RoadAction::New)); SetFocus(frame); return;
+            case IDC_PAINT_MARKINGS: Post(actions, int(RoadAction::TogglePaintMarkings)); return;
             case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
             case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
             case IDC_RADIUS_LESS: Post(actions, int(RoadAction::SmallerRadius)); return;
@@ -932,6 +934,8 @@ struct WindowsPanels::Impl
         const bool marker = properties.page == PropertiesPage::Marker;
         const bool refreshText = marker && (pageChanged || lastInspector->properties.title != properties.title ||
                                              lastInspector->properties.markerText != properties.markerText);
+        const bool refreshNames = pageChanged || lastInspector->selected != data.selected ||
+                                  lastInspector->properties.roadNames != properties.roadNames;
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
         const bool junction = properties.page == PropertiesPage::Intersection;
@@ -939,7 +943,7 @@ struct WindowsPanels::Impl
         {
             ScrollTo(0);
             LayoutInspectorScroll();
-            for (int id : {IDC_VIEW, IDC_NEW, IDC_ALIGNMENT, IDC_FEWER, IDC_LANE_COUNT, IDC_MORE, IDC_LAYOUT,
+            for (int id : {IDC_ROAD_NAMES_LABEL, IDC_ROAD_NAMES, IDC_PAINT_MARKINGS, IDC_ALIGNMENT, IDC_FEWER, IDC_LANE_COUNT, IDC_MORE, IDC_LAYOUT,
                            IDC_LEFT, IDC_RIGHT, IDC_EDGE, IDC_WIDTH, IDC_POINT, IDC_FINISH, IDC_CANCEL_DRAFT,
                            IDC_LAYOUT_LABEL, IDC_LANE_DETAIL, IDC_DIVIDED, IDC_GAP_LESS, IDC_GAP_VALUE,
                            IDC_GAP_MORE, IDC_MEDIAN, IDC_CAPTION_ALIGN, IDC_CAPTION_LANES, IDC_CAPTION_SHOULDERS,
@@ -977,9 +981,10 @@ struct WindowsPanels::Impl
             CheckDlgButton(road, IDC_INVINCIBLE, properties.invincible ? BST_CHECKED : BST_UNCHECKED);
             return;
         }
-        SetDlgItemTextW(road, IDC_VIEW, data.plan ? L"Back to 3D  [R]" : L"Top-down view  [R]");
-        SetDlgItemTextW(road, IDC_NEW, data.draft && !data.drawing ? L"Resume draft" : L"New road");
-        EnableWindow(GetDlgItem(road, IDC_NEW), !data.drawing);
+        EnableWindow(GetDlgItem(road, IDC_ROAD_NAMES), properties.roadNames.has_value());
+        EnableWindow(GetDlgItem(road, IDC_PAINT_MARKINGS), properties.roadNames.has_value());
+        if (refreshNames) RestoreField(IDC_ROAD_NAMES);
+        CheckDlgButton(road, IDC_PAINT_MARKINGS, properties.paintMarkings ? BST_CHECKED : BST_UNCHECKED);
         SendDlgItemMessageW(road, IDC_ALIGNMENT, CB_SETCURSEL, data.style.curved, 0);
         SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
         EnableWindow(GetDlgItem(road, IDC_FEWER), lanes > (data.style.IsDivided() ? 2 : 1));
@@ -1364,8 +1369,9 @@ struct WindowsPanels::Impl
             self.outline.QueueTerrainFill((msg->lParam & (1L << 30)) != 0)) return false;
 
         const int id = GetDlgCtrlID(focus);
-        const int field = id == IDC_MARKER_TEXT ? InspectorEdit::markerText : id - IDC_LOC_X;
-        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
+        const int field = id == IDC_MARKER_TEXT ? InspectorEdit::markerText :
+                          id == IDC_ROAD_NAMES ? InspectorEdit::roadNames : id - IDC_LOC_X;
+        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (msg->message == WM_KEYDOWN)
@@ -1698,7 +1704,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
     const int point = !plan && current ? state.point : -1;
 
     p.UpdateInspector({current ? current->style : state.defaults, plan, plan && state.drawing,
-                       state.draft.has_value(), plan && state.drawing && state.draft->points.size() >= 2,
+                       plan && state.drawing && state.draft->points.size() >= 2,
                        state.selected, point, point >= 0 ? current->points[point].position.y : 0.0, Material::Revision(), properties});
 
     const double speed = camera.GetMoveSpeed();
