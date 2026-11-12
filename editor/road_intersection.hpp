@@ -6,7 +6,7 @@
 struct RoadIntersectionInsertion
 {
     Intersection junction;
-    std::vector<Road> approaches; // Before and after the junction, with their final mouths already tested.
+    std::vector<Road> approaches; // One at an endpoint, two inside a road, in spline order.
 };
 
 // A control-point hit uses its exact authored position. A pavement or spline hit projects onto the centerline.

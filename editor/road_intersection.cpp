@@ -172,8 +172,8 @@ std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, 
     Location at{};
     if (hit.kind == RoadPickKind::Point)
     {
-        if (hit.index <= 0 || hit.index >= last) return {};
-        at = {hit.index, 0};
+        if (hit.index < 0 || hit.index > last) return {};
+        at = hit.index == last ? Location{last - 1, 1} : Location{hit.index, 0};
     }
     else
     {
@@ -182,21 +182,25 @@ std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, 
         if (at.segment < 0) return {};
     }
     const auto [left, right] = Split(Curve(road, at.segment), at.t);
+    const bool atStart = at.segment == 0 && at.t == 0;
+    const bool atEnd = at.segment == last - 1 && at.t == 1;
+    if ((atStart && road.points.front().anchor) || (atEnd && road.points.back().anchor)) return {};
     const bool knot = at.t == 0 || at.t == 1;
-    const auto tangent = knot ? road.Tangent(at.segment + (at.t == 1)) : Math::Normalize(right.b - left.c);
+    const int point = at.segment + (at.t == 1);
+    const auto tangent = knot ? road.Tangent(point) : Math::Normalize(right.b - left.c);
     if (std::hypot(tangent.x, tangent.z) < 1e-8) return {};
     RoadIntersectionInsertion plan;
-    plan.junction.position = knot ? road.points[at.segment + (at.t == 1)].position : left.d;
+    plan.junction.position = knot ? road.points[point].position : left.d;
     plan.junction.yaw = -std::atan2(tangent.z, tangent.x);
     plan.junction.material = road.style.material;
     plan.junction.pavedThrough = true;
-    plan.approaches.resize(2);
     for (int i = 0; i < 2; ++i)
     {
-        Road& piece = plan.approaches[i];
+        const bool forward = i == 1;
+        if ((atStart && !forward) || (atEnd && forward)) continue;
+        Road& piece = plan.approaches.emplace_back();
         piece.style = road.style;
         piece.rotation = road.rotation;
-        const bool forward = i == 1;
         if (!Approach(road, at, plan.junction, forward, piece.points)) return {};
 
         // Use the renderer's own trimming rules. The full cross section, including

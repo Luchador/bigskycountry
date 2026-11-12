@@ -195,8 +195,15 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
         if (!junctionId) return false;
         world.intersections.at(junctionId) = *inserted;
         before.junction = EditSnapshot::Junction{junctionId, {}};
-        replacements.front().points.back().anchor = IntersectionAnchor{junctionId, 2};
-        replacements.back().points.front().anchor = IntersectionAnchor{junctionId, 0};
+        // The planner marks each new attachment with ID zero. A far end can already belong to another junction.
+        for (Road& piece : replacements)
+        {
+            for (RoadPoint* end : {&piece.points.front(), &piece.points.back()})
+            {
+                if (end->anchor && end->anchor->intersectionId == 0)
+                    end->anchor->intersectionId = junctionId;
+            }
+        }
         if (before.roadFolder)
         {
             before.hierarchy = world.hierarchy;
@@ -204,7 +211,7 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
         }
     }
     std::map<int, TerrainBoundary> newBoundaries;
-    if (replacements.size() > 1)
+    if (inserted || replacements.size() > 1)
     {
         for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
         {
