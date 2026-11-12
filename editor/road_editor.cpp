@@ -45,6 +45,39 @@ namespace
         return std::hypot(a.x - b.x, a.y - b.y) <= pickRadius;
     }
 
+    bool AnchorOccupied(const WorldDocument& world, IntersectionAnchor anchor)
+    {
+        return std::ranges::any_of(world.ConnectedEnds(anchor.intersectionId),
+            [anchor](const auto& end) { return end.anchor == anchor; });
+    }
+
+    RoadPoint AttachedEndpoint(const Intersection& junction, IntersectionAnchor anchor, bool first)
+    {
+        const Vector3 tangent = Intersection::Directions(junction.yaw)[anchor.side] * (first ? 1.0 : -1.0);
+        return {junction.AnchorPosition(anchor.side), std::atan2(tangent.z, tangent.x), 0, 0, anchor};
+    }
+
+    // Project a screen delta from the authored anchor, even when the press was off-center on its raised marker.
+    std::optional<Vector3> DragAtElevation(const FreeCamera& camera, SDL_Rect scene, Vector3 anchor, SDL_FPoint delta)
+    {
+        const Vector3 view = camera.WorldToView(anchor);
+        const double focal = ViewportFocalLength(scene);
+        if (view.z < worldNearDepth || focal <= 0) return {};
+        const double height = anchor.y - camera.GetPosition().y;
+        if (std::abs(height) < 0.05 * view.z)
+        {
+            // Viewed edge-on, the horizontal plane has no usable ray intersection.
+            // Map screen right/up to camera right/forward at the anchor's depth.
+            const Vector3 right = camera.ViewRay(1, 0) - camera.ViewRay(0, 0);
+            const Vector3 forward{-right.z, 0, right.x};
+            return anchor + (right * delta.x - forward * delta.y) * (view.z / focal);
+        }
+        const Vector3 ray = camera.ViewRay(view.x / view.z + delta.x / focal, view.y / view.z - delta.y / focal);
+        if (std::abs(ray.y) < 0.01 || height / ray.y < worldNearDepth) return {};
+        const Vector3 hit = camera.GetPosition() + ray * (height / ray.y);
+        return Vector3{hit.x, anchor.y, hit.z};
+    }
+
     bool HitTriangle(Vector3 p, const std::array<Vector3, 3>& triangle)
     {
         const auto side = [](Vector3 a, Vector3 b, Vector3 p)
@@ -346,7 +379,9 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleWireframe();
         return;
     }
+    const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
     Release(world);
+    if (undoPreview) return;
     if (command == EditorCommand::CreateRoad)
     {
         constexpr double initialLength = 10.0; // meters along world X
@@ -770,6 +805,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     }
     if (closest && (shift || subtract))
     {
+        if (shift && !subtract && BeginAnchorRoad(world, *closest, cursor)) return;
         if (state.point < 0 && !state.anchorSelection)
         {
             state.PickElement({SceneKind::Intersection, closest->intersectionId}, shift, subtract);
@@ -1038,6 +1074,7 @@ void RoadEditor::Release(WorldDocument& world)
     }
 
     originalPoints.clear();
+    anchorRoad.reset();
     extensionSource.reset();
     gizmoDrag.reset();
     appliedAngle = 0;
@@ -1210,6 +1247,8 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         {
             return false;
         }
+        if (const Road* road = PreviewRoad(); road && !DrawPlanRoad(renderer, *road, center, scale, canvas, layer))
+            return false;
     }
 
     for (const SceneKey key : state.SelectedRows())
@@ -1561,16 +1600,68 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
         status = "This road endpoint is already connected";
         return;
     }
-    for (const auto& end : world.ConnectedEnds(anchor.intersectionId))
+    if (AnchorOccupied(world, anchor))
     {
-        if (end.anchor == anchor)
-        {
-            status = "This intersection anchor is already connected";
-            return;
-        }
+        status = "This intersection anchor is already connected";
+        return;
     }
     state.anchorSelection = anchor;
     status.clear();
+}
+
+bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer)
+{
+    if (!state.InspectingAnchor(anchor)) return false;
+    if (AnchorOccupied(world, anchor))
+    {
+        status = "This intersection anchor is already connected";
+        return true;
+    }
+    const auto& junction = world.intersections.at(anchor.intersectionId);
+    Road& road = anchorRoad.emplace();
+    road.style = state.defaults;
+    road.points.push_back(AttachedEndpoint(junction, anchor, true));
+    anchorPress = pointer;
+    drag = Drag::AnchorRoad;
+    status.clear();
+    return true;
+}
+
+void RoadEditor::UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer)
+{
+    dragChanged = false;
+    const SDL_FPoint delta{pointer.x - anchorPress.x, pointer.y - anchorPress.y};
+    if (std::hypot(delta.x, delta.y) < 4.0f || pointer.x < 0 || pointer.y < 0 ||
+        pointer.x >= scene.w || pointer.y >= scene.h) return;
+
+    Road& road = *anchorRoad;
+    const Vector3 origin = road.points.front().position;
+    const auto end = planView ? std::optional{origin + Vector3{delta.x / scale, 0, -delta.y / scale}}
+                              : DragAtElevation(camera, scene, origin, delta);
+    if (!end || !ValidRoadSpan(road, origin, *end)) return;
+    if (road.points.size() == 1 || road.points.back().position != *end)
+    {
+        road.points.resize(2);
+        road.points.back().position = *end;
+        road.Rebuild();
+    }
+    dragChanged = true;
+}
+
+void RoadEditor::FinishAnchorRoad(WorldDocument& world)
+{
+    if (!PreviewRoad()) return;
+    Road& road = *anchorRoad;
+    const auto anchor = *road.points.front().anchor;
+    const auto junction = world.intersections.find(anchor.intersectionId);
+    if (!state.InspectingAnchor(anchor) || junction == world.intersections.end() ||
+        junction->second.AnchorPosition(anchor.side) != road.points.front().position ||
+        AnchorOccupied(world, anchor)) return;
+    if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
+    EditSnapshot before(state);
+    world.roads.push_back(std::move(road));
+    state.SelectPoint(static_cast<int>(world.roads.size()) - 1, 1);
+    Commit(world, state.selected, std::move(before), &world.roads.back());
 }
 
 void RoadEditor::FillSelection(WorldDocument& world)
@@ -1612,15 +1703,15 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
     SelectAnchor(world, anchor, false); // Recheck the selection and occupancy at commit time.
     if (!state.anchorSelection) return;
     Road& road = world.roads[state.selected];
-    const Vector3 position = junction->second.AnchorPosition(anchor.side);
+    const bool first = state.point == 0;
+    const RoadPoint point = AttachedEndpoint(junction->second, anchor, first);
     RoadPoint& previous = road.points[state.point];
-    if (!ValidRoadSpan(road, previous.position, position))
+    if (!ValidRoadSpan(road, previous.position, point.position))
     {
         status = SDL_GetError();
         return;
     }
     EditSnapshot before(state, &road);
-    const bool first = state.point == 0;
     if (road.style.curved && !previous.heading)
     {
         // Extending a Bézier endpoint must preserve the shape of its existing span.
@@ -1628,8 +1719,6 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
         previous.heading = std::atan2(tangent.z, tangent.x);
         previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
-    const Vector3 tangent = Intersection::Directions(junction->second.yaw)[anchor.side] * (first ? 1.0 : -1.0);
-    RoadPoint point{position, std::atan2(tangent.z, tangent.x), 0, 0, anchor};
     const int index = first ? 0 : static_cast<int>(road.points.size());
     road.points.insert(road.points.begin() + index, point);
     road.Rebuild();
@@ -1688,6 +1777,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
+        if (shift && !subtract && BeginAnchorRoad(world, anchor, mouse)) return;
         if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
         else if (shift || subtract) state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
         else
@@ -2265,7 +2355,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             DeleteSelection(world);
             return EditorEvent::Handled;
         }
-        if (drag == Drag::Measure && event.key.key == SDLK_ESCAPE)
+        if ((drag == Drag::Measure || drag == Drag::AnchorRoad) && event.key.key == SDLK_ESCAPE)
         {
             Release(world);
             return EditorEvent::Handled;
@@ -2432,7 +2522,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
 #endif
     }
-    if (!planView && !DraggingGizmo() && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
+    if (!planView && !DraggingGizmo() && drag != Drag::AnchorRoad && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         return EditorEvent::Pass;
     }
@@ -2482,7 +2572,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (DraggingGizmo())
+        if (drag == Drag::AnchorRoad)
+        {
+            if (e.motion.state & SDL_BUTTON_LMASK) UpdateAnchorRoad(camera, pointer);
+            else Release(world);
+        }
+        else if (DraggingGizmo())
         {
             MoveGizmo(world, camera, pointer);
         }
@@ -2498,7 +2593,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                             drag == Drag::Pan ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
         if (e.button.button == button)
         {
-            if (DraggingGizmo())
+            if (drag == Drag::AnchorRoad)
+            {
+                UpdateAnchorRoad(camera, pointer);
+                FinishAnchorRoad(world);
+            }
+            else if (DraggingGizmo())
             {
                 MoveGizmo(world, camera, pointer);
             }

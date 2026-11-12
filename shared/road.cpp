@@ -320,6 +320,7 @@ void Road::Rebuild()
 {
     MarkRebuilt();
     centerline.clear();
+    splineLengthMeters = 0.0;
     pointSamples.clear();
     pavementTriangles.clear();
     edgeTriangles.clear();
@@ -356,6 +357,12 @@ void Road::Rebuild()
         }
 
         pointSamples.push_back(centerline.size() - 1);
+    }
+
+    // Measure the authored centerline before intersection mouths trim the pavement.
+    for (std::size_t i = 1; i < centerline.size(); ++i)
+    {
+        splineLengthMeters += Math::Length(centerline[i] - centerline[i - 1]);
     }
 
     // Sweep and wind the cross section in the road's own frame, including curbs and paint.

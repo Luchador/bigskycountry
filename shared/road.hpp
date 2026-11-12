@@ -148,6 +148,7 @@ struct Road : RoadGeometry
 
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
+    double SplineLengthMeters() const { return splineLengthMeters; }
     Vector3 Tangent(std::size_t index) const;
     double ThreeLaneDividerOffset() const; // Signed distance left of the authored path for a 2+1 layout.
     std::array<Vector3, 3> PointAxes(std::size_t index, bool includeRoll = true) const;
@@ -164,5 +165,6 @@ private:
     void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
                       const std::array<std::optional<RoadMouthFrame>, 2>& caps);
     std::vector<Vector3> centerline;
+    double splineLengthMeters = 0.0;
     std::vector<std::size_t> pointSamples; // Centerline index of each control point.
 };

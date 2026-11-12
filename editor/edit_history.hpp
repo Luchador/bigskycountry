@@ -50,10 +50,13 @@ struct RoadEditorState
         SelectPoint(-1, -1);
         meshSelection = {SelectionKind::Anchor, anchor.intersectionId, anchor.side};
     }
+    bool InspectingAnchor(IntersectionAnchor anchor) const
+    {
+        return meshSelection == TransformTarget{SelectionKind::Anchor, anchor.intersectionId, anchor.side};
+    }
     bool AnchorHighlighted(IntersectionAnchor anchor) const
     {
-        return anchorSelection == anchor ||
-               meshSelection == TransformTarget{SelectionKind::Anchor, anchor.intersectionId, anchor.side};
+        return anchorSelection == anchor || InspectingAnchor(anchor);
     }
 
     void PickPoint(int roadIndex, int index, bool add, bool subtract);

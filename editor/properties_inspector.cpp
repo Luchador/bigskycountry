@@ -11,7 +11,18 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         (target.kind == SelectionKind::None && state.outlineSelection.empty()))
     {
         const Road* road = editingDraft ? &*state.draft : state.selected >= 0 ? &world.roads.at(state.selected) : nullptr;
-        result.title = editingDraft ? "Road editor | Draft" : road ? "Road editor | Road " + std::to_string(state.selected + 1) : "Road defaults";
+        if (road && !editingDraft)
+        {
+            constexpr double metersPerMile = 1609.344;
+            const double meters = road->SplineLengthMeters();
+            char label[96];
+            SDL_snprintf(label, sizeof(label), "Length: %.2f m (%.3f mi)", meters, meters / metersPerMile);
+            result.title = label;
+        }
+        else
+        {
+            result.title = editingDraft ? "Road editor | Draft" : "Road defaults";
+        }
         result.materialSlot = road != nullptr;
         if (road) result.material = road->style.material;
     }

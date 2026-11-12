@@ -33,6 +33,7 @@ public:
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) override;
     bool DraggingGizmo() const override { return drag == Drag::Gizmo; }
     const Road* Selected(const WorldDocument& world) const;
+    const Road* PreviewRoad() const override { return anchorRoad && dragChanged ? &*anchorRoad : nullptr; }
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool IsPlanView() const override { return planView; }
@@ -48,6 +49,7 @@ private:
         Rotate,
         Pan,
         Measure,
+        AnchorRoad,
         Gizmo
     };
     using Action = RoadAction;
@@ -87,6 +89,9 @@ private:
     bool GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const;
     void UpdateGizmoHover(const WorldDocument& world, const FreeCamera& camera, const GizmoPlacement& placement);
     void SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract);
+    bool BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer);
+    void UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer);
+    void FinishAnchorRoad(WorldDocument& world);
     void FillSelection(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
@@ -172,5 +177,7 @@ private:
     Vector3 measureStart{}, measureEnd{}; // World-space endpoints while Drag::Measure is active.
     Vector3 grabOffset{};
     SDL_FPoint mouse{};
+    SDL_FPoint anchorPress{};
+    std::optional<Road> anchorRoad; // Preview only until the left button is released.
     std::string status;
 };

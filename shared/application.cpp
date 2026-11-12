@@ -185,6 +185,8 @@ namespace
                     const Road& road = world.roads[i];
                     worldRenderer.SubmitRoad(road, road.style.material, roadTool && roadTool->GeometrySelected({SceneKind::Road, i}));
                 }
+                if (const Road* preview = roadTool ? roadTool->PreviewRoad() : nullptr)
+                    worldRenderer.SubmitRoad(*preview, preview->style.material, false);
                 for (const auto& [id, junction] : world.IntersectionSurfaces())
                     worldRenderer.SubmitRoad(junction.geometry, world.intersections.at(id).material, roadTool && roadTool->GeometrySelected({SceneKind::Intersection, id}));
 

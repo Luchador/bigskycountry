@@ -8,6 +8,7 @@ struct SceneKey;
 class FreeCamera;
 class MeshAssets;
 class WorldRenderer;
+struct Road;
 
 enum class ApplicationMode
 {
@@ -27,6 +28,7 @@ public:
     virtual void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) = 0;
     virtual bool DraggingGizmo() const = 0;
     virtual bool GeometrySelected(SceneKey key) const = 0;
+    virtual const Road* PreviewRoad() const { return nullptr; }
     virtual bool WireframeEnabled() const { return false; }
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;
