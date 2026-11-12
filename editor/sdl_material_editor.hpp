@@ -14,6 +14,7 @@ public:
 private:
     void Close();
     void FinishDrag();
+    void AdjustSlider(float x, bool commit);
     bool UpdateImages(int pixelWidth, int pixelHeight);
     void Report(bool success);
     MaterialEditor editor;
@@ -23,6 +24,7 @@ private:
     std::array<SDL_Texture*, materialSlotCount> thumbs{};
     bool dirty = false, imagesDirty = false, sphereDirty = false, typeMenu = false;
     std::optional<SDL_FPoint> orbitPoint;
+    std::optional<int> activeSlider; // RGB channels followed by the translucency multiplier.
     std::string dragged;
     std::optional<MaterialSlot> hover;
 };

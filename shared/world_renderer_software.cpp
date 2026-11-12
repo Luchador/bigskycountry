@@ -79,17 +79,11 @@ bool WorldRenderer::DrawSoftware()
         std::memset(static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch, 0, static_cast<std::size_t>(width) * 4);
     }
 
-    size_t range = 0;
-    auto selection = selectedRanges.begin();
-    for (std::size_t first = 0; first < vertices.size(); first += 3)
+    const auto rasterize = [&](size_t first, const SurfaceMaterial* material, bool selected)
     {
-        while (range < materialRanges.size() && first >= materialRanges[range].end) ++range;
-        const bool textured = range < materialRanges.size() && first >= materialRanges[range].first && materialRanges[range].material;
+        const bool translucent = material && material->type == MaterialType::Unlit;
         const bool wire = first < wireframeEnd;
-        if (first == foregroundStart) std::fill(softwareDepth.begin(), softwareDepth.end(), Sample{});
         const bool outline = first >= outlineStart && first < foregroundStart;
-        if (selection != selectedRanges.end() && first >= selection->end) ++selection;
-        const bool selected = selection != selectedRanges.end() && first >= selection->first;
         Polygon p{};
         p.count = 3;
         std::copy_n(vertices.data() + first, 3, p.points.begin());
@@ -145,7 +139,7 @@ bool WorldRenderer::DrawSoftware()
             const auto& face = vertices[first];
             const bool lit = face.lit && !wire;
             // A uniformly colored flat triangle needs just one lighting evaluation.
-            const bool flatColor = lit && !textured && a.normal == b.normal && a.normal == c.normal &&
+            const bool flatColor = lit && !material && a.normal == b.normal && a.normal == c.normal &&
                 a.color.r == b.color.r && a.color.g == b.color.g && a.color.b == b.color.b &&
                 a.color.r == c.color.r && a.color.g == c.color.g && a.color.b == c.color.b;
             SDL_FColor flat{};
@@ -163,13 +157,19 @@ bool WorldRenderer::DrawSoftware()
                     {
                         continue;
                     }
+                    // Assign a shared triangle edge to just one face when blending.
+                    const auto includesEdge = [](const ScreenVertex& from, const ScreenVertex& to) {
+                        return to.y < from.y || (to.y == from.y && to.x > from.x);
+                    };
+                    if (translucent && ((wa == 0 && !includesEdge(b,c)) || (wb == 0 && !includesEdge(c,a)) ||
+                                        (wc == 0 && !includesEdge(a,b)))) continue;
                     Sample& sample = softwareDepth[static_cast<std::size_t>(y) * width + x];
                     const float depth = static_cast<float>((wa * a.depth + wb * b.depth + wc * c.depth) / area);
                     if (depth < sample.depth || (outline && !sample.selected))
                     {
                         continue;
                     }
-                    if (!outline && !textured)
+                    if (!outline && !material)
                     {
                         sample = {depth, selected};
                     }
@@ -185,7 +185,7 @@ bool WorldRenderer::DrawSoftware()
                             continue;
                         }
                     }
-                    if (textured)
+                    if (material)
                     {
                         const double tu = (u*a.uv.x + v*b.uv.x + w*c.uv.x) / sum;
                         const double tv = (u*a.uv.y + v*b.uv.y + w*c.uv.y) / sum;
@@ -197,9 +197,24 @@ bool WorldRenderer::DrawSoftware()
                         const float footprint = static_cast<float>(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
                         const Vector3 normal = Math::Normalize(a.normal*u + b.normal*v + c.normal*w);
                         const Vector3 view = (a.view*u + b.view*v + c.view*w) * (1.0 / sum);
-                        const auto color = materialRanges[range].material->Shade(float(tu), float(tv), footprint, lights,
+                        const auto color = material->Shade(float(tu), float(tv), footprint, lights,
                                                                                  normal, face.tangent, face.handedness, view);
                         if (color.a == 0) continue;
+                        if (translucent)
+                        {
+                            // SDL's software texture uses straight alpha for the final sky composite.
+                            const float behind = (pixel[3] / 255.f) * (1 - color.a);
+                            const float alpha = color.a + behind;
+                            const auto blend = [&](float source, Uint8 dest) {
+                                return Channel((source * color.a + dest / 255.f * behind) / alpha);
+                            };
+                            pixel[0] = blend(color.r, pixel[0]);
+                            pixel[1] = blend(color.g, pixel[1]);
+                            pixel[2] = blend(color.b, pixel[2]);
+                            pixel[3] = Channel(alpha);
+                            sample.selected = selected;
+                            continue;
+                        }
                         sample = {depth, selected};
                         pixel[0] = Channel(color.r);
                         pixel[1] = Channel(color.g);
@@ -222,6 +237,14 @@ bool WorldRenderer::DrawSoftware()
                 }
             }
         }
+    };
+    for (const auto& range : draws)
+        for (size_t i = range.first; i < range.end; i += 3) rasterize(i, range.material, range.selected);
+    for (size_t i = outlineStart; i < foregroundStart; i += 3) rasterize(i, nullptr, false);
+    if (foregroundStart < vertices.size())
+    {
+        std::fill(softwareDepth.begin(), softwareDepth.end(), Sample{});
+        for (size_t i = foregroundStart; i < vertices.size(); i += 3) rasterize(i, nullptr, false);
     }
 
     SDL_UnlockTexture(colorTarget);

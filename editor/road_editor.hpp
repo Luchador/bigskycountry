@@ -89,11 +89,12 @@ private:
     bool GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const;
     void UpdateGizmoHover(const WorldDocument& world, const FreeCamera& camera, const GizmoPlacement& placement);
     void SelectAnchor(const WorldDocument& world, IntersectionAnchor anchor, bool subtract);
-    bool BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer);
+    bool BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer, bool snap);
     void UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer);
     void FinishAnchorRoad(WorldDocument& world);
     void FillSelection(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
+    void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);

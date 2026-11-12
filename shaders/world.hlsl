@@ -55,6 +55,12 @@ void Illuminate(float3 direction, float3 radiance, float3 normal, float3 eye, fl
     }
 }
 
+float3 ToDisplay(float3 c)
+{
+    c = saturate(c);
+    return lerp(12.92 * c, 1.055 * pow(c, 1.0 / 2.4) - 0.055, step(0.0031308, c));
+}
+
 // Keep the software renderer's WorldLighting::Shade in sync.
 float3 ShadeSurface(float3 normal, float3 view, float3 base, float3 orm, float3 emission)
 {
@@ -63,9 +69,9 @@ float3 ShadeSurface(float3 normal, float3 view, float3 base, float3 orm, float3 
     float3 eye = UnitVector(view);
     Illuminate(sunDirection.xyz, sunRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     Illuminate(moonDirection.xyz, moonRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
-    float3 c = saturate(emission + base * diffuse + lerp(0.08, base, orm.b) * specular);
+    float3 c = emission + base * diffuse + lerp(0.08, base, orm.b) * specular;
     // SDL composites the world into a display-encoded color target.
-    return lerp(12.92 * c, 1.055 * pow(c, 1.0 / 2.4) - 0.055, step(0.0031308, c));
+    return ToDisplay(c);
 }
 
 float4 PSMain(WorldFragment input) : SV_Target0
@@ -83,7 +89,7 @@ float4 WireframePS(WorldFragment input) : SV_Target0
     const float halfWidth = 1.0;
     bool onEdge = any(edge * edge <= halfWidth * halfWidth * (dx * dx + dy * dy));
     // Clear interiors to sky while writing depth and selection stencil as usual.
-    return float4(input.color.rgb, onEdge ? 1.0 : 0.0);
+    return onEdge ? float4(input.color.rgb, 1.0) : 0;
 }
 
 #ifdef __spirv__
@@ -104,11 +110,19 @@ BSC_COMBINED SamplerState emissiveSampler : register(s3, space2);
 BSC_COMBINED SamplerState opacitySampler : register(s4, space2);
 cbuffer MaterialProperties : register(b1, space3)
 {
-    uint alphaCutout;
+    float4 tint;
+    uint alphaCutout, unlit;
 };
 
 float4 MaterialPS(WorldFragment input) : SV_Target0
 {
+    if (unlit)
+    {
+        float alpha = opacityMap.Sample(opacitySampler, input.uv) * tint.a;
+        if (alpha <= 0) discard;
+        float3 c = emissiveMap.Sample(emissiveSampler, input.uv).rgb * tint.rgb;
+        return float4(ToDisplay(c), alpha);
+    }
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
     if (alphaCutout) clip(base.a * opacityMap.Sample(opacitySampler, input.uv) - 0.5);
     float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;

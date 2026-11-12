@@ -11,7 +11,14 @@ namespace
 {
     unsigned materialRevision = 0, imageRevision = 0;
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
-    constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity"};
+    constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity", "translucency"};
+
+    bool ReadUnit(const cJSON* value, float& channel)
+    {
+        if (!cJSON_IsNumber(value) || !(value->valuedouble >= 0 && value->valuedouble <= 1)) return false;
+        channel = static_cast<float>(value->valuedouble);
+        return true;
+    }
 
     Json ReadDocument(const std::string& file)
     {
@@ -76,6 +83,14 @@ bool Material::Load(const std::string& file)
             return SDL_SetError("Unsupported material type: %s", value);
         material.type = static_cast<MaterialType>(match - materialTypes.begin());
     }
+    if (const auto* tint = cJSON_GetObjectItemCaseSensitive(json.get(), "emissiveTint"))
+    {
+        if (!cJSON_IsArray(tint) || cJSON_GetArraySize(tint) != 3) return SDL_SetError("Invalid emissive tint");
+        for (int i = 0; i < 3; ++i)
+            if (!ReadUnit(cJSON_GetArrayItem(tint, i), material.emissiveTint[i])) return SDL_SetError("Invalid emissive tint");
+    }
+    if (const auto* factor = cJSON_GetObjectItemCaseSensitive(json.get(), "translucencyMultiplier"))
+        if (!ReadUnit(factor, material.translucency)) return SDL_SetError("Invalid translucency multiplier");
     const auto* maps = cJSON_GetObjectItemCaseSensitive(json.get(), "textures");
     if (maps && !cJSON_IsObject(maps))
         return SDL_SetError("Invalid material texture list");
@@ -101,6 +116,17 @@ bool Material::Save(const std::string& file) const
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "type");
     if (!cJSON_AddStringToObject(json.get(), "type", materialTypes.at(static_cast<std::size_t>(type)).key))
         return SDL_OutOfMemory();
+    const auto unit = [](float v) { return v >= 0 && v <= 1; };
+    if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "emissiveTint");
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "translucencyMultiplier");
+    if (type == MaterialType::Unlit || emissiveTint != std::array{1.f, 1.f, 1.f} || translucency != 1)
+    {
+        Json tint(cJSON_CreateFloatArray(emissiveTint.data(), 3), cJSON_Delete);
+        if (!tint || !cJSON_AddItemToObject(json.get(), "emissiveTint", tint.get())) return SDL_OutOfMemory();
+        tint.release();
+        if (!cJSON_AddNumberToObject(json.get(), "translucencyMultiplier", translucency)) return SDL_OutOfMemory();
+    }
     auto* maps = cJSON_GetObjectItemCaseSensitive(json.get(), "textures");
     if (!maps)
         maps = cJSON_AddObjectToObject(json.get(), "textures");

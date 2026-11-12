@@ -10,6 +10,12 @@ public:
     bool Open(TextureCatalog& assets, const std::string& path);
     bool SetType(MaterialType type);
     bool SetTexture(MaterialSlot slot, const std::string& path);
+    bool SetTint(std::array<float, 3> color);
+    void PreviewTint(std::array<float, 3> color);
+    const std::array<float, 3>& Tint() const { return previewTint; }
+    void PreviewTranslucency(float value);
+    bool SetTranslucency(float value);
+    float Translucency() const { return previewFactor; }
     const Material& Current() const { return material; }
     bool Orbit(double deltaX, double deltaY, double viewportSpan);
     SDL_Surface* Preview(int pixelWidth, int pixelHeight);
@@ -22,6 +28,8 @@ private:
     TextureCatalog* catalog = nullptr;
     std::string path;
     Material material;
+    float previewFactor = 1;
+    std::array<float, 3> previewTint{1, 1, 1};
     double yaw = 0.0, pitch = 0.0;
     bool previewDirty = true;
     MaterialSurface preview{nullptr, SDL_DestroySurface};

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -18,29 +19,64 @@ namespace
         point.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
 
-    // Subdivide until the cubic deviates from its linear interpolation by at most 10 cm.
-    void SampleCubic(Vector3 a, Vector3 b, Vector3 c, Vector3 d, int depth, std::vector<Vector3>& samples,
-                     std::vector<Vector3>& tangents)
+    struct Cubic
     {
+        Vector3 a, b, c, d;
+    };
+
+    Cubic SegmentCurve(const RoadPoint& start, const RoadPoint& end, Vector3 startTangent, Vector3 endTangent)
+    {
+        const double chord = Math::Length(end.position - start.position);
+        return {start.position, start.position + startTangent * (chord * start.outgoingHandle),
+                end.position - endTangent * (chord * end.incomingHandle), end.position};
+    }
+
+    // De Casteljau subdivision gives the control polygons of both exact child curves.
+    std::pair<Cubic, Cubic> Split(const Cubic& curve, double t)
+    {
+        const auto lerp = [t](Vector3 a, Vector3 b) { return a + (b - a) * t; };
+        const auto [a, b, c, d] = curve;
+        const Vector3 ab = lerp(a, b), bc = lerp(b, c), cd = lerp(c, d);
+        const Vector3 abc = lerp(ab, bc), bcd = lerp(bc, cd);
+        const Vector3 middle = lerp(abc, bcd);
+        return {{a, ab, abc, middle}, {middle, bcd, cd, d}};
+    }
+
+    template<typename Visit>
+    void SampleCubic(const Cubic& curve, double tolerance, int depth, double t0, double t1, const Visit& visit)
+    {
+        const auto& [a, b, c, d] = curve;
         const Vector3 chord = d - a;
         const double error = std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
 
-        if (error <= 0.1 || depth == 12)
+        if (error <= tolerance || depth == 12)
         {
-            samples.push_back(d);
             // The derivative at this subcurve's endpoint is parallel to its last control-polygon edge.
-            tangents.push_back(d - c);
+            visit(d, d - c, t1);
             return;
         }
 
-        const Vector3 ab = (a + b) * 0.5;
-        const Vector3 bc = (b + c) * 0.5;
-        const Vector3 cd = (c + d) * 0.5;
-        const Vector3 abc = (ab + bc) * 0.5;
-        const Vector3 bcd = (bc + cd) * 0.5;
-        const Vector3 middle = (abc + bcd) * 0.5;
-        SampleCubic(a, ab, abc, middle, depth + 1, samples, tangents);
-        SampleCubic(middle, bcd, cd, d, depth + 1, samples, tangents);
+        const auto [left, right] = Split(curve, 0.5);
+        const double middle = (t0 + t1) * 0.5;
+        SampleCubic(left, tolerance, depth + 1, t0, middle, visit);
+        SampleCubic(right, tolerance, depth + 1, middle, t1, visit);
+    }
+
+    double HalfLengthParameter(const Cubic& curve)
+    {
+        struct Sample { double distance, t; };
+        std::vector<Sample> samples{{0, 0}};
+        Vector3 previous = curve.a;
+        SampleCubic(curve, 0.001, 0, 0, 1, [&](Vector3 position, Vector3, double t)
+        {
+            samples.push_back({samples.back().distance + Math::Length(position - previous), t});
+            previous = position;
+        });
+        const double half = samples.back().distance * 0.5;
+        if (!(half > 0) || !std::isfinite(half)) return 0.5;
+        const auto next = std::ranges::lower_bound(samples, half, {}, &Sample::distance);
+        const auto& last = *(next - 1);
+        return std::lerp(last.t, next->t, (half - last.distance) / (next->distance - last.distance));
     }
 }
 
@@ -261,6 +297,57 @@ Road Road::Section(std::size_t first, std::size_t last) const
     return result;
 }
 
+bool Road::SubdivideSegments(const std::set<int>& segments)
+{
+    if (segments.empty() || *segments.begin() < 0 || static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size())
+        return false;
+
+    std::vector<RoadPoint> result;
+    result.reserve(points.size() + segments.size());
+    result.push_back(points.front());
+    // Automatic tangents can change at the original ends when their neighbors change.
+    std::vector<std::pair<std::size_t, Vector3>> originalTangents;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i)
+    {
+        RoadPoint end = points[i + 1];
+        if (!segments.contains(static_cast<int>(i)))
+        {
+            result.push_back(end);
+            continue;
+        }
+        RoadPoint& start = result.back();
+        RoadPoint middle{};
+        middle.position = start.position + (end.position - start.position) * 0.5;
+        middle.roll = start.roll + 0.5 * std::remainder(end.roll - start.roll, 2 * std::numbers::pi);
+        if (style.curved)
+        {
+            const Vector3 startTangent = Tangent(i), endTangent = Tangent(i + 1);
+            if (!start.heading && !segments.contains(static_cast<int>(i) - 1))
+                originalTangents.emplace_back(result.size() - 1, startTangent);
+            if (!end.heading)
+                originalTangents.emplace_back(result.size() + 1, endTangent);
+            const Cubic curve = SegmentCurve(start, end, startTangent, endTangent);
+            const auto [left, right] = Split(curve, HalfLengthParameter(curve));
+            const double leftChord = Math::Length(left.d - left.a), rightChord = Math::Length(right.d - right.a);
+            if (leftChord == 0 || rightChord == 0 || !std::isfinite(leftChord) || !std::isfinite(rightChord)) return false;
+            middle.position = left.d;
+            SetTangent(middle, right.b - left.c);
+            start.outgoingHandle = Math::Length(left.b - left.a) / leftChord;
+            middle.incomingHandle = Math::Length(left.d - left.c) / leftChord;
+            middle.outgoingHandle = Math::Length(right.b - right.a) / rightChord;
+            end.incomingHandle = Math::Length(right.d - right.c) / rightChord;
+        }
+        else if (middle.position == start.position || middle.position == end.position) return false;
+        result.push_back(middle);
+        result.push_back(end);
+    }
+    points = std::move(result);
+    for (const auto& [i, tangent] : originalTangents)
+        if (Math::Length(Tangent(i) - tangent) > 1e-12) SetTangent(points[i], tangent);
+    Rebuild();
+    return true;
+}
+
 bool Road::SetPose(Vector3 position, Vector3 angles)
 {
     if (!TransformControlPoints(position, angles)) return false;
@@ -340,14 +427,17 @@ void Road::Rebuild()
 
     for (std::size_t i = 1; i < points.size(); ++i)
     {
-        const Vector3 a = points[i - 1].position;
         const Vector3 b = points[i].position;
 
         if (style.curved)
         {
-            const double arm = Math::Length(b - a) / 3.0;
             const Vector3 endTangent = Tangent(i);
-            SampleCubic(a, a + Tangent(i - 1) * arm, b - endTangent * arm, b, 0, centerline, tangents);
+            const Cubic curve = SegmentCurve(points[i - 1], points[i], tangents.back(), endTangent);
+            SampleCubic(curve, 0.1, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double)
+            {
+                centerline.push_back(position);
+                tangents.push_back(tangent);
+            });
             // Preserve the authored direction even when a segment has zero length.
             tangents.back() = endTangent;
         }

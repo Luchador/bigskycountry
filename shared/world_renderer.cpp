@@ -180,6 +180,69 @@ void WorldRenderer::WireframeSubmittedGeometry()
     }
 }
 
+void WorldRenderer::BuildDrawRanges()
+{
+    draws.clear();
+    struct TranslucentTriangle { float depth; DrawRange draw; };
+    std::vector<TranslucentTriangle> transparent;
+    std::vector<VertexRange> translucentSpans;
+    auto material = materialRanges.begin();
+    auto selection = selectedRanges.begin();
+    for (size_t first = 0; first < outlineStart; )
+    {
+        size_t end = outlineStart;
+        if (first < wireframeEnd) end = std::min(end, wireframeEnd);
+        while (material != materialRanges.end() && material->end <= first) ++material;
+        while (selection != selectedRanges.end() && selection->end <= first) ++selection;
+        const SurfaceMaterial* surface = nullptr;
+        if (!wireframeEnd && material != materialRanges.end())
+        {
+            const bool inside = first >= material->first;
+            end = std::min(end, inside ? material->end : material->first);
+            if (inside) surface = material->material;
+        }
+        const bool selected = selection != selectedRanges.end() && first >= selection->first;
+        if (selection != selectedRanges.end()) end = std::min(end, selected ? selection->end : selection->first);
+        if (surface && surface->type == MaterialType::Unlit)
+        {
+            translucentSpans.push_back({first, end});
+            for (size_t i = first; i < end; i += 3)
+            {
+                const float depth = vertices[i].w + vertices[i + 1].w + vertices[i + 2].w;
+                transparent.push_back({depth, {i, i + 3, surface, selected}});
+            }
+        }
+        else draws.push_back({first, end, surface, selected});
+        first = end;
+    }
+    if (transparent.empty()) return;
+    // Clip W is camera-space depth. Blend far to near after every opaque surface.
+    std::stable_sort(transparent.begin(), transparent.end(), [](const auto& a, const auto& b) { return a.depth > b.depth; });
+
+    // Pack sorted triangles into the original transparent spans so a large translucent
+    // road or terrain mesh can still be drawn in batches. Opaque and overlay vertices stay in place.
+    std::vector<WorldDepthVertex> sortedVertices;
+    sortedVertices.reserve(transparent.size() * 3);
+    for (const auto& triangle : transparent)
+    {
+        sortedVertices.insert(sortedVertices.end(), vertices.begin() + triangle.draw.first, vertices.begin() + triangle.draw.end);
+    }
+    size_t triangle = 0;
+    for (const auto& span : translucentSpans)
+    {
+        std::copy_n(sortedVertices.begin() + triangle * 3, span.end - span.first, vertices.begin() + span.first);
+        for (size_t first = span.first; first < span.end; first += 3)
+        {
+            const auto& draw = transparent[triangle++].draw;
+            if (!draws.empty() && draws.back().end == first && draws.back().material == draw.material &&
+                draws.back().selected == draw.selected)
+                draws.back().end = first + 3;
+            else
+                draws.push_back({first, first + 3, draw.material, draw.selected});
+        }
+    }
+}
+
 bool WorldRenderer::End()
 {
     if (vertices.empty() || viewport.w <= 0 || viewport.h <= 0)
@@ -195,6 +258,7 @@ bool WorldRenderer::End()
     {
         for (auto& range : materialRanges) range.material = materialCache.Get(range.path, device);
     }
+    BuildDrawRanges();
     return (device ? DrawGPU() : DrawSoftware()) &&
            SDL_RenderTexture(renderer, colorTarget, nullptr, &dest);
 }

@@ -9,6 +9,7 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -98,6 +99,9 @@ struct RoadPoint
     double pitch = 0.0; // Radians above the XZ plane for a manual tangent.
     double roll = 0.0; // Radians about the tangent; orients the control point's local Y/Z axes.
     std::optional<IntersectionAnchor> anchor; // Only endpoints can be attached.
+    // Bézier handle lengths as fractions of the adjacent chords.
+    double incomingHandle = 1.0 / 3.0;
+    double outgoingHandle = 1.0 / 3.0;
 };
 
 struct RoadGeometry
@@ -158,6 +162,7 @@ struct Road : RoadGeometry
     bool TransformControlPoints(Vector3 position, Vector3 angles); // Authored data only, for batch edits.
     // An independent run of surviving segments, including both endpoint control points.
     Road Section(std::size_t first, std::size_t last) const;
+    bool SubdivideSegments(const std::set<int>& segments);
     void Rebuild();
 
 private:

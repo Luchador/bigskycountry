@@ -14,6 +14,8 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     path = relative;
     yaw = pitch = 0.0;
     material = std::move(next);
+    previewFactor = material.translucency;
+    previewTint = material.emissiveTint;
     previewDirty = true;
     return true;
 }
@@ -38,7 +40,7 @@ bool MaterialEditor::SetType(MaterialType type)
 
 bool MaterialEditor::SetTexture(MaterialSlot slot, const std::string& relative)
 {
-    if (!catalog)
+    if (!catalog || !material.Uses(slot))
         return false;
     const auto index = static_cast<std::size_t>(slot);
     if (!relative.empty() && !catalog->Image(relative))
@@ -48,6 +50,38 @@ bool MaterialEditor::SetTexture(MaterialSlot slot, const std::string& relative)
     auto next = material;
     next.textures[index] = relative;
     return Commit(std::move(next));
+}
+
+bool MaterialEditor::SetTint(std::array<float, 3> color)
+{
+    auto next = material;
+    next.emissiveTint = color;
+    const bool saved = color == material.emissiveTint || Commit(std::move(next));
+    PreviewTint(material.emissiveTint);
+    return saved;
+}
+
+void MaterialEditor::PreviewTint(std::array<float, 3> color)
+{
+    if (color == previewTint) return;
+    previewTint = color;
+    previewDirty = true;
+}
+
+void MaterialEditor::PreviewTranslucency(float value)
+{
+    if (value == previewFactor) return;
+    previewFactor = value;
+    previewDirty = true;
+}
+
+bool MaterialEditor::SetTranslucency(float value)
+{
+    auto next = material;
+    next.translucency = value;
+    const bool saved = value == material.translucency || Commit(std::move(next));
+    PreviewTranslucency(material.translucency);
+    return saved;
 }
 
 bool MaterialEditor::Orbit(double deltaX, double deltaY, double viewportSpan)
@@ -85,5 +119,5 @@ SDL_Surface* MaterialEditor::Preview(int pixelWidth, int pixelHeight)
 
 SDL_Surface* MaterialEditor::Thumbnail(std::size_t slot)
 {
-    return catalog ? catalog->Thumbnail(material.textures.at(slot)) : nullptr;
+    return catalog && material.Uses(static_cast<MaterialSlot>(slot)) ? catalog->Thumbnail(material.textures.at(slot)) : nullptr;
 }

@@ -18,6 +18,7 @@ private:
     static LRESULT CALLBACK PreviewInput(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
     void Layout();
     void Sync();
+    void SyncFactor();
     void Paint(const DRAWITEMSTRUCT& draw);
     MaterialEditor editor;
     HWND window = nullptr;

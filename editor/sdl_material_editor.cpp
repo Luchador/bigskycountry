@@ -10,18 +10,32 @@ namespace
         int windowWidth = 0, windowHeight = 0;
         SDL_FRect view, type;
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
-        explicit Layout(SDL_Window* window)
+        SDL_FRect tint{};
+        std::array<SDL_FRect, 4> sliders{};
+        Layout(SDL_Window* window, const Material& material)
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
             const float split = float(windowWidth) - 224;
             view = {0, 0, split, float(windowHeight)};
             type = {split + 10, 32, 204, 25};
-            const float step = std::min(80.f, (windowHeight - 70.f) / materialSlotCount);
+            const bool unlit = material.type == MaterialType::Unlit;
+            const float step = unlit ? std::min(80.f, (windowHeight - 210.f) / 2) : std::min(80.f, (windowHeight - 70.f) / 5);
+            float y = 68;
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
-                slots[i] = {split + 10, 68 + i * step, 160, step - 5};
+                if (!material.Uses(static_cast<MaterialSlot>(i))) continue;
+                slots[i] = {split + 10, y, 160, step - 5};
                 clear[i] = {split + 173, slots[i].y + (step - 27) * .5f, 41, 22};
+                y += step;
+                if (unlit && i == static_cast<size_t>(MaterialSlot::Emissive))
+                {
+                    tint = {split + 159, y, 55, 16};
+                    y += 20;
+                    for (int c = 0; c < 3; ++c, y += 17) sliders[c] = {split + 32, y, 182, 15};
+                    y += 4;
+                }
             }
+            sliders[3] = {split + 10, y + 18, 204, 18};
         }
         std::optional<MaterialSlot> Slot(SDL_FPoint p) const
         {
@@ -47,6 +61,7 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
 {
     if (!editor.Open(catalog, path))
         return false;
+    if (window) FinishDrag();
     if (!window)
     {
         const auto props = SDL_CreateProperties();
@@ -82,9 +97,16 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
 
 void SdlMaterialEditor::FinishDrag()
 {
-    if (orbitPoint || !dragged.empty())
+    if (orbitPoint || activeSlider || !dragged.empty())
         SDL_CaptureMouse(false);
     orbitPoint.reset();
+    if (activeSlider)
+    {
+        editor.PreviewTint(editor.Current().emissiveTint);
+        editor.PreviewTranslucency(editor.Current().translucency);
+        sphereDirty = true;
+        activeSlider.reset();
+    }
     dragged.clear();
     hover.reset();
     dirty = true;
@@ -125,6 +147,22 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
         return false;
     auto* source = SDL_GetWindowFromEvent(&e);
     const bool own = source == window;
+    if (activeSlider)
+    {
+        const bool release = e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT;
+        if (own && (e.type == SDL_EVENT_MOUSE_MOTION || release))
+        {
+            if (release || (e.motion.state & SDL_BUTTON_LMASK)) AdjustSlider(release ? e.button.x : e.motion.x, release);
+            if (release || !(e.motion.state & SDL_BUTTON_LMASK)) FinishDrag();
+            return true;
+        }
+        if ((own && e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) ||
+            (own && e.type == SDL_EVENT_WINDOW_FOCUS_LOST) || e.type == SDL_EVENT_WILL_ENTER_BACKGROUND || release)
+        {
+            FinishDrag();
+            return own;
+        }
+    }
     if (orbitPoint)
     {
         const bool released = e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT;
@@ -133,7 +171,7 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
             if (released || (e.motion.state & SDL_BUTTON_LMASK))
             {
                 const SDL_FPoint point = released ? SDL_FPoint{e.button.x, e.button.y} : SDL_FPoint{e.motion.x, e.motion.y};
-                const auto view = Layout(window).view;
+                const auto view = Layout(window, editor.Current()).view;
                 if (editor.Orbit(point.x - orbitPoint->x, point.y - orbitPoint->y, std::min(view.w, view.h)))
                     sphereDirty = true;
                 orbitPoint = point;
@@ -171,7 +209,7 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
                 p.x += sx - wx;
                 p.y += sy - wy;
             }
-            const auto slot = Layout(window).Slot(p);
+            const auto slot = Layout(window, editor.Current()).Slot(p);
             if (slot != hover)
             {
                 hover = slot;
@@ -213,7 +251,7 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
     {
         const SDL_FPoint p{e.button.x, e.button.y};
-        const Layout layout(window);
+        const Layout layout(window, editor.Current());
         dirty = true;
         if (typeMenu)
         {
@@ -233,11 +271,43 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
         else if (SDL_PointInRectFloat(&p, &layout.type))
             typeMenu = true;
         else
+        {
+            if (editor.Current().type == MaterialType::Unlit)
+                for (int i = 0; i < int(layout.sliders.size()); ++i)
+                    if (SDL_PointInRectFloat(&p, &layout.sliders[i]))
+                    {
+                        activeSlider = i;
+                        SDL_CaptureMouse(true);
+                        AdjustSlider(p.x, false);
+                        return true;
+                    }
             for (std::size_t i = 0; i < layout.clear.size(); ++i)
                 if (SDL_PointInRectFloat(&p, &layout.clear[i]) && !editor.Current().textures[i].empty())
                     Report(editor.SetTexture(static_cast<MaterialSlot>(i), {}));
+        }
     }
     return true;
+}
+
+void SdlMaterialEditor::AdjustSlider(float x, bool commit)
+{
+    const int index = *activeSlider;
+    const auto bar = Layout(window, editor.Current()).sliders[index];
+    const float fraction = std::clamp((x - bar.x) / (bar.w - 1), 0.f, 1.f);
+    if (index == 3)
+    {
+        const float value = std::round(fraction * 100) / 100;
+        if (commit) Report(editor.SetTranslucency(value));
+        else editor.PreviewTranslucency(value);
+    }
+    else
+    {
+        auto tint = editor.Tint();
+        tint[index] = std::round(fraction * 255) / 255;
+        if (commit) Report(editor.SetTint(tint));
+        else editor.PreviewTint(tint);
+    }
+    dirty = sphereDirty = true;
 }
 
 bool SdlMaterialEditor::UpdateImages(int pixelWidth, int pixelHeight)
@@ -272,7 +342,7 @@ bool SdlMaterialEditor::Draw()
         imagesDirty = true;
     if (!dirty && !imagesDirty && !sphereDirty)
         return true;
-    const Layout layout(window);
+    const Layout layout(window, editor.Current());
     int outputWidth, outputHeight;
     if (!SDL_GetRenderOutputSize(renderer, &outputWidth, &outputHeight)) return false;
     if (layout.view.w <= 0 || layout.windowHeight <= 0 || outputWidth <= 0 || outputHeight <= 0) return true;
@@ -297,6 +367,7 @@ bool SdlMaterialEditor::Draw()
         return false;
     for (std::size_t i = 0; i < thumbs.size(); ++i)
     {
+        if (!editor.Current().Uses(static_cast<MaterialSlot>(i))) continue;
         const auto r = layout.slots[i], c = layout.clear[i];
         const float sz = std::min(48.f, r.h - 8);
         const SDL_FRect image{r.x + 4, r.y + (r.h - sz) / 2, sz, sz};
@@ -314,6 +385,25 @@ bool SdlMaterialEditor::Draw()
             return false;
         if (!path.empty() && (!Fill(renderer, c, button) || !Text(renderer, c.x + 1, c.y + 7, "Clear", text)))
             return false;
+    }
+    if (editor.Current().type == MaterialType::Unlit)
+    {
+        const auto& color = editor.Tint();
+        const auto byte = [](float c) { return static_cast<Uint8>(std::lround(c * 255)); };
+        if (!Text(renderer, layout.type.x, layout.tint.y + 4, "Emissive tint", text) ||
+            !Fill(renderer, layout.tint, {byte(color[0]), byte(color[1]), byte(color[2]), 255})) return false;
+        char label[40];
+        SDL_snprintf(label, sizeof(label), "Translucency %.2f", editor.Translucency());
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto bar = layout.sliders[i];
+            const bool factor = i == 3;
+            const float value = factor ? editor.Translucency() : color[i];
+            if (!Text(renderer, layout.type.x, factor ? bar.y - 16 : bar.y + 3,
+                      factor ? label : std::string(1, "RGB"[i]), text) ||
+                !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
+                !Fill(renderer, {bar.x + value * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
+        }
     }
     if (typeMenu)
         for (int i = 0; i < int(materialTypes.size()); ++i)

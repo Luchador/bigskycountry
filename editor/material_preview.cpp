@@ -1,6 +1,7 @@
 #include "material_editor.hpp"
 #include "editor_theme.hpp"
 #include "mesh.hpp"
+#include "world_lighting.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -109,14 +110,17 @@ namespace
             }
         }
 
-        Uint8 Encode(double radiance) const
+        Uint8 EncodeLinear(double mapped) const
         {
-            const double x = std::max(0., radiance);
-            const double mapped = x / (1 + x);
             // Each bin spans less than one 8-bit sRGB step. One threshold comparison
             // gives the exact rounded code without three pow calls per shaded pixel.
             const auto c = code[std::min(int(mapped * bins), bins - 1)];
             return static_cast<Uint8>(c + (mapped >= nextCode[c]));
+        }
+        Uint8 Encode(double radiance) const
+        {
+            const double x = std::max(0., radiance);
+            return EncodeLinear(x / (1 + x));
         }
     };
     const DisplayTransfer display;
@@ -124,7 +128,9 @@ namespace
     struct Shader
     {
         SDL_Surface *base, *normal, *orm, *emissive, *opacity;
-        bool cutout;
+        MaterialType type;
+        SDL_FColor tint;
+        float factor;
         Vector3 toEye;
         const Vector3 light = Math::Normalize({-.48, .68, .72});
         const Vector3 half = Math::Normalize(light + toEye);
@@ -132,8 +138,21 @@ namespace
 
         void Shade(Uint8* pixel, Vector3 n, double u, double v) const
         {
+            if (type == MaterialType::Unlit)
+            {
+                const auto glow = Sample<3, true>(emissive, u, v, {1, 1, 1, 1});
+                const float alpha = factor * Sample<1>(opacity, u, v, {1, 1, 1, 1}).channel[0];
+                constexpr auto bg = EditorTheme::field;
+                const auto blend = [alpha](Uint8 background, Uint8 emission) {
+                    return static_cast<Uint8>(std::lerp(float(background), float(emission), alpha) + .5f);
+                };
+                pixel[2] = blend(bg.r, display.EncodeLinear(glow.channel[0] * tint.r));
+                pixel[1] = blend(bg.g, display.EncodeLinear(glow.channel[1] * tint.g));
+                pixel[0] = blend(bg.b, display.EncodeLinear(glow.channel[2] * tint.b));
+                return;
+            }
             const auto albedo = Sample<4, true>(base, u, v, {.48f, .48f, .48f, 1});
-            if (cutout && albedo.channel[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1}).channel[0] < .5f)
+            if (type == MaterialType::AlphaCutout && albedo.channel[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1}).channel[0] < .5f)
                 return;
             n = UnitNormal(n);
             if (normal)
@@ -234,7 +253,7 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
 {
     const int width = target.w, height = target.h;
     const auto image = [&](MaterialSlot slot) {
-        return catalog->Image(material.textures[static_cast<std::size_t>(slot)]);
+        return material.Uses(slot) ? catalog->Image(material.textures[static_cast<std::size_t>(slot)]) : nullptr;
     };
     // Orthographic camera aimed at the center of the sphere. UVs and lighting stay in mesh space.
     const Vector3 right{std::cos(yaw), 0.0, -std::sin(yaw)};
@@ -244,9 +263,11 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
     const auto project = [&](Vector3 point) -> SDL_FPoint {
         return {float(width * .5 + radius * Math::Dot(point, right)), float(height * .5 - radius * Math::Dot(point, up))};
     };
+    const auto& tint = Tint();
     const Shader shader{image(MaterialSlot::BaseColor), image(MaterialSlot::Normal),
                         image(MaterialSlot::ORM),       image(MaterialSlot::Emissive),
-                        image(MaterialSlot::Opacity),   material.type == MaterialType::AlphaCutout, toEye};
+                        image(material.type == MaterialType::Unlit ? MaterialSlot::Translucency : MaterialSlot::Opacity),
+                        material.type, Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), toEye};
     constexpr auto background = EditorTheme::field;
     SDL_FillSurfaceRect(&target, nullptr, SDL_MapSurfaceRGB(&target, background.r, background.g, background.b));
     static const Mesh sphere = BuildSphere();

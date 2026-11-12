@@ -805,7 +805,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     }
     if (closest && (shift || subtract))
     {
-        if (shift && !subtract && BeginAnchorRoad(world, *closest, cursor)) return;
+        if (shift && BeginAnchorRoad(world, *closest, cursor, subtract)) return;
         if (state.point < 0 && !state.anchorSelection)
         {
             state.PickElement({SceneKind::Intersection, closest->intersectionId}, shift, subtract);
@@ -1609,7 +1609,7 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
     status.clear();
 }
 
-bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer)
+bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor anchor, SDL_FPoint pointer, bool snap)
 {
     if (!state.InspectingAnchor(anchor)) return false;
     if (AnchorOccupied(world, anchor))
@@ -1622,6 +1622,7 @@ bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor 
     road.style = state.defaults;
     road.points.push_back(AttachedEndpoint(junction, anchor, true));
     anchorPress = pointer;
+    snapRotation = snap;
     drag = Drag::AnchorRoad;
     status.clear();
     return true;
@@ -1629,6 +1630,7 @@ bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor 
 
 void RoadEditor::UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer)
 {
+    mouse = pointer;
     dragChanged = false;
     const SDL_FPoint delta{pointer.x - anchorPress.x, pointer.y - anchorPress.y};
     if (std::hypot(delta.x, delta.y) < 4.0f || pointer.x < 0 || pointer.y < 0 ||
@@ -1636,9 +1638,17 @@ void RoadEditor::UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer)
 
     Road& road = *anchorRoad;
     const Vector3 origin = road.points.front().position;
-    const auto end = planView ? std::optional{origin + Vector3{delta.x / scale, 0, -delta.y / scale}}
-                              : DragAtElevation(camera, scene, origin, delta);
+    auto end = planView ? std::optional{origin + Vector3{delta.x / scale, 0, -delta.y / scale}}
+                        : DragAtElevation(camera, scene, origin, delta);
     if (!end || !ValidRoadSpan(road, origin, *end)) return;
+    if (snapRotation)
+    {
+        const Vector3 offset = *end - origin;
+        const double outward = *road.points.front().heading;
+        const double angle = outward + DragAngle::Snap(std::atan2(offset.z, offset.x) - outward, true);
+        const double radius = std::hypot(offset.x, offset.z);
+        *end = origin + Vector3{std::cos(angle) * radius, 0, std::sin(angle) * radius};
+    }
     if (road.points.size() == 1 || road.points.back().position != *end)
     {
         road.points.resize(2);
@@ -1777,7 +1787,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
-        if (shift && !subtract && BeginAnchorRoad(world, anchor, mouse)) return;
+        if (shift && BeginAnchorRoad(world, anchor, mouse, subtract)) return;
         if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
         else if (shift || subtract) state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
         else
@@ -1838,6 +1848,27 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         if (!shift && !subtract) state.SelectPoint(-1, -1);
         break;
     }
+}
+
+void RoadEditor::SubdivideSelection(WorldDocument& world)
+{
+    if (drag != Drag::None || EditingDraft() || state.selected < 0 || state.segments.empty()) return;
+    Road& road = world.roads.at(state.selected);
+    EditSnapshot before(state, &road);
+    if (!road.SubdivideSegments(state.segments))
+    {
+        status = "Cannot subdivide a segment with coincident endpoints";
+        return;
+    }
+    const auto segments = std::move(state.segments);
+    int inserted = 0;
+    for (int segment : segments)
+    {
+        const int point = segment + inserted + 1;
+        state.PickPoint(state.selected, point, inserted > 0, false);
+        ++inserted;
+    }
+    Commit(world, state.selected, std::move(before), &road);
 }
 
 void RoadEditor::DeleteSelection(WorldDocument& world)
@@ -2303,11 +2334,19 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
         (event.key.key == SDLK_LCTRL || event.key.key == SDLK_RCTRL) &&
-        (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate)))
+        (drag == Drag::AnchorRoad || drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate)))
     {
         snapRotation = (event.key.mod & SDL_KMOD_CTRL) != 0;
-        if (DraggingGizmo()) MoveGizmo(world, camera, mouse);
+        if (drag == Drag::AnchorRoad) UpdateAnchorRoad(camera, mouse);
+        else if (DraggingGizmo()) MoveGizmo(world, camera, mouse);
         else UpdatePlanDrag(world, mouse);
+        return EditorEvent::Handled;
+    }
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_Q && (event.key.mod & SDL_KMOD_CTRL) &&
+        !(event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI)) &&
+        ViewportFocused() && !SDL_GetWindowRelativeMouseMode(window))
+    {
+        if (!event.key.repeat) SubdivideSelection(world);
         return EditorEvent::Handled;
     }
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F && ViewportFocused() &&

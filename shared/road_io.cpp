@@ -24,6 +24,12 @@ namespace
         return std::isfinite(position.x) && std::isfinite(position.y) &&
                std::isfinite(position.z) && std::isfinite(heading) && std::isfinite(pitch);
     }
+
+    bool ValidHandles(const RoadPoint& point)
+    {
+        return std::isfinite(point.incomingHandle) && point.incomingHandle >= 0 &&
+               std::isfinite(point.outgoingHandle) && point.outgoingHandle >= 0;
+    }
 }
 
 namespace RoadIO
@@ -88,7 +94,7 @@ namespace RoadIO
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
-            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll))
+            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
             {
                 out.setstate(std::ios::failbit);
                 return;
@@ -105,7 +111,7 @@ namespace RoadIO
                 out << ' ' << p.anchor->intersectionId << ' ' << p.anchor->side;
             }
             else out << " 0";
-            out << '\n';
+            out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << '\n';
         }
     }
 
@@ -156,7 +162,8 @@ namespace RoadIO
                     p.anchor = anchor;
                 }
             }
-            if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll))
+            if (version >= 9) in >> p.incomingHandle >> p.outgoingHandle;
+            if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
             {
                 in.setstate(std::ios::failbit);
                 break;

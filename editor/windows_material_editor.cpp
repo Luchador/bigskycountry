@@ -4,6 +4,8 @@
 #include "panel_ids.h"
 #include <algorithm>
 #include <commctrl.h>
+#include <commdlg.h>
+#include <cmath>
 #include <windowsx.h>
 
 namespace
@@ -54,19 +56,34 @@ void WindowsMaterialEditor::Layout()
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
     const int top = Units(window, 42, false), clear = Units(window, 28, true);
-    const int step =
-        std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / int(materialSlotCount)));
+    const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / 5));
     MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 60, false), FALSE);
+    int row = 0;
+    const bool unlit = editor.Current().type == MaterialType::Unlit;
+    for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
+        ShowWindow(GetDlgItem(window, id), unlit ? SW_SHOWNA : SW_HIDE);
     for (int i = 0; i < int(materialSlotCount); ++i)
     {
-        const int y = top + step * i;
+        const bool visible = editor.Current().Uses(static_cast<MaterialSlot>(i));
+        ShowWindow(GetDlgItem(window, IDC_MAT_SLOT_FIRST + i), visible ? SW_SHOWNA : SW_HIDE);
+        ShowWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), visible ? SW_SHOWNA : SW_HIDE);
+        if (!visible) continue;
+        const int y = top + step * row++;
         MoveWindow(GetDlgItem(window, IDC_MAT_SLOT_FIRST + i), x, y, width - clear - pad, std::max(1, step - pad),
                    FALSE);
         const int h = Units(window, 15, false);
         MoveWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), x + width - clear, y + (step - pad - h) / 2, clear, h,
                    FALSE);
+        if (unlit && i == int(MaterialSlot::Emissive))
+            MoveWindow(GetDlgItem(window, IDC_MAT_TINT), x, top + step * row++, width, Units(window, 20, false), FALSE);
+    }
+    if (unlit)
+    {
+        const int y = top + step * row;
+        MoveWindow(GetDlgItem(window, IDC_MAT_FACTOR_LABEL), x, y, width, Units(window, 12, false), FALSE);
+        MoveWindow(GetDlgItem(window, IDC_MAT_FACTOR), x, y + Units(window, 14, false), width, Units(window, 18, false), FALSE);
     }
     // Erase the old control positions and paint the whole layout during the native resize loop.
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -83,7 +100,16 @@ void WindowsMaterialEditor::Sync()
         SetDlgItemTextW(window, IDC_MAT_SLOT_FIRST + i, name.c_str());
         EnableWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), !path.empty());
     }
-    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+    SyncFactor();
+    Layout();
+}
+
+void WindowsMaterialEditor::SyncFactor()
+{
+    wchar_t label[40];
+    swprintf(label, 40, L"Translucency %.2f", editor.Translucency());
+    SetDlgItemTextW(window, IDC_MAT_FACTOR_LABEL, label);
+    SendDlgItemMessageW(window, IDC_MAT_FACTOR, TBM_SETPOS, TRUE, std::lround(editor.Translucency() * 100));
 }
 
 void WindowsMaterialEditor::RefreshImages()
@@ -170,6 +196,22 @@ LRESULT CALLBACK WindowsMaterialEditor::PreviewInput(HWND view, UINT message, WP
 
 void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
 {
+    if (draw.CtlID == IDC_MAT_TINT)
+    {
+        RECT area = draw.rcItem;
+        FillRect(draw.hDC, &area, WindowsTheme::Brush(EditorTheme::button));
+        InflateRect(&area, -4, -3);
+        SetBkMode(draw.hDC, TRANSPARENT);
+        SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
+        DrawTextW(draw.hDC, L"Emissive tint", -1, &area, DT_SINGLELINE | DT_VCENTER);
+        RECT swatch = area;
+        swatch.left = swatch.right - Units(window, 32, true);
+        const auto& c = editor.Current().emissiveTint;
+        SetDCBrushColor(draw.hDC, RGB(std::lround(c[0]*255), std::lround(c[1]*255), std::lround(c[2]*255)));
+        FillRect(draw.hDC, &swatch, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        if (draw.itemState & ODS_FOCUS) DrawFocusRect(draw.hDC, &draw.rcItem);
+        return;
+    }
     if (draw.CtlID == IDC_MAT_PREVIEW)
     {
         const RECT& view = draw.rcItem;
@@ -207,6 +249,7 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         SetWindowLongPtrW(hwnd, DWLP_USER, l);
         self.window = hwnd;
         WindowsTheme::ApplyDialog(hwnd);
+        SendDlgItemMessageW(hwnd, IDC_MAT_FACTOR, TBM_SETRANGE, FALSE, MAKELPARAM(0, 100));
         for (const auto& type : materialTypes)
         {
             const auto label = WindowsNameDialog::Wide(type.label);
@@ -231,7 +274,36 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
     case WM_DRAWITEM:
         self->Paint(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
         return TRUE;
+    case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(l) != GetDlgItem(hwnd, IDC_MAT_FACTOR)) return FALSE;
+        {
+            const float value = SendDlgItemMessageW(hwnd, IDC_MAT_FACTOR, TBM_GETPOS, 0, 0) / 100.f;
+            if (LOWORD(w) == TB_THUMBTRACK) self->editor.PreviewTranslucency(value);
+            else if (!self->editor.SetTranslucency(value))
+                MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+            self->SyncFactor();
+            InvalidateRect(GetDlgItem(hwnd, IDC_MAT_PREVIEW), nullptr, FALSE);
+        }
+        return TRUE;
     case WM_COMMAND:
+        if (LOWORD(w) == IDC_MAT_TINT && HIWORD(w) == BN_CLICKED)
+        {
+            static COLORREF custom[16]{};
+            const auto& c = self->editor.Current().emissiveTint;
+            CHOOSECOLORW picker{sizeof(picker)};
+            picker.hwndOwner = hwnd;
+            picker.lpCustColors = custom;
+            picker.rgbResult = RGB(std::lround(c[0]*255), std::lround(c[1]*255), std::lround(c[2]*255));
+            picker.Flags = CC_FULLOPEN | CC_RGBINIT;
+            if (ChooseColorW(&picker))
+            {
+                const auto rgb = picker.rgbResult;
+                if (!self->editor.SetTint({GetRValue(rgb)/255.f, GetGValue(rgb)/255.f, GetBValue(rgb)/255.f}))
+                    MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+                self->Sync();
+            }
+            return TRUE;
+        }
         if (LOWORD(w) == IDC_MAT_TYPE && HIWORD(w) == CBN_SELCHANGE)
         {
             const auto i = SendDlgItemMessageW(hwnd, IDC_MAT_TYPE, CB_GETCURSEL, 0, 0);

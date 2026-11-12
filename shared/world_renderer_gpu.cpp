@@ -69,6 +69,7 @@ WorldRenderer::~WorldRenderer()
     {
         SDL_ReleaseGPUGraphicsPipeline(device, surfacePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, translucentPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
     }
@@ -149,10 +150,24 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, materialSlotCount, 2);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount, 2);
     }
 
     if (texturedPipeline)
+    {
+        // Accumulate premultiplied color in the initially transparent world target.
+        auto& blend = color.blend_state;
+        blend.enable_blend = true;
+        blend.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+        blend.dst_color_blendfactor = blend.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+        blend.color_blend_op = blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+        ds.enable_depth_write = false;
+        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount, 2);
+        color.blend_state = {};
+        ds.enable_depth_write = true;
+    }
+    if (translucentPipeline)
     {
         wireframePipeline = materialPipeline("WireframePS", wireframe_frag_dxil, wireframe_frag_spirv, 0);
     }
@@ -177,6 +192,11 @@ bool WorldRenderer::CreatePipelines()
         {
             SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
             wireframePipeline = nullptr;
+        }
+        if (translucentPipeline)
+        {
+            SDL_ReleaseGPUGraphicsPipeline(device, translucentPipeline);
+            translucentPipeline = nullptr;
         }
         if (texturedPipeline)
         {
@@ -221,7 +241,7 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         return false;
     }
 
-    if (!SDL_SetTextureBlendMode(color, SDL_BLENDMODE_BLEND) || !SDL_SetTextureScaleMode(color, SDL_SCALEMODE_NEAREST))
+    if (!SDL_SetTextureBlendMode(color, device ? SDL_BLENDMODE_BLEND_PREMULTIPLIED : SDL_BLENDMODE_BLEND) || !SDL_SetTextureScaleMode(color, SDL_SCALEMODE_NEAREST))
     {
         SDL_DestroyTexture(color);
         return false;
@@ -377,45 +397,23 @@ bool WorldRenderer::DrawGPU()
         }
     };
 
-    auto selected = selectedRanges.begin();
-    const auto drawSurface = [&](size_t first, size_t end)
+    SDL_GPUGraphicsPipeline* bound = surfacePipeline;
+    const SurfaceMaterial* boundMaterial = nullptr;
+    for (const auto& range : draws)
     {
-        // A selection can span material draws, and a draw can span several selections.
-        while (selected != selectedRanges.end() && selected->first < end)
+        auto* pipeline = surfacePipeline;
+        if (range.first < wireframeEnd) pipeline = wireframePipeline;
+        else if (range.material)
+            pipeline = range.material->type == MaterialType::Unlit ? translucentPipeline : texturedPipeline;
+        if (pipeline != bound)
         {
-            draw(first, selected->first, 0);
-            draw(std::max(first, selected->first), std::min(end, selected->end), 1);
-            if (end < selected->end) return;
-            first = selected->end;
-            ++selected;
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            bound = pipeline;
         }
-        draw(first, end, 0);
-    };
-
-    size_t cursor = 0;
-
-    if (wireframeEnd)
-    {
-        SDL_BindGPUGraphicsPipeline(pass, wireframePipeline);
-        drawSurface(0, wireframeEnd);
-        SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
-        cursor = wireframeEnd;
+        if (range.material && range.material != boundMaterial) materialCache.Bind(*range.material, commands, pass);
+        boundMaterial = range.material;
+        draw(range.first, range.end, range.selected);
     }
-    else
-    {
-        for (const auto& range : materialRanges)
-        {
-            if (!range.material) continue;
-            drawSurface(cursor, range.first);
-            SDL_BindGPUGraphicsPipeline(pass, texturedPipeline);
-            materialCache.Bind(*range.material, commands, pass);
-            drawSurface(range.first, range.end);
-            SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
-            cursor = range.end;
-        }
-    }
-
-    drawSurface(cursor, outlineStart);
 
     if (outlineStart < foregroundStart)
     {

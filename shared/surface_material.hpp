@@ -17,8 +17,10 @@ struct SurfaceMaterialTexture
 struct SurfaceMaterial
 {
     static constexpr double tileMeters = 4.0;
+    static constexpr unsigned shaderMapCount = 5; // The fifth binding carries opacity or translucency.
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
+    SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     SDL_FColor Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
                      Vector3 tangent, float handedness, Vector3 view) const;
 };
@@ -36,7 +38,7 @@ public:
 
 private:
     void ClearTextures();
-    const SurfaceMaterialTexture* Map(const std::string& path, MaterialSlot slot);
+    const SurfaceMaterialTexture* Map(const std::string& path, MaterialSlot slot, bool whiteEmission);
     const AssetRoot location;
     const std::string root;
     SDL_GPUDevice* device = nullptr;

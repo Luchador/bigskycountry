@@ -62,6 +62,7 @@ private:
     bool CreatePipelines();
     bool DrawGPU();
     bool DrawSoftware();
+    void BuildDrawRanges();
 
     void SubmitMaterialTriangle(const std::array<Vector3, 3>& points, const std::array<SDL_FColor, 3>& colors,
                                 const std::array<SDL_FPoint, 3>& uv, const std::array<Vector3, 3>* smoothNormals = nullptr);
@@ -80,6 +81,13 @@ private:
         const SurfaceMaterial* material = nullptr;
     };
     std::vector<MaterialRange> materialRanges;
+    struct DrawRange
+    {
+        std::size_t first, end;
+        const SurfaceMaterial* material;
+        bool selected;
+    };
+    std::vector<DrawRange> draws;
     SurfaceMaterialCache materialCache;
     WorldLighting lights{};
     bool lightGeometry = false;
@@ -94,6 +102,7 @@ private:
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
     SDL_GPUGraphicsPipeline* texturedPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* translucentPipeline = nullptr;
     SDL_GPUGraphicsPipeline* wireframePipeline = nullptr;
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;
     SDL_GPUBuffer* vertexBuffer = nullptr;
