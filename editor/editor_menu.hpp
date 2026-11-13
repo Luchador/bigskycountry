@@ -3,7 +3,9 @@
 #include <SDL3/SDL.h>
 #include <optional>
 
-enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateMarker, CreateIntersection };
+enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateMarker, CreateIntersection,
+                           CreateExitRamp, CreateEntranceRamp, ConnectRamp, SetRampTaper };
+struct RampMenuOptions { bool exit = false, entrance = false, connect = false, taper = false; };
 
 class EditorMenu
 {
@@ -12,7 +14,7 @@ public:
     static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
 #endif
     bool Attach(SDL_Window* window);
-    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection);
+    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, RampMenuOptions ramps);
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -34,6 +36,7 @@ private:
     void* editMenu = nullptr;
     void* viewMenu = nullptr;
 #else
+    RampMenuOptions rampOptions;
     bool intersectionEnabled = true;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;

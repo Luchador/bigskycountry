@@ -107,6 +107,8 @@ struct EditSnapshot
     std::optional<ObjectTransform> meshTransform;
     std::optional<RoadGroupPose> roadGroup;
     std::map<int, RoadProperties> roadProperties;
+    // Additional authored points changed by planting a ramp station or disconnecting an end.
+    std::map<int, std::vector<RoadPoint>> connectedRoadPoints; // Stable road ID.
     struct TerrainPlacement
     {
         std::string modelPath;

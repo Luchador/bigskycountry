@@ -148,7 +148,11 @@ namespace
                 }
             }
 
-            if (roadTool) world.RefreshTerrainFills();
+            if (roadTool)
+            {
+                world.RefreshRampConnections();
+                world.RefreshTerrainFills();
+            }
             const Uint64 now = SDL_GetTicksNS();
             const Uint64 elapsedNanoseconds = now - previousTime;
             previousTime = now;

@@ -171,6 +171,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
             return {};
         }
         const RoadPoint& point = road->points[state.point];
+        if (point.ramp) return {};
         auto placement = RoadOverlay::PointPlacement(point.position, camera, scene);
         if (placement && gizmo.settings.space == GizmoSpace::Local)
         {
@@ -237,6 +238,11 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera)
 {
+    if (pendingRamp)
+    {
+        overlay.DrawDirection(renderer, pendingRamp->preview, camera, scene);
+        return;
+    }
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world))
     {
@@ -394,6 +400,133 @@ void RoadEditor::Commit(WorldDocument& world, int roadIndex, EditSnapshot before
     }
 }
 
+std::optional<RampPlan> RoadEditor::PrepareRamp(EditorCommand command, const WorldDocument& world) const
+{
+    if (!roadMenuTarget || !roadMenuTarget->rampSite) return {};
+    const auto& target = *roadMenuTarget;
+    if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return {};
+    const auto& host = world.roads[target.index];
+    if (host.revision != target.revision) return {};
+    auto site = *target.rampSite;
+    RoadStyle style;
+    style.oneWay = true;
+    style.SetLaneCount(1);
+    bool exit = command == EditorCommand::CreateExitRamp;
+    std::optional<RampLink> replacing;
+    double length = RampLink{}.length;
+    if (command == EditorCommand::ConnectRamp || command == EditorCommand::SetRampTaper)
+    {
+        const Road* ramp = Selected(world);
+        if (!ramp || ramp == &host || ramp->points.size() < 2 || ramp->style.IsDivided() ||
+            (!ramp->style.oneWay && ramp->style.GetLaneCount() != 1) || !state.additionalPoints.empty() ||
+            (state.point != 0 && state.point != static_cast<int>(ramp->points.size()) - 1)) return {};
+        const auto& point = ramp->points[state.point];
+        if (point.anchor) return {};
+        exit = state.point == 0;
+        style = ramp->style;
+        style.oneWay = true;
+        replacing = point.ramp;
+        if (replacing) length = replacing->length;
+        if (command == EditorCommand::SetRampTaper)
+        {
+            if (!replacing || site.side != replacing->side) return {};
+            const auto amount = RampTaperLength(host, *replacing, exit, target.surfaceHit);
+            if (!amount) return {};
+            const auto knot = std::ranges::find(host.points, replacing->station, &RoadPoint::rampStation);
+            const int i = static_cast<int>(knot - host.points.begin());
+            site = i + 1 < static_cast<int>(host.points.size()) ? RampSite{i, site.side, 0} : RampSite{i - 1, site.side, 1};
+            length = *amount;
+        }
+    }
+    auto plan = PlanRamp(host, site, world.NextRampStationId(), style, exit, length, replacing);
+    if (plan && command == EditorCommand::ConnectRamp)
+    {
+        const Road& ramp = world.roads[state.selected];
+        const auto& neighbor = ramp.points[exit ? 1 : ramp.points.size() - 2];
+        if (!ValidRoadSpan(ramp, plan->seam.center, neighbor.position)) return {};
+    }
+    return plan;
+}
+
+void RoadEditor::CreateRamp(EditorCommand command, WorldDocument& world)
+{
+    auto plan = PrepareRamp(command, world);
+    if (!plan) return;
+    const bool create = command == EditorCommand::CreateExitRamp || command == EditorCommand::CreateEntranceRamp;
+    const int hostIndex = roadMenuTarget->index;
+    Road& host = world.roads[hostIndex];
+    if (create)
+    {
+        const bool exit = command == EditorCommand::CreateExitRamp;
+        auto preview = NewRamp(host.style, *plan, exit);
+        pendingRamp.emplace(RampPlacement{hostIndex, host.id, host.revision, std::move(*plan), std::move(preview), exit});
+        return;
+    }
+    const int index = state.selected, hostId = host.id;
+    auto& ramp = world.roads[index];
+    EditSnapshot before(state, &ramp);
+    before.connectedRoadPoints.emplace(hostId, host.points);
+    host.points = std::move(plan->hostPoints);
+    host.Rebuild();
+    ramp.style.oneWay = true;
+    auto& end = ramp.points[state.point];
+    end.ramp = plan->link;
+    AlignRampEnd(end, plan->seam);
+    ramp.Rebuild();
+    world.RefreshRampConnections(true);
+    EditSnapshot after(state, &world.roads[index]);
+    after.connectedRoadPoints.emplace(hostId, world.roads[roadMenuTarget->index].points);
+    outliner.Invalidate();
+    if (history.Record(index, std::move(before), std::move(after))) Save(world);
+}
+
+void RoadEditor::AimRamp(const FreeCamera& camera, SDL_FPoint pointer)
+{
+    auto& placement = *pendingRamp;
+    const auto& seam = placement.plan.seam;
+    const auto normal = Math::Normalize(Math::Cross(seam.forward, seam.frame.left));
+    const auto ray = ViewportRay(camera, scene, pointer);
+    const double denominator = Math::Dot(ray, normal);
+    if (std::abs(denominator) < 1e-8) return;
+    const double depth = Math::Dot(seam.center - camera.GetPosition(), normal) / denominator;
+    if (depth < worldNearDepth) return;
+    const auto end = camera.GetPosition() + ray * depth;
+    const auto offset = end - seam.center;
+    // Start the branch on its own side with a nonzero approach in the travel direction.
+    if (Math::Dot(offset, seam.forward) * (placement.exit ? 1 : -1) < Road::minPointSpacing ||
+        Math::Dot(offset, seam.frame.left) > 0) return;
+    auto& free = placement.exit ? placement.preview.points.back() : placement.preview.points.front();
+    if (free.position == end) return;
+    free.position = end;
+    placement.preview.Rebuild();
+}
+
+void RoadEditor::FinishRamp(WorldDocument& world)
+{
+    auto placement = std::move(*pendingRamp);
+    pendingRamp.reset();
+    const int i = placement.hostIndex;
+    if (i >= static_cast<int>(world.roads.size()) || world.roads[i].id != placement.hostId ||
+        world.roads[i].revision != placement.revision) return;
+    if (!(placement.preview.id = world.AllocateRoadId())) return;
+    EditSnapshot before(state);
+    before.connectedRoadPoints.emplace(placement.hostId, world.roads[i].points);
+    world.roads[i].points = std::move(placement.plan.hostPoints);
+    world.roads[i].Rebuild();
+    world.roads.push_back(std::move(placement.preview));
+    const int index = static_cast<int>(world.roads.size()) - 1;
+    state.drawing = false;
+    state.SelectPoint(index, placement.exit ? 1 : 0);
+    const int folder = world.hierarchy.Parent({SceneKind::Road, i});
+    if (folder) world.hierarchy.Move({{SceneKind::Road, index}}, folder);
+    world.RefreshRampConnections(true);
+    EditSnapshot after(state, &world.roads.back());
+    after.roadFolder = folder;
+    after.connectedRoadPoints.emplace(placement.hostId, world.roads[i].points);
+    outliner.Invalidate();
+    if (history.Record(index, std::move(before), std::move(after))) Save(world);
+}
+
 void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera)
 {
     if (command == EditorCommand::ToggleWireframe)
@@ -401,9 +534,15 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleWireframe();
         return;
     }
-    const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
+    const bool undoPreview = command == EditorCommand::Undo && (pendingRamp || drag == Drag::AnchorRoad);
     Release(world);
     if (undoPreview) return;
+    if (command == EditorCommand::CreateExitRamp || command == EditorCommand::CreateEntranceRamp ||
+        command == EditorCommand::ConnectRamp || command == EditorCommand::SetRampTaper)
+    {
+        CreateRamp(command, world);
+        return;
+    }
     if (command == EditorCommand::CreateRoad)
     {
         constexpr double initialLength = 10.0; // meters along world X
@@ -411,6 +550,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Road road;
         if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
         road.style = Style(world);
+        road.style.oneWay = false;
         road.style.material = RoadStyle::defaultMaterial;
         road.points = {{creationPoint, {}}, {creationPoint + Vector3{initialLength, 0, 0}, {}}};
         road.Rebuild();
@@ -501,9 +641,23 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
                                                                  picker.HitPosition();
         roadMenuTarget = RoadMenuTarget{index, road.revision, PlanRoadIntersection(road, hit, position)};
         canCreate = roadMenuTarget->insertion.has_value();
+        if (road.style.IsDivided())
+        {
+            // Pick the visible carriageway itself. Overlay boxes and spline ribbons can protrude beyond it.
+            auto pavement = rightClick->picker;
+            if (pavement.TestRoad(road))
+            {
+                roadMenuTarget->surfaceHit = pavement.HitPosition();
+                roadMenuTarget->rampSite = PickRampSite(road, roadMenuTarget->surfaceHit);
+            }
+        }
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate))
+    const RampMenuOptions ramps{PrepareRamp(EditorCommand::CreateExitRamp, world).has_value(),
+                                PrepareRamp(EditorCommand::CreateEntranceRamp, world).has_value(),
+                                PrepareRamp(EditorCommand::ConnectRamp, world).has_value(),
+                                PrepareRamp(EditorCommand::SetRampTaper, world).has_value()};
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps))
     {
         RunCommand(*command, world, camera);
     }
@@ -628,6 +782,7 @@ void RoadEditor::BeginDraft(WorldDocument& world)
         before.emplace(state);
         const RoadStyle style = Style(world);
         state.draft.emplace().style = style;
+        state.draft->style.oneWay = false;
         state.draft->style.material = RoadStyle::defaultMaterial;
     }
 
@@ -967,6 +1122,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
 
 void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 {
+    if (state.point >= 0 && road.points[state.point].ramp) return;
     dragStart.emplace(state, &road);
     drag = kind;
     const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
@@ -1121,6 +1277,7 @@ void RoadEditor::Release(WorldDocument& world)
     originalPoints.clear();
     selectOnlyOnClick = false;
     anchorRoad.reset();
+    pendingRamp.reset();
     extensionSource.reset();
     gizmoDrag.reset();
     appliedAngle = 0;
@@ -1688,7 +1845,7 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
         status = "Select one road endpoint first";
         return;
     }
-    if (road->points[state.point].anchor)
+    if (road->points[state.point].anchor || road->points[state.point].ramp)
     {
         status = "This road endpoint is already connected";
         return;
@@ -1713,6 +1870,7 @@ bool RoadEditor::BeginAnchorRoad(const WorldDocument& world, IntersectionAnchor 
     const auto& junction = world.intersections.at(anchor.intersectionId);
     Road& road = anchorRoad.emplace();
     road.style = state.defaults;
+    road.style.oneWay = false;
     road.points.push_back(AttachedEndpoint(junction, anchor, true));
     anchorPress = pointer;
     snapRotation = snap;
@@ -2212,6 +2370,8 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
         // Deliberately moving or extending an attached end releases it. Undo restores its link.
         for (auto& point : road.points)
         {
+            const bool interior = &point != &road.points.front() && &point != &road.points.back();
+            if (interior) point.ramp.reset();
             if (!point.anchor) continue;
             const auto ref = *point.anchor;
             if ((&point != &road.points.front() && &point != &road.points.back()) ||
@@ -2339,6 +2499,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifndef _WIN32
     if (browser.MaterialWindow().Handle(event)) return EditorEvent::Handled;
 #endif
+    if (pendingRamp && event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
+    {
+        pendingRamp.reset();
+        return EditorEvent::Handled;
+    }
     if (event.type == SDL_EVENT_QUIT)
     {
         Release(world);
@@ -2682,6 +2847,26 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     default: pointer = {e.button.x, e.button.y}; break;
     }
 
+    if (pendingRamp)
+    {
+        const SDL_FPoint local{pointer.x - scene.x, pointer.y};
+        const bool inside = local.x >= 0 && local.x < scene.w && local.y >= 0 && local.y < scene.h;
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT)
+            pendingRamp.reset();
+        else if (inside && e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)
+        {
+            pendingRamp->dragging = true;
+            AimRamp(camera, local);
+        }
+        else if (inside && pendingRamp->dragging && e.type == SDL_EVENT_MOUSE_MOTION)
+            AimRamp(camera, local);
+        else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && pendingRamp->dragging)
+        {
+            if (inside) { AimRamp(camera, local); FinishRamp(world); }
+            else pendingRamp.reset();
+        }
+        return EditorEvent::Handled;
+    }
     if (drag == Drag::None)
     {
 #ifdef _WIN32

@@ -23,6 +23,7 @@ public:
     static Vector3 SplinePosition(const ViewportPicker& pick, SDL_Rect scene);
     void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection,
               const FreeCamera& camera, SDL_Rect scene) const;
+    void DrawDirection(WorldRenderer& renderer, const Road& ramp, const FreeCamera& camera, SDL_Rect scene) const;
     void DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
                            const FreeCamera& camera, SDL_Rect scene) const;
     RoadPick Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected,

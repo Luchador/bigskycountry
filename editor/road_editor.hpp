@@ -17,6 +17,7 @@
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
 #include "road_intersection.hpp"
+#include "highway_ramp_tool.hpp"
 #include "viewport_picker.hpp"
 #include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
@@ -36,7 +37,11 @@ public:
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) override;
     bool DraggingGizmo() const override { return gizmoDrag.has_value(); }
     const Road* Selected(const WorldDocument& world) const;
-    const Road* PreviewRoad() const override { return anchorRoad && dragChanged ? &*anchorRoad : nullptr; }
+    const Road* PreviewRoad() const override
+    {
+        if (pendingRamp) return &pendingRamp->preview;
+        return anchorRoad && dragChanged ? &*anchorRoad : nullptr;
+    }
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool IsPlanView() const override { return planView; }
@@ -126,6 +131,8 @@ private:
     }
     bool UpdateWindowTitle();
     bool Save(WorldDocument& world);
+    std::optional<RampPlan> PrepareRamp(EditorCommand command, const WorldDocument& world) const;
+    void CreateRamp(EditorCommand command, WorldDocument& world);
     void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
     void CommitTransform(WorldDocument& world, EditSnapshot before);
     void Commit(WorldDocument& world, int roadIndex, EditSnapshot before, const Road* after = nullptr);
@@ -157,8 +164,22 @@ private:
         int index;
         std::uint64_t revision;
         std::optional<RoadIntersectionInsertion> insertion;
+        std::optional<RampSite> rampSite;
+        Vector3 surfaceHit{};
+
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
+    struct RampPlacement
+    {
+        int hostIndex, hostId;
+        std::uint64_t revision;
+        RampPlan plan;
+        Road preview;
+        bool exit, dragging = false;
+    };
+    std::optional<RampPlacement> pendingRamp;
+    void AimRamp(const FreeCamera& camera, SDL_FPoint pointer);
+    void FinishRamp(WorldDocument& world);
     RoadEditorState state;
     EditHistory history;
     SceneOutliner outliner;

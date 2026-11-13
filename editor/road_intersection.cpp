@@ -184,7 +184,8 @@ std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, 
     const auto [left, right] = Split(Curve(road, at.segment), at.t);
     const bool atStart = at.segment == 0 && at.t == 0;
     const bool atEnd = at.segment == last - 1 && at.t == 1;
-    if ((atStart && road.points.front().anchor) || (atEnd && road.points.back().anchor)) return {};
+    if ((atStart && (road.points.front().anchor || road.points.front().ramp)) ||
+        (atEnd && (road.points.back().anchor || road.points.back().ramp))) return {};
     const bool knot = at.t == 0 || at.t == 1;
     const int point = at.segment + (at.t == 1);
     const auto tangent = knot ? road.Tangent(point) : Math::Normalize(right.b - left.c);

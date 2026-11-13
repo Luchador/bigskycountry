@@ -55,6 +55,7 @@ struct RoadStyle
     static constexpr const char* defaultMaterial = "surfaces/roads/M_Asphalt01.bmat";
     std::string material = defaultMaterial;
     std::string transitionMaterial;
+    bool oneWay = false; // All lanes travel from the first point to the last.
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = true;
@@ -68,7 +69,7 @@ struct RoadStyle
     double SingleLaneExtraWidth() const { return singleLaneExtraWidth; }
     bool SetSingleLaneExtraWidth(double meters);
     double TravelLaneWidth() const { return laneWidth + (lanes == 1 ? singleLaneExtraWidth : 0.0); }
-    bool CanDivide() const { return lanes % 2 == 0; }
+    bool CanDivide() const { return !oneWay && lanes % 2 == 0; }
     bool IsDivided() const { return divided; }
     void SetDivided(bool value) { divided = value && CanDivide(); }
     double DividedGap() const { return dividedGap; }
@@ -98,6 +99,15 @@ struct IntersectionAnchor
     auto operator<=>(const IntersectionAnchor&) const = default;
 };
 
+// Positive station IDs identify authored highway knots, even after subdivision or a road split.
+struct RampLink
+{
+    int station = 0, side = 0; // Side in the host spline frame, +1 left and -1 right.
+    double length = 60.0;      // Game meters from the narrow end of the taper to the gore.
+    bool operator==(const RampLink&) const = default;
+    bool Valid() const;
+};
+
 struct RoadPoint
 {
     bool operator==(const RoadPoint&) const = default;
@@ -109,6 +119,8 @@ struct RoadPoint
     // Bézier handle lengths as fractions of the adjacent chords.
     double incomingHandle = 1.0 / 3.0;
     double outgoingHandle = 1.0 / 3.0;
+    int rampStation = 0;
+    std::optional<RampLink> ramp; // First endpoint exits the highway, last endpoint enters it.
 };
 
 struct RoadGeometry
@@ -153,7 +165,23 @@ struct RoadMouth
 
 struct RoadMouthFrame
 {
+    bool operator==(const RoadMouthFrame&) const = default;
     Vector3 left, up; // Junction cross-section axes in the road mesh frame.
+};
+
+struct RampLane
+{
+    int station, side;
+    bool exit;
+    double length, halfTravel, innerPavement, outerPavement, edgeWidth;
+    bool operator==(const RampLane&) const = default;
+};
+
+struct RampSeam
+{
+    Vector3 center, forward;
+    RoadMouthFrame frame;
+    double taperLength; // Effective length after fitting the current highway.
 };
 
 struct Road : RoadGeometry
@@ -173,6 +201,12 @@ struct Road : RoadGeometry
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
     double SplineLengthMeters() const { return splineLengthMeters; }
     Vector3 Tangent(std::size_t index) const;
+    bool InsertStation(int segment, double t, int stationId);
+    // Derived from attached ramp ends. Each seam uses the actual highway surface frame.
+    std::vector<RampLane> rampLanes;
+    std::map<std::pair<int, int>, RampSeam> rampSeams; // (station ID, side)
+    std::array<std::optional<RoadMouthFrame>, 2> rampCaps{};
+
     double ThreeLaneDividerOffset() const; // Signed distance left of the authored path for a 2+1 layout.
     std::array<Vector3, 3> PointAxes(std::size_t index, bool includeRoll = true) const;
     void RotatePoint(std::size_t index, double heading);
@@ -191,7 +225,7 @@ private:
     std::vector<std::string> names;
     std::array<std::optional<RoadMouth>, 2> mouths;
     void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
-                      const std::array<std::optional<RoadMouthFrame>, 2>& caps);
+                      const std::array<std::optional<RoadMouthFrame>, 2>& caps, std::size_t firstSample);
     std::vector<Vector3> centerline;
     double splineLengthMeters = 0.0;
     std::vector<std::size_t> pointSamples; // Centerline index of each control point.

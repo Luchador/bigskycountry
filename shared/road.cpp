@@ -40,6 +40,11 @@ namespace
     }
 }
 
+bool RampLink::Valid() const
+{
+    return station > 0 && (side == -1 || side == 1) && std::isfinite(length) && length > 0;
+}
+
 int RoadStyle::GetLaneCount() const
 {
     return lanes;
@@ -65,6 +70,7 @@ void RoadStyle::SetDividedGap(double meters)
 
 bool RoadStyle::HasCenterTurnLane() const
 {
+    if (oneWay) return false;
     if (lanes == 3)
     {
         return threeLaneLayout == ThreeLaneLayout::CenterTurn;
@@ -301,6 +307,44 @@ Road Road::Section(std::size_t first, std::size_t last) const
     return result;
 }
 
+bool Road::InsertStation(int segment, double t, int stationId)
+{
+    if (segment < 0 || segment + 1 >= static_cast<int>(points.size()) || !(t >= 0 && t <= 1) || stationId <= 0) return false;
+    if (t == 0 || t == 1)
+    {
+        auto& knot = points[segment + (t == 1)];
+        if (knot.rampStation && knot.rampStation != stationId) return false;
+        knot.rampStation = stationId;
+    }
+    else
+    {
+        auto& a = points[segment];
+        auto& b = points[segment + 1];
+        RoadPoint knot{};
+        knot.rampStation = stationId;
+        knot.position = a.position + (b.position - a.position) * t;
+        knot.roll = a.roll + t * std::remainder(b.roll - a.roll, 2 * std::numbers::pi);
+        if (style.curved)
+        {
+            const auto ta = Tangent(segment), tb = Tangent(segment + 1);
+            const auto [left, right] = Split(SegmentCurve(a, b, ta, tb), t);
+            const double la = Math::Length(left.d - left.a), lb = Math::Length(right.d - right.a);
+            if (std::min(la, lb) < minPointSpacing) return false;
+            SetTangent(a, ta);
+            SetTangent(b, tb);
+            SetTangent(knot, right.b - left.c);
+            a.outgoingHandle = Math::Length(left.b - left.a) / la;
+            knot.incomingHandle = Math::Length(left.d - left.c) / la;
+            knot.outgoingHandle = Math::Length(right.b - right.a) / lb;
+            b.incomingHandle = Math::Length(right.d - right.c) / lb;
+            knot.position = left.d;
+        }
+        points.insert(points.begin() + segment + 1, knot);
+    }
+    Rebuild();
+    return true;
+}
+
 bool Road::SubdivideSegments(const std::set<int>& segments)
 {
     if (segments.empty() || *segments.begin() < 0 || static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size())
@@ -410,6 +454,7 @@ void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value, bool 
 void Road::Rebuild()
 {
     MarkRebuilt();
+    rampSeams.clear();
     centerline.clear();
     splineLengthMeters = 0.0;
     pointSamples.clear();
@@ -528,15 +573,20 @@ void Road::Rebuild()
              Math::Dot(trimmed.front() - trimmed.back(), mouths[1]->outward) <= 0)) return;
         surfacePath = &trimmed;
     }
+    for (int end = 0; end < 2; ++end)
+    {
+        if (const auto& cap = rampCaps[end])
+            caps[end] = RoadMouthFrame{frame.Unrotate(cap->left), frame.Unrotate(cap->up)};
+    }
     if (rotated)
     {
         std::vector<Vector3> local;
         local.reserve(surfacePath->size());
         for (Vector3 sample : *surfacePath) local.push_back(frame.Unrotate(sample - frame.origin));
         for (Vector3& tangent : tangents) tangent = frame.Unrotate(tangent);
-        BuildSurface(local, tangents, caps);
+        BuildSurface(local, tangents, caps, first);
     }
-    else BuildSurface(*surfacePath, tangents, caps);
+    else BuildSurface(*surfacePath, tangents, caps, first);
 
     // Bevels can turn either way. Give all top surfaces an upward normal once,
     // when the road changes. Vertical curb risers already face the pavement.
@@ -589,6 +639,12 @@ void Road::Rebuild()
                 for (auto& vertex : triangle) vertex.position = frame.Point(vertex.position);
             }
         };
+        for (auto& [key, seam] : rampSeams)
+        {
+            seam.center = frame.Point(seam.center);
+            seam.forward = frame.Direction(seam.forward);
+            seam.frame = {frame.Direction(seam.frame.left), frame.Direction(seam.frame.up)};
+        }
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);
         for (auto& [material, strip] : transitionStrips) moveSurface(strip);

@@ -235,12 +235,32 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
             newBoundaries.emplace(i, *boundary);
         }
     }
+    std::set<int> removedStations;
+    for (const auto& p : world.roads[index].points)
+        if (p.rampStation) removedStations.insert(p.rampStation);
+    for (const auto& piece : replacements)
+        for (const auto& p : piece.points) removedStations.erase(p.rampStation);
+    std::map<int, std::vector<RoadPoint>> disconnected;
+    if (!removedStations.empty())
+    {
+        for (Road& ramp : world.roads)
+        {
+            for (auto& p : ramp.points)
+            {
+                if (!p.ramp || !removedStations.contains(p.ramp->station)) continue;
+                before.connectedRoadPoints.try_emplace(ramp.id, ramp.points);
+                p.ramp.reset();
+                disconnected[ramp.id] = ramp.points;
+            }
+        }
+    }
     const std::size_t count = replacements.size();
     world.hierarchy.ReplaceRange(SceneKind::Road, index, 1, static_cast<int>(count), before.roadFolder);
     ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
     if (inserted) editor.SelectRows({{SceneKind::Intersection, junctionId}});
     else editor.SelectPoint(count ? index : -1, -1);
     EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
+    after.connectedRoadPoints = std::move(disconnected);
     after.roadFolder = before.roadFolder;
     after.splitBoundaries = std::move(newBoundaries);
     if (inserted) after.junction = EditSnapshot::Junction{junctionId, *inserted};
@@ -313,6 +333,14 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
                                          static_cast<int>(replacements.size()), to.roadFolder);
         }
         ReplaceRoadRange(roads, index, from.roadData.size(), std::move(replacements));
+    }
+    for (auto& road : roads)
+    {
+        if (auto it = to.connectedRoadPoints.find(road.id); it != to.connectedRoadPoints.end())
+        {
+            road.points = it->second;
+            road.Rebuild();
+        }
     }
     for (const auto& [i, boundary] : to.splitBoundaries) world.Terrain().at(i)->boundary = boundary;
     if (to.junction)

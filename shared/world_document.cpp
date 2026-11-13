@@ -180,6 +180,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
     if (intersections.empty() && junctions.empty())
     {
         for (int index : changedRoads) roads[index].Rebuild();
+        RefreshRampConnections(true);
         terrainRevision = 0; // Also covers removal of the last road.
         RefreshTerrainFills();
         return;
@@ -229,18 +230,30 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
     }
     std::erase_if(junctions, [&](const auto& entry) { return !active.contains(entry.first); });
     for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i], changedRoads.contains(static_cast<int>(i)));
+    RefreshRampConnections(true);
     terrainRevision = 0; // Attachment changes can open a junction without rebuilding a road.
     RefreshTerrainFills();
 }
 
 bool WorldDocument::ValidConnections() const
 {
+    std::set<int> stations;
+    std::set<std::pair<int, int>> rampEnds;
+    for (const auto& road : roads)
+        for (const auto& p : road.points)
+            if (p.rampStation && !stations.insert(p.rampStation).second) return SDL_SetError("Duplicate highway ramp station");
     std::set<IntersectionAnchor> occupied;
     for (const Road& road : roads)
     {
         if (road.points.size() < 2) return SDL_SetError("Road needs two endpoints");
         for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
         {
+            if (point->ramp)
+            {
+                const auto& link = *point->ramp;
+                if (!link.Valid() || !road.style.oneWay || point->anchor || !stations.contains(link.station) ||
+                    !rampEnds.emplace(link.station, link.side).second) return SDL_SetError("Invalid highway ramp connection");
+            }
             if (!point->anchor) continue;
             const auto ref = *point->anchor;
             const auto it = intersections.find(ref.intersectionId);

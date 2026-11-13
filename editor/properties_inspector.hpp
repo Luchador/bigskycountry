@@ -33,7 +33,7 @@ struct PropertiesInspector
         return page == PropertiesPage::Road && materialSlot && style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge);
     }
     bool OneLane() const { return maxLanes == 1; }
-    bool ThreeLanes() const { return minLanes == 3 && maxLanes == 3; }
+    bool ThreeLanes() const { return !style.oneWay && minLanes == 3 && maxLanes == 3; }
     bool HasMedian() const { return AllDivided() && minGap > RoadStyle::minSeparation; }
     int StepLanes(bool increase) const;
     bool CanStepLanes(bool increase) const { return minLanes != maxLanes || minLanes != StepLanes(increase); }

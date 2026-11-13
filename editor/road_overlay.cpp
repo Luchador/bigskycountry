@@ -136,8 +136,27 @@ MeshInstance RoadOverlay::Marker(const GizmoPlacement& placement) const
     return {marker, {placement.origin, {r, 0, 0}, {0, r, 0}, {0, 0, r}}};
 }
 
+void RoadOverlay::DrawDirection(WorldRenderer& renderer, const Road& ramp, const FreeCamera& camera, SDL_Rect scene) const
+{
+    const auto samples = ramp.SegmentSamples(0);
+    if (samples.size() < 2) return;
+    const size_t i = samples.size() / 2;
+    const auto mid = (samples[i - 1] + samples[i]) * 0.5;
+    const auto forward = Math::Normalize(samples[i] - samples[i - 1]);
+    const auto left = Math::Normalize(Math::Cross(forward, {0, 1, 0}));
+    const double length = std::min(7.0, ramp.SplineLengthMeters() * 0.25);
+    const double focal = ViewportFocalLength(scene);
+    if (focal <= 0) return;
+    const auto raised = mid + Vector3{0, 0.12, 0};
+    const auto tip = camera.WorldToView(raised + forward * (length * 0.5));
+    const OverlayStroke stroke(camera, scene, focal);
+    for (int side : {-1, 1})
+        stroke.Draw(renderer, tip, camera.WorldToView(raised - forward * (length * 0.5) + left * (length * 0.35 * side)), EditorColors::amber);
+}
+
 void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
 {
+    if (road.style.oneWay) DrawDirection(renderer, road, camera, scene);
     VisitSegmentTriangles(road, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)
     {
         renderer.SubmitTriangle(a, b, c, selection.segments.contains(i) ? EditorColors::amber : EditorColors::blue);

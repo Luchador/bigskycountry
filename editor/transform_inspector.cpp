@@ -177,6 +177,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
                 return {};
             }
             const auto axes = road.PointAxes(target.point, false);
+            fields.roadBound = road.points[target.point].ramp.has_value();
             fields.value.rotation.x = road.points[target.point].roll;
             fields.value.position = road.points[target.point].position;
             fields.value.rotation.y = std::atan2(axes[2].x, axes[2].z);

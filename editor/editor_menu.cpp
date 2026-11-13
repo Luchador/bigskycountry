@@ -29,7 +29,9 @@ namespace
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
-    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_MARKER, L"&Marker"}};
+    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_MARKER, L"&Marker"},
+                                         {BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"},
+                                         {BSC_CONNECT_RAMP, L"Connect Selected Ramp Here"}, {BSC_RAMP_TAPER, L"Set Ramp Taper End Here"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
     {
@@ -342,7 +344,11 @@ namespace
     };
     constexpr CreateItem createItems[] = {{"Create Road", EditorCommand::CreateRoad},
                                           {"Create Intersection", EditorCommand::CreateIntersection},
-                                          {"Marker", EditorCommand::CreateMarker}};
+                                          {"Marker", EditorCommand::CreateMarker},
+                                          {"Create Exit Ramp", EditorCommand::CreateExitRamp},
+                                          {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp},
+                                          {"Connect Selected Ramp Here", EditorCommand::ConnectRamp},
+                                          {"Set Ramp Taper End Here", EditorCommand::SetRampTaper}};
     constexpr int createItemCount = static_cast<int>(std::size(createItems));
     constexpr float itemHeight = 26;
 }
@@ -366,7 +372,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 }
 #endif
 
-std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection)
+std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, RampMenuOptions ramps)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -389,6 +395,9 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     if (ClientToScreen(hwnd, &at) && AddSubmenu(root, create, createItems))
     {
         if (!canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
+        for (const auto& [id, enabled] : {std::pair{BSC_CREATE_EXIT_RAMP, ramps.exit}, {BSC_CREATE_ENTRANCE_RAMP, ramps.entrance},
+                                           {BSC_CONNECT_RAMP, ramps.connect}, {BSC_RAMP_TAPER, ramps.taper}})
+            if (!enabled) EnableMenuItem(GetSubMenu(root, 0), id, MF_BYCOMMAND | MF_GRAYED);
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
                                   at.x, at.y, hwnd, nullptr);
     }
@@ -397,15 +406,20 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
+    if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
+    if (choice == BSC_CONNECT_RAMP) return EditorCommand::ConnectRamp;
+    if (choice == BSC_RAMP_TAPER) return EditorCommand::SetRampTaper;
     if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;
     if (choice == BSC_CREATE_MARKER)
     {
         return EditorCommand::CreateMarker;
     }
 #else
+    rampOptions = ramps;
     intersectionEnabled = canCreateIntersection;
     rootItem = {0, 0, 104, itemHeight};
-    submenu = {0, 0, 170, itemHeight * createItemCount};
+    submenu = {0, 0, 240, itemHeight * createItemCount};
     const auto fit = [](float start, float extent, int limit)
     {
         return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));
@@ -437,6 +451,10 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
 #ifndef _WIN32
 bool EditorMenu::Enabled(EditorCommand command) const
 {
+    if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
+    if (command == EditorCommand::CreateEntranceRamp) return rampOptions.entrance;
+    if (command == EditorCommand::ConnectRamp) return rampOptions.connect;
+    if (command == EditorCommand::SetRampTaper) return rampOptions.taper;
     if (command == EditorCommand::CreateIntersection) return intersectionEnabled;
     if (command == EditorCommand::Undo) return undoEnabled;
     if (command == EditorCommand::Redo) return redoEnabled;

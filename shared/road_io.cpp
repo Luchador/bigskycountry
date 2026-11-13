@@ -49,7 +49,7 @@ namespace RoadIO
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
             << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median
             << ' ' << std::quoted(style.material) << ' ' << style.SingleLaneExtraWidth()
-            << ' ' << std::quoted(style.transitionMaterial) << '\n';
+            << ' ' << std::quoted(style.transitionMaterial) << ' ' << style.oneWay << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
@@ -72,6 +72,9 @@ namespace RoadIO
         if (version >= 11) in >> extraWidth;
         style.transitionMaterial.clear();
         if (version >= 12) in >> std::quoted(style.transitionMaterial);
+        style.oneWay = false;
+        if (version >= 13) in >> style.oneWay;
+        if (in && divided && style.oneWay) in.setstate(std::ios::failbit);
         if ((!style.transitionMaterial.empty() && !Material::ValidAssetPath(style.transitionMaterial)) ||
             !in || !style.SetSingleLaneExtraWidth(extraWidth) || !Material::ValidAssetPath(style.material) ||
             !ValidStyle(lanes, layout, gap, edge, median) ||
@@ -119,7 +122,9 @@ namespace RoadIO
                 out << ' ' << p.anchor->intersectionId << ' ' << p.anchor->side;
             }
             else out << " 0";
-            out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << '\n';
+            out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
+            if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length;
+            out << '\n';
         }
     }
 
@@ -180,6 +185,18 @@ namespace RoadIO
                 }
             }
             if (version >= 9) in >> p.incomingHandle >> p.outgoingHandle;
+            if (version >= 13)
+            {
+                int target = 0;
+                if (!(in >> p.rampStation >> target) || p.rampStation < 0) in.setstate(std::ios::failbit);
+                if (target)
+                {
+                    RampLink link{target};
+                    if (!(in >> link.side >> link.length) || !link.Valid() || p.anchor || !road.style.oneWay ||
+                        (i != 0 && i != count - 1)) in.setstate(std::ios::failbit);
+                    p.ramp = link;
+                }
+            }
             if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
             {
                 in.setstate(std::ios::failbit);

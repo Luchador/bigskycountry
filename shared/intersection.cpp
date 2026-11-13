@@ -158,7 +158,13 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
     IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
                              first ? style.RightWidth() : style.LeftWidth(), style.edge, {},
                              style.edge == RoadEdge::Transition ? style.transitionMaterial : std::string{}};
-    if (!paintStopLine || !road.paintMarkings) return arm;
+    if (!paintStopLine || !road.paintMarkings || (style.oneWay && first)) return arm;
+    if (style.oneWay)
+    {
+        const double half = style.GetLaneCount() * style.TravelLaneWidth() * 0.5;
+        arm.stopLine = LaneSpan{-half, half};
+        return arm;
+    }
 
     const int lanes = style.GetLaneCount();
     const double halfLane = style.TravelLaneWidth() * 0.5;

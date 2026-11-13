@@ -67,6 +67,7 @@ add_library(BigSkyApplication STATIC
     shared/mesh_import.cpp
     shared/world_renderer.cpp
     shared/intersection.cpp
+    shared/highway_ramp.cpp
     shared/road.cpp
     shared/road_stripes.cpp
     shared/road_io.cpp
@@ -133,6 +134,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
+    editor/highway_ramp_tool.cpp
     editor/road_intersection.cpp
     editor/properties_inspector.cpp
     editor/transform_inspector.cpp
