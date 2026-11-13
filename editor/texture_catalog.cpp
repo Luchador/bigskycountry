@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <set>
 
 namespace
 {
@@ -23,6 +24,24 @@ namespace
     fs::path FromUtf8(const std::string& text)
     {
         return fs::path(std::u8string(text.begin(), text.end()));
+    }
+
+    // Keep the padding of numbered assets, including when duplicating a copy.
+    std::string NextMaterialName(std::string name)
+    {
+        const auto firstDigit = name.find_last_not_of("0123456789") + 1;
+        if (firstDigit == name.size()) return name + "_1";
+        for (auto i = name.size(); i > firstDigit; --i)
+        {
+            if (name[i - 1] != '9')
+            {
+                ++name[i - 1];
+                return name;
+            }
+            name[i - 1] = '0';
+        }
+        name.insert(firstDigit, 1, '1');
+        return name;
     }
 
     bool ValidMaterialName(const std::string& name)
@@ -185,6 +204,33 @@ bool TextureCatalog::CreateMaterial(const std::string& name, std::string& create
         error = "Enter a valid material filename.";
         return false;
     }
+    return WriteNewMaterial(name, "{\n  \"version\": 1\n}\n", false, createdPath, error);
+}
+
+bool TextureCatalog::DuplicateMaterial(const std::string& sourcePath, std::string& createdPath, std::string& error)
+{
+    const auto source = std::ranges::find(items, sourcePath, &Item::path);
+    if (source == items.end() || !source->material)
+    {
+        error = "Select a material in the current folder.";
+        return false;
+    }
+
+    // Copy the file verbatim, including material settings unknown to this editor.
+    size_t size = 0;
+    std::unique_ptr<void, decltype(&SDL_free)> bytes(SDL_LoadFile((root + sourcePath).c_str(), &size), SDL_free);
+    if (!bytes)
+    {
+        error = std::string("Cannot read material: ") + SDL_GetError();
+        return false;
+    }
+    return WriteNewMaterial(NextMaterialName(source->name), {static_cast<const char*>(bytes.get()), size},
+                            true, createdPath, error);
+}
+
+bool TextureCatalog::WriteNewMaterial(std::string name, std::string_view contents, bool numberCopy,
+                                     std::string& createdPath, std::string& error)
+{
     if (root.empty())
     {
         error = "Cannot locate the texture folder.";
@@ -193,39 +239,45 @@ bool TextureCatalog::CreateMaterial(const std::string& name, std::string& create
     const auto base = FromUtf8(root);
     const auto directory = base / FromUtf8(folder);
     std::error_code ec;
-    if (std::any_of(items.begin(), items.end(), [&](const Item& item) {
-            return item.material && SDL_strcasecmp(item.name.c_str(), name.c_str()) == 0; }))
-    {
-        error = "That material name is already in use.";
-        return false;
-    }
     fs::create_directories(directory, ec);
-    const auto filename = name + ".bmat";
+    const auto less = [](const std::string& a, const std::string& b) { return SDL_strcasecmp(a.c_str(), b.c_str()) < 0; };
+    std::set<std::string, decltype(less)> filenames;
     fs::directory_iterator it(directory, ec), end;
     for (; !ec && it != end; it.increment(ec))
-    {
-        if (SDL_strcasecmp(Utf8(it->path().filename()).c_str(), filename.c_str()) == 0)
-        {
-            error = "That material name is already in use.";
-            return false;
-        }
-    }
+        filenames.insert(Utf8(it->path().filename()));
     if (ec)
     {
         error = "Cannot read the destination folder.";
         return false;
     }
 
-    const auto file = directory / FromUtf8(filename);
-    const auto path = Utf8(file);
-    SDL_IOStream* output = SDL_IOFromFile(path.c_str(), "wbx");
-    if (!output)
+    SDL_IOStream* output = nullptr;
+    fs::path file;
+    while (!output)
     {
-        error = std::string("Cannot create material: ") + SDL_GetError();
-        return false;
+        const auto filename = name + ".bmat";
+        file = directory / FromUtf8(filename);
+        if (!filenames.contains(filename))
+        {
+            // Exclusive creation protects a name claimed by another editor since the directory scan.
+            output = SDL_IOFromFile(Utf8(file).c_str(), "wbx");
+            if (output) break;
+            const std::string reason = SDL_GetError();
+            if (!fs::exists(fs::symlink_status(file, ec)))
+            {
+                error = "Cannot create material: " + reason;
+                return false;
+            }
+        }
+        if (!numberCopy)
+        {
+            error = "That material name is already in use.";
+            return false;
+        }
+        name = NextMaterialName(std::move(name));
     }
-    constexpr char contents[] = "{\n  \"version\": 1\n}\n";
-    const bool written = SDL_WriteIO(output, contents, sizeof(contents) - 1) == sizeof(contents) - 1;
+
+    const bool written = SDL_WriteIO(output, contents.data(), contents.size()) == contents.size();
     if (!SDL_CloseIO(output) || !written)
     {
         error = "Could not finish writing the material.";

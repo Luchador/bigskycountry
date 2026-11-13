@@ -594,11 +594,29 @@ struct WindowsPanels::Impl
         ShowBrowserTab();
     }
 
+    std::string MaterialAtRow(HWND list, LRESULT row) const
+    {
+        if (row == LB_ERR) return {};
+        const auto index = static_cast<std::size_t>(SendMessageW(list, LB_GETITEMDATA, row, 0));
+        const auto& items = browser->Textures().Items();
+        return index < items.size() && items[index].material ? items[index].path : std::string{};
+    }
+
+    void DuplicateMaterial(const std::string& path)
+    {
+        std::string created, error;
+        if (browser->Textures().DuplicateMaterial(path, created, error))
+            PopulateTextures(created);
+        else
+            MessageBoxW(frame, Wide(error).c_str(), L"Duplicate Material", MB_OK | MB_ICONWARNING);
+    }
+
     bool TextureContextMenu(HWND source, POINT at)
     {
         if (browser->ActiveTab() != ContentBrowser::Tab::Textures) return false;
         HWND list = GetDlgItem(models, IDC_TEXTURES);
         HWND tree = GetDlgItem(models, IDC_TEXTURE_FOLDERS);
+        std::string material;
         POINT local = at;
         ScreenToClient(source, &local);
         if (source == list)
@@ -610,7 +628,13 @@ struct WindowsPanels::Impl
             const int index = LOWORD(hit);
             if (index < SendMessageW(list, LB_GETCOUNT, 0, 0) &&
                 SendMessageW(list, LB_GETITEMRECT, index, reinterpret_cast<LPARAM>(&row)) != LB_ERR &&
-                PtInRect(&row, local)) return false;
+                PtInRect(&row, local))
+            {
+                material = MaterialAtRow(list, index);
+                if (material.empty()) return false;
+                SendMessageW(list, LB_SETCURSEL, index, 0);
+                SetFocus(list);
+            }
         }
         else if (source == tree)
         {
@@ -620,8 +644,13 @@ struct WindowsPanels::Impl
         }
         else if (source != models || local.y < DialogSize(models, 0, BROWSER_PAGE_TOP).cy) return false;
 
-        if (EditorMenu::OpenMaterialMenu(frameWindow, at.x, at.y))
+        if (EditorMenu::OpenMaterialMenu(frameWindow, at.x, at.y, !material.empty()))
         {
+            if (!material.empty())
+            {
+                DuplicateMaterial(material);
+                return true;
+            }
             auto& catalog = browser->Textures();
             std::string name = catalog.NewMaterialName();
             while (auto input = WindowsNameDialog::Prompt(frame, L"Add New Material", name))
@@ -736,10 +765,8 @@ struct WindowsPanels::Impl
     {
         HWND list = GetDlgItem(models, IDC_TEXTURES);
         const auto row = SendMessageW(list, LB_GETCURSEL, 0, 0);
-        const auto index = static_cast<std::size_t>(SendMessageW(list, LB_GETITEMDATA, row, 0));
-        auto& catalog = browser->Textures();
-        if (index < catalog.Items().size() && catalog.Items()[index].material &&
-            !materialEditor.Open(frame, catalog, catalog.Items()[index].path))
+        const auto path = MaterialAtRow(list, row);
+        if (!path.empty() && !materialEditor.Open(frame, browser->Textures(), path))
             MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
     }
 
@@ -1348,6 +1375,17 @@ struct WindowsPanels::Impl
         if (focus != self.frame && !IsChild(self.frame, focus))
         {
             return true;
+        }
+
+        if (msg->message == WM_KEYDOWN && msg->wParam == 'D' && (GetKeyState(VK_CONTROL) & 0x8000) &&
+            focus == GetDlgItem(self.models, IDC_TEXTURES) && !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
+        {
+            if (!(msg->lParam & (1L << 30)) && self.pressedTexture.empty())
+            {
+                const auto path = self.MaterialAtRow(focus, SendMessageW(focus, LB_GETCURSEL, 0, 0));
+                if (!path.empty()) self.DuplicateMaterial(path);
+            }
+            return false;
         }
 
         if (!self.pressedTexture.empty() && msg->message == WM_KEYDOWN && msg->wParam == VK_ESCAPE)

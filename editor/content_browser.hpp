@@ -67,8 +67,11 @@ private:
     void UpdateFolderRows();
     std::set<std::string> collapsedFolders;
     std::vector<std::size_t> folderRows;
+    void DuplicateSelectedMaterial(SDL_Window* window);
+    void RevealSelectedTexture();
     bool DrawMaterialPopup(SDL_Renderer* renderer) const;
-    enum class MaterialPopup { Closed, Menu, Name };
+    enum class MaterialPopup { Closed, AddMenu, DuplicateMenu, Name };
+    bool assetListFocused = false;
     MaterialPopup popup = MaterialPopup::Closed;
     SDL_FRect popupBounds{};
     bool replaceName = false;

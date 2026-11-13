@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 class TextureCatalog
@@ -25,6 +26,7 @@ public:
     void SelectFolder(const std::string& path);
     std::string NewMaterialName() const;
     bool CreateMaterial(const std::string& name, std::string& createdPath, std::string& error);
+    bool DuplicateMaterial(const std::string& sourcePath, std::string& createdPath, std::string& error);
     const std::vector<Item>& Items() const { return items; }
     const std::string& Status() const { return status; }
     const std::string& Root() const { return root; }
@@ -60,6 +62,8 @@ private:
 #ifndef _WIN32
     std::vector<SDL_Texture*> thumbnailTextures;
 #endif
+    bool WriteNewMaterial(std::string name, std::string_view contents, bool numberCopy,
+                          std::string& createdPath, std::string& error);
     void ReadFolder();
     std::vector<std::string> folders;
     std::string folder;

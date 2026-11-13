@@ -9,7 +9,7 @@ class EditorMenu
 {
 public:
 #ifdef _WIN32
-    static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY);
+    static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection);

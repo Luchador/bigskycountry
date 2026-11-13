@@ -349,12 +349,17 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
     {
         const bool assetRow = local.y >= top && (local.y - top + offset) < count * step &&
                               local.x >= 5 && local.x < width - 7;
-        if (!assetRow)
+        if (assetRow)
         {
-            popup = MaterialPopup::Menu;
-            const float w = std::min(154.0f, static_cast<float>(width));
-            popupBounds = {std::clamp(local.x, 0.0f, width - w), std::max(0.0f, std::min(local.y, height - 26.0f)), w, 26};
+            const auto& item = textures.Items()[static_cast<std::size_t>((local.y - top + offset) / step)];
+            selectedTexture = item.path;
+            assetListFocused = true;
+            if (!item.material) return {};
+            popup = MaterialPopup::DuplicateMenu;
         }
+        else popup = MaterialPopup::AddMenu;
+        const float w = std::min(154.0f, static_cast<float>(width));
+        popupBounds = {std::clamp(local.x, 0.0f, width - w), std::max(0.0f, std::min(local.y, height - 26.0f)), w, 26};
         return {};
     }
     if (event.type == SDL_EVENT_MOUSE_WHEEL)
@@ -386,6 +391,7 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
         {
             const auto& item = textures.Items()[index];
             selectedTexture = item.path;
+            assetListFocused = true;
             if (item.material && event.button.clicks == 2)
             {
                 auto* owner = SDL_GetWindowFromEvent(&event);
@@ -404,9 +410,39 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
     return {};
 }
 
+void ContentBrowser::RevealSelectedTexture()
+{
+    const auto& items = textures.Items();
+    const auto row = std::ranges::find(items, selectedTexture, &TextureCatalog::Item::path);
+    if (row != items.end()) textureScroll = static_cast<float>(row - items.begin()) * textureRowHeight;
+    assetListFocused = true;
+}
+
+void ContentBrowser::DuplicateSelectedMaterial(SDL_Window* window)
+{
+    std::string created, error;
+    if (textures.DuplicateMaterial(selectedTexture, created, error))
+    {
+        selectedTexture = std::move(created);
+        RevealSelectedTexture();
+    }
+    else SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Duplicate Material", error.c_str(), window);
+}
+
 bool ContentBrowser::HandleMaterialPopup(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, SDL_Rect panel)
 {
-    if (popup == MaterialPopup::Closed) return false;
+    const bool duplicateKey = event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_D &&
+                              (event.key.mod & SDL_KMOD_CTRL) && !(event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI));
+    if (popup == MaterialPopup::Closed)
+    {
+        // A press on a texture row restores focus in HandlePointer, after the main editor routes the click.
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+            assetListFocused = false;
+        if (!duplicateKey || !assetListFocused || tab != Tab::Textures || !Material::ValidAssetPath(selectedTexture))
+            return false;
+        if (!event.key.repeat) DuplicateSelectedMaterial(window);
+        return true;
+    }
     auto close = [&]
     {
         if (popup == MaterialPopup::Name) SDL_StopTextInput(window);
@@ -448,7 +484,16 @@ bool ContentBrowser::HandleMaterialPopup(SDL_Window* window, SDL_Renderer* rende
         return true;
     }
     const bool enter = key && !event.key.repeat && (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER);
-    if (popup == MaterialPopup::Menu)
+    if (popup == MaterialPopup::DuplicateMenu)
+    {
+        if (press || enter || (duplicateKey && !event.key.repeat))
+        {
+            close();
+            DuplicateSelectedMaterial(window);
+        }
+        return true;
+    }
+    if (popup == MaterialPopup::AddMenu)
     {
         if (press || enter)
         {
@@ -468,9 +513,7 @@ bool ContentBrowser::HandleMaterialPopup(SDL_Window* window, SDL_Renderer* rende
     {
         if (textures.CreateMaterial(materialName, selectedTexture, nameError))
         {
-            const auto& items = textures.Items();
-            auto it = std::find_if(items.begin(), items.end(), [&](const auto& item) { return item.path == selectedTexture; });
-            textureScroll = static_cast<float>(it - items.begin()) * textureRowHeight;
+            RevealSelectedTexture();
             close();
         }
     }
@@ -682,9 +725,12 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
 bool ContentBrowser::DrawMaterialPopup(SDL_Renderer* renderer) const
 {
     if (popup == MaterialPopup::Closed) return true;
-    if (!Fill(renderer, popupBounds, EditorTheme::chrome) ||
-        !Text(renderer, popupBounds.x + 6, popupBounds.y + 8, "Add New Material", ink)) return false;
-    if (popup == MaterialPopup::Menu) return true;
+    if (!Fill(renderer, popupBounds, EditorTheme::chrome)) return false;
+    if (popup == MaterialPopup::DuplicateMenu)
+        return Text(renderer, popupBounds.x + 6, popupBounds.y + 8, "Duplicate", ink) &&
+               Text(renderer, popupBounds.x + popupBounds.w - 54, popupBounds.y + 8, "Ctrl+D", muted);
+    if (!Text(renderer, popupBounds.x + 6, popupBounds.y + 8, "Add New Material", ink)) return false;
+    if (popup == MaterialPopup::AddMenu) return true;
     const auto [x, y, w, h] = popupBounds;
     if (!Fill(renderer, {x + 5, y + 28, w - 10, 23}, replaceName ? EditorTheme::selected : EditorTheme::field) ||
         !Text(renderer, x + 8, y + 36, materialName, ink)) return false;

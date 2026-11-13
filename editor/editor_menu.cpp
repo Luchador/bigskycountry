@@ -349,16 +349,18 @@ namespace
 #endif
 
 #ifdef _WIN32
-bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY)
+bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial)
 {
     constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Add New Material"};
+    constexpr static MenuItem duplicate{BSC_DUPLICATE_MATERIAL, L"&Duplicate\tCtrl+D"};
+    const auto& item = onMaterial ? duplicate : add;
     HWND owner = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
                                    SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     HMENU menu = CreatePopupMenu();
     if (!menu) return false;
     MenuBackground(menu, EditorTheme::chrome);
-    const bool chosen = Insert(menu, add) && TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-                                                             screenX, screenY, owner, nullptr) == add.id;
+    const bool chosen = Insert(menu, item) && TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                                             screenX, screenY, owner, nullptr) == item.id;
     DestroyMenu(menu);
     return chosen;
 }
