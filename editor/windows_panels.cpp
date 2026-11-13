@@ -129,6 +129,7 @@ struct WindowsPanels::Impl
     std::optional<TransformFields> inspected;
     bool pendingFieldEdit = false;
     std::deque<InspectorEdit> pendingEdits;
+    std::deque<TransformTarget> actionTargets;
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     WindowsMaterialEditor materialEditor;
@@ -202,7 +203,6 @@ struct WindowsPanels::Impl
 
     struct Inspector
     {
-        RoadStyle style;
         bool plan, drawing, canFinish;
         int selected, point;
         double elevation;
@@ -291,6 +291,7 @@ struct WindowsPanels::Impl
     {
         if (inspected && *inspected == fields) return;
         const bool changedTarget = !inspected || inspected->target != fields.target;
+        if (changedTarget && GetFocus() == GetDlgItem(road, IDC_ROAD_NAMES)) SetFocus(frame);
         inspected = fields;
         for (int field = 0; field <= TransformFields::geographicLocation; ++field)
         {
@@ -749,7 +750,7 @@ struct WindowsPanels::Impl
         const RECT thumb{r.left + pad, r.top + pad, r.left + r.bottom - r.top - pad, r.bottom - pad};
         const bool active = lastInspector && lastInspector->properties.materialSlot;
         const auto path = active ? lastInspector->properties.material : std::string{};
-        WindowsTheme::DrawPreview(draw.hDC, thumb, active ? browser->RoadMaterialThumbnail(path) : nullptr);
+        WindowsTheme::DrawPreview(draw.hDC, thumb, !path.empty() ? browser->RoadMaterialThumbnail(path) : nullptr);
         SetBkMode(draw.hDC, TRANSPARENT);
         RECT line{thumb.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
         constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
@@ -759,7 +760,8 @@ struct WindowsPanels::Impl
         line.top = line.bottom;
         line.bottom = r.bottom;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
-        const auto label = !active ? L"Select a road" : path.empty() ? L"Mesh colors" : Wide(path.substr(path.rfind('/') + 1));
+        const auto label = !active ? L"Select a road" : lastInspector->properties.Mixed(RoadProperty::Material) ? L"Multiple values" :
+                           path.empty() ? L"Mesh colors" : Wide(path.substr(path.rfind('/') + 1));
         DrawTextW(draw.hDC, label.c_str(), -1, &line, flags);
     }
 
@@ -844,6 +846,13 @@ struct WindowsPanels::Impl
         return DefSubclassProc(list, msg, w, l);
     }
 
+    void PostAction(RoadAction action)
+    {
+        if (!inspected) return;
+        actionTargets.push_back(inspected->target);
+        if (!Post(actions, static_cast<int>(action))) actionTargets.pop_back();
+    }
+
     void Control(int id, int notification)
     {
         if (id == IDC_TEXTURES && notification == LBN_DBLCLK)
@@ -881,20 +890,20 @@ struct WindowsPanels::Impl
             case IDC_TRANSFORM_SPACE:
             case IDC_SNAP_TO_GRID: Post(toolbarEvent, id); SetFocus(frame); return;
             case IDC_REFRESH: RefreshBrowser(); return;
-            case IDC_PAINT_MARKINGS: Post(actions, int(RoadAction::TogglePaintMarkings)); return;
-            case IDC_FINISH: Post(actions, int(RoadAction::Finish)); SetFocus(frame); return;
-            case IDC_CANCEL_DRAFT: Post(actions, int(RoadAction::Cancel)); SetFocus(frame); return;
-            case IDC_RADIUS_LESS: Post(actions, int(RoadAction::SmallerRadius)); return;
-            case IDC_RADIUS_MORE: Post(actions, int(RoadAction::LargerRadius)); return;
-            case IDC_STOP_LINE: Post(actions, int(RoadAction::ToggleStopLine)); return;
-            case IDC_INVINCIBLE: Post(actions, int(RoadAction::ToggleInvincible)); return;
-            case IDC_FEWER: Post(actions, int(RoadAction::Fewer)); return;
-            case IDC_MORE: Post(actions, int(RoadAction::More)); return;
-            case IDC_DIVIDED: Post(actions, int(RoadAction::Divide)); return;
-            case IDC_GAP_LESS: Post(actions, int(RoadAction::NarrowerGap)); return;
-            case IDC_GAP_MORE: Post(actions, int(RoadAction::WiderGap)); return;
-            case IDC_LEFT: Post(actions, int(RoadAction::Left)); return;
-            case IDC_RIGHT: Post(actions, int(RoadAction::Right)); return;
+            case IDC_PAINT_MARKINGS: PostAction(RoadAction::TogglePaintMarkings); return;
+            case IDC_FINISH: PostAction(RoadAction::Finish); SetFocus(frame); return;
+            case IDC_CANCEL_DRAFT: PostAction(RoadAction::Cancel); SetFocus(frame); return;
+            case IDC_RADIUS_LESS: PostAction(RoadAction::SmallerRadius); return;
+            case IDC_RADIUS_MORE: PostAction(RoadAction::LargerRadius); return;
+            case IDC_STOP_LINE: PostAction(RoadAction::ToggleStopLine); return;
+            case IDC_INVINCIBLE: PostAction(RoadAction::ToggleInvincible); return;
+            case IDC_FEWER: PostAction(RoadAction::Fewer); return;
+            case IDC_MORE: PostAction(RoadAction::More); return;
+            case IDC_DIVIDED: PostAction(RoadAction::Divide); return;
+            case IDC_GAP_LESS: PostAction(RoadAction::NarrowerGap); return;
+            case IDC_GAP_MORE: PostAction(RoadAction::WiderGap); return;
+            case IDC_LEFT: PostAction(RoadAction::Left); return;
+            case IDC_RIGHT: PostAction(RoadAction::Right); return;
             }
         }
         if (notification == CBN_SELCHANGE)
@@ -905,19 +914,19 @@ struct WindowsPanels::Impl
             static constexpr RoadAction edge[] = {RoadAction::NoEdge, RoadAction::Transition, RoadAction::Curb};
             if (id == IDC_ALIGNMENT && i >= 0 && i < 2)
             {
-                Post(actions, int(alignment[i]));
+                PostAction(alignment[i]);
             }
             if (id == IDC_LAYOUT && i >= 0 && i < 3)
             {
-                Post(actions, int(layout[i]));
+                PostAction(layout[i]);
             }
             if (id == IDC_MEDIAN && (i == 0 || i == 1))
             {
-                Post(actions, int(i == 0 ? RoadAction::ConcreteMedian : RoadAction::GrassMedian));
+                PostAction(i == 0 ? RoadAction::ConcreteMedian : RoadAction::GrassMedian);
             }
             if (id == IDC_EDGE && i >= 0 && i < 3)
             {
-                Post(actions, int(edge[i]));
+                PostAction(edge[i]);
             }
         }
     }
@@ -935,7 +944,8 @@ struct WindowsPanels::Impl
         const bool refreshText = marker && (pageChanged || lastInspector->properties.title != properties.title ||
                                              lastInspector->properties.markerText != properties.markerText);
         const bool refreshNames = pageChanged || lastInspector->selected != data.selected ||
-                                  lastInspector->properties.roadNames != properties.roadNames;
+                                  lastInspector->properties.roadNames != properties.roadNames ||
+                                  lastInspector->properties.Mixed(RoadProperty::Names) != properties.Mixed(RoadProperty::Names);
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
         const bool junction = properties.page == PropertiesPage::Intersection;
@@ -966,7 +976,8 @@ struct WindowsPanels::Impl
         }
         SetDlgItemTextW(road, IDC_ROAD_TITLE, Wide(properties.title).c_str());
         InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
-        const int lanes = data.style.GetLaneCount();
+        const auto& style = properties.style;
+        const int lanes = style.GetLaneCount();
         if (!roadPage)
         {
             SetDlgItemTextW(road, IDC_PROPERTY_DETAIL, junction ? L"Corner radius (m)" : Wide(properties.detail).c_str());
@@ -983,19 +994,39 @@ struct WindowsPanels::Impl
         }
         EnableWindow(GetDlgItem(road, IDC_ROAD_NAMES), properties.roadNames.has_value());
         EnableWindow(GetDlgItem(road, IDC_PAINT_MARKINGS), properties.roadNames.has_value());
-        if (refreshNames) RestoreField(IDC_ROAD_NAMES);
-        CheckDlgButton(road, IDC_PAINT_MARKINGS, properties.paintMarkings ? BST_CHECKED : BST_UNCHECKED);
-        SendDlgItemMessageW(road, IDC_ALIGNMENT, CB_SETCURSEL, data.style.curved, 0);
-        SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
-        EnableWindow(GetDlgItem(road, IDC_FEWER), lanes > (data.style.IsDivided() ? 2 : 1));
-        EnableWindow(GetDlgItem(road, IDC_MORE), lanes < RoadStyle::maxLanes);
+        if (refreshNames)
+        {
+            RestoreField(IDC_ROAD_NAMES);
+            SendDlgItemMessageW(road, IDC_ROAD_NAMES, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(
+                properties.Mixed(RoadProperty::Names) ? L"Multiple values" : L""));
+        }
+        const auto check = [&](int id, RoadProperty field, bool value)
+        {
+            CheckDlgButton(road, id, properties.Mixed(field) ? BST_INDETERMINATE : value ? BST_CHECKED : BST_UNCHECKED);
+        };
+        const auto choice = [&](int id, RoadProperty field, int index, int choices)
+        {
+            const bool mixed = index >= 0 && properties.Mixed(field);
+            const HWND combo = GetDlgItem(road, id);
+            const bool hasPlaceholder = SendMessageW(combo, CB_GETCOUNT, 0, 0) > choices;
+            if (mixed && !hasPlaceholder)
+                SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Multiple values"));
+            if (!mixed && hasPlaceholder) SendMessageW(combo, CB_DELETESTRING, choices, 0);
+            SendMessageW(combo, CB_SETCURSEL, mixed ? choices : index, 0);
+        };
+        check(IDC_PAINT_MARKINGS, RoadProperty::Markings, properties.paintMarkings);
+        choice(IDC_ALIGNMENT, RoadProperty::Alignment, style.curved, 2);
+        if (properties.minLanes == properties.maxLanes) SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
+        else SetDlgItemTextW(road, IDC_LANE_COUNT, L"Mixed");
+        EnableWindow(GetDlgItem(road, IDC_FEWER), properties.CanStepLanes(false));
+        EnableWindow(GetDlgItem(road, IDC_MORE), properties.CanStepLanes(true));
 
         for (int id : {IDC_LAYOUT_LABEL, IDC_LAYOUT})
         {
-            ShowWindow(GetDlgItem(road, id), lanes == 3 ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, id), properties.ThreeLanes() ? SW_SHOWNA : SW_HIDE);
         }
 
-        const bool centerTurn = lanes > 3 && data.style.HasCenterTurnLane();
+        const bool centerTurn = properties.minLanes == properties.maxLanes && lanes > 3 && style.HasCenterTurnLane();
 
         if (centerTurn)
         {
@@ -1004,23 +1035,23 @@ struct WindowsPanels::Impl
         }
 
         ShowWindow(GetDlgItem(road, IDC_LANE_DETAIL), centerTurn ? SW_SHOWNA : SW_HIDE);
-        SendDlgItemMessageW(road, IDC_LAYOUT, CB_SETCURSEL, lanes == 3 ? int(data.style.threeLaneLayout) : -1, 0);
-        CheckDlgButton(road, IDC_LEFT, data.style.leftShoulder ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(road, IDC_RIGHT, data.style.rightShoulder ? BST_CHECKED : BST_UNCHECKED);
-        SendDlgItemMessageW(road, IDC_EDGE, CB_SETCURSEL, int(data.style.edge), 0);
+        choice(IDC_LAYOUT, RoadProperty::Layout, properties.ThreeLanes() ? int(style.threeLaneLayout) : -1, 3);
+        check(IDC_LEFT, RoadProperty::Left, style.leftShoulder);
+        check(IDC_RIGHT, RoadProperty::Right, style.rightShoulder);
+        choice(IDC_EDGE, RoadProperty::Edge, int(style.edge), 3);
         wchar_t text[100];
-        const bool divided = data.style.IsDivided();
-        const bool hasMedian = data.style.HalfMedianWidth() > 0;
-        CheckDlgButton(road, IDC_DIVIDED, divided ? BST_CHECKED : BST_UNCHECKED);
-        EnableWindow(GetDlgItem(road, IDC_DIVIDED), data.style.CanDivide());
-        EnableWindow(GetDlgItem(road, IDC_GAP_LESS), divided && data.style.DividedGap() > RoadStyle::minSeparation);
+        const bool divided = properties.AllDivided();
+        const bool hasMedian = properties.HasMedian();
+        check(IDC_DIVIDED, RoadProperty::Divided, divided);
+        EnableWindow(GetDlgItem(road, IDC_DIVIDED), properties.canDivide || properties.anyDivided);
+        EnableWindow(GetDlgItem(road, IDC_GAP_LESS), divided && properties.maxGap > RoadStyle::minSeparation);
         EnableWindow(GetDlgItem(road, IDC_GAP_MORE), divided);
-        swprintf(text, 100, L"%.2f", data.style.DividedGap());
-        SetDlgItemTextW(road, IDC_GAP_VALUE, divided ? text : L"");
+        swprintf(text, 100, L"%.2f", style.DividedGap());
+        SetDlgItemTextW(road, IDC_GAP_VALUE, !divided ? L"" : properties.minGap != properties.maxGap ? L"Mixed" : text);
         EnableWindow(GetDlgItem(road, IDC_MEDIAN), hasMedian);
-        SendDlgItemMessageW(road, IDC_MEDIAN, CB_SETCURSEL, hasMedian ? int(data.style.median) : -1, 0);
-        swprintf(text, 100, L"Width: %.2f m", data.style.LeftWidth() + data.style.RightWidth() + 2 * data.style.EdgeWidth());
-        SetDlgItemTextW(road, IDC_WIDTH, text);
+        choice(IDC_MEDIAN, RoadProperty::Median, hasMedian ? int(style.median) : -1, 2);
+        swprintf(text, 100, L"Width: %.2f m", style.LeftWidth() + style.RightWidth() + 2 * style.EdgeWidth());
+        SetDlgItemTextW(road, IDC_WIDTH, properties.Mixed(RoadProperty::Width) ? L"Width: Mixed" : text);
 
         if (data.point >= 0)
         {
@@ -1376,6 +1407,9 @@ struct WindowsPanels::Impl
         {
             if (msg->message == WM_KEYDOWN)
             {
+                if (id == IDC_ROAD_NAMES && (msg->wParam == VK_BACK || msg->wParam == VK_DELETE) &&
+                    self.lastInspector && self.lastInspector->properties.Mixed(RoadProperty::Names))
+                    SendMessageW(focus, EM_SETMODIFY, TRUE, 0);
                 if (msg->wParam == VK_RETURN)
                 {
                     self.SubmitField(focus, field);
@@ -1622,16 +1656,17 @@ void WindowsPanels::ToViewport(SDL_Window* frame, SDL_Event& event, const SDL_Re
     }
 }
 
-bool WindowsPanels::Command(const SDL_Event& event, RoadAction& action) const
+bool WindowsPanels::Command(const SDL_Event& event, const RoadEditorState& state, RoadAction& action)
 {
-    if (event.type != impl->actions)
+    if (event.type != impl->actions || impl->actionTargets.empty())
     {
         return false;
     }
 
+    const bool matches = impl->actionTargets.front() == state.Target();
+    impl->actionTargets.pop_front();
     action = static_cast<RoadAction>(event.user.code);
-
-    return true;
+    return matches;
 }
 
 bool WindowsPanels::HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings)
@@ -1703,7 +1738,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
 
     const int point = !plan && current ? state.point : -1;
 
-    p.UpdateInspector({current ? current->style : state.defaults, plan, plan && state.drawing,
+    p.UpdateInspector({plan, plan && state.drawing,
                        plan && state.drawing && state.draft->points.size() >= 2,
                        state.selected, point, point >= 0 ? current->points[point].position.y : 0.0, Material::Revision(), properties});
 

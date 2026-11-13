@@ -157,9 +157,21 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> 
     }
 }
 
+void RoadProperties::Apply(Road& road) const
+{
+    if (road.NameList() != names) road.SetNameList(names);
+    road.style.material = style.material;
+    if (road.style != style || road.paintMarkings != paintMarkings)
+    {
+        road.style = style;
+        road.paintMarkings = paintMarkings;
+        road.Rebuild();
+    }
+}
+
 bool EditHistory::Action::ChangesWorld() const
 {
-    return roadIndex >= 0 || object || after.meshTransform || after.roadGroup || after.junction ||
+    return roadIndex >= 0 || !after.roadProperties.empty() || object || after.meshTransform || after.roadGroup || after.junction ||
            after.objectInvincible || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
            before.addedTerrain || after.addedTerrain;
 }
@@ -314,6 +326,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
             (end.first ? points.front() : points.back()).anchor = value ? std::optional{end.anchor} : std::nullopt;
         }
     }
+    for (const auto& [i, properties] : to.roadProperties) properties.Apply(roads.at(i));
     if (to.roadGroup) to.roadGroup->Restore(world);
     if (to.markerText || to.markerTextColor)
     {

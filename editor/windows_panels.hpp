@@ -37,7 +37,7 @@ public:
         std::optional<TransformTarget> inspectorTarget;
     };
     std::optional<MaterialDrop> TakeMaterialDrop(const SDL_Event& event);
-    bool Command(const SDL_Event& event, RoadAction& action) const;
+    bool Command(const SDL_Event& event, const RoadEditorState& state, RoadAction& action);
     bool HandleInput(const SDL_Event& event, FreeCamera& camera, TransformSettings& settings);
     SDL_Keymod TakePressModifiers();
     std::optional<InspectorEdit> TakeInspectorEdit(const SDL_Event& event);

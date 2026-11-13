@@ -87,7 +87,7 @@ namespace
         const SDL_Color fg = enabled ? text : disabled;
         const SDL_Color face = !enabled ? header : (state & BST_PUSHED) ? pressed : hot ? hover : button;
         const UINT prefix = SendMessageW(w, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL ? DT_HIDEPREFIX : 0;
-        if (type == BS_AUTOCHECKBOX || type == BS_CHECKBOX)
+        if (type == BS_AUTOCHECKBOX || type == BS_CHECKBOX || type == BS_3STATE)
         {
             DWORD_PTR bg = Color(panel);
             GetWindowSubclass(GetParent(w), DialogColors, 1, &bg);
@@ -95,9 +95,14 @@ namespace
             const int side = std::min<int>(r.bottom - r.top, Scale(w, 13));
             const LONG y = (r.bottom - side) / 2;
             RECT mark{r.left, y, r.left + side, y + side};
-            const bool checked = SendMessageW(w, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            const auto checked = SendMessageW(w, BM_GETCHECK, 0, 0);
             Box(dc, mark, checked ? selected : hot ? button : field, enabled ? disabled : button);
-            if (checked)
+            if (checked == BST_INDETERMINATE)
+            {
+                RECT dash{mark.left + side / 4, y + side / 2, mark.right - side / 4, y + side / 2 + Scale(w, 2)};
+                FillRect(dc, &dash, Solid(Color(fg)));
+            }
+            else if (checked == BST_CHECKED)
             {
                 Stroke(dc, Color(fg), {mark.left + side/5, y + side/2},
                        {mark.left + side*2/5, y + side*3/4}, {mark.right - side/6, y + side/4});
@@ -343,7 +348,7 @@ namespace
         if (IsClass(w, WC_BUTTONW))
         {
             const auto type = GetWindowLongPtrW(w, GWL_STYLE) & BS_TYPEMASK;
-            if (type != BS_PUSHBUTTON && type != BS_DEFPUSHBUTTON && type != BS_AUTOCHECKBOX && type != BS_CHECKBOX)
+            if (type != BS_PUSHBUTTON && type != BS_DEFPUSHBUTTON && type != BS_AUTOCHECKBOX && type != BS_CHECKBOX && type != BS_3STATE)
             {
                 SetWindowTheme(w, L"DarkMode_Explorer", nullptr);
                 return TRUE;

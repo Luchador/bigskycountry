@@ -21,6 +21,7 @@
 #include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
 #include <SDL3/SDL.h>
+#include <functional>
 
 class RoadEditor : public EditorTool
 {
@@ -64,9 +65,10 @@ private:
         const char* label;
         bool active = false;
         bool enabled = true;
+        bool mixed = false;
     };
 
-    std::vector<Button> Buttons(const WorldDocument& world, const PropertiesInspector& properties) const;
+    std::vector<Button> Buttons(const PropertiesInspector& properties) const;
 #endif
     RoadStyle& Style(WorldDocument& world);
     bool EditingDraft() const { return planView && state.drawing; }
@@ -112,6 +114,7 @@ private:
     void UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer);
     void Activate(Action action, WorldDocument& world);
     void ChangeStyle(Action action, WorldDocument& world);
+    void EditRoadGroup(WorldDocument& world, const std::function<void(RoadProperties&)>& edit);
     void PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod modifiers);
     void DeleteSelection(WorldDocument& world);
     void Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion);

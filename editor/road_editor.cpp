@@ -29,16 +29,16 @@ namespace
     constexpr SDL_FRect propertyMaterialSlot{12, 118, 194, 54};
     constexpr float threeLanePanelHeight = 104.0f;
 
-    SDL_FRect MaterialSlotRect(const RoadStyle& style)
+    SDL_FRect MaterialSlotRect(const PropertiesInspector& properties)
     {
-        const float y = (style.IsDivided() ? 514.0f : 406.0f) +
-                        (style.GetLaneCount() == 3 ? threeLanePanelHeight : 0.0f);
+        const float y = (properties.AllDivided() ? 514.0f : 406.0f) +
+                        (properties.ThreeLanes() ? threeLanePanelHeight : 0.0f);
         return {12, y, 194, 54};
     }
 
-    float RoadStyleBottom(const RoadStyle& style)
+    float RoadStyleBottom(const PropertiesInspector& properties)
     {
-        const auto slot = MaterialSlotRect(style);
+        const auto slot = MaterialSlotRect(properties);
         return slot.y + slot.h + 8;
     }
 #endif
@@ -280,7 +280,7 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
 }
 
 #ifndef _WIN32
-std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, const PropertiesInspector& properties) const
+std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& properties) const
 {
     if (properties.page == PropertiesPage::Intersection)
         return {{Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
@@ -290,36 +290,36 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
     if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
         return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
     if (properties.page != PropertiesPage::Road) return {};
-    const Road* current = EditingDraft() ? &*state.draft : Selected(world);
-    const RoadStyle& style = current ? current->style : state.defaults;
-    const int laneCount = style.GetLaneCount();
-    const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
+    const auto& style = properties.style;
+    const float offset = properties.ThreeLanes() ? threeLanePanelHeight : 0.0f;
 
     std::vector<Button> buttons{
-        {Action::TogglePaintMarkings, {12, 84, 194, 28}, "Paint markings", properties.paintMarkings, current != nullptr},
-        {Action::Straight, {12, 148, 94, 28}, "Straight", !style.curved},
-        {Action::Curve, {112, 148, 94, 28}, "Bezier", style.curved},
-        {Action::Fewer, {12, 210, 32, 28}, "-", false, laneCount > (style.IsDivided() ? 2 : 1)},
-        {Action::More, {174, 210, 32, 28}, "+", false, laneCount < RoadStyle::maxLanes},
-        {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder},
-        {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder},
-        {Action::NoEdge, {12, 328 + offset, 46, 28}, "None", style.edge == RoadEdge::None},
-        {Action::Transition, {62, 328 + offset, 94, 28}, "Transition", style.edge == RoadEdge::Transition},
-        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", style.edge == RoadEdge::Curb},
-        {Action::Divide, {12, 368 + offset, 194, 28}, "Divided road", style.IsDivided(), style.CanDivide()}};
+        {Action::TogglePaintMarkings, {12, 84, 194, 28}, "Paint markings", properties.paintMarkings,
+         properties.roadNames.has_value(), properties.Mixed(RoadProperty::Markings)},
+        {Action::Straight, {12, 148, 94, 28}, "Straight", !properties.Mixed(RoadProperty::Alignment) && !style.curved},
+        {Action::Curve, {112, 148, 94, 28}, "Bezier", !properties.Mixed(RoadProperty::Alignment) && style.curved},
+        {Action::Fewer, {12, 210, 32, 28}, "-", false, properties.CanStepLanes(false)},
+        {Action::More, {174, 210, 32, 28}, "+", false, properties.CanStepLanes(true)},
+        {Action::Left, {12, 274 + offset, 94, 28}, "Left", style.leftShoulder, true, properties.Mixed(RoadProperty::Left)},
+        {Action::Right, {112, 274 + offset, 94, 28}, "Right", style.rightShoulder, true, properties.Mixed(RoadProperty::Right)},
+        {Action::NoEdge, {12, 328 + offset, 46, 28}, "None", !properties.Mixed(RoadProperty::Edge) && style.edge == RoadEdge::None},
+        {Action::Transition, {62, 328 + offset, 94, 28}, "Transition", !properties.Mixed(RoadProperty::Edge) && style.edge == RoadEdge::Transition},
+        {Action::Curb, {160, 328 + offset, 46, 28}, "Curb", !properties.Mixed(RoadProperty::Edge) && style.edge == RoadEdge::Curb},
+        {Action::Divide, {12, 368 + offset, 194, 28}, "Divided road", properties.AllDivided(),
+         properties.canDivide || properties.anyDivided, properties.Mixed(RoadProperty::Divided)}};
 
-    if (style.IsDivided())
+    if (properties.AllDivided())
     {
         buttons.push_back({Action::NarrowerGap, {12, 422 + offset, 32, 28}, "-", false,
-                           style.DividedGap() > RoadStyle::minSeparation});
+                           properties.maxGap > RoadStyle::minSeparation});
         buttons.push_back({Action::WiderGap, {174, 422 + offset, 32, 28}, "+"});
-        const bool hasMedian = style.HalfMedianWidth() > 0;
+        const bool hasMedian = properties.HasMedian();
         buttons.push_back({Action::ConcreteMedian, {12, 476 + offset, 94, 28}, "Concrete",
-                           hasMedian && style.median == RoadMedian::Concrete, hasMedian});
+                           hasMedian && !properties.Mixed(RoadProperty::Median) && style.median == RoadMedian::Concrete, hasMedian});
         buttons.push_back({Action::GrassMedian, {112, 476 + offset, 94, 28}, "Grass",
-                           hasMedian && style.median == RoadMedian::Grass, hasMedian});
+                           hasMedian && !properties.Mixed(RoadProperty::Median) && style.median == RoadMedian::Grass, hasMedian});
     }
-    const float styleBottom = RoadStyleBottom(style);
+    const float styleBottom = RoadStyleBottom(properties);
 
     if (planView)
     {
@@ -328,14 +328,14 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const WorldDocument& world, 
         buttons.push_back({Action::Cancel, {12, styleBottom + 64, 194, 28}, "Cancel draft [Esc]", false, state.drawing});
     }
 
-    if (laneCount == 3)
+    if (properties.ThreeLanes())
     {
         buttons.push_back({Action::TwoNorthbound, {12, 268, 194, 26}, "2 north / 1 south",
-                           style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound});
+                           !properties.Mixed(RoadProperty::Layout) && style.threeLaneLayout == ThreeLaneLayout::TwoNorthbound});
         buttons.push_back({Action::TwoSouthbound, {12, 298, 194, 26}, "1 north / 2 south",
-                           style.threeLaneLayout == ThreeLaneLayout::TwoSouthbound});
+                           !properties.Mixed(RoadProperty::Layout) && style.threeLaneLayout == ThreeLaneLayout::TwoSouthbound});
         buttons.push_back({Action::CenterTurn, {12, 328, 194, 26}, "Center turn lane",
-                           style.threeLaneLayout == ThreeLaneLayout::CenterTurn});
+                           !properties.Mixed(RoadProperty::Layout) && style.threeLaneLayout == ThreeLaneLayout::CenterTurn});
     }
 
     return buttons;
@@ -531,12 +531,19 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     case RoadPickKind::Object: key = {SceneKind::Object, target.index}; break;
     default: return;
     }
+    const bool group = !EditingDraft() && state.MultipleRoadsSelected() && target.kind == RoadPickKind::Road &&
+                       (!viewportPoint || state.outlineSelection.contains({SceneKind::Road, target.index}));
     auto* current = road ? &road->style.material : FindPlacedMaterial(world, key);
-    if (!current || *current == path || (path.empty() && key.kind != SceneKind::Object)) return;
+    if ((!group && (!current || *current == path)) || (path.empty() && key.kind != SceneKind::Object)) return;
     Material definition;
     if (!path.empty() && (!Material::ValidAssetPath(path) || !definition.Load(browser.Textures().Root() + path)))
     {
         status = SDL_GetError();
+        return;
+    }
+    if (group)
+    {
+        EditRoadGroup(world, [&](RoadProperties& p) { p.style.material = path; });
         return;
     }
     if (road)
@@ -649,6 +656,13 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
     }
     case Action::TogglePaintMarkings:
     {
+        if (!EditingDraft() && state.MultipleRoadsSelected())
+        {
+            const auto p = InspectProperties(world, state, false);
+            const bool value = p.Mixed(RoadProperty::Markings) || !p.paintMarkings;
+            EditRoadGroup(world, [value](RoadProperties& road) { road.paintMarkings = value; });
+            return;
+        }
         const int index = EditingDraft() ? -1 : state.selected;
         Road* placed = index >= 0 ? &world.roads.at(index) : nullptr;
         Road* road = EditingDraft() ? &*state.draft : placed;
@@ -686,69 +700,43 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         return;
     }
     default:
-        if (InspectProperties(world, state, EditingDraft()).page == PropertiesPage::Road) ChangeStyle(action, world);
+        ChangeStyle(action, world);
         return;
     }
 }
 
+void RoadEditor::EditRoadGroup(WorldDocument& world, const std::function<void(RoadProperties&)>& edit)
+{
+    EditSnapshot before(state), after(state);
+    for (const auto key : state.SelectedRoadRows())
+    {
+        const RoadProperties original(world.roads.at(key.index));
+        auto updated = original;
+        edit(updated);
+        if (updated == original) continue;
+        before.roadProperties.emplace(key.index, original);
+        after.roadProperties.emplace(key.index, std::move(updated));
+    }
+    if (after.roadProperties.empty()) return;
+    for (const auto& [index, properties] : after.roadProperties) properties.Apply(world.roads.at(index));
+    outliner.Invalidate();
+    history.Record(-1, std::move(before), std::move(after));
+    Save(world);
+}
+
+
 void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
 {
-    RoadStyle& current = Style(world);
-    RoadStyle style = current;
-    switch (action)
+    const auto p = InspectProperties(world, state, EditingDraft());
+    if (p.page != PropertiesPage::Road) return;
+    if (!EditingDraft() && state.MultipleRoadsSelected())
     {
-    case Action::Straight:
-        style.curved = false;
-        break;
-    case Action::Curve:
-        style.curved = true;
-        break;
-    case Action::Fewer:
-        style.SetLaneCount(std::max(style.IsDivided() ? 2 : 1, style.GetLaneCount() - (style.IsDivided() ? 2 : 1)));
-        break;
-    case Action::More:
-        style.SetLaneCount(style.GetLaneCount() + (style.IsDivided() ? 2 : 1));
-        break;
-    case Action::TwoNorthbound:
-        style.threeLaneLayout = ThreeLaneLayout::TwoNorthbound;
-        break;
-    case Action::TwoSouthbound:
-        style.threeLaneLayout = ThreeLaneLayout::TwoSouthbound;
-        break;
-    case Action::CenterTurn:
-        style.threeLaneLayout = ThreeLaneLayout::CenterTurn;
-        break;
-    case Action::Left:
-        style.leftShoulder = !style.leftShoulder;
-        break;
-    case Action::Right:
-        style.rightShoulder = !style.rightShoulder;
-        break;
-    case Action::NoEdge:
-        style.edge = RoadEdge::None;
-        break;
-    case Action::Transition:
-        style.edge = RoadEdge::Transition;
-        break;
-    case Action::Curb:
-        style.edge = RoadEdge::Curb;
-        break;
-    case Action::Divide:
-        style.SetDivided(!style.IsDivided());
-        break;
-    case Action::NarrowerGap:
-    case Action::WiderGap:
-        if (!style.IsDivided()) return;
-        style.SetDividedGap(style.DividedGap() + (action == Action::WiderGap ? 0.5 : -0.5));
-        break;
-    case Action::ConcreteMedian:
-    case Action::GrassMedian:
-        if (style.HalfMedianWidth() <= 0) return;
-        style.median = action == Action::GrassMedian ? RoadMedian::Grass : RoadMedian::Concrete;
-        break;
-    default:
+        EditRoadGroup(world, [&](RoadProperties& road) { p.ApplyRoadStyle(road.style, action); });
         return;
     }
+    RoadStyle& current = Style(world);
+    RoadStyle style = current;
+    p.ApplyRoadStyle(style, action);
     if (style == current)
     {
         return;
@@ -1407,15 +1395,21 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
         return false;
     }
 
-    for (const Button& b : Buttons(world, properties))
+    for (const Button& b : Buttons(properties))
     {
-        if (b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings)
+        if (b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings ||
+            b.action == Action::Left || b.action == Action::Right || b.action == Action::Divide)
         {
             const SDL_FRect box{b.rect.x + 2, b.rect.y + 6, 16, 16};
-            if (!Fill(renderer, box, b.active ? EditorTheme::selected : EditorTheme::field) ||
+            if (!Fill(renderer, box, (b.active || b.mixed) ? EditorTheme::selected : EditorTheme::field) ||
                 !EditorTheme::SetColor(renderer, muted) || !SDL_RenderRect(renderer, &box) ||
                 !Text(renderer, box.x + 23, b.rect.y + 10, b.label, b.enabled ? ink : muted)) return false;
-            if (b.active)
+            if (b.mixed)
+            {
+                if (!EditorTheme::SetColor(renderer, ink) ||
+                    !SDL_RenderLine(renderer, box.x + 3, box.y + 8, box.x + 13, box.y + 8)) return false;
+            }
+            else if (b.active)
             {
                 const SDL_FPoint tick[]{{box.x + 3, box.y + 8}, {box.x + 7, box.y + 12}, {box.x + 13, box.y + 4}};
                 if (!EditorTheme::SetColor(renderer, ink) || !SDL_RenderLines(renderer, tick, 3)) return false;
@@ -1430,10 +1424,10 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
         }
     }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
-    const RoadStyle& style = current ? current->style : state.defaults;
+    const auto& style = properties.style;
     if (properties.materialSlot || properties.page == PropertiesPage::Road)
     {
-        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(style) : propertyMaterialSlot;
+        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties) : propertyMaterialSlot;
         const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
         const char* caption = properties.MaterialCaption();
         if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
@@ -1443,7 +1437,8 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
             if (auto* thumbnail = browser.RoadMaterialTexture(properties.material, renderer))
                 if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
         }
-        const auto label = !properties.materialSlot ? "Select a road" : properties.material.empty() ? "Mesh colors" :
+        const auto label = !properties.materialSlot ? "Select a road" : properties.Mixed(RoadProperty::Material) ? "Mixed" :
+                           properties.material.empty() ? "Mesh colors" :
                            properties.material.substr(properties.material.rfind('/') + 1);
         if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     }
@@ -1467,30 +1462,31 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
         return Text(renderer, 12, 48, properties.detail.c_str(), muted);
     if (!Text(renderer, 12, roadNamesBox.y - 15, "Road names", muted) ||
         !transformPanel.DrawField(renderer, roadNamesBox, state.Target(), InspectorEdit::roadNames,
-                                  properties.roadNames.value_or(""), properties.roadNames.has_value())) return false;
+                                  properties.Mixed(RoadProperty::Names) ? "Multiple values" : properties.roadNames.value_or(""),
+                                  properties.roadNames.has_value())) return false;
     const int laneCount = style.GetLaneCount();
-    const float offset = laneCount == 3 ? threeLanePanelHeight : 0.0f;
-    if (laneCount == 3 && !Text(renderer, 12, 252, "Three-lane layout", muted))
+    const float offset = properties.ThreeLanes() ? threeLanePanelHeight : 0.0f;
+    if (properties.ThreeLanes() && !Text(renderer, 12, 252, properties.Mixed(RoadProperty::Layout) ? "3-lane layout (mixed)" : "Three-lane layout", muted))
     {
         return false;
     }
-    if (laneCount > 3 && style.HasCenterTurnLane())
+    if (properties.minLanes == properties.maxLanes && laneCount > 3 && style.HasCenterTurnLane())
     {
         if (!SDL_RenderDebugTextFormat(renderer, 12, 243, "%d each way + center turn", laneCount / 2))
         {
             return false;
         }
     }
-    const float styleBottom = RoadStyleBottom(style);
-    if (style.IsDivided() &&
+    const float styleBottom = RoadStyleBottom(properties);
+    if (properties.AllDivided() &&
         (!Text(renderer, 12, 406 + offset, "Separation (m)", muted) ||
-         !SDL_RenderDebugTextFormat(renderer, 80, 432 + offset, "%.2f", style.DividedGap()) ||
-         !Text(renderer, 12, 460 + offset, "Median", muted))) return false;
-    if (!Text(renderer, 12, 132, "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
+         !SDL_RenderDebugTextFormat(renderer, 80, 432 + offset, properties.minGap == properties.maxGap ? "%.2f" : "Mixed", style.DividedGap()) ||
+         !Text(renderer, 12, 460 + offset, properties.Mixed(RoadProperty::Median) ? "Median (mixed)" : "Median", muted))) return false;
+    if (!Text(renderer, 12, 132, properties.Mixed(RoadProperty::Alignment) ? "Alignment (mixed)" : "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
         !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
-        !Text(renderer, 12, 312 + offset, "Road edges", muted) ||
-        !SDL_RenderDebugTextFormat(renderer, 89, 220, "%d", laneCount) ||
-        !SDL_RenderDebugTextFormat(renderer, 12, styleBottom, "Width: %.2f m",
+        !Text(renderer, 12, 312 + offset, properties.Mixed(RoadProperty::Edge) ? "Road edges (mixed)" : "Road edges", muted) ||
+        !SDL_RenderDebugTextFormat(renderer, 89, 220, properties.minLanes == properties.maxLanes ? "%d" : "Mixed", laneCount) ||
+        !SDL_RenderDebugTextFormat(renderer, 12, styleBottom, properties.Mixed(RoadProperty::Width) ? "Width: Mixed" : "Width: %.2f m",
                                    style.LeftWidth() + style.RightWidth() + 2.0 * style.EdgeWidth()))
     {
         return false;
@@ -1595,10 +1591,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     {
         return false;
     }
-    const Road* current = EditingDraft() ? &*state.draft : Selected(world);
-    const RoadStyle& style = current ? current->style : state.defaults;
     const int contentHeight = properties.page == PropertiesPage::Road ?
-        static_cast<int>(RoadStyleBottom(style)) + (planView ? 102 : 50) :
+        static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
@@ -2088,6 +2082,14 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
     if (edit.target != state.Target() || drag != Drag::None) return;
     if (edit.field == InspectorEdit::roadNames)
     {
+        if (!EditingDraft() && state.MultipleRoadsSelected())
+        {
+            Road parsed;
+            if (!parsed.SetNameList(edit.text)) return;
+            const auto names = parsed.NameList();
+            EditRoadGroup(world, [&](RoadProperties& road) { road.names = names; });
+            return;
+        }
         const int index = EditingDraft() ? -1 : state.selected;
         Road* placed = index >= 0 ? &world.roads.at(index) : nullptr;
         Road* road = EditingDraft() ? &*state.draft : placed;
@@ -2367,7 +2369,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                         const SDL_FPoint local{point.x + scene.x - roadPanel.x,
                                                point.y + scene.y - roadPanel.y + roadScroll};
                         const auto properties = InspectProperties(world, state, EditingDraft());
-                        const auto slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(Style(world)) : propertyMaterialSlot;
+                        const auto slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties) : propertyMaterialSlot;
                         if (properties.materialSlot && local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
                             AssignMaterial(world, draggedAsset, camera, {});
                         else if (point.x >= 0 && point.y >= 0 && point.x < scene.w && point.y < scene.h)
@@ -2456,7 +2458,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         return EditorEvent::Handled;
     }
     Action action;
-    if (panels.Command(event, action))
+    if (panels.Command(event, state, action))
     {
         Release(world);
         Activate(action, world);
@@ -2759,7 +2761,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     AssignMaterial(world, {}, camera, {});
                     return EditorEvent::Handled;
                 }
-                for (const Button& button : Buttons(world, properties))
+                for (const Button& button : Buttons(properties))
                 {
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
                     {

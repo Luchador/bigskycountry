@@ -8,6 +8,9 @@
 #include "road_group_transform.hpp"
 
 #include <cstdint>
+#include <iterator>
+#include <limits>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -31,11 +34,22 @@ struct RoadEditorState
     std::set<SceneKey> SelectedRows() const;
     bool GeometrySelected(SceneKey key) const;
     bool RoadGroupSelected() const { return IsRoadGroup(outlineSelection); }
+    auto SelectedRoadRows() const
+    {
+        return std::ranges::subrange(outlineSelection.lower_bound({SceneKind::Road, 0}),
+            outlineSelection.upper_bound({SceneKind::Road, std::numeric_limits<int>::max()}));
+    }
+    bool MultipleRoadsSelected() const
+    {
+        const auto roads = SelectedRoadRows();
+        return !roads.empty() && std::next(roads.begin()) != roads.end();
+    }
     void PickElement(SceneKey key, bool add, bool subtract);
     void SelectRows(const std::set<SceneKey>& keys);
     TransformTarget Target() const
     {
         if (RoadGroupSelected()) return {SelectionKind::RoadGroup, -1, -1, outlineSelection};
+        if (!outlineSelection.empty()) return {SelectionKind::None, -1, -1, outlineSelection};
         if (selected < 0) return meshSelection;
         return {point < 0 ? SelectionKind::Road : SelectionKind::Point, selected, point, {}, additionalPoints};
     }
@@ -74,6 +88,17 @@ struct RoadEditorState
     }
 };
 
+// Authored inspector values only. Control points, junction links and generated meshes stay in place.
+struct RoadProperties
+{
+    explicit RoadProperties(const Road& road) : style(road.style), names(road.NameList()), paintMarkings(road.paintMarkings) {}
+    RoadStyle style;
+    std::string names;
+    bool paintMarkings;
+    bool operator==(const RoadProperties&) const = default;
+    void Apply(Road& road) const;
+};
+
 struct EditSnapshot
 {
     EditSnapshot(const RoadEditorState& editor, const Road* affectedRoad = nullptr);
@@ -81,6 +106,7 @@ struct EditSnapshot
     TransformTarget meshSelection;
     std::optional<ObjectTransform> meshTransform;
     std::optional<RoadGroupPose> roadGroup;
+    std::map<int, RoadProperties> roadProperties;
     struct TerrainPlacement
     {
         std::string modelPath;

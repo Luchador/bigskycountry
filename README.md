@@ -161,6 +161,8 @@ Choose **View → Wireframe** to see the visible triangle edges of roads, terrai
 
 Right-click the 3D viewport and choose **Create → Create Road**. The first control point lands on the nearest road triangle under the original click, including elevated roads and curbs. On empty space it lands on the ground plane (Y = 0), or 20 m along the ray if the ground is out of reach. The new road starts with a level 10 m segment along world +X. Its far endpoint is selected for Shift-drag extension. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
 
+Select two or more roads in the viewport or Outliner to edit their properties together. The road inspector shows their combined length and marks settings that differ. Each edit changes that property on every selected road and takes one **Ctrl+Z** to undo. For mixed lane counts or separations, **+** steps above the largest value and **−** below the smallest, within the road style limits. Drop a material on the pavement slot to assign it to the selection.
+
 In the road inspector, enter one or more comma-separated **Road names**, such as `US 40,Main Street`, and press **Enter**. The Scene Outliner displays those names. Clear **Paint markings** to hide that road’s lane lines, edge lines, and intersection stop bars. Re-enabling paint restores the stop bars enabled on its anchors.
 
 Press **R** to switch between the 3D and top-down views. In the top-down viewport, press **N** to start or resume a road draft.

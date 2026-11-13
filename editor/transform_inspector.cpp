@@ -225,7 +225,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         }
         fields.value = world.Objects()[i]->GetTransform();
         break;
-    default: return {};
+    default: break;
     }
     return fields;
 }
