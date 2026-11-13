@@ -79,7 +79,7 @@ The optional `OBJS` version 3 section stores one record per object. Each record 
 
 Right-click in the 3D viewport and choose **Create → Marker**. The editor places `assets/models/objects/marker/marker.glb` at the picked position and selects it. In the inspector, enter a place name in **Marker text** and press **Enter**. An empty name hides the lettering. The Outliner shows the name and the world saves it with the marker. Drag a `.bmat` from the **Textures** tab onto **Mesh material** or directly onto the marker mesh. **Clear material** restores the model’s own colors. Choose **Text color** to set the label independently. Windows opens a color picker, and the SDL inspector accepts a `#RRGGBB` value. Each marker saves its own settings and supports Undo and Redo.
 
-In the game and the editor, the lettering faces the active camera around the world Y axis. Its lower edge is 50 game meters above the transformed mesh. The default capital letter height is 100 game meters.
+In the game and the editor, the lettering faces the active camera around the world Y axis. Its lower edge is 50 game meters above the transformed mesh. The marker’s X scale controls letter width and its Y scale controls letter height. At unit scale a capital H is 100 game meters tall.
 
 ### Terrain chunks
 

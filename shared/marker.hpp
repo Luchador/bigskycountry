@@ -12,7 +12,7 @@ class Marker final : public BSCObject
 public:
     static constexpr char modelPath[] = "objects/marker/marker.glb";
     static constexpr double labelGap = 50.0;   // Game meters above the transformed model.
-    static constexpr double capHeight = 100.0; // Game meters for a capital H.
+    static constexpr double capHeight = 100.0; // Game meters for a capital H at unit scale.
     static constexpr int maxCharacters = 120;
 
     ObjectType Type() const override { return ObjectType::Marker; }
@@ -26,7 +26,7 @@ public:
 
 private:
     MeshInstance Label(const FreeCamera& camera) const;
-    mutable double labelRadius = 0;
+    mutable double localLabelRadius = 0;
     std::string text = "Marker";
     mutable std::shared_ptr<const Mesh> lettering;
     mutable std::optional<ObjectTransform> measuredTransform;

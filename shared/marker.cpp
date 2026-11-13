@@ -105,7 +105,7 @@ bool Marker::SetText(std::string value)
 MeshInstance Marker::Label(const FreeCamera& camera) const
 {
     if (text.empty() || !IsLoaded()) return {};
-    if (!lettering) lettering = MakeLettering(text, labelRadius);
+    if (!lettering) lettering = MakeLettering(text, localLabelRadius);
     if (lettering->indices.empty()) return {};
 
     const auto& instance = Instance();
@@ -129,12 +129,18 @@ MeshInstance Marker::Label(const FreeCamera& camera) const
     Vector3 away = labelOrigin - camera.GetPosition();
     if (std::hypot(away.x, away.z) < 1e-8) away = camera.ViewRay(0, 0);
     const Vector3 forward = Math::Normalize({away.x, 0, away.z});
-    return {lettering, {labelOrigin, {forward.z, 0, -forward.x}, {0, 1, 0}, forward}};
+    const Vector3 right{forward.z, 0, -forward.x};
+    const auto& scale = GetTransform().scale;
+    // Keep the billboard readable even when the marker mesh is mirrored.
+    return {lettering, {labelOrigin, right * std::abs(scale.x), {0, std::abs(scale.y), 0}, forward}};
 }
 
 void Marker::SubmitLabel(WorldRenderer& renderer, const FreeCamera& camera) const
 {
     const auto label = Label(camera);
-    if (label.mesh && renderer.SphereVisible(label.transform.origin, labelRadius))
+    if (!label.mesh) return;
+    const auto& scale = GetTransform().scale;
+    const double worldRadius = localLabelRadius * std::max(std::abs(scale.x), std::abs(scale.y));
+    if (renderer.SphereVisible(label.transform.origin, worldRadius))
         renderer.SubmitMesh(label, {textColor[0] / 255.f, textColor[1] / 255.f, textColor[2] / 255.f, 1});
 }
