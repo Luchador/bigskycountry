@@ -2,14 +2,15 @@
 
 #include "editor_theme.hpp"
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <span>
+#include <string_view>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
 #include "windows_theme.hpp"
-#include <string_view>
 #include <cwctype>
 #include "menu_ids.h"
 
@@ -24,11 +25,13 @@ namespace
     };
 
     // Owner-draw data must live as long as the menu, including while Windows tracks a popup.
-    constexpr MenuItem file{0, L"&File", 0, true}, edit{0, L"&Edit", 0, true}, view{0, L"&View", 0, true}, create{0, L"&Create"};
+    constexpr MenuItem file{0, L"&File", 0, true}, edit{0, L"&Edit", 0, true}, view{0, L"&View", 0, true},
+                       settings{0, L"&Settings", 0, true}, create{0, L"&Create"};
     constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
+    constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
                                         {BSC_CREATE_MARKER, L"&Marker"}};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
@@ -208,7 +211,8 @@ namespace
         if (message == WM_COMMAND && lParam == 0)
         {
             const int id = LOWORD(wParam);
-            if (id == BSC_FILE_SAVE || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME)
+            if (id == BSC_FILE_SAVE || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
+                id == BSC_PROJECT_SETTINGS)
             {
                 SDL_Event event{};
                 event.type = static_cast<Uint32>(eventType);
@@ -252,7 +256,8 @@ bool EditorMenu::Attach(SDL_Window* window)
         return SDL_SetError("Cannot create the editor menu (Windows error %lu)", GetLastError());
     }
     WindowsTheme::TitleBar(hwnd);
-    if (!AddSubmenu(bar, file, fileItems) || !AddSubmenu(bar, edit, editItems) || !AddSubmenu(bar, view, viewItems))
+    if (!AddSubmenu(bar, file, fileItems) || !AddSubmenu(bar, edit, editItems) ||
+        !AddSubmenu(bar, view, viewItems) || !AddSubmenu(bar, settings, settingsItems))
     {
         DestroyMenu(bar);
         return false;
@@ -307,6 +312,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         switch (event.user.code)
         {
         case BSC_VIEW_WIREFRAME: return EditorCommand::ToggleWireframe;
+        case BSC_PROJECT_SETTINGS: return EditorCommand::ProjectSettings;
         case BSC_FILE_SAVE: return EditorCommand::Save;
         case BSC_EDIT_UNDO: return EditorCommand::Undo;
         case BSC_EDIT_REDO: return EditorCommand::Redo;
@@ -334,9 +340,24 @@ namespace
     constexpr BarAction save[] = {{"Save", EditorCommand::Save}};
     constexpr BarAction history[] = {{"Undo", EditorCommand::Undo}, {"Redo", EditorCommand::Redo}};
     constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe}};
+    constexpr BarAction settings[] = {{"Project Settings", EditorCommand::ProjectSettings}};
     struct BarMenu { const char* label; std::span<const BarAction> items; };
-    constexpr BarMenu menus[] = {{"File", save}, {"Edit", history}, {"View", display}};
-    constexpr int barTabWidth = 52, dropdownWidth = 136;
+    constexpr BarMenu menus[] = {{"File", save}, {"Edit", history}, {"View", display}, {"Settings", settings}};
+    constexpr int dropdownWidth = 160;
+
+    constexpr auto barTabs = []
+    {
+        std::array<SDL_FRect, std::size(menus)> tabs{};
+        float x = 0;
+        for (std::size_t i = 0; i < tabs.size(); ++i)
+        {
+            const auto characters = std::string_view(menus[i].label).size();
+            const float width = std::max(52.0f, 16.0f + static_cast<float>(characters * SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE));
+            tabs[i] = {x, 0, width, EditorMenu::barHeight};
+            x += width;
+        }
+        return tabs;
+    }();
 
     constexpr BarAction createItems[] = {{"Create Road", EditorCommand::CreateRoad},
                                          {"Create Railroad", EditorCommand::CreateRailroad},
@@ -492,7 +513,7 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
     if (!EditorTheme::SetColor(renderer, EditorTheme::menuBar) || !SDL_RenderFillRect(renderer, &bar)) return false;
     for (int i = 0; i < static_cast<int>(std::size(menus)); ++i)
     {
-        const SDL_FRect tab{static_cast<float>(i * barTabWidth), 0, barTabWidth, barHeight};
+        const SDL_FRect& tab = barTabs[i];
         if (i == openMenu && (!EditorTheme::SetColor(renderer, EditorTheme::selected) || !SDL_RenderFillRect(renderer, &tab))) return false;
         if (!EditorTheme::SetColor(renderer, EditorTheme::text) ||
             !SDL_RenderDebugText(renderer, tab.x + 8, 8, menus[i].label)) return false;
@@ -501,7 +522,7 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
     const auto items = menus[openMenu].items;
     for (int i = 0; i < static_cast<int>(items.size()); ++i)
     {
-        const SDL_FRect row{static_cast<float>(openMenu * barTabWidth), barHeight + i * itemHeight,
+        const SDL_FRect row{barTabs[openMenu].x, barHeight + i * itemHeight,
                             dropdownWidth, itemHeight};
         const bool enabled = Enabled(items[i].command);
         if (!EditorTheme::SetColor(renderer, i == barRow && enabled ? EditorTheme::selected : EditorTheme::chrome) ||
@@ -555,7 +576,11 @@ bool EditorMenu::HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::
     const SDL_FPoint p = press ? SDL_FPoint{e.button.x, e.button.y} : SDL_FPoint{e.motion.x, e.motion.y};
     if (p.y >= 0 && p.y < barHeight)
     {
-        const int tab = p.x >= 0 && p.x < count * barTabWidth ? static_cast<int>(p.x / barTabWidth) : -1;
+        int tab = -1;
+        for (int i = 0; i < count; ++i)
+        {
+            if (SDL_PointInRectFloat(&p, &barTabs[i])) { tab = i; break; }
+        }
         if (press || tab >= 0)
         {
             openMenu = press && (e.button.button != SDL_BUTTON_LEFT || openMenu == tab) ? -1 : tab;
@@ -565,7 +590,7 @@ bool EditorMenu::HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::
     }
     if (openMenu < 0) return false;
     const auto items = menus[openMenu].items;
-    const SDL_FRect popupRect{static_cast<float>(openMenu * barTabWidth), barHeight,
+    const SDL_FRect popupRect{barTabs[openMenu].x, barHeight,
                               dropdownWidth, items.size() * itemHeight};
     if (SDL_PointInRectFloat(&p, &popupRect))
     {

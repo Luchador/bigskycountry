@@ -170,7 +170,7 @@ if(WIN32)
     endif()
     target_link_libraries(BigSkyCountryEditor PRIVATE user32 comctl32 comdlg32 gdi32 dwmapi uxtheme)
 else()
-    target_sources(BigSkyCountryEditor PRIVATE editor/sdl_material_editor.cpp editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
+    target_sources(BigSkyCountryEditor PRIVATE editor/sdl_material_editor.cpp editor/sdl_project_settings.cpp editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 

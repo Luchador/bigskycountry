@@ -12,6 +12,7 @@
 #include "outliner_splitter.hpp"
 #include "sdl_transform_panel.hpp"
 #include "sdl_outliner.hpp"
+#include "sdl_project_settings.hpp"
 #endif
 #include "content_browser.hpp"
 #include "edit_history.hpp"
@@ -31,7 +32,10 @@ public:
     SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
     bool ViewportFocused() const override { return panels.ViewportFocused(); }
 #else
-    bool ViewportFocused() const override { return !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused(); }
+    bool ViewportFocused() const override
+    {
+        return !projectSettings.Focused() && !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused();
+    }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
     void SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) override;
@@ -148,6 +152,7 @@ private:
     SDL_Cursor* resizeCursor = nullptr; // Released by SDL on video shutdown.
     SdlOutliner outlinePanel;
     SdlTransformPanel transformPanel;
+    SdlProjectSettings projectSettings;
     int roadScroll = 0, roadScrollMax = 0;
 #endif
     struct ViewportClick

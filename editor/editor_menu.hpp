@@ -3,7 +3,7 @@
 #include <SDL3/SDL.h>
 #include <optional>
 
-enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
+enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
                            CreateExitRamp, CreateEntranceRamp, FlattenSegment };
 struct RampMenuOptions { bool exit, entrance; };
 

@@ -464,6 +464,16 @@ void RoadEditor::CreateRamp(EditorCommand command, WorldDocument& world)
 
 void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera)
 {
+    if (command == EditorCommand::ProjectSettings)
+    {
+#ifdef _WIN32
+        const bool opened = panels.OpenProjectSettings();
+#else
+        const bool opened = projectSettings.Open(frame);
+#endif
+        if (!opened) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Project Settings", SDL_GetError(), frame);
+        return;
+    }
     if (command == EditorCommand::ToggleWireframe)
     {
         menu.ToggleWireframe();
@@ -2606,7 +2616,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     // Recheck once after the event queue is drained, even if several events arrived.
     lastHoverPoint = {-1, -1};
 #ifndef _WIN32
-    if (browser.MaterialWindow().Handle(event)) return EditorEvent::Handled;
+    if (browser.MaterialWindow().Handle(event) || projectSettings.Handle(event)) return EditorEvent::Handled;
 #endif
     if (rampDrag && event.type == SDL_EVENT_KEY_DOWN)
     {

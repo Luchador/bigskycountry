@@ -133,6 +133,7 @@ struct WindowsPanels::Impl
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     WindowsMaterialEditor materialEditor;
+    HWND projectSettings = nullptr;
     std::string pressedTexture;
     POINT texturePress{};
     bool draggingTexture = false;
@@ -1388,14 +1389,41 @@ struct WindowsPanels::Impl
         return DefSubclassProc(hwnd, msg, w, l);
     }
 
+    static INT_PTR CALLBACK ProjectSettingsProc(HWND dialog, UINT message, WPARAM w, LPARAM l)
+    {
+        if (message == WM_INITDIALOG)
+        {
+            auto& self = *reinterpret_cast<Impl*>(l);
+            self.projectSettings = dialog;
+            SetWindowLongPtrW(dialog, DWLP_USER, l);
+            WindowsTheme::ApplyDialog(dialog);
+            return TRUE;
+        }
+        if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(w) == IDCANCEL))
+        {
+            DestroyWindow(dialog);
+            return TRUE;
+        }
+        if (message == WM_NCDESTROY)
+        {
+            if (auto* self = reinterpret_cast<Impl*>(GetWindowLongPtrW(dialog, DWLP_USER)))
+                self->projectSettings = nullptr;
+        }
+        return FALSE;
+    }
+
     static bool SDLCALL Filter(void* data, MSG* msg)
     {
         auto& self = *static_cast<Impl*>(data);
         HWND focus = GetFocus();
-        HWND material = self.materialEditor.Window();
-        if (material && msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST &&
-            (msg->hwnd == material || IsChild(material, msg->hwnd)))
-            return !IsDialogMessageW(material, msg);
+        if (msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
+        {
+            for (HWND dialog : {self.materialEditor.Window(), self.projectSettings})
+            {
+                if (dialog && (msg->hwnd == dialog || IsChild(dialog, msg->hwnd)))
+                    return !IsDialogMessageW(dialog, msg);
+            }
+        }
 
         if (focus != self.frame && !IsChild(self.frame, focus))
         {
@@ -1696,6 +1724,21 @@ std::optional<WindowsPanels::MaterialDrop> WindowsPanels::TakeMaterialDrop(const
 bool WindowsPanels::HasPendingEdit() const
 {
     return impl->pendingFieldEdit;
+}
+
+bool WindowsPanels::OpenProjectSettings()
+{
+    if (!impl->projectSettings &&
+        !CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_PROJECT_SETTINGS), impl->frame,
+                            Impl::ProjectSettingsProc, reinterpret_cast<LPARAM>(impl.get())))
+    {
+        WinError("Cannot open Project Settings");
+        return false;
+    }
+    HWND dialog = impl->projectSettings;
+    ShowWindow(dialog, IsIconic(dialog) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(dialog);
+    return true;
 }
 
 bool WindowsPanels::ViewportFocused() const
