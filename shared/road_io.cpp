@@ -38,7 +38,8 @@ namespace RoadIO
     {
         const int edge = static_cast<int>(style.edge);
         const int median = static_cast<int>(style.median);
-        if (!Material::ValidAssetPath(style.material) ||
+        if ((!style.transitionMaterial.empty() && !Material::ValidAssetPath(style.transitionMaterial)) ||
+            !Material::ValidAssetPath(style.material) ||
             !ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.DividedGap(), edge, median))
         {
             out.setstate(std::ios::failbit);
@@ -47,7 +48,8 @@ namespace RoadIO
         out << style.GetLaneCount() << ' ' << style.curved << ' ' << style.leftShoulder << ' '
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
             << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median
-            << ' ' << std::quoted(style.material) << ' ' << style.SingleLaneExtraWidth() << '\n';
+            << ' ' << std::quoted(style.material) << ' ' << style.SingleLaneExtraWidth()
+            << ' ' << std::quoted(style.transitionMaterial) << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
@@ -68,7 +70,11 @@ namespace RoadIO
         if (version >= 6) in >> std::quoted(style.material);
         double extraWidth = 0.0;
         if (version >= 11) in >> extraWidth;
-        if (!in || !style.SetSingleLaneExtraWidth(extraWidth) || !Material::ValidAssetPath(style.material) || !ValidStyle(lanes, layout, gap, edge, median) ||
+        style.transitionMaterial.clear();
+        if (version >= 12) in >> std::quoted(style.transitionMaterial);
+        if ((!style.transitionMaterial.empty() && !Material::ValidAssetPath(style.transitionMaterial)) ||
+            !in || !style.SetSingleLaneExtraWidth(extraWidth) || !Material::ValidAssetPath(style.material) ||
+            !ValidStyle(lanes, layout, gap, edge, median) ||
             (version >= 5 && (gap < RoadStyle::minSeparation || (divided && lanes % 2 != 0))))
         {
             in.setstate(std::ios::failbit);

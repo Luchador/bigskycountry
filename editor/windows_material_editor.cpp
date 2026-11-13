@@ -57,14 +57,16 @@ void WindowsMaterialEditor::Layout()
 {
     RECT area{};
     GetClientRect(window, &area);
-    const int pad = Units(window, 6, true), side = Units(window, 144, true);
+    const bool transition = editor.Current().type == MaterialType::Transition;
+    const int pad = Units(window, 6, true), side = Units(window, transition ? 165 : 144, true);
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
     const int top = Units(window, 42, false), clear = Units(window, 28, true);
-    const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / 5));
+    const int rows = transition ? 6 : 5;
+    const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / rows));
     MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), FALSE);
-    MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 60, false), FALSE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 96, false), FALSE);
     int row = 0;
     const bool unlit = editor.Current().type == MaterialType::Unlit;
     for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
@@ -101,7 +103,7 @@ void WindowsMaterialEditor::Sync()
     {
         const auto& path = editor.Current().textures[i];
         const auto name =
-            WindowsNameDialog::Wide(std::string(materialSlotLabels[i]) + " - " + (path.empty() ? "Unassigned" : path));
+            WindowsNameDialog::Wide(std::string(editor.Current().SlotLabel(i)) + " - " + (path.empty() ? "Unassigned" : path));
         SetDlgItemTextW(window, IDC_MAT_SLOT_FIRST + i, name.c_str());
         EnableWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), !path.empty());
     }
@@ -227,7 +229,7 @@ void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
     const auto& path = editor.Current().textures[slot];
     RECT line{icon.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
     constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-    DrawTextW(draw.hDC, WindowsNameDialog::Wide(materialSlotLabels[slot]).c_str(), -1, &line, flags);
+    DrawTextW(draw.hDC, WindowsNameDialog::Wide(editor.Current().SlotLabel(slot)).c_str(), -1, &line, flags);
     line.top = line.bottom;
     line.bottom = r.bottom;
     SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::secondary));

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <compare>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -53,6 +54,7 @@ struct RoadStyle
     static constexpr int maxLanes = 10;
     static constexpr const char* defaultMaterial = "surfaces/roads/M_Asphalt01.bmat";
     std::string material = defaultMaterial;
+    std::string transitionMaterial;
     bool leftShoulder = false;
     bool rightShoulder = false;
     bool curved = true;
@@ -128,6 +130,14 @@ struct RoadGeometry
         SDL_FColor color;
     };
 
+    struct TransitionVertex
+    {
+        Vector3 position;
+        SDL_FColor color;
+        SDL_FPoint uv;
+    };
+    // Junction corners can inherit different strip materials from their adjoining roads.
+    std::map<std::string, std::vector<std::array<TransitionVertex, 3>>> transitionStrips;
     std::vector<std::array<PavementVertex, 3>> pavementTriangles;
     std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.

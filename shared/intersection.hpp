@@ -32,6 +32,7 @@ struct IntersectionApproach
         bool operator==(const LaneSpan&) const = default;
     };
     std::optional<LaneSpan> stopLine;
+    std::string transitionMaterial;
     static IntersectionApproach FromRoad(const Road& road, bool first, bool paintStopLine);
     bool operator==(const IntersectionApproach&) const = default;
 };

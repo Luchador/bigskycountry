@@ -81,6 +81,7 @@ private:
         size_t first, end;
         std::string path;
         const SurfaceMaterial* material = nullptr;
+        bool transitionOnly = false;
     };
     std::vector<MaterialRange> materialRanges;
     struct DrawRange

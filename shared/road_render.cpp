@@ -118,13 +118,18 @@ namespace
             {
                 return transform(v.position);
             }, focal, viewport, vertices);
-            AppendMesh(road.edgeTriangles, [&](const RoadGeometry::EdgeVertex& v)
+            const auto appendEdges = [&](const auto& triangles)
             {
-                return RoadGeometry::EdgeVertex{transform(v.position), v.color};
-            }, ClipEdge, [&](const RoadGeometry::EdgeVertex& v)
-            {
-                vertices.push_back({ScreenPoint(v.position, focal, viewport), v.color, {}});
-            }, focal, viewport);
+                AppendMesh(triangles, [&](const auto& v)
+                {
+                    return RoadGeometry::EdgeVertex{transform(v.position), v.color};
+                }, ClipEdge, [&](const RoadGeometry::EdgeVertex& v)
+                {
+                    vertices.push_back({ScreenPoint(v.position, focal, viewport), v.color, {}});
+                }, focal, viewport);
+            };
+            appendEdges(road.edgeTriangles);
+            for (const auto& [path, strip] : road.transitionStrips) appendEdges(strip);
             return;
         }
         if (layer == RoadLayer::Outline)
@@ -174,6 +179,17 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
     {
         SubmitTriangle({triangle[0].position, triangle[1].position, triangle[2].position},
                        {Srgb::ToLinear(triangle[0].color), Srgb::ToLinear(triangle[1].color), Srgb::ToLinear(triangle[2].color)});
+    }
+    for (const auto& [path, strip] : road.transitionStrips)
+    {
+        const auto first = vertices.size();
+        for (const auto& t : strip)
+        {
+            SubmitMaterialTriangle({t[0].position, t[1].position, t[2].position},
+                                   {t[0].color, t[1].color, t[2].color}, {t[0].uv, t[1].uv, t[2].uv});
+        }
+        if (!path.empty() && vertices.size() > first)
+            materialRanges.push_back({first, vertices.size(), path, nullptr, true});
     }
     solid(road.yellowStripes, yellowPaint);
     solid(road.whiteStripes, whitePaint);

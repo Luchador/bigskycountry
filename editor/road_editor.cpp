@@ -34,16 +34,16 @@ namespace
         return 0.0f;
     }
 
-    SDL_FRect MaterialSlotRect(const PropertiesInspector& properties)
+    SDL_FRect MaterialSlotRect(const PropertiesInspector& properties, bool strip = false)
     {
         const float y = (properties.AllDivided() ? 514.0f : 406.0f) +
                         LaneOptionsHeight(properties);
-        return {12, y, 194, 54};
+        return {12, y + (strip ? 58 : 0), 194, 54};
     }
 
     float RoadStyleBottom(const PropertiesInspector& properties)
     {
-        const auto slot = MaterialSlotRect(properties);
+        const auto slot = MaterialSlotRect(properties, properties.HasTransitionSlot());
         return slot.y + slot.h + 8;
     }
 #endif
@@ -513,7 +513,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 }
 
 void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
-                                std::optional<SDL_FPoint> viewportPoint)
+                                std::optional<SDL_FPoint> viewportPoint, bool strip)
 {
     RoadPick target{RoadPickKind::Road, EditingDraft() ? -1 : state.selected};
     if (!viewportPoint && !EditingDraft())
@@ -543,7 +543,9 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     }
     const bool group = !EditingDraft() && state.MultipleRoadsSelected() && target.kind == RoadPickKind::Road &&
                        (!viewportPoint || state.outlineSelection.contains({SceneKind::Road, target.index}));
-    auto* current = road ? &road->style.material : FindPlacedMaterial(world, key);
+    if (strip && !InspectProperties(world, state, EditingDraft()).HasTransitionSlot()) return;
+    const auto materialField = strip ? &RoadStyle::transitionMaterial : &RoadStyle::material;
+    auto* current = road ? &(road->style.*materialField) : FindPlacedMaterial(world, key);
     if ((!group && (!current || *current == path)) || (path.empty() && key.kind != SceneKind::Object)) return;
     Material definition;
     if (!path.empty() && (!Material::ValidAssetPath(path) || !definition.Load(browser.Textures().Root() + path)))
@@ -551,9 +553,15 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
         status = SDL_GetError();
         return;
     }
+    if (strip && definition.type != MaterialType::Transition)
+    {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Transition strip material",
+                                 "Choose a material with its type set to Transition.", frame);
+        return;
+    }
     if (group)
     {
-        EditRoadGroup(world, [&](RoadProperties& p) { p.style.material = path; });
+        EditRoadGroup(world, [&](RoadProperties& p) { p.style.*materialField = path; });
         return;
     }
     if (road)
@@ -561,6 +569,7 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
         const Road* placed = target.index >= 0 ? road : nullptr;
         EditSnapshot before(state, placed);
         *current = path;
+        if (strip) road->Rebuild();
         Commit(world, target.index, std::move(before), placed);
         return;
     }
@@ -931,10 +940,15 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
             return HitTriangle(pos, {t[0].position, t[1].position, t[2].position});
         });
     };
+    const auto hitRoad = [&](const RoadGeometry& geometry)
+    {
+        return hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles) ||
+               std::ranges::any_of(geometry.transitionStrips, [&](const auto& entry) { return hitSurface(entry.second); });
+    };
     for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
     {
         const auto& geometry = it->second.geometry;
-        if (hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles))
+        if (hitRoad(geometry))
         {
             return SceneKey{SceneKind::Intersection, it->first};
         }
@@ -943,7 +957,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         const Road& road = world.roads[i];
-        if (hitSurface(road.pavementTriangles) || hitSurface(road.edgeTriangles))
+        if (hitRoad(road))
         {
             return SceneKey{SceneKind::Road, i};
         }
@@ -1435,21 +1449,24 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     }
     const Road* current = EditingDraft() ? &*state.draft : Selected(world);
     const auto& style = properties.style;
-    if (properties.materialSlot || properties.page == PropertiesPage::Road)
+    for (bool strip : {false, true})
     {
-        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties) : propertyMaterialSlot;
+        if (strip ? !properties.HasTransitionSlot() : !properties.materialSlot && properties.page != PropertiesPage::Road)
+            continue;
+        const auto& path = strip ? properties.style.transitionMaterial : properties.material;
+        const auto property = strip ? RoadProperty::TransitionMaterial : RoadProperty::Material;
+        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties, strip) : propertyMaterialSlot;
         const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
-        const char* caption = properties.MaterialCaption();
+        const char* caption = strip ? "Transition strip" : properties.MaterialCaption();
         if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
             !Text(renderer, slot.x + 55, slot.y + 9, caption, muted)) return false;
-        if (!properties.material.empty())
+        if (!path.empty())
         {
-            if (auto* thumbnail = browser.RoadMaterialTexture(properties.material, renderer))
+            if (auto* thumbnail = browser.RoadMaterialTexture(path, renderer, strip))
                 if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
         }
-        const auto label = !properties.materialSlot ? "Select a road" : properties.Mixed(RoadProperty::Material) ? "Mixed" :
-                           properties.material.empty() ? "Mesh colors" :
-                           properties.material.substr(properties.material.rfind('/') + 1);
+        const auto label = !properties.materialSlot ? "Select a road" : properties.Mixed(property) ? "Mixed" :
+                           path.empty() ? (strip ? "Drop material" : "Mesh colors") : path.substr(path.rfind('/') + 1);
         if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     }
     if (properties.page == PropertiesPage::Marker)
@@ -2384,8 +2401,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                                                point.y + scene.y - roadPanel.y + roadScroll};
                         const auto properties = InspectProperties(world, state, EditingDraft());
                         const auto slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties) : propertyMaterialSlot;
-                        if (properties.materialSlot && local.y >= roadScroll && local.y < roadScroll + roadPanel.h && SDL_PointInRectFloat(&local, &slot))
-                            AssignMaterial(world, draggedAsset, camera, {});
+                        const auto stripSlot = MaterialSlotRect(properties, true);
+                        const bool strip = properties.HasTransitionSlot() && SDL_PointInRectFloat(&local, &stripSlot);
+                        if (properties.materialSlot && local.y >= roadScroll && local.y < roadScroll + roadPanel.h &&
+                            (strip || SDL_PointInRectFloat(&local, &slot)))
+                            AssignMaterial(world, draggedAsset, camera, {}, strip);
                         else if (point.x >= 0 && point.y >= 0 && point.x < scene.w && point.y < scene.h)
                             AssignMaterial(world, draggedAsset, camera, point);
                     }
@@ -2452,7 +2472,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (!SetContentViewport(renderer)) return EditorEvent::Error;
             *point = {point->x * scene.w, point->y * scene.h};
         }
-        AssignMaterial(world, drop->path, camera, point);
+        AssignMaterial(world, drop->path, camera, point, drop->strip);
         return EditorEvent::Handled;
     }
     if (const auto drop = panels.TakeModelDrop(event))

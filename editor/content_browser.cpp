@@ -140,29 +140,30 @@ namespace
     }
 }
 
-SDL_Surface* ContentBrowser::RoadMaterialThumbnail(const std::string& path)
+SDL_Surface* ContentBrowser::RoadMaterialThumbnail(const std::string& path, bool strip)
 {
-    if (path != roadPreviewPath || roadPreviewRevision != Material::Revision())
+    auto& thumb = materialThumbnails[strip];
+    if (path != thumb.path || thumb.revision != Material::Revision())
     {
-        roadPreviewPath = path;
-        roadPreviewRevision = Material::Revision();
-        roadThumbnail = roadPreview.Open(textures, path) ?
-            roadPreview.Preview(TextureCatalog::thumbnailSize, TextureCatalog::thumbnailSize) : nullptr;
+        thumb.path = path;
+        thumb.revision = Material::Revision();
+        thumb.surface = thumb.preview.Open(textures, path) ?
+            thumb.preview.Preview(TextureCatalog::thumbnailSize, TextureCatalog::thumbnailSize) : nullptr;
 #ifndef _WIN32
-        SDL_DestroyTexture(roadThumbnailTexture);
-        roadThumbnailTexture = nullptr;
+        SDL_DestroyTexture(thumb.texture);
+        thumb.texture = nullptr;
 #endif
     }
-    return roadThumbnail;
+    return thumb.surface;
 }
 
 #ifndef _WIN32
-SDL_Texture* ContentBrowser::RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer)
+SDL_Texture* ContentBrowser::RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer, bool strip)
 {
-    auto* surface = RoadMaterialThumbnail(path);
-    if (surface && !roadThumbnailTexture)
-        roadThumbnailTexture = SDL_CreateTextureFromSurface(renderer, surface);
-    return roadThumbnailTexture;
+    auto* surface = RoadMaterialThumbnail(path, strip);
+    auto& texture = materialThumbnails[strip].texture;
+    if (surface && !texture) texture = SDL_CreateTextureFromSurface(renderer, surface);
+    return texture;
 }
 #endif
 

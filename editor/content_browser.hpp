@@ -19,9 +19,9 @@ public:
     Tab ActiveTab() const { return tab; }
     TextureCatalog& Textures() { return textures; }
     void Refresh();
-    SDL_Surface* RoadMaterialThumbnail(const std::string& path);
+    SDL_Surface* RoadMaterialThumbnail(const std::string& path, bool strip = false);
 #ifndef _WIN32
-    SDL_Texture* RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer);
+    SDL_Texture* RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer, bool strip = false);
 #endif
 #ifndef _WIN32
     // A model-row press selects the preview and returns the path available to drag.
@@ -48,13 +48,17 @@ public:
     bool UpdatePreview(); // Returns true when the selected model or its preview changed.
 
 private:
-    MaterialEditor roadPreview;
-    std::string roadPreviewPath;
-    unsigned roadPreviewRevision = 0;
-    SDL_Surface* roadThumbnail = nullptr; // Borrowed from roadPreview.
+    struct MaterialThumbnail
+    {
+        MaterialEditor preview;
+        std::string path;
+        unsigned revision = 0;
+        SDL_Surface* surface = nullptr; // Borrowed from preview.
 #ifndef _WIN32
-    SDL_Texture* roadThumbnailTexture = nullptr; // Owned by the main renderer.
+        SDL_Texture* texture = nullptr; // Owned by the main renderer.
 #endif
+    };
+    std::array<MaterialThumbnail, 2> materialThumbnails; // Primary and transition inspector slots.
     Tab tab = Tab::Models;
     TextureCatalog textures;
     bool texturesScanned = false;

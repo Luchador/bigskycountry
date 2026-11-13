@@ -450,7 +450,8 @@ struct WindowsPanels::Impl
         RECT client{};
         GetClientRect(road, &client);
         const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
-        const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT :
+        const int stripHeight = lastInspector && lastInspector->properties.HasTransitionSlot() ? 41 : 0;
+        const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight :
                            page == PropertiesPage::Marker ? 267 :
                            page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
@@ -749,19 +750,22 @@ struct WindowsPanels::Impl
         const int pad = DialogSize(road, 3, 0).cx;
         const RECT thumb{r.left + pad, r.top + pad, r.left + r.bottom - r.top - pad, r.bottom - pad};
         const bool active = lastInspector && lastInspector->properties.materialSlot;
-        const auto path = active ? lastInspector->properties.material : std::string{};
-        WindowsTheme::DrawPreview(draw.hDC, thumb, !path.empty() ? browser->RoadMaterialThumbnail(path) : nullptr);
+        const bool strip = draw.CtlID == IDC_TRANSITION_MATERIAL;
+        const auto property = strip ? RoadProperty::TransitionMaterial : RoadProperty::Material;
+        const auto path = !active ? std::string{} : strip ? lastInspector->properties.style.transitionMaterial :
+                                                           lastInspector->properties.material;
+        WindowsTheme::DrawPreview(draw.hDC, thumb, !path.empty() ? browser->RoadMaterialThumbnail(path, strip) : nullptr);
         SetBkMode(draw.hDC, TRANSPARENT);
         RECT line{thumb.right + pad, r.top, r.right - pad, (r.top + r.bottom) / 2};
         constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::secondary));
-        const auto caption = lastInspector ? lastInspector->properties.MaterialCaption() : "Pavement material";
+        const auto caption = strip ? "Transition strip material" : lastInspector ? lastInspector->properties.MaterialCaption() : "Pavement material";
         DrawTextW(draw.hDC, Wide(caption).c_str(), -1, &line, flags);
         line.top = line.bottom;
         line.bottom = r.bottom;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
-        const auto label = !active ? L"Select a road" : lastInspector->properties.Mixed(RoadProperty::Material) ? L"Multiple values" :
-                           path.empty() ? L"Mesh colors" : Wide(path.substr(path.rfind('/') + 1));
+        const auto label = !active ? L"Select a road" : lastInspector->properties.Mixed(property) ? L"Multiple values" :
+                           path.empty() ? (strip ? L"Drop a Transition material" : L"Mesh colors") : Wide(path.substr(path.rfind('/') + 1));
         DrawTextW(draw.hDC, label.c_str(), -1, &line, flags);
     }
 
@@ -812,9 +816,12 @@ struct WindowsPanels::Impl
                 ClientToScreen(list, &point);
                 const bool material = Material::ValidAssetPath(self.pressedTexture);
                 const auto slot = material ? std::nullopt : self.materialEditor.SlotAt(point);
+                const HWND under = WindowFromPoint(point);
+                const bool strip = self.lastInspector && self.lastInspector->properties.HasTransitionSlot() &&
+                                  under == GetDlgItem(self.road, IDC_TRANSITION_MATERIAL);
                 const bool inspector = material && self.lastInspector &&
                     self.lastInspector->properties.materialSlot &&
-                    WindowFromPoint(point) == GetDlgItem(self.road, IDC_ROAD_MATERIAL);
+                    (strip || under == GetDlgItem(self.road, IDC_ROAD_MATERIAL));
                 const auto viewport = material ? self.ViewportDropPoint(point) : std::nullopt;
                 if (msg == WM_LBUTTONUP)
                 {
@@ -824,7 +831,7 @@ struct WindowsPanels::Impl
                     if (drop && material)
                     {
                         const auto target = inspector && self.inspected ? std::optional{self.inspected->target} : std::nullopt;
-                        self.materialDrops.push_back({path, viewport, target});
+                        self.materialDrops.push_back({path, viewport, target, strip});
                         if (!self.Post(self.materialDropEvent, 0)) self.materialDrops.pop_back();
                     }
                     else if (drop) self.materialEditor.Drop(*slot, path);
@@ -948,6 +955,7 @@ struct WindowsPanels::Impl
         const bool refreshNames = pageChanged || lastInspector->selected != data.selected ||
                                   lastInspector->properties.roadNames != properties.roadNames ||
                                   lastInspector->properties.Mixed(RoadProperty::Names) != properties.Mixed(RoadProperty::Names);
+        const bool stripChanged = !lastInspector || lastInspector->properties.HasTransitionSlot() != properties.HasTransitionSlot();
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
         const bool junction = properties.page == PropertiesPage::Intersection;
@@ -970,6 +978,12 @@ struct WindowsPanels::Impl
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
         }
+        if (stripChanged)
+        {
+            ShowWindow(GetDlgItem(road, IDC_TRANSITION_MATERIAL), properties.HasTransitionSlot() ? SW_SHOWNA : SW_HIDE);
+            LayoutInspectorScroll();
+        }
+        InvalidateRect(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, FALSE);
         for (int id : {IDC_EXTRA_WIDTH_LABEL, IDC_EXTRA_WIDTH_LESS, IDC_EXTRA_WIDTH_VALUE, IDC_EXTRA_WIDTH_MORE})
             ShowWindow(GetDlgItem(road, id), roadPage && properties.OneLane() ? SW_SHOWNA : SW_HIDE);
         if (marker)
@@ -1236,7 +1250,7 @@ struct WindowsPanels::Impl
                 WindowsTheme::DrawColorButton(*reinterpret_cast<DRAWITEMSTRUCT*>(l), L"Text color", RGB(c[0], c[1], c[2]));
                 return TRUE;
             }
-            if (w == IDC_ROAD_MATERIAL)
+            if (w == IDC_ROAD_MATERIAL || w == IDC_TRANSITION_MATERIAL)
             {
                 self->DrawRoadMaterial(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
                 return TRUE;

@@ -272,7 +272,12 @@ bool WorldRenderer::End()
     if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
     if (!wireframeEnd)
     {
-        for (auto& range : materialRanges) range.material = materialCache.Get(range.path, device);
+        for (auto& range : materialRanges)
+        {
+            range.material = materialCache.Get(range.path, device);
+            if (range.transitionOnly && range.material && range.material->type != MaterialType::Transition)
+                range.material = nullptr;
+        }
     }
     BuildDrawRanges();
     return (device ? DrawGPU() : DrawSoftware()) &&

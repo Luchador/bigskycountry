@@ -275,6 +275,14 @@ namespace
             return Road::PavementVertex{section.At(offset), {static_cast<float>(u), static_cast<float>(v)}};
         };
 
+        auto* strip = edge == RoadEdge::Transition ? &road.transitionStrips[road.style.transitionMaterial] : nullptr;
+        const auto stripVertex = [&](const CrossSection& section, double offset)
+        {
+            const auto v = pavementVertex(section, offset);
+            const auto color = offset == pavement ? RoadEdgeColor::transitionInner : RoadEdgeColor::transitionOuter;
+            return Road::TransitionVertex{v.position, color, v.uv};
+        };
+
         // Divided markings follow the same cross sections as their carriageway.
         const bool paintDivided = road.paintMarkings && road.style.IsDivided();
         std::vector<MarkingPath> dividers(paintDivided ? lanes / 2 - 1 : 0);
@@ -294,7 +302,7 @@ namespace
             profile[0] = current.At(pavement);
             if (faces > 0)
             {
-                profile[1] = profile[0] + current.lateral * RoadStyle::stripWidth;
+                profile[1] = current.At(pavement + RoadStyle::stripWidth);
             }
 
             if (edge == RoadEdge::Curb)
@@ -333,9 +341,10 @@ namespace
                     PaintCarriagewayEdges(road, side, last, current, halfGap, travelEdge);
                 }
 
-                if (edge == RoadEdge::Transition)
+                if (strip)
                 {
-                    AddEdgeFace(road, side, previous, profile, 0, RoadEdgeColor::transitionInner, RoadEdgeColor::transitionOuter);
+                    VisitBand(side, last, current, pavement, pavement + RoadStyle::stripWidth, stripVertex,
+                              [&](const auto& triangle) { strip->push_back(triangle); });
                 }
                 else if (edge == RoadEdge::Curb)
                 {

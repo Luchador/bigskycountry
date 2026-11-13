@@ -11,7 +11,8 @@ namespace
 {
     unsigned materialRevision = 0, imageRevision = 0;
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
-    constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity", "translucency"};
+    constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity", "translucency",
+                                                            "outerBaseColor", "outerNormal", "outerOrm"};
 
     bool ReadUnit(const cJSON* value, float& channel)
     {

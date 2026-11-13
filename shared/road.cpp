@@ -415,6 +415,7 @@ void Road::Rebuild()
     pointSamples.clear();
     pavementTriangles.clear();
     edgeTriangles.clear();
+    transitionStrips.clear();
     outline.clear();
     whiteStripes.clear();
     yellowStripes.clear();
@@ -567,6 +568,7 @@ void Road::Rebuild()
     };
     windSurface(pavementTriangles);
     windSurface(edgeTriangles);
+    for (auto& [material, strip] : transitionStrips) windSurface(strip);
 
     if (rotated)
     {
@@ -589,6 +591,7 @@ void Road::Rebuild()
         };
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);
+        for (auto& [material, strip] : transitionStrips) moveSurface(strip);
         for (Vector3& vertex : outline)
         {
             vertex = frame.Point(vertex);

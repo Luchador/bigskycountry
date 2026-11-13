@@ -51,12 +51,17 @@ namespace
                 Mix(a.inner, b.inner, t), Mix(a.outer, b.outer, t)};
     }
 
+    SDL_FPoint SurfaceUV(Vector3 center, const std::array<Vector3, sides>& axes, Vector3 p)
+    {
+        const Vector3 d = p - center;
+        return {float(Math::Dot(d, axes[0]) / RoadStyle::laneWidth), float(Math::Dot(d, axes[1]) / RoadStyle::laneWidth)};
+    }
+
     void Pavement(IntersectionSurface& surface, const std::array<Vector3, sides>& axes, Vector3 a, Vector3 b, Vector3 c)
     {
         const auto vertex = [&](Vector3 p)
         {
-            const Vector3 d = p - surface.layout.center;
-            return RoadGeometry::PavementVertex{p, {static_cast<float>(Math::Dot(d, axes[0]) / RoadStyle::laneWidth), static_cast<float>(Math::Dot(d, axes[1]) / RoadStyle::laneWidth)}};
+            return RoadGeometry::PavementVertex{p, SurfaceUV(surface.layout.center, axes, p)};
         };
         const double area = Math::Cross(b - a, c - a).y;
         if (std::abs(area) < 1e-12) return;
@@ -64,20 +69,34 @@ namespace
         surface.geometry.pavementTriangles.push_back({vertex(a), vertex(b), vertex(c)});
     }
 
-    void Join(IntersectionSurface& surface, const Rim& a, const Rim& b)
+    void Join(IntersectionSurface& surface, const Rim& a, const Rim& b,
+              const IntersectionApproach& approach, const std::array<Vector3, sides>& axes)
     {
         for (int i = 0; i < 3; ++i)
         {
             const SDL_FColor curbColor = i == 1 ? RoadEdgeColor::riser : RoadEdgeColor::top;
-            using Vertex = RoadGeometry::EdgeVertex;
-            const Vertex v0{a.p[i], i == 0 ? a.inner : curbColor};
-            const Vertex v1{b.p[i], i == 0 ? b.inner : curbColor};
-            const Vertex v2{b.p[i + 1], i == 0 ? b.outer : curbColor};
-            const Vertex v3{a.p[i + 1], i == 0 ? a.outer : curbColor};
-            if (v0.position != v1.position && v1.position != v2.position)
-                surface.geometry.edgeTriangles.push_back({v0, v1, v2});
-            if (v0.position != v3.position && v2.position != v3.position)
-                surface.geometry.edgeTriangles.push_back({v0, v2, v3});
+            const auto append = [&](auto& mesh, auto v0, auto v1, auto v2, auto v3)
+            {
+                if (v0.position != v1.position && v1.position != v2.position) mesh.push_back({v0, v1, v2});
+                if (v0.position != v3.position && v2.position != v3.position) mesh.push_back({v0, v2, v3});
+            };
+            if (i == 0 && !approach.transitionMaterial.empty() && approach.edge == RoadEdge::Transition)
+            {
+                const auto vertex = [&](Vector3 p, SDL_FColor mask)
+                {
+                    return RoadGeometry::TransitionVertex{p, mask, SurfaceUV(surface.layout.center, axes, p)};
+                };
+                append(surface.geometry.transitionStrips[approach.transitionMaterial],
+                       vertex(a.p[0], RoadEdgeColor::transitionInner), vertex(b.p[0], RoadEdgeColor::transitionInner),
+                       vertex(b.p[1], RoadEdgeColor::transitionOuter), vertex(a.p[1], RoadEdgeColor::transitionOuter));
+            }
+            else
+            {
+                using Vertex = RoadGeometry::EdgeVertex;
+                append(surface.geometry.edgeTriangles,
+                       Vertex{a.p[i], i == 0 ? a.inner : curbColor}, Vertex{b.p[i], i == 0 ? b.inner : curbColor},
+                       Vertex{b.p[i + 1], i == 0 ? b.outer : curbColor}, Vertex{a.p[i + 1], i == 0 ? a.outer : curbColor});
+            }
         }
     }
 
@@ -137,7 +156,8 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
 {
     const auto& style = road.style;
     IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
-                             first ? style.RightWidth() : style.LeftWidth(), style.edge, {}};
+                             first ? style.RightWidth() : style.LeftWidth(), style.edge, {},
+                             style.edge == RoadEdge::Transition ? style.transitionMaterial : std::string{}};
     if (!paintStopLine || !road.paintMarkings) return arm;
 
     const int lanes = style.GetLaneCount();
@@ -206,7 +226,10 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
                     Pavement(*this, directions, lastBase, rim.p[0], previous->p[0]);
                     lastBase = base;
                 }
-                Join(*this, *previous, rim);
+                // Carry a strip through a taper to a bare edge. Otherwise each arm owns its half corner.
+                const bool useA = a.edge != RoadEdge::None && (b.edge == RoadEdge::None || t <= .5);
+                const auto& approach = useA ? a : b;
+                Join(*this, *previous, rim, approach, directions);
             }
             geometry.outline.push_back(rim.p.back());
             previous = rim;
@@ -249,7 +272,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
             // Across the closed side of a T there is one continuous boundary.
             // Horizontal end tangents make asymmetric shoulders meet it smoothly.
             const double length = setbacks[i] + setbacks[j];
-            const int intervals = wa == wb && a.edge == b.edge ? 1 : cornerIntervals;
+            const int intervals = wa == wb && a.edge == b.edge ?
+                (a.transitionMaterial == b.transitionMaterial ? 1 : 2) : cornerIntervals;
             for (int k = 1; k <= intervals; ++k)
             {
                 const double t = static_cast<double>(k) / intervals, smooth = t * t * (3 - 2 * t);

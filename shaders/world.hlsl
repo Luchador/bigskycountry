@@ -100,8 +100,10 @@ float4 WireframePS(WorldFragment input) : SV_Target0
 BSC_COMBINED Texture2D<float4> baseColorMap : register(t0, space2);
 BSC_COMBINED Texture2D<float2> normalMap : register(t1, space2);
 BSC_COMBINED Texture2D<float4> ormMap : register(t2, space2);
-BSC_COMBINED Texture2D<float4> emissiveMap : register(t3, space2);
-BSC_COMBINED Texture2D<float> opacityMap : register(t4, space2);
+BSC_COMBINED Texture2D<float4> emissionOrOuterColor : register(t3, space2);
+BSC_COMBINED Texture2D<float4> alphaOrOuterNormal : register(t4, space2);
+BSC_COMBINED Texture2D<float4> outerOrmMap : register(t5, space2);
+BSC_COMBINED SamplerState outerOrmSampler : register(s5, space2);
 BSC_COMBINED SamplerState colorSampler : register(s0, space2);
 BSC_COMBINED SamplerState normalSampler : register(s1, space2);
 BSC_COMBINED SamplerState ormSampler : register(s2, space2);
@@ -111,26 +113,42 @@ BSC_COMBINED SamplerState opacitySampler : register(s4, space2);
 cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;
-    uint alphaCutout, unlit;
+    uint alphaCutout, unlit, transition;
 };
+
+float3 DecodeNormalXY(float2 channels)
+{
+    float2 xy = 2 * channels - 1;
+    return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
+}
 
 float4 MaterialPS(WorldFragment input) : SV_Target0
 {
     if (unlit)
     {
-        float alpha = opacityMap.Sample(opacitySampler, input.uv) * tint.a;
+        float alpha = alphaOrOuterNormal.Sample(opacitySampler, input.uv).r * tint.a;
         if (alpha <= 0) discard;
-        float3 c = emissiveMap.Sample(emissiveSampler, input.uv).rgb * tint.rgb;
+        float3 c = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb * tint.rgb;
         return float4(ToDisplay(c), alpha);
     }
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
-    if (alphaCutout) clip(base.a * opacityMap.Sample(opacitySampler, input.uv) - 0.5);
+    if (alphaCutout) clip(base.a * alphaOrOuterNormal.Sample(opacitySampler, input.uv).r - 0.5);
     float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;
-    float3 glow = emissiveMap.Sample(emissiveSampler, input.uv).rgb;
-    float2 xy = normalMap.Sample(normalSampler, input.uv) * 2 - 1;
+    float3 layerColor = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb;
+    float3 surfaceNormal = DecodeNormalXY(normalMap.Sample(normalSampler, input.uv));
+    float3 glow = 0;
+    if (transition)
+    {
+        float weight = saturate(input.color.r);
+        base.rgb = lerp(layerColor, base.rgb, weight);
+        orm = lerp(outerOrmMap.Sample(outerOrmSampler, input.uv).rgb, orm, weight);
+        float3 outerNormal = DecodeNormalXY(alphaOrOuterNormal.Sample(opacitySampler, input.uv).rg);
+        surfaceNormal = lerp(outerNormal, surfaceNormal, weight);
+    }
+    else glow = layerColor;
     float3 n = UnitVector(input.normal.xyz);
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
-    float3 mapped = UnitVector(t * xy.x + b * xy.y + n * sqrt(saturate(1 - dot(xy, xy))));
+    float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
     return float4(ShadeSurface(mapped, input.view, base.rgb, orm, glow), 1);
 }

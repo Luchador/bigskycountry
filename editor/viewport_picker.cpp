@@ -87,6 +87,7 @@ bool ViewportPicker::TestRoad(const RoadGeometry& road)
     };
     testSurface(road.pavementTriangles);
     testSurface(road.edgeTriangles);
+    for (const auto& [material, strip] : road.transitionStrips) testSurface(strip);
     return depth < previous;
 }
 

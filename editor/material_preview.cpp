@@ -1,6 +1,7 @@
 #include "material_editor.hpp"
 #include "editor_theme.hpp"
 #include "mesh.hpp"
+#include "material_blend.hpp"
 #include "world_lighting.hpp"
 
 #include <algorithm>
@@ -48,10 +49,7 @@ namespace
     };
     const ChannelValues values;
 
-    struct Color
-    {
-        float channel[4];
-    };
+    using Color = std::array<float, 4>;
 
     template<int channels, bool srgb = false>
     Color Sample(const SDL_Surface* image, double u, double v, Color fallback)
@@ -76,7 +74,7 @@ namespace
         for (int c = 0; c < channels; ++c)
         {
             const float* lut = srgb && c < 3 ? values.srgb : values.unorm;
-            color.channel[c] = w00 * lut[p00[c]] + w10 * lut[p10[c]] + w01 * lut[p01[c]] + w11 * lut[p11[c]];
+            color[c] = w00 * lut[p00[c]] + w10 * lut[p10[c]] + w01 * lut[p01[c]] + w11 * lut[p11[c]];
         }
         return color;
     }
@@ -127,7 +125,7 @@ namespace
 
     struct Shader
     {
-        SDL_Surface *base, *normal, *orm, *emissive, *opacity;
+        SDL_Surface *base, *normal, *orm, *emissive, *opacity, *outerBase, *outerNormal, *outerOrm;
         MaterialType type;
         SDL_FColor tint;
         float factor;
@@ -141,31 +139,45 @@ namespace
             if (type == MaterialType::Unlit)
             {
                 const auto glow = Sample<3, true>(emissive, u, v, {1, 1, 1, 1});
-                const float alpha = factor * Sample<1>(opacity, u, v, {1, 1, 1, 1}).channel[0];
+                const float alpha = factor * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0];
                 constexpr auto bg = EditorTheme::field;
                 const auto blend = [alpha](Uint8 background, Uint8 emission) {
                     return static_cast<Uint8>(std::lerp(float(background), float(emission), alpha) + .5f);
                 };
-                pixel[2] = blend(bg.r, display.EncodeLinear(glow.channel[0] * tint.r));
-                pixel[1] = blend(bg.g, display.EncodeLinear(glow.channel[1] * tint.g));
-                pixel[0] = blend(bg.b, display.EncodeLinear(glow.channel[2] * tint.b));
+                pixel[2] = blend(bg.r, display.EncodeLinear(glow[0] * tint.r));
+                pixel[1] = blend(bg.g, display.EncodeLinear(glow[1] * tint.g));
+                pixel[0] = blend(bg.b, display.EncodeLinear(glow[2] * tint.b));
                 return;
             }
-            const auto albedo = Sample<4, true>(base, u, v, {.48f, .48f, .48f, 1});
-            if (type == MaterialType::AlphaCutout && albedo.channel[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1}).channel[0] < .5f)
+            auto albedo = Sample<4, true>(base, u, v, {.48f, .48f, .48f, 1});
+            if (type == MaterialType::AlphaCutout && albedo[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0] < .5f)
                 return;
             n = UnitNormal(n);
-            if (normal)
+            auto packed = Sample<3>(orm, u, v, {1, .5f, 0, 1});
+            const bool transition = type == MaterialType::Transition;
+            // Give the preview sphere a horizontal gradient in mesh space, so it orbits with the material.
+            const float weight = transition ? float(std::clamp(.5 + n.x, 0., 1.)) : 1.f;
+            if (transition)
+            {
+                albedo = BlendMaterialSamples(Sample<4, true>(outerBase, u, v, {.48f, .48f, .48f, 1}), albedo, weight);
+                packed = BlendMaterialSamples(Sample<3>(outerOrm, u, v, {1, .5f, 0, 1}), packed, weight);
+            }
+            if (normal || outerNormal)
             {
                 const auto map = Sample<3>(normal, u, v, {.5f, .5f, 1, 1});
+                Vector3 detail{2 * map[0] - 1, 2 * map[1] - 1, 2 * map[2] - 1};
+                if (transition)
+                {
+                    const auto outer = DecodeNormalXY(Sample<2>(outerNormal, u, v, {.5f, .5f, 1, 1}));
+                    detail = outer + (DecodeNormalXY(map) - outer) * weight;
+                }
                 const Vector3 tangent = UnitNormal({n.z, 0, -n.x});
                 // Sphere V increases toward the south pole.
                 const Vector3 bitangent = Math::Cross(tangent, n);
-                n = UnitNormal(tangent * (2 * map.channel[0] - 1) + bitangent * (2 * map.channel[1] - 1) + n * (2 * map.channel[2] - 1));
+                n = UnitNormal(tangent * detail.x + bitangent * detail.y + n * detail.z);
             }
-            const auto packed = Sample<3>(orm, u, v, {1, .5f, 0, 1});
             const auto glow = Sample<3, true>(emissive, u, v, {0, 0, 0, 1});
-            const double ao = packed.channel[0], rough = std::max(.085, double(packed.channel[1])), metal = packed.channel[2];
+            const double ao = packed[0], rough = std::max(.085, double(packed[1])), metal = packed[2];
             const double nl = std::max(0., Math::Dot(n, light)), nv = std::clamp(Math::Dot(n, toEye), .001, 1.);
             const double nh = std::max(0., Math::Dot(n, half));
             const double a2 = rough * rough * rough * rough;
@@ -181,10 +193,10 @@ namespace
                 1.6 * std::pow(std::max(0., Math::Dot(reflection, light)), 2 + 20 * (1 - rough)) / (1 + rough);
             for (int c = 0; c < 3; ++c)
             {
-                const double f0 = .04 * (1 - metal) + albedo.channel[c] * metal;
+                const double f0 = .04 * (1 - metal) + albedo[c] * metal;
                 const double f = f0 + (1 - f0) * fresnelWeight;
-                const double diffuse = albedo.channel[c] * (1 - metal) * (1 - f);
-                pixel[2 - c] = display.Encode(glow.channel[c] + ao * (ambient * diffuse + studio * f0) +
+                const double diffuse = albedo[c] * (1 - metal) * (1 - f);
+                pixel[2 - c] = display.Encode(glow[c] + ao * (ambient * diffuse + studio * f0) +
                                        2.6 * nl * (diffuse / pi + distribution * visibility * f));
             }
         }
@@ -267,6 +279,7 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
     const Shader shader{image(MaterialSlot::BaseColor), image(MaterialSlot::Normal),
                         image(MaterialSlot::ORM),       image(MaterialSlot::Emissive),
                         image(material.type == MaterialType::Unlit ? MaterialSlot::Translucency : MaterialSlot::Opacity),
+                        image(MaterialSlot::OuterBaseColor), image(MaterialSlot::OuterNormal), image(MaterialSlot::OuterORM),
                         material.type, Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), toEye};
     constexpr auto background = EditorTheme::field;
     SDL_FillSurfaceRect(&target, nullptr, SDL_MapSurfaceRGB(&target, background.r, background.g, background.b));

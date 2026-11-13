@@ -83,7 +83,7 @@ private:
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
     void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
-                        std::optional<SDL_FPoint> viewportPoint);
+                        std::optional<SDL_FPoint> viewportPoint, bool strip = false);
     void PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position);
     void PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);

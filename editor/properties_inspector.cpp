@@ -167,6 +167,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
                 result.canDivide &= s.CanDivide();
                 compare(RoadProperty::Names, *result.roadNames != other.NameList());
                 compare(RoadProperty::Material, first.material != s.material);
+                compare(RoadProperty::TransitionMaterial, first.transitionMaterial != s.transitionMaterial);
                 compare(RoadProperty::Markings, result.paintMarkings != other.paintMarkings);
                 compare(RoadProperty::Alignment, first.curved != s.curved);
                 compare(RoadProperty::Layout, first.threeLaneLayout != s.threeLaneLayout);
@@ -179,6 +180,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             }
             if (result.Mixed(RoadProperty::Names)) result.roadNames->clear();
             if (result.Mixed(RoadProperty::Material)) result.material.clear();
+            if (result.Mixed(RoadProperty::TransitionMaterial)) result.style.transitionMaterial.clear();
         }
         if (road && !editingDraft)
         {

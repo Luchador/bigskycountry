@@ -35,6 +35,7 @@ public:
         std::string path;
         std::optional<SDL_FPoint> viewportFraction; // Empty when dropped on the inspector.
         std::optional<TransformTarget> inspectorTarget;
+        bool strip = false;
     };
     std::optional<MaterialDrop> TakeMaterialDrop(const SDL_Event& event);
     bool Command(const SDL_Event& event, const RoadEditorState& state, RoadAction& action);

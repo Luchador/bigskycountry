@@ -1,5 +1,6 @@
 #include "surface_material.hpp"
 #include "texture_loader.hpp"
+#include "material_blend.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,7 +10,7 @@ namespace
 {
     using Format = DdsTexture::Format;
     constexpr std::array formats{Format::BaseColor, Format::Normal, Format::Packed, Format::BaseColor, Format::Scalar, Format::Scalar};
-    constexpr std::array<std::array<Uint8, 4>, materialSlotCount> defaults{{
+    constexpr std::array<std::array<Uint8, 4>, formats.size()> defaults{{
         {184,184,184,255}, {128,128,255,255}, {255,128,0,255}, {0,0,0,255}, {255,255,255,255}, {255,255,255,255}
     }};
 }
@@ -29,6 +30,10 @@ void SurfaceMaterialCache::ClearTextures()
 
 const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path, MaterialSlot slot, bool whiteEmission)
 {
+    // Both layers share the same texture formats, cache entries and neutral maps.
+    if (slot == MaterialSlot::OuterBaseColor) slot = MaterialSlot::BaseColor;
+    if (slot == MaterialSlot::OuterNormal) slot = MaterialSlot::Normal;
+    if (slot == MaterialSlot::OuterORM) slot = MaterialSlot::ORM;
     const auto index = static_cast<size_t>(slot);
     const auto format = formats[index];
     // ':' cannot occur in an asset path. Give each neutral map its own cache key.
@@ -126,21 +131,24 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
 {
     std::array<SDL_GPUTextureSamplerBinding, SurfaceMaterial::shaderMapCount> bindings{};
     const bool unlit = material.type == MaterialType::Unlit;
-    for (size_t i = 0; i < bindings.size(); ++i)
-    {
-        auto slot = static_cast<MaterialSlot>(i);
-        // All declared bindings must be valid. Reuse emission for the unused lit maps.
-        if (unlit) slot = slot == MaterialSlot::Opacity ? MaterialSlot::Translucency : MaterialSlot::Emissive;
-        bindings[i] = {material.maps[static_cast<size_t>(slot)]->gpu, sampler};
-    }
+    const bool transition = material.type == MaterialType::Transition;
+    using Slot = MaterialSlot;
+    // The second triplet carries either outer-layer maps or the emission and alpha maps.
+    // Bind a valid texture even for shader inputs unused by the current type.
+    constexpr std::array standardSlots{Slot::BaseColor, Slot::Normal, Slot::ORM, Slot::Emissive, Slot::Opacity, Slot::ORM};
+    constexpr std::array transitionSlots{Slot::BaseColor, Slot::Normal, Slot::ORM, Slot::OuterBaseColor, Slot::OuterNormal, Slot::OuterORM};
+    constexpr std::array unlitSlots{Slot::Emissive, Slot::Emissive, Slot::Emissive, Slot::Emissive, Slot::Translucency, Slot::Emissive};
+    const auto& slots = transition ? transitionSlots : unlit ? unlitSlots : standardSlots;
+    for (size_t i = 0; i < slots.size(); ++i)
+        bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), bindings.size());
-    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, padding[2]; };
-    const Properties params{material.tint, material.type == MaterialType::AlphaCutout, unlit, {}};
+    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, padding; };
+    const Properties params{material.tint, material.type == MaterialType::AlphaCutout, unlit, transition, 0};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
 SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                                  Vector3 tangent, float handedness, Vector3 view) const
+                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
@@ -151,18 +159,25 @@ SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const World
         return {Srgb::ToDisplay(glow[0] * tint.r), Srgb::ToDisplay(glow[1] * tint.g),
                 Srgb::ToDisplay(glow[2] * tint.b), sample(MaterialSlot::Translucency)[0] * tint.a};
     }
-    const auto color = sample(MaterialSlot::BaseColor);
+    auto color = sample(MaterialSlot::BaseColor);
     if (type == MaterialType::AlphaCutout && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
         return {};
-    const auto xy = sample(MaterialSlot::Normal);
-    const auto orm = sample(MaterialSlot::ORM);
-    const auto glow = sample(MaterialSlot::Emissive);
-    const float x = xy[0] * 2 - 1, y = xy[1] * 2 - 1;
-    const float z = std::sqrt(std::max(0.0f, 1 - x*x - y*y));
+    auto orm = sample(MaterialSlot::ORM);
+    auto mappedNormal = DecodeNormalXY(sample(MaterialSlot::Normal));
+    std::array<float, 4> glow{};
+    if (type == MaterialType::Transition)
+    {
+        const float weight = std::clamp(vertexRed, 0.f, 1.f);
+        color = BlendMaterialSamples(sample(MaterialSlot::OuterBaseColor), color, weight);
+        orm = BlendMaterialSamples(sample(MaterialSlot::OuterORM), orm, weight);
+        const auto outerNormal = DecodeNormalXY(sample(MaterialSlot::OuterNormal));
+        mappedNormal = outerNormal + (mappedNormal - outerNormal) * weight;
+    }
+    else glow = sample(MaterialSlot::Emissive);
     // Re-orthogonalize the projected U axis against the interpolated shading normal.
     tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
     const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
-    const Vector3 mapped = Math::Normalize(tangent * x + bitangent * y + normal * z);
+    const Vector3 mapped = Math::Normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
     return lights.Shade(mapped, view, {color[0], color[1], color[2], 1}, {orm[0], orm[1], orm[2]},
                         {glow[0], glow[1], glow[2]});
 }

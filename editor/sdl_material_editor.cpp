@@ -15,17 +15,20 @@ namespace
         Layout(SDL_Window* window, const Material& material)
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-            const float split = float(windowWidth) - 224;
+            const bool transition = material.type == MaterialType::Transition;
+            const float panelWidth = transition ? 256.f : 224.f;
+            const float split = float(windowWidth) - panelWidth;
             view = {0, 0, split, float(windowHeight)};
-            type = {split + 10, 32, 204, 25};
+            type = {split + 10, 32, panelWidth - 20, 25};
             const bool unlit = material.type == MaterialType::Unlit;
-            const float step = unlit ? std::min(80.f, (windowHeight - 210.f) / 2) : std::min(80.f, (windowHeight - 70.f) / 5);
+            const float rowHeight = unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f) / (transition ? 6 : 5);
+            const float step = std::min(80.f, rowHeight);
             float y = 68;
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
                 if (!material.Uses(static_cast<MaterialSlot>(i))) continue;
-                slots[i] = {split + 10, y, 160, step - 5};
-                clear[i] = {split + 173, slots[i].y + (step - 27) * .5f, 41, 22};
+                slots[i] = {split + 10, y, panelWidth - 64, step - 5};
+                clear[i] = {split + panelWidth - 51, slots[i].y + (step - 27) * .5f, 41, 22};
                 y += step;
                 if (unlit && i == static_cast<size_t>(MaterialSlot::Emissive))
                 {
@@ -363,7 +366,7 @@ bool SdlMaterialEditor::Draw()
         !Text(renderer, layout.type.x, 13, "Material type", text) || !Fill(renderer, layout.type, button) ||
         !Text(renderer, layout.type.x + 6, layout.type.y + 8,
               materialTypes[static_cast<std::size_t>(editor.Current().type)].label, text) ||
-        !Text(renderer, layout.type.x + 184, layout.type.y + 8, "v", text))
+        !Text(renderer, layout.type.x + layout.type.w - 20, layout.type.y + 8, "v", text))
         return false;
     for (std::size_t i = 0; i < thumbs.size(); ++i)
     {
@@ -378,7 +381,7 @@ bool SdlMaterialEditor::Draw()
         const float x = image.x + sz + 6;
         const SDL_Rect clip{int(x), int(r.y), int(r.x + r.w - x), int(r.h)};
         if (!SDL_SetRenderClipRect(renderer, &clip) ||
-            !Text(renderer, x, r.y + r.h / 2 - 10, materialSlotLabels[i], text) ||
+            !Text(renderer, x, r.y + r.h / 2 - 10, editor.Current().SlotLabel(i), text) ||
             !Text(renderer, x, r.y + r.h / 2 + 5, path.empty() ? "Drop texture" : path.substr(path.rfind('/') + 1),
                   secondary) ||
             !SDL_SetRenderClipRect(renderer, nullptr))

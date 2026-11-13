@@ -12,7 +12,7 @@ struct SceneKey;
 
 enum class PropertiesPage { Road, Intersection, Anchor, Terrain, Object, Marker, Other };
 
-enum class RoadProperty { Names, Material, Markings, Alignment, Layout, Left, Right, Edge, Divided, Median, Width, Count };
+enum class RoadProperty { Names, Material, TransitionMaterial, Markings, Alignment, Layout, Left, Right, Edge, Divided, Median, Width, Count };
 
 struct PropertiesInspector
 {
@@ -28,6 +28,10 @@ struct PropertiesInspector
     double minGap = 4, maxGap = 4;
     bool canDivide = true, anyDivided = false;
     bool AllDivided() const { return anyDivided && !Mixed(RoadProperty::Divided); }
+    bool HasTransitionSlot() const
+    {
+        return page == PropertiesPage::Road && materialSlot && style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge);
+    }
     bool OneLane() const { return maxLanes == 1; }
     bool ThreeLanes() const { return minLanes == 3 && maxLanes == 3; }
     bool HasMedian() const { return AllDivided() && minGap > RoadStyle::minSeparation; }

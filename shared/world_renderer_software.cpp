@@ -197,8 +197,10 @@ bool WorldRenderer::DrawSoftware()
                         const float footprint = static_cast<float>(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
                         const Vector3 normal = Math::Normalize(a.normal*u + b.normal*v + c.normal*w);
                         const Vector3 view = (a.view*u + b.view*v + c.view*w) * (1.0 / sum);
-                        const auto color = material->Shade(float(tu), float(tv), footprint, lights,
-                                                                                 normal, face.tangent, face.handedness, view);
+                        const float red = material->type == MaterialType::Transition ?
+                            float((u*a.color.r + v*b.color.r + w*c.color.r) / sum) : 1.f;
+                        const auto color = material->Shade(float(tu), float(tv), footprint, lights, normal,
+                                                           face.tangent, face.handedness, view, red);
                         if (color.a == 0) continue;
                         if (translucent)
                         {
