@@ -4,10 +4,11 @@
 #include <cmath>
 #include <limits>
 
-RampLane HighwayRampLane(const RoadStyle& style, const RampLink& link, bool exit)
+RampLane HighwayRampLane(const RoadStyle& style, const RampLink& link, bool exit, bool branchesLeft)
 {
     return {link.station, link.side, exit, link.length, style.GetLaneCount() * style.TravelLaneWidth() * 0.5,
-            style.LeftWidth(), style.RightWidth(), style.EdgeWidth()};
+            branchesLeft ? style.RightWidth() : style.LeftWidth(), branchesLeft ? style.LeftWidth() : style.RightWidth(),
+            style.EdgeWidth(), style.GetLaneCount(), link.offset};
 }
 
 void AlignRampEnd(RoadPoint& end, const RampSeam& seam)
@@ -36,7 +37,7 @@ void WorldDocument::RefreshRampConnections(bool force)
     for (size_t i = 0; i < roads.size(); ++i)
     {
         const Road& host = roads[i];
-        if (!host.style.IsDivided()) continue;
+        if (host.style.GetLaneCount() < 2) continue;
         for (const auto& point : host.points)
             if (point.rampStation) stations.emplace(point.rampStation, i);
     }
@@ -50,7 +51,10 @@ void WorldDocument::RefreshRampConnections(bool force)
             if (!link) continue;
             const auto it = stations.find(link->station);
             if (it != stations.end())
-                lanes[it->second].push_back(HighwayRampLane(ramp.style, *link, exit));
+            {
+                const bool branchesLeft = roads[it->second].style.oneWay && link->side > 0;
+                lanes[it->second].push_back(HighwayRampLane(ramp.style, *link, exit, branchesLeft));
+            }
         }
     }
     for (size_t i = 0; i < roads.size(); ++i)

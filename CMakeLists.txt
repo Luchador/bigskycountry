@@ -135,6 +135,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/scene_outliner.cpp
     editor/road_editor.cpp
     editor/highway_ramp_tool.cpp
+    editor/ramp_handles.cpp
     editor/road_intersection.cpp
     editor/properties_inspector.cpp
     editor/transform_inspector.cpp

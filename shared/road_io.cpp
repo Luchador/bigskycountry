@@ -123,7 +123,7 @@ namespace RoadIO
             }
             else out << " 0";
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
-            if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length;
+            if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
             out << '\n';
         }
     }
@@ -192,7 +192,9 @@ namespace RoadIO
                 if (target)
                 {
                     RampLink link{target};
-                    if (!(in >> link.side >> link.length) || !link.Valid() || p.anchor || !road.style.oneWay ||
+                    in >> link.side >> link.length;
+                    if (version >= 14) in >> link.offset;
+                    if (!in || !link.Valid() || p.anchor || !road.style.oneWay ||
                         (i != 0 && i != count - 1)) in.setstate(std::ios::failbit);
                     p.ramp = link;
                 }

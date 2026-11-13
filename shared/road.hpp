@@ -69,6 +69,7 @@ struct RoadStyle
     double SingleLaneExtraWidth() const { return singleLaneExtraWidth; }
     bool SetSingleLaneExtraWidth(double meters);
     double TravelLaneWidth() const { return laneWidth + (lanes == 1 ? singleLaneExtraWidth : 0.0); }
+    int TravelDirection(int side) const { return oneWay ? 1 : -side; } // Along (+1) or against the authored spline.
     bool CanDivide() const { return !oneWay && lanes % 2 == 0; }
     bool IsDivided() const { return divided; }
     void SetDivided(bool value) { divided = value && CanDivide(); }
@@ -104,6 +105,7 @@ struct RampLink
 {
     int station = 0, side = 0; // Side in the host spline frame, +1 left and -1 right.
     double length = 60.0;      // Game meters from the narrow end of the taper to the gore.
+    double offset = 0.0; // Signed meters along the host from the stable knot to the ramp attachment.
     bool operator==(const RampLink&) const = default;
     bool Valid() const;
 };
@@ -174,6 +176,8 @@ struct RampLane
     int station, side;
     bool exit;
     double length, halfTravel, innerPavement, outerPavement, edgeWidth;
+    int laneCount = 1;
+    double offset = 0.0;
     bool operator==(const RampLane&) const = default;
 };
 
@@ -182,6 +186,8 @@ struct RampSeam
     Vector3 center, forward;
     RoadMouthFrame frame;
     double taperLength; // Effective length after fitting the current highway.
+    double goreDistance, tipDistance, stationDistance; // Along the surfaced centerline, in authored order.
+    int outwardSide; // Side of the branch in its own travel frame.
 };
 
 struct Road : RoadGeometry
@@ -199,6 +205,13 @@ struct Road : RoadGeometry
 
     // Includes both endpoints; the span is valid until the road is rebuilt.
     std::span<const Vector3> SegmentSamples(std::size_t segment) const;
+    // World-space centers of the surfaced lanes, sampled in spline order. On multi-lane
+    // roads the configured lanes run right to left, followed by any ramp taper lanes.
+    std::vector<std::vector<Vector3>> laneCenterlines;
+    // Same indices as the outer lane centerlines, including equal-distance bevel stations.
+    std::array<std::vector<double>, 2> outerLaneDistances;
+    std::span<const Vector3> OuterLane(int side) const;
+    Vector3 OuterLanePosition(int side, double distance) const;
     double SplineLengthMeters() const { return splineLengthMeters; }
     Vector3 Tangent(std::size_t index) const;
     bool InsertStation(int segment, double t, int stationId);

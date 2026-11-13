@@ -232,6 +232,12 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
     ViewportPicker surfaces(camera, scene, *pointer);
     const RoadPick hit = overlay.Pick(surfaces, world, Selected(world), camera, scene,
                                       (modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0);
+    if (!gizmoDrag && !(modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) && Selected(world) &&
+        overlay.PickRampControl(surfaces, world, *Selected(world), camera, scene))
+    {
+        hoveredAxis.reset();
+        return;
+    }
     if ((!gizmoDrag && !GizmoTakesClick(hit, modifiers)) || (!GizmoInForeground() && !handles.CloserThan(surfaces)))
         hoveredAxis.reset();
 }
@@ -247,7 +253,9 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     if (const Road* road = Selected(world))
     {
         overlay.Draw(renderer, *road, state, camera, scene);
+        overlay.DrawRampControls(renderer, world, *road, camera, scene);
     }
+    if (rampDrag) return;
     if (const auto placement = SelectedGizmoPlacement(world, camera))
     {
         UpdateGizmoHover(world, camera, *placement);
@@ -438,7 +446,8 @@ std::optional<RampPlan> RoadEditor::PrepareRamp(EditorCommand command, const Wor
             length = *amount;
         }
     }
-    auto plan = PlanRamp(host, site, world.NextRampStationId(), style, exit, length, replacing);
+    auto plan = PlanRamp(host, site, world.NextRampStationId(), style, exit, length, replacing,
+                         command == EditorCommand::SetRampTaper && replacing ? replacing->offset : 0.0);
     if (plan && command == EditorCommand::ConnectRamp)
     {
         const Road& ramp = world.roads[state.selected];
@@ -494,7 +503,7 @@ void RoadEditor::AimRamp(const FreeCamera& camera, SDL_FPoint pointer)
     const auto offset = end - seam.center;
     // Start the branch on its own side with a nonzero approach in the travel direction.
     if (Math::Dot(offset, seam.forward) * (placement.exit ? 1 : -1) < Road::minPointSpacing ||
-        Math::Dot(offset, seam.frame.left) > 0) return;
+        Math::Dot(offset, seam.frame.left) * seam.outwardSide < 0) return;
     auto& free = placement.exit ? placement.preview.points.back() : placement.preview.points.front();
     if (free.position == end) return;
     free.position = end;
@@ -641,7 +650,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
                                                                  picker.HitPosition();
         roadMenuTarget = RoadMenuTarget{index, road.revision, PlanRoadIntersection(road, hit, position)};
         canCreate = roadMenuTarget->insertion.has_value();
-        if (road.style.IsDivided())
+        if (road.style.GetLaneCount() >= 2)
         {
             // Pick the visible carriageway itself. Overlay boxes and spline ribbons can protrude beyond it.
             auto pavement = rightClick->picker;
@@ -1269,6 +1278,7 @@ void RoadEditor::RotatePlanPoint(Road& road)
 
 void RoadEditor::Release(WorldDocument& world)
 {
+    if (rampDrag) FinishRampControl(world, false);
     if (dragStart && dragChanged)
     {
         CommitTransform(world, std::move(*dragStart));
@@ -2013,6 +2023,14 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, shift || subtract);
+    if (selected && !shift && !subtract)
+    {
+        if (const auto control = overlay.PickRampControl(picker, world, *selected, camera, scene))
+        {
+            PressRampControl(world, camera, *control, RoadOverlay::SplinePosition(picker, scene));
+            return;
+        }
+    }
     const auto placement = SelectedGizmoPlacement(world, camera);
     if (placement && GizmoTakesClick(hit, modifiers))
     {
@@ -2499,6 +2517,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifndef _WIN32
     if (browser.MaterialWindow().Handle(event)) return EditorEvent::Handled;
 #endif
+    if (rampDrag && event.type == SDL_EVENT_KEY_DOWN)
+    {
+        if (event.key.key == SDLK_ESCAPE || ((event.key.mod & SDL_KMOD_CTRL) && event.key.key == SDLK_Z))
+            FinishRampControl(world, false);
+        return EditorEvent::Handled;
+    }
     if (pendingRamp && event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
     {
         pendingRamp.reset();
@@ -2598,7 +2622,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         std::optional<EditorCommand> command;
         if (menu.HandleViewportMenu(renderer, scene, event, command) ||
-            (drag == Drag::None && !splitterGrab && !outlinePanel.Tracking() && !SDL_GetWindowRelativeMouseMode(window) &&
+            (!rampDrag && drag == Drag::None && !splitterGrab && !outlinePanel.Tracking() && !SDL_GetWindowRelativeMouseMode(window) &&
              menu.HandleBar(renderer, event, command)))
         {
             if (command)
@@ -2630,6 +2654,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #ifdef _WIN32
     if (const auto drop = panels.TakeMaterialDrop(event))
     {
+        if (rampDrag) FinishRampControl(world, false);
         if (drop->inspectorTarget && *drop->inspectorTarget != state.Target()) return EditorEvent::Handled;
         auto point = drop->viewportFraction;
         if (point)
@@ -2642,6 +2667,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (const auto drop = panels.TakeModelDrop(event))
     {
+        if (rampDrag) FinishRampControl(world, false);
         if (!SetContentViewport(renderer)) return EditorEvent::Error;
         PlaceProp(world, camera, {drop->viewportFraction.x * scene.w, drop->viewportFraction.y * scene.h}, drop->path);
         return EditorEvent::Handled;
@@ -2653,6 +2679,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (const auto edit = panels.TakeInspectorEdit(event))
     {
+        if (rampDrag) FinishRampControl(world, false);
         ApplyInspectorEdit(world, *edit);
         return EditorEvent::Handled;
     }
@@ -2847,6 +2874,20 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     default: pointer = {e.button.x, e.button.y}; break;
     }
 
+    if (rampDrag)
+    {
+        const SDL_FPoint local{pointer.x - scene.x, pointer.y};
+        if (e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & SDL_BUTTON_LMASK))
+            MoveRampControl(world, camera, local);
+        else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT)
+        {
+            MoveRampControl(world, camera, local);
+            FinishRampControl(world, true);
+        }
+        else if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            FinishRampControl(world, false);
+        return EditorEvent::Handled;
+    }
     if (pendingRamp)
     {
         const SDL_FPoint local{pointer.x - scene.x, pointer.y};

@@ -180,6 +180,21 @@ private:
     std::optional<RampPlacement> pendingRamp;
     void AimRamp(const FreeCamera& camera, SDL_FPoint pointer);
     void FinishRamp(WorldDocument& world);
+    struct RampHandleDrag
+    {
+        RampControlHit hit;
+        int ramp;
+        bool exit;
+        RampLink original;
+        double initialGore, grabOffset, reference, low, high;
+        SDL_FPoint press;
+        bool moved;
+        EditSnapshot before;
+    };
+    std::optional<RampHandleDrag> rampDrag;
+    void PressRampControl(WorldDocument& world, const FreeCamera& camera, RampControlHit hit, Vector3 position);
+    void MoveRampControl(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
+    void FinishRampControl(WorldDocument& world, bool commit);
     RoadEditorState state;
     EditHistory history;
     SceneOutliner outliner;

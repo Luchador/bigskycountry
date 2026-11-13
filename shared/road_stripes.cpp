@@ -226,8 +226,17 @@ namespace
     struct Taper
     {
         RampLane lane;
-        double tip, gore;
+        double tip, gore, stationDistance;
+        size_t firstGuide = 0;
         double Fraction(double d) const { return std::clamp((d - tip) / (gore - tip), 0.0, 1.0); }
+
+        struct Bounds { double inner, outer; };
+        Bounds TravelBounds(double travelEdge, double rampCenter, double f) const
+        {
+            const double nose = std::clamp((f - goreStartFraction) / (1.0 - goreStartFraction), 0.0, 1.0);
+            return {std::lerp(travelEdge, rampCenter - lane.halfTravel, nose),
+                    std::lerp(travelEdge, rampCenter + lane.halfTravel, f)};
+        }
     };
 
     template<typename Visit>
@@ -275,6 +284,11 @@ namespace
     }
 
     void PaintDashes(const MarkingPath& path, std::vector<Road::Triangle>& mesh);
+
+    void AppendLanePoint(std::vector<Vector3>& line, Vector3 point)
+    {
+        if (line.empty() || line.back() != point) line.push_back(point);
+    }
 
     // Use the same cross sections for pavement, its outline and any edge treatment.
     // Adjacent spans then meet at the same elevation along the entire join.
@@ -326,6 +340,26 @@ namespace
             stations.push_back(station);
         });
 
+        if (lanes >= 2)
+        {
+            for (int lane = 0; lane < lanes; ++lane)
+            {
+                const double fromCenter = (lane + 0.5 - lanes * 0.5) * laneWidth;
+                if ((fromCenter < 0 ? -1 : 1) != side) continue;
+                const double offset = halfGap + std::abs(fromCenter);
+                auto& line = road.laneCenterlines[lane];
+                line.reserve(stations.size());
+                const bool outer = lane == 0 || lane == lanes - 1;
+                for (const auto& station : stations)
+                {
+                    const Vector3 point = station.At(offset);
+                    if (!line.empty() && point == line.back()) continue;
+                    line.push_back(point);
+                    if (outer) road.outerLaneDistances[side > 0].push_back(station.distance);
+                }
+            }
+        }
+
         const auto profile = [&](const CrossSection& s, double outer)
         {
             EdgeProfile rim{};
@@ -345,16 +379,32 @@ namespace
             const double clearance = taper ? goreWidth + road.style.EdgeWidth() + taper->lane.edgeWidth : 0;
             const double extra = taper ? clearance + taper->lane.innerPavement + taper->lane.outerPavement : 0;
             const double wa = pavement + fa * extra, wb = pavement + fb * extra;
+            Taper::Bounds travelA{}, travelB{};
+            if (taper)
+            {
+                const double rampCenter = pavement + clearance + taper->lane.innerPavement;
+                travelA = taper->TravelBounds(travelEdge, rampCenter, fa);
+                travelB = taper->TravelBounds(travelEdge, rampCenter, fb);
+                for (int lane = 0; lane < taper->lane.laneCount; ++lane)
+                {
+                    const double across = (lane + 0.5) / taper->lane.laneCount;
+                    auto& line = road.laneCenterlines[taper->firstGuide + lane];
+                    AppendLanePoint(line, a.At(std::lerp(travelA.inner, travelA.outer, across)));
+                    AppendLanePoint(line, b.At(std::lerp(travelB.inner, travelB.outer, across)));
+                }
+            }
             // At the gore the widened and ordinary sections share a station. The
             // ramp end uses this exact frame, including whole-road pitch and roll.
             if (taper && (fa == 1 || fb == 1))
             {
                 const auto& end = fa == 1 ? a : b;
                 const auto& lane = taper->lane;
-                const Vector3 along = (b.center - a.center) * -side;
+                const int direction = road.style.TravelDirection(side);
+                const Vector3 along = (b.center - a.center) * direction;
                 road.rampSeams[{lane.station, side}] =
                     {end.At(pavement + clearance + lane.innerPavement), Math::Normalize(along),
-                     {end.lateral * -1, end.up}, std::abs(taper->gore - taper->tip)};
+                     {end.lateral * (side * direction), end.up}, std::abs(taper->gore - taper->tip),
+                     taper->gore, taper->tip, taper->stationDistance, side * direction};
             }
             const auto ra = profile(a, wa), rb = profile(b, wb);
             if (boundary.empty()) boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);
@@ -402,7 +452,7 @@ namespace
                 }
             }
 
-            if (paintDivided)
+            if (paintDivided || (road.paintMarkings && !tapers.empty()))
             {
                 const Vector3 delta = b.center - a.center;
                 const bool vertical = delta.x == 0 && delta.z == 0 && delta.y != 0;
@@ -412,25 +462,23 @@ namespace
                     return s.At(d) + (vertical ? paintUp : s.up) * RoadStyle::stripeHeight;
                 };
                 const auto white = [&](const Road::Triangle& t) { road.whiteStripes.push_back(t); };
-                VisitBand(side, a, b, halfGap, halfGap + stripeWidth, raised,
-                          [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
+                if (paintDivided)
+                    VisitBand(side, a, b, halfGap, halfGap + stripeWidth, raised,
+                              [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
+                const auto edgePaint = [&](const Road::Triangle& t) {
+                    (road.style.oneWay && side > 0 ? road.yellowStripes : road.whiteStripes).push_back(t);
+                };
                 const double mid = (fa + fb) * 0.5;
                 if (!taper || mid >= goreStartFraction || std::fmod((a.distance + b.distance) * 0.5, RoadStyle::dashPeriod) < dashLength)
-                    VisitBand(side, a, b, travelEdge - stripeWidth, travelEdge, raised, white);
+                    VisitBand(side, a, b, travelEdge - stripeWidth, travelEdge, raised, edgePaint);
                 if (taper)
                 {
-                    const double centerOffset = pavement + clearance + taper->lane.innerPavement;
-                    const double end = centerOffset + taper->lane.halfTravel;
-                    const double outerA = std::lerp(travelEdge, end, fa);
-                    const double outerB = std::lerp(travelEdge, end, fb);
-                    band(outerA - stripeWidth, outerA, outerB - stripeWidth, outerB, raised, white);
+                    band(travelA.outer - stripeWidth, travelA.outer,
+                         travelB.outer - stripeWidth, travelB.outer, raised, edgePaint);
                     if (mid >= goreStartFraction)
                     {
-                        const auto gore = [&](double f) {
-                            return std::lerp(travelEdge, centerOffset - taper->lane.halfTravel,
-                                             std::clamp((f - goreStartFraction) / (1.0 - goreStartFraction), 0.0, 1.0));
-                        };
-                        band(gore(fa), gore(fa) + stripeWidth, gore(fb), gore(fb) + stripeWidth, raised, white);
+                        band(travelA.inner, travelA.inner + stripeWidth,
+                             travelB.inner, travelB.inner + stripeWidth, raised, white);
                     }
                 }
             }
@@ -619,6 +667,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     }
 
     const int laneCount = style.GetLaneCount();
+    if (laneCount >= 2) laneCenterlines.resize(laneCount);
     const bool hasGradedBend = std::adjacent_find(spans.begin(), spans.end(), [](const Span& a, const Span& b)
     {
         return a.left != b.left && (a.start.y != a.end.y || b.start.y != b.end.y);
@@ -630,14 +679,15 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
         std::vector<Taper> tapers;
         for (const auto& lane : rampLanes)
         {
-            if (!style.IsDivided() || lane.side != side) continue;
+            if (laneCount < 2 || lane.side != side) continue;
             const auto knot = std::ranges::find(points, lane.station, &RoadPoint::rampStation);
             if (knot == points.end()) continue;
             const auto sample = pointSamples[knot - points.begin()];
             if (sample < firstSample || sample - firstSample >= path.distances.size()) continue;
-            const double gore = path.distances[sample - firstSample];
-            const double tip = std::clamp(gore + (lane.exit ? side : -side) * lane.length, 0.0, path.distances.back());
-            if (gore != tip) tapers.push_back({lane, tip, gore});
+            const double gore = std::clamp(path.distances[sample - firstSample] + lane.offset, 0.0, path.distances.back());
+            const int direction = style.TravelDirection(side);
+            const double tip = std::clamp(gore + (lane.exit ? -direction : direction) * lane.length, 0.0, path.distances.back());
+            if (gore != tip) tapers.push_back({lane, tip, gore, path.distances[sample - firstSample]});
         }
         // If a later highway edit shortens the available run, keep both joins at
         // their knots. Only shorten the conflicting tapers, restoring them when space returns.
@@ -654,8 +704,13 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
                 a.tip = b.tip = std::lerp(a.gore, b.gore, fraction);
             }
         }
+        for (auto& taper : tapers)
+        {
+            taper.firstGuide = laneCenterlines.size();
+            laneCenterlines.resize(taper.firstGuide + taper.lane.laneCount);
+        }
         BuildRoadSide(*this, path, side, hasGradedBend, tapers);
-        if (paintMarkings && !style.IsDivided())
+        if (paintMarkings && !style.IsDivided() && tapers.empty())
         {
             // Place the white stripe wholly inside the travel edge, beside any shoulder.
             const auto edge = OffsetPath(path, side * halfTravelWidth);

@@ -5,9 +5,9 @@
 #include <cmath>
 #include <limits>
 
-std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit)
+std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit, int guideSide)
 {
-    if (!host.style.IsDivided()) return {};
+    if (host.style.GetLaneCount() < 2) return {};
     double best = std::numeric_limits<double>::infinity();
     std::optional<RampSite> site;
     const auto frame = ObjectTransform{{}, host.rotation}.ToMeshTransform();
@@ -28,10 +28,10 @@ std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit)
             const auto local = frame.Unrotate(delta);
             const auto left = Math::Normalize(Vector3{-local.z, 0, local.x});
             const double lateral = Math::Dot(offset, left);
-            const int side = lateral < 0 ? -1 : 1;
+            const int side = guideSide ? guideSide : (lateral < 0 ? -1 : 1);
             const double width = side < 0 ? host.style.RightWidth() : host.style.LeftWidth();
             site.reset();
-            if (std::abs(lateral) >= host.style.HalfSeparation() && std::abs(lateral) <= width + 0.05)
+            if (guideSide || (std::abs(lateral) >= host.style.HalfSeparation() && std::abs(lateral) <= width + 0.05))
                 site = RampSite{i, side, std::lerp(t0, t1, u)};
         };
         if (!host.style.curved) { inspect(a.position, b.position, 0, 1); continue; }
@@ -44,9 +44,9 @@ std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit)
 }
 
 std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation, const RoadStyle& style,
-                                 bool exit, double length, std::optional<RampLink> replacing)
+                                 bool exit, double length, std::optional<RampLink> replacing, double offset)
 {
-    if (!host.style.IsDivided() || !style.oneWay || !newStation || site.segment < 0 ||
+    if (host.style.GetLaneCount() < 2 || !style.oneWay || !newStation || site.segment < 0 ||
         site.segment + 1 >= static_cast<int>(host.points.size()) || (site.side != -1 && site.side != 1)) return {};
     int station = newStation;
     if (site.t == 0 || site.t == 1)
@@ -55,7 +55,7 @@ std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation
         if (p.anchor) return {};
         if (p.rampStation) station = p.rampStation;
     }
-    RampLink link{station, site.side, length};
+    RampLink link{station, site.side, length, offset};
     if (!link.Valid()) return {};
     // Test against a copy of the authored spline. Its geometry is regenerated anyway.
     Road staged = host.NewSection();
@@ -67,7 +67,7 @@ std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation
     });
     for (const auto& l : staged.rampLanes)
         if (l.station == station && l.side == site.side) return {};
-    staged.rampLanes.push_back(HighwayRampLane(style, link, exit));
+    staged.rampLanes.push_back(HighwayRampLane(style, link, exit, host.style.oneWay && site.side > 0));
     if (!staged.InsertStation(site.segment, site.t, station)) return {};
     const auto seam = staged.rampSeams.find({station, site.side});
     if (seam == staged.rampSeams.end() || seam->second.taperLength + 1e-6 < length) return {};
@@ -75,6 +75,8 @@ std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation
     {
         if (replacing && key == std::pair{replacing->station, replacing->side}) continue;
         const auto current = staged.rampSeams.find(key);
+        // Two joins on the same side cannot occupy the same section, even when their tapers point away.
+        if (key.second == site.side && std::abs(previous.goreDistance - seam->second.goreDistance) < Road::minPointSpacing) return {};
         if (current == staged.rampSeams.end() || current->second.taperLength + 1e-6 < previous.taperLength) return {};
     }
     return RampPlan{std::move(staged.points), link, seam->second};
@@ -91,7 +93,7 @@ Road NewRamp(const RoadStyle& highway, const RampPlan& plan, bool exit)
     auto& free = exit ? ramp.points.back() : ramp.points.front();
     joined.ramp = plan.link;
     AlignRampEnd(joined, plan.seam);
-    free.position = joined.position + plan.seam.forward * (exit ? 35.0 : -35.0) - plan.seam.frame.left * 12.0;
+    free.position = joined.position + plan.seam.forward * (exit ? 35.0 : -35.0) + plan.seam.frame.left * (plan.seam.outwardSide * 12.0);
     ramp.rampCaps[exit ? 0 : 1] = plan.seam.frame;
     ramp.Rebuild();
     return ramp;
@@ -99,6 +101,7 @@ Road NewRamp(const RoadStyle& highway, const RampPlan& plan, bool exit)
 
 std::optional<double> RampTaperLength(const Road& host, const RampLink& link, bool exit, Vector3 click)
 {
+    if (host.points.size() < 2) return {};
     // Compare along-road distances, so the chosen taper length follows the grade and curve.
     double distance = 0, closest = std::numeric_limits<double>::infinity(), endDistance = 0;
     std::optional<double> stationDistance;
@@ -119,6 +122,7 @@ std::optional<double> RampTaperLength(const Road& host, const RampLink& link, bo
     }
     if (host.points.back().rampStation == link.station) stationDistance = distance;
     if (!stationDistance) return {};
-    const double length = (endDistance - *stationDistance) * (exit ? link.side : -link.side);
+    const double length = (endDistance - *stationDistance - link.offset) *
+                          host.style.TravelDirection(link.side) * (exit ? -1 : 1);
     return length >= Road::minPointSpacing ? std::optional{length} : std::nullopt;
 }

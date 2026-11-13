@@ -31,10 +31,11 @@ namespace
               up((camera.ViewRay(0, 1) - forward) * (1.0 / focal)) {}
 
         template<typename Visit>
-        void Triangles(Vector3 viewStart, Vector3 viewEnd, Visit visit) const
+        void Triangles(Vector3 viewStart, Vector3 viewEnd, Visit visit, float halfWidth = overlayStrokeWidth,
+                       float innerHalfWidth = 0.0f) const
         {
             const auto stroke = ViewGeometry::ProjectStroke(viewStart, viewEnd, sides, focal, viewport,
-                                                             worldNearDepth, overlayStrokeWidth);
+                                                             worldNearDepth, halfWidth);
             if (!stroke) return;
             std::array<Vector3, 4> corners;
             for (int j = 0; j < 4; ++j)
@@ -45,8 +46,22 @@ namespace
                 const double depth = j < 2 ? stroke->startDepth : stroke->endDepth;
                 corners[j] = eye + ray * std::max(worldNearDepth, depth / strokeDepthBias);
             }
-            visit(corners[0], corners[1], corners[2]);
-            visit(corners[0], corners[2], corners[3]);
+            const auto quad = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+            {
+                visit(a, b, c);
+                visit(a, c, d);
+            };
+            if (innerHalfWidth == 0.0f)
+            {
+                quad(corners[0], corners[1], corners[2], corners[3]);
+                return;
+            }
+            // Leave the middle free for the editable spline, even when looking along it.
+            const double rim = 0.5 * (1.0 - innerHalfWidth / halfWidth);
+            const Vector3 startRim = (corners[1] - corners[0]) * rim;
+            const Vector3 endRim = (corners[2] - corners[3]) * rim;
+            quad(corners[0], corners[0] + startRim, corners[3] + endRim, corners[3]);
+            quad(corners[1] - startRim, corners[1], corners[2], corners[2] - endRim);
         }
 
         void Draw(WorldRenderer& renderer, Vector3 viewStart, Vector3 viewEnd, SDL_FColor color) const
@@ -56,28 +71,51 @@ namespace
     };
 
     template<typename Visit>
-    void VisitSegmentTriangles(const Road& road, const FreeCamera& camera, SDL_Rect scene, Visit visit)
+    void VisitSplineTriangles(const OverlayStroke& stroke, const FreeCamera& camera, std::span<const Vector3> samples,
+                              Visit visit, float halfWidth = overlayStrokeWidth, float innerHalfWidth = 0.0f)
     {
-        const double focal = ViewportFocalLength(scene);
-        if (focal <= 0) return;
-        const OverlayStroke stroke(camera, scene, focal);
+        if (samples.size() < 2) return;
         const Vector3 lift = camera.WorldDirectionToView(markerOffsetPixels);
         const auto display = [&](Vector3 point)
         {
             const Vector3 v = camera.WorldToView(point);
-            return v + lift * (v.z / focal); // Match the elevated centers of the point markers.
+            return v + lift * (v.z / stroke.focal); // Match the elevated centers of the point markers.
         };
+        Vector3 previous = display(samples.front());
+        for (Vector3 sample : samples.subspan(1))
+        {
+            const Vector3 next = display(sample);
+            stroke.Triangles(previous, next, visit, halfWidth, innerHalfWidth);
+            previous = next;
+        }
+    }
 
+    template<typename Visit>
+    void VisitSegmentTriangles(const Road& road, const OverlayStroke& stroke, const FreeCamera& camera, Visit visit)
+    {
         for (int i = 0; i + 1 < static_cast<int>(road.points.size()); ++i)
         {
-            const auto samples = road.SegmentSamples(i);
-            if (samples.empty()) continue;
-            Vector3 previous = display(samples.front());
-            for (Vector3 sample : samples.subspan(1))
+            VisitSplineTriangles(stroke, camera, road.SegmentSamples(i),
+                                 [&](Vector3 a, Vector3 b, Vector3 c) { visit(i, a, b, c); });
+        }
+    }
+
+    // Show every pair on the selected highway, and either attached end of a selected ramp.
+    template<typename Visit>
+    void VisitRampSeams(const WorldDocument& world, const Road& selected, Visit visit)
+    {
+        const int selectedIndex = static_cast<int>(&selected - world.roads.data());
+        for (const auto& [key, seam] : selected.rampSeams) visit(selectedIndex, key, seam);
+        if (!selected.style.oneWay || selected.points.size() < 2) return;
+        for (const auto* end : {&selected.points.front(), &selected.points.back()})
+        {
+            if (!end->ramp) continue;
+            const auto key = std::pair{end->ramp->station, end->ramp->side};
+            for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
             {
-                const Vector3 next = display(sample);
-                stroke.Triangles(previous, next, [&](Vector3 a, Vector3 b, Vector3 c) { visit(i, a, b, c); });
-                previous = next;
+                const auto& seams = world.roads[i].rampSeams;
+                const auto seam = seams.find(key);
+                if (seam != seams.end()) { visit(i, key, seam->second); break; }
             }
         }
     }
@@ -156,8 +194,20 @@ void RoadOverlay::DrawDirection(WorldRenderer& renderer, const Road& ramp, const
 
 void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
 {
+    const double focal = ViewportFocalLength(scene);
+    if (focal <= 0) return;
+    const OverlayStroke stroke(camera, scene, focal);
+    const int laneCount = road.style.GetLaneCount();
+    for (size_t lane = 0; lane < road.laneCenterlines.size(); ++lane)
+    {
+        // An odd road's middle lane shares the editing spline. Leave a green rim around it.
+        const bool middle = laneCount % 2 != 0 && lane == static_cast<size_t>(laneCount / 2);
+        VisitSplineTriangles(stroke, camera, road.laneCenterlines[lane],
+            [&](Vector3 a, Vector3 b, Vector3 c) { renderer.SubmitTriangle(a, b, c, EditorColors::laneGreen); },
+            middle ? 2 * overlayStrokeWidth : overlayStrokeWidth, middle ? overlayStrokeWidth : 0.0f);
+    }
     if (road.style.oneWay) DrawDirection(renderer, road, camera, scene);
-    VisitSegmentTriangles(road, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)
+    VisitSegmentTriangles(road, stroke, camera, [&](int i, Vector3 a, Vector3 b, Vector3 c)
     {
         renderer.SubmitTriangle(a, b, c, selection.segments.contains(i) ? EditorColors::amber : EditorColors::blue);
     });
@@ -166,6 +216,99 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
     {
         renderer.SubmitMesh(Marker(placement), selection.PointSelected(i) ? EditorColors::amber : EditorColors::blue);
     });
+}
+
+void RoadOverlay::DrawRampControls(WorldRenderer& renderer, const WorldDocument& world, const Road& selected,
+                                   const FreeCamera& camera, SDL_Rect scene) const
+{
+    const double focal = ViewportFocalLength(scene);
+    if (focal <= 0) return;
+    const OverlayStroke stroke(camera, scene, focal);
+    std::set<std::pair<int, int>> drawnLanes;
+    VisitRampSeams(world, selected, [&](int i, auto key, const RampSeam& seam)
+    {
+        const auto& host = world.roads[i];
+        const int side = key.second;
+        if (&host != &selected && drawnLanes.emplace(i, side).second)
+            VisitSplineTriangles(stroke, camera, host.OuterLane(side), [&](Vector3 a, Vector3 b, Vector3 c) {
+                renderer.SubmitTriangle(a, b, c, EditorColors::laneGreen);
+            });
+        for (bool taper : {false, true})
+        {
+            const auto point = host.OuterLanePosition(side, taper ? seam.tipDistance : seam.goreDistance);
+            if (const auto placement = PointPlacement(point, camera, scene))
+                renderer.SubmitMesh(Marker(*placement), taper ? EditorColors::taperPink : EditorColors::laneGreen);
+        }
+    });
+}
+
+std::optional<RampControlHit> RoadOverlay::PickRampControl(ViewportPicker& picker, const WorldDocument& world,
+                                                           const Road& selected, const FreeCamera& camera, SDL_Rect scene) const
+{
+    const double focal = ViewportFocalLength(scene);
+    if (focal <= 0) return {};
+    const OverlayStroke stroke(camera, scene, focal);
+    std::optional<RampControlHit> hit;
+    const int host = static_cast<int>(&selected - world.roads.data());
+    const auto pickLane = [&](int i, int side)
+    {
+        VisitSplineTriangles(stroke, camera, world.roads[i].OuterLane(side), [&](Vector3 a, Vector3 b, Vector3 c) {
+            if (picker.TestTriangle(a, b, c)) hit = RampControlHit{RampControl::Lane, i, 0, side};
+        });
+    };
+    for (int side : {-1, 1}) pickLane(host, side);
+    std::set<std::pair<int, int>> testedLanes;
+    VisitRampSeams(world, selected, [&](int i, auto key, const RampSeam& seam)
+    {
+        if (i != host && testedLanes.emplace(i, key.second).second) pickLane(i, key.second);
+        for (bool taper : {false, true})
+        {
+            const auto point = world.roads[i].OuterLanePosition(key.second, taper ? seam.tipDistance : seam.goreDistance);
+            const auto placement = PointPlacement(point, camera, scene);
+            if (placement && picker.TestMesh(Marker(*placement)))
+                hit = RampControlHit{taper ? RampControl::Taper : RampControl::Attachment, i, key.first, key.second};
+        }
+    });
+    return hit;
+}
+
+std::optional<double> RoadOverlay::LaneDistanceAtPointer(const Road& host, int side, const FreeCamera& camera,
+                                                        SDL_Rect scene, SDL_FPoint pointer, double reference)
+{
+    const auto line = host.OuterLane(side);
+    const auto& distances = host.outerLaneDistances[side > 0];
+    const double focal = ViewportFocalLength(scene);
+    if (line.size() < 2 || focal <= 0) return {};
+    const auto lift = camera.WorldDirectionToView(markerOffsetPixels) * (1.0 / focal);
+    const auto view = [&](Vector3 p) { const auto v = camera.WorldToView(p); return v + lift * v.z; };
+    const SDL_Rect viewport{0, 0, scene.w, scene.h};
+    double best = std::numeric_limits<double>::infinity();
+    std::optional<double> result;
+    auto previous = view(line.front());
+    for (size_t i = 1; i < line.size(); ++i)
+    {
+        const auto next = view(line[i]);
+        const auto start = previous;
+        auto a = previous, b = next;
+        previous = next;
+        if (!ViewGeometry::ClipLine(a, b, {0, 0, 1}, worldNearDepth)) continue;
+        const auto pa = ViewGeometry::ScreenPoint(a, focal, viewport), pb = ViewGeometry::ScreenPoint(b, focal, viewport);
+        const double dx = pb.x - pa.x, dy = pb.y - pa.y;
+        const double x = pointer.x + 0.5 - pa.x, y = pointer.y + 0.5 - pa.y;
+        if (dx == 0 && dy == 0) continue;
+        const double u = std::clamp((x * dx + y * dy) / (dx * dx + dy * dy), 0.0, 1.0);
+        const double error = std::hypot(x - dx * u, y - dy * u);
+        if (error > best + 0.25) continue;
+        // Undo perspective interpolation and near-plane clipping before interpolating meters.
+        const auto delta = next - start;
+        const auto closest = a + (b - a) * (u * a.z / std::lerp(b.z, a.z, u));
+        const double fraction = std::clamp(Math::Dot(closest - start, delta) / Math::Dot(delta, delta), 0.0, 1.0);
+        const double distance = std::lerp(distances[i - 1], distances[i], fraction);
+        if (result && std::abs(error - best) <= 0.25 && std::abs(distance - reference) >= std::abs(*result - reference)) continue;
+        best = error;
+        result = distance;
+    }
+    return result;
 }
 
 std::array<MeshInstance, 2> RoadOverlay::IntersectionMarker(const GizmoPlacement& placement, double yaw) const
@@ -285,9 +428,11 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         }
     };
     if (preferAnchor) pickAnchors();
-    if (selected)
+    const double focal = ViewportFocalLength(scene);
+    if (selected && focal > 0)
     {
-        VisitSegmentTriangles(*selected, camera, scene, [&](int i, Vector3 a, Vector3 b, Vector3 c)
+        const OverlayStroke stroke(camera, scene, focal);
+        VisitSegmentTriangles(*selected, stroke, camera, [&](int i, Vector3 a, Vector3 b, Vector3 c)
         {
             if (picker.TestTriangle(a, b, c))
             {

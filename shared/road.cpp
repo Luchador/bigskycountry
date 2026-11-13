@@ -40,9 +40,28 @@ namespace
     }
 }
 
+std::span<const Vector3> Road::OuterLane(int side) const
+{
+    if (laneCenterlines.empty()) return {};
+    return laneCenterlines[side < 0 ? 0 : style.GetLaneCount() - 1];
+}
+
+Vector3 Road::OuterLanePosition(int side, double distance) const
+{
+    const auto line = OuterLane(side);
+    if (line.empty()) return {};
+    const auto& distances = outerLaneDistances[side > 0];
+    const auto next = std::ranges::lower_bound(distances, distance);
+    if (next == distances.end()) return line.back();
+    if (next == distances.begin()) return line.front();
+    const auto i = next - distances.begin();
+    const double t = (distance - distances[i - 1]) / (*next - distances[i - 1]);
+    return line[i - 1] + (line[i] - line[i - 1]) * t;
+}
+
 bool RampLink::Valid() const
 {
-    return station > 0 && (side == -1 || side == 1) && std::isfinite(length) && length > 0;
+    return station > 0 && (side == -1 || side == 1) && std::isfinite(length) && length > 0 && std::isfinite(offset);
 }
 
 int RoadStyle::GetLaneCount() const
@@ -455,6 +474,8 @@ void Road::Rebuild()
 {
     MarkRebuilt();
     rampSeams.clear();
+    laneCenterlines.clear();
+    for (auto& distances : outerLaneDistances) distances.clear();
     centerline.clear();
     splineLengthMeters = 0.0;
     pointSamples.clear();
@@ -647,6 +668,8 @@ void Road::Rebuild()
         }
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);
+        for (auto& lane : laneCenterlines)
+            for (Vector3& point : lane) point = frame.Point(point);
         for (auto& [material, strip] : transitionStrips) moveSurface(strip);
         for (Vector3& vertex : outline)
         {
