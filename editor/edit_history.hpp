@@ -113,6 +113,7 @@ struct EditSnapshot
         ObjectTransform transform;
         std::optional<TerrainBoundary> boundary;
         std::string material;
+        int folder = 0;
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;

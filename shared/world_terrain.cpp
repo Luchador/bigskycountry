@@ -81,10 +81,17 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
     }
     auto chunk = std::make_unique<TerrainChunk>();
     chunk->boundary = std::move(boundary);
+    int folder = 0;
     if (!allowOpen)
     {
         std::map<int, const Road*> byId;
-        for (const auto& road : roads) byId.emplace(road.id, &road);
+        for (std::size_t i = 0; i < roads.size(); ++i)
+        {
+            const Road& road = roads[i];
+            byId.emplace(road.id, &road);
+            if (!folder && chunk->boundary->roads.contains(road.id))
+                folder = hierarchy.Parent({SceneKind::Road, static_cast<int>(i)});
+        }
         RebuildTerrain(*chunk, byId);
         if (!chunk->Instance().mesh)
         {
@@ -94,7 +101,10 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
     }
     lastRoadId = std::max(lastRoadId, *chunk->boundary->roads.rbegin());
     terrainRevision = 0;
-    return terrain.emplace_back(std::move(chunk)).get();
+    const SceneKey key{SceneKind::Terrain, static_cast<int>(terrain.size())};
+    auto& placed = terrain.emplace_back(std::move(chunk));
+    if (folder) hierarchy.Move({key}, folder);
+    return placed.get();
 }
 
 void WorldDocument::MoveLastTerrainTo(std::size_t index)

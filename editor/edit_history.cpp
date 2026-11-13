@@ -290,6 +290,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         if (!chunk) return Result::Failed;
         chunk->material = placement.material;
         world.MoveLastTerrainTo(to.meshSelection.index);
+        if (placement.folder) world.hierarchy.Move({{SceneKind::Terrain, to.meshSelection.index}}, placement.folder);
     }
     if (from.addedTerrain && !world.RemoveTerrain(from.meshSelection.index))
     {

@@ -1790,9 +1790,10 @@ void RoadEditor::FillSelection(WorldDocument& world)
         status = SDL_GetError();
         return;
     }
-    state.SelectRows({{SceneKind::Terrain, static_cast<int>(world.Terrain().size()) - 1}});
+    const SceneKey terrain{SceneKind::Terrain, static_cast<int>(world.Terrain().size()) - 1};
+    state.SelectRows({terrain});
     EditSnapshot after(state);
-    after.addedTerrain = EditSnapshot::TerrainPlacement{{}, {}, std::move(boundary)};
+    after.addedTerrain = EditSnapshot::TerrainPlacement{{}, {}, std::move(boundary), {}, world.hierarchy.Parent(terrain)};
     history.Record(-1, std::move(before), std::move(after));
     Save(world);
 }
@@ -1985,13 +1986,12 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         const int index = state.meshSelection.index;
         const auto& chunk = *world.Terrain().at(index);
         EditSnapshot before(state);
-        before.hierarchy = world.hierarchy;
         before.addedTerrain = EditSnapshot::TerrainPlacement{
-            chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary, chunk.material};
+            chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary,
+            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index})};
         world.RemoveTerrain(index);
         state.SelectRows({});
         EditSnapshot after(state);
-        after.hierarchy = world.hierarchy;
         history.Record(-1, std::move(before), std::move(after));
         Save(world);
         return;
