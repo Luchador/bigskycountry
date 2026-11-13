@@ -55,7 +55,7 @@ struct RoadStyle
     std::string material = defaultMaterial;
     bool leftShoulder = false;
     bool rightShoulder = false;
-    bool curved = false;
+    bool curved = true;
     RoadMedian median = RoadMedian::Concrete;
     ThreeLaneLayout threeLaneLayout = ThreeLaneLayout::CenterTurn;
     RoadEdge edge = RoadEdge::None;
@@ -63,6 +63,9 @@ struct RoadStyle
     bool operator==(const RoadStyle&) const = default;
     int GetLaneCount() const;
     void SetLaneCount(int count);
+    double SingleLaneExtraWidth() const { return singleLaneExtraWidth; }
+    bool SetSingleLaneExtraWidth(double meters);
+    double TravelLaneWidth() const { return laneWidth + (lanes == 1 ? singleLaneExtraWidth : 0.0); }
     bool CanDivide() const { return lanes % 2 == 0; }
     bool IsDivided() const { return divided; }
     void SetDivided(bool value) { divided = value && CanDivide(); }
@@ -76,6 +79,7 @@ struct RoadStyle
     double EdgeWidth() const;
 
 private:
+    double singleLaneExtraWidth = 0.0; // Total added travel width, split evenly about the spline.
     bool divided = false;
     double dividedGap = 4.0; // Distance between opposing travel lanes, including both inner shoulders.
     int lanes = 2; // Total across both directions, including any center turn lane.

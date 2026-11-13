@@ -141,7 +141,7 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
     if (!paintStopLine || !road.paintMarkings) return arm;
 
     const int lanes = style.GetLaneCount();
-    const double halfLane = RoadStyle::laneWidth * 0.5;
+    const double halfLane = style.TravelLaneWidth() * 0.5;
     const double outer = style.HalfSeparation() + lanes * halfLane;
     double inner = style.HalfSeparation();
     if (lanes == 1) inner = -halfLane; // Shared, unstriped lane.

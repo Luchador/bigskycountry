@@ -900,6 +900,8 @@ struct WindowsPanels::Impl
             case IDC_FEWER: PostAction(RoadAction::Fewer); return;
             case IDC_MORE: PostAction(RoadAction::More); return;
             case IDC_DIVIDED: PostAction(RoadAction::Divide); return;
+            case IDC_EXTRA_WIDTH_LESS: PostAction(RoadAction::LessExtraWidth); return;
+            case IDC_EXTRA_WIDTH_MORE: PostAction(RoadAction::MoreExtraWidth); return;
             case IDC_GAP_LESS: PostAction(RoadAction::NarrowerGap); return;
             case IDC_GAP_MORE: PostAction(RoadAction::WiderGap); return;
             case IDC_LEFT: PostAction(RoadAction::Left); return;
@@ -968,6 +970,8 @@ struct WindowsPanels::Impl
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
         }
+        for (int id : {IDC_EXTRA_WIDTH_LABEL, IDC_EXTRA_WIDTH_LESS, IDC_EXTRA_WIDTH_VALUE, IDC_EXTRA_WIDTH_MORE})
+            ShowWindow(GetDlgItem(road, id), roadPage && properties.OneLane() ? SW_SHOWNA : SW_HIDE);
         if (marker)
         {
             EnableWindow(GetDlgItem(road, IDC_MARKER_CLEAR_MATERIAL), !properties.material.empty());
@@ -1040,6 +1044,12 @@ struct WindowsPanels::Impl
         check(IDC_RIGHT, RoadProperty::Right, style.rightShoulder);
         choice(IDC_EDGE, RoadProperty::Edge, int(style.edge), 3);
         wchar_t text[100];
+        if (properties.OneLane())
+        {
+            swprintf(text, 100, L"%.2f", properties.minExtraWidth);
+            SetDlgItemTextW(road, IDC_EXTRA_WIDTH_VALUE, properties.minExtraWidth == properties.maxExtraWidth ? text : L"Mixed");
+            EnableWindow(GetDlgItem(road, IDC_EXTRA_WIDTH_LESS), properties.maxExtraWidth > 0);
+        }
         const bool divided = properties.AllDivided();
         const bool hasMedian = properties.HasMedian();
         check(IDC_DIVIDED, RoadProperty::Divided, divided);

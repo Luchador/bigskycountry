@@ -47,7 +47,7 @@ namespace RoadIO
         out << style.GetLaneCount() << ' ' << style.curved << ' ' << style.leftShoulder << ' '
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
             << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median
-            << ' ' << std::quoted(style.material) << '\n';
+            << ' ' << std::quoted(style.material) << ' ' << style.SingleLaneExtraWidth() << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
@@ -66,7 +66,9 @@ namespace RoadIO
         if (version >= 5) in >> median;
         style.material = RoadStyle::defaultMaterial;
         if (version >= 6) in >> std::quoted(style.material);
-        if (!in || !Material::ValidAssetPath(style.material) || !ValidStyle(lanes, layout, gap, edge, median) ||
+        double extraWidth = 0.0;
+        if (version >= 11) in >> extraWidth;
+        if (!in || !style.SetSingleLaneExtraWidth(extraWidth) || !Material::ValidAssetPath(style.material) || !ValidStyle(lanes, layout, gap, edge, median) ||
             (version >= 5 && (gap < RoadStyle::minSeparation || (divided && lanes % 2 != 0))))
         {
             in.setstate(std::ios::failbit);

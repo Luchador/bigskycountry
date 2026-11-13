@@ -9,6 +9,8 @@ enum class RoadAction
     Curve,
     Fewer,
     More,
+    LessExtraWidth,
+    MoreExtraWidth,
     TwoNorthbound,
     TwoSouthbound,
     CenterTurn,

@@ -247,7 +247,8 @@ namespace
         const double halfGap = road.style.HalfSeparation();
         const double halfMedian = road.style.HalfMedianWidth();
         const int lanes = road.style.GetLaneCount();
-        const double travelEdge = halfGap + lanes * RoadStyle::laneWidth * 0.5;
+        const double laneWidth = road.style.TravelLaneWidth();
+        const double travelEdge = halfGap + lanes * laneWidth * 0.5;
         const SDL_FColor medianColor = road.style.median == RoadMedian::Grass
             ? SDL_FColor{0.29f, 0.49f, 0.24f, 1} : SDL_FColor{0.69f, 0.69f, 0.67f, 1};
 
@@ -256,10 +257,10 @@ namespace
         if (road.style.IsDivided()) pavementCuts.push_back(halfGap);
         if (hasGradedBend)
         {
-            const double firstLane = lanes % 2 ? RoadStyle::laneWidth * 0.5 : RoadStyle::laneWidth;
+            const double firstLane = lanes % 2 ? laneWidth * 0.5 : laneWidth;
             for (int i = 0; i < (lanes + 1) / 2; ++i)
             {
-                const double offset = halfGap + firstLane + i * RoadStyle::laneWidth;
+                const double offset = halfGap + firstLane + i * laneWidth;
                 if (offset < pavement) pavementCuts.push_back(offset);
             }
         }
@@ -268,7 +269,7 @@ namespace
         const double centerU = lanes * 0.5 + (road.style.IsDivided() && side < 0 ? 1.0 : 0.0);
         const auto pavementVertex = [&](const CrossSection& section, double offset)
         {
-            const double tileWidth = offset < halfGap ? 2.0 * RoadStyle::innerShoulderWidth : RoadStyle::laneWidth;
+            const double tileWidth = offset < halfGap ? 2.0 * RoadStyle::innerShoulderWidth : laneWidth;
             const double u = centerU - side * (offset - halfGap) / tileWidth;
             const double v = (section.distance + offset * section.bevelSlope) / RoadStyle::laneWidth;
             return Road::PavementVertex{section.At(offset), {static_cast<float>(u), static_cast<float>(v)}};
@@ -523,7 +524,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     {
         return a.left != b.left && (a.start.y != a.end.y || b.start.y != b.end.y);
     }) != spans.end();
-    const double halfTravelWidth = laneCount * RoadStyle::laneWidth * 0.5;
+    const double halfTravelWidth = laneCount * style.TravelLaneWidth() * 0.5;
 
     for (int side : {-1, 1})
     {

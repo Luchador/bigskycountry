@@ -27,12 +27,17 @@ namespace
     constexpr SDL_FRect markerColorSwatch{96, markerColorBox.y + 3, 15, 15};
     constexpr SDL_FRect markerClearButton{12, 178, 128, 21};
     constexpr SDL_FRect propertyMaterialSlot{12, 118, 194, 54};
-    constexpr float threeLanePanelHeight = 104.0f;
+    float LaneOptionsHeight(const PropertiesInspector& properties)
+    {
+        if (properties.OneLane()) return 54.0f;
+        if (properties.ThreeLanes()) return 104.0f;
+        return 0.0f;
+    }
 
     SDL_FRect MaterialSlotRect(const PropertiesInspector& properties)
     {
         const float y = (properties.AllDivided() ? 514.0f : 406.0f) +
-                        (properties.ThreeLanes() ? threeLanePanelHeight : 0.0f);
+                        LaneOptionsHeight(properties);
         return {12, y, 194, 54};
     }
 
@@ -291,7 +296,7 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
         return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
     if (properties.page != PropertiesPage::Road) return {};
     const auto& style = properties.style;
-    const float offset = properties.ThreeLanes() ? threeLanePanelHeight : 0.0f;
+    const float offset = LaneOptionsHeight(properties);
 
     std::vector<Button> buttons{
         {Action::TogglePaintMarkings, {12, 84, 194, 28}, "Paint markings", properties.paintMarkings,
@@ -308,6 +313,11 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
         {Action::Divide, {12, 368 + offset, 194, 28}, "Divided road", properties.AllDivided(),
          properties.canDivide || properties.anyDivided, properties.Mixed(RoadProperty::Divided)}};
 
+    if (properties.OneLane())
+    {
+        buttons.push_back({Action::LessExtraWidth, {12, 264, 32, 28}, "-", false, properties.maxExtraWidth > 0});
+        buttons.push_back({Action::MoreExtraWidth, {174, 264, 32, 28}, "+"});
+    }
     if (properties.AllDivided())
     {
         buttons.push_back({Action::NarrowerGap, {12, 422 + offset, 32, 28}, "-", false,
@@ -1465,7 +1475,11 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                                   properties.Mixed(RoadProperty::Names) ? "Multiple values" : properties.roadNames.value_or(""),
                                   properties.roadNames.has_value())) return false;
     const int laneCount = style.GetLaneCount();
-    const float offset = properties.ThreeLanes() ? threeLanePanelHeight : 0.0f;
+    const float offset = LaneOptionsHeight(properties);
+    if (properties.OneLane() &&
+        (!Text(renderer, 12, 248, "Extra width (m)", muted) ||
+         !SDL_RenderDebugTextFormat(renderer, 80, 274, properties.minExtraWidth == properties.maxExtraWidth ? "%.2f" : "Mixed",
+                                    properties.minExtraWidth))) return false;
     if (properties.ThreeLanes() && !Text(renderer, 12, 252, properties.Mixed(RoadProperty::Layout) ? "3-lane layout (mixed)" : "Three-lane layout", muted))
     {
         return false;

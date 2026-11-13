@@ -30,6 +30,14 @@ void PropertiesInspector::ApplyRoadStyle(RoadStyle& destination, RoadAction acti
     case RoadAction::More:
         destination.SetLaneCount(StepLanes(action == RoadAction::More));
         break;
+    case RoadAction::LessExtraWidth:
+    case RoadAction::MoreExtraWidth:
+        if (OneLane())
+        {
+            const double width = action == RoadAction::MoreExtraWidth ? maxExtraWidth + 0.5 : std::max(0.0, minExtraWidth - 0.5);
+            destination.SetSingleLaneExtraWidth(width);
+        }
+        break;
     case RoadAction::TwoNorthbound:
         if (ThreeLanes()) destination.threeLaneLayout = ThreeLaneLayout::TwoNorthbound;
         break;
@@ -121,6 +129,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         const auto& first = road ? road->style : state.defaults;
         result.style = first;
         result.minLanes = result.maxLanes = first.GetLaneCount();
+        result.minExtraWidth = result.maxExtraWidth = first.SingleLaneExtraWidth();
         result.minGap = result.maxGap = first.DividedGap();
         result.anyDivided = first.IsDivided();
         result.canDivide = first.CanDivide();
@@ -150,6 +159,8 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
                 meters += other.SplineLengthMeters();
                 result.minLanes = std::min(result.minLanes, s.GetLaneCount());
                 result.maxLanes = std::max(result.maxLanes, s.GetLaneCount());
+                result.minExtraWidth = std::min(result.minExtraWidth, s.SingleLaneExtraWidth());
+                result.maxExtraWidth = std::max(result.maxExtraWidth, s.SingleLaneExtraWidth());
                 result.minGap = std::min(result.minGap, s.DividedGap());
                 result.maxGap = std::max(result.maxGap, s.DividedGap());
                 result.anyDivided |= s.IsDivided();

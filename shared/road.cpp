@@ -51,6 +51,13 @@ void RoadStyle::SetLaneCount(int count)
     if (!CanDivide()) divided = false;
 }
 
+bool RoadStyle::SetSingleLaneExtraWidth(double meters)
+{
+    if (!std::isfinite(meters) || meters < 0.0) return false;
+    singleLaneExtraWidth = meters;
+    return true;
+}
+
 void RoadStyle::SetDividedGap(double meters)
 {
     if (std::isfinite(meters)) dividedGap = std::max(minSeparation, meters);
@@ -68,12 +75,12 @@ bool RoadStyle::HasCenterTurnLane() const
 
 double RoadStyle::LeftWidth() const
 {
-    return HalfSeparation() + lanes * laneWidth * 0.5 + (leftShoulder ? shoulderWidth : 0.0);
+    return HalfSeparation() + lanes * TravelLaneWidth() * 0.5 + (leftShoulder ? shoulderWidth : 0.0);
 }
 
 double RoadStyle::RightWidth() const
 {
-    return HalfSeparation() + lanes * laneWidth * 0.5 + (rightShoulder ? shoulderWidth : 0.0);
+    return HalfSeparation() + lanes * TravelLaneWidth() * 0.5 + (rightShoulder ? shoulderWidth : 0.0);
 }
 
 double RoadStyle::EdgeWidth() const
