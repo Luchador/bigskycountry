@@ -29,14 +29,22 @@ namespace RoadSpline
         return {{a, ab, abc, middle}, {middle, bcd, cd, d}};
     }
 
+    struct EndSampling
+    {
+        double start = 0.0, end = 0.0; // Meters of closely spaced sections needed at either cap.
+        double spacing = 1.0;
+    };
+
     template<typename Visit>
-    void SampleCubic(const Cubic& curve, double tolerance, int depth, double t0, double t1, const Visit& visit)
+    void SampleCubic(const Cubic& curve, double tolerance, int depth, double t0, double t1, const Visit& visit,
+                     EndSampling ends = {})
     {
         const auto& [a, b, c, d] = curve;
         const Vector3 chord = d - a;
         const double error = std::max(Math::Length((b - a) - chord * (1.0 / 3.0)), Math::Length((c - a) - chord * (2.0 / 3.0)));
 
-        if (error <= tolerance || depth == 12)
+        const bool refineEnd = (ends.start > 0 || ends.end > 0) && Math::Dot(chord, chord) > ends.spacing * ends.spacing;
+        if ((error <= tolerance && !refineEnd) || depth == 12)
         {
             // The derivative at this subcurve's endpoint is parallel to its last control-polygon edge.
             visit(d, d - c, t1);
@@ -45,7 +53,10 @@ namespace RoadSpline
 
         const auto [left, right] = Split(curve, 0.5);
         const double middle = (t0 + t1) * 0.5;
-        SampleCubic(left, tolerance, depth + 1, t0, middle, visit);
-        SampleCubic(right, tolerance, depth + 1, middle, t1, visit);
+        EndSampling first = ends, last = ends;
+        if (ends.start > 0) last.start -= Math::Length(left.d - left.a);
+        if (ends.end > 0) first.end -= Math::Length(right.d - right.a);
+        SampleCubic(left, tolerance, depth + 1, t0, middle, visit, first);
+        SampleCubic(right, tolerance, depth + 1, middle, t1, visit, last);
     }
 }

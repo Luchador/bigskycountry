@@ -140,6 +140,20 @@ Vector3 Road::Tangent(std::size_t index) const
         return ManualTangent(point);
     }
 
+    if (style.curved && points.size() == 2 && !point.ramp && !point.anchor)
+    {
+        const auto& joined = points[1 - index];
+        if (joined.ramp && joined.heading)
+        {
+            // Mirror the known join tangent about the chord. A newly placed branch then
+            // follows a single bend all the way to its free end as the user moves it.
+            const Vector3 chord = Math::Normalize(points.back().position - points.front().position);
+            const Vector3 joinTangent = ManualTangent(joined);
+            const double along = Math::Dot(joinTangent, chord);
+            if (along > 0.0) return chord * (2.0 * along) - joinTangent;
+        }
+    }
+
     Vector3 incoming{};
     Vector3 outgoing{};
 
@@ -504,11 +518,15 @@ void Road::Rebuild()
         {
             const Vector3 endTangent = Tangent(i);
             const Cubic curve = SegmentCurve(points[i - 1], points[i], tangents.back(), endTangent);
-            SampleCubic(curve, 0.1, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double)
+            // Resolve the oblique cross sections near a ramp join even on a nearly straight branch.
+            const EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
+                                   i + 1 == points.size() && rampCaps.back() ? RampFrameBlendLength() : 0.0};
+            const double tolerance = ends.start || ends.end ? 0.005 : 0.1;
+            SampleCubic(curve, tolerance, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double)
             {
                 centerline.push_back(position);
                 tangents.push_back(tangent);
-            });
+            }, ends);
             // Preserve the authored direction even when a segment has zero length.
             tangents.back() = endTangent;
         }
@@ -597,7 +615,8 @@ void Road::Rebuild()
     for (int end = 0; end < 2; ++end)
     {
         if (const auto& cap = rampCaps[end])
-            caps[end] = RoadMouthFrame{frame.Unrotate(cap->left), frame.Unrotate(cap->up)};
+            caps[end] = RoadMouthFrame{frame.Unrotate(cap->left), frame.Unrotate(cap->up),
+                                       frame.Unrotate(cap->leftPerMeter), frame.Unrotate(cap->upPerMeter)};
     }
     if (rotated)
     {
@@ -664,7 +683,9 @@ void Road::Rebuild()
         {
             seam.center = frame.Point(seam.center);
             seam.forward = frame.Direction(seam.forward);
-            seam.frame = {frame.Direction(seam.frame.left), frame.Direction(seam.frame.up)};
+            auto& cap = seam.frame;
+            cap = {frame.Direction(cap.left), frame.Direction(cap.up),
+                   frame.Direction(cap.leftPerMeter), frame.Direction(cap.upPerMeter)};
         }
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);

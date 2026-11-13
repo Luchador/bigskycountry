@@ -502,7 +502,8 @@ void RoadEditor::AimRamp(const FreeCamera& camera, SDL_FPoint pointer)
     const auto end = camera.GetPosition() + ray * depth;
     const auto offset = end - seam.center;
     // Start the branch on its own side with a nonzero approach in the travel direction.
-    if (Math::Dot(offset, seam.forward) * (placement.exit ? 1 : -1) < Road::minPointSpacing ||
+    const Vector3 along = Math::Normalize(Math::Cross(seam.frame.left, normal));
+    if (Math::Dot(offset, along) * (placement.exit ? 1 : -1) < Road::minPointSpacing ||
         Math::Dot(offset, seam.frame.left) * seam.outwardSide < 0) return;
     auto& free = placement.exit ? placement.preview.points.back() : placement.preview.points.front();
     if (free.position == end) return;

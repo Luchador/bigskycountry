@@ -93,7 +93,9 @@ Road NewRamp(const RoadStyle& highway, const RampPlan& plan, bool exit)
     auto& free = exit ? ramp.points.back() : ramp.points.front();
     joined.ramp = plan.link;
     AlignRampEnd(joined, plan.seam);
-    free.position = joined.position + plan.seam.forward * (exit ? 35.0 : -35.0) + plan.seam.frame.left * (plan.seam.outwardSide * 12.0);
+    const Vector3 left = Math::Normalize(plan.seam.frame.left);
+    const Vector3 along = Math::Normalize(plan.seam.forward - left * Math::Dot(plan.seam.forward, left));
+    free.position = joined.position + along * (exit ? 35.0 : -35.0) + plan.seam.frame.left * (plan.seam.outwardSide * 12.0);
     ramp.rampCaps[exit ? 0 : 1] = plan.seam.frame;
     ramp.Rebuild();
     return ramp;

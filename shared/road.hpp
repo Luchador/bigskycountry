@@ -169,6 +169,7 @@ struct RoadMouthFrame
 {
     bool operator==(const RoadMouthFrame&) const = default;
     Vector3 left, up; // Junction cross-section axes in the road mesh frame.
+    Vector3 leftPerMeter{}, upPerMeter{}; // Axis derivatives along an attached ramp's travel direction.
 };
 
 struct RampLane
@@ -235,6 +236,7 @@ struct Road : RoadGeometry
     void Rebuild();
 
 private:
+    double RampFrameBlendLength() const { return 2.0 * (style.LeftWidth() + style.RightWidth()); }
     std::vector<std::string> names;
     std::array<std::optional<RoadMouth>, 2> mouths;
     void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
