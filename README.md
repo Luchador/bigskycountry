@@ -135,6 +135,8 @@ Use **New folder** to name a folder. Selecting a folder first creates a subfolde
 
 To reorder folders, drag a folder to the gap above or below another folder and release when the black insertion line appears. The line’s indentation shows the destination level. Dropping on the middle of a folder moves the selection inside it. Several selected folders move together in their displayed order.
 
+Right-click a folder and choose **Hide Children** or **Unhide Children** to change visibility throughout its subtree in both editor views. Hidden entries stay in the Outliner with dimmed labels. You can unhide a subfolder independently. The world saves these editor visibility settings and the game displays the full scene.
+
 With a folder selected, **Delete** moves its contents to its parent and removes the folder. Folder edits save immediately and support **Ctrl+Z** and **Ctrl+Y**. The optional `OUTL` section in each `.wld` stores its hierarchy, folder order, and item assignments. Worlds without that section open with all entries at the root.
 
 ### Transform panel

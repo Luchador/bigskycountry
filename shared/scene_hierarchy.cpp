@@ -28,6 +28,44 @@ int SceneHierarchy::Parent(SceneKey key) const
     return it == members.end() ? 0 : it->second;
 }
 
+bool SceneHierarchy::EditorHidden(SceneKey key) const
+{
+    if (hiddenChildren.empty()) return false;
+    int id = key.kind == SceneKind::Folder ? key.index : Parent(key);
+    while (id)
+    {
+        const auto setting = hiddenChildren.find(id);
+        if (setting != hiddenChildren.end()) return setting->second;
+        id = Parent({SceneKind::Folder, id});
+    }
+    return false;
+}
+
+bool SceneHierarchy::SetChildrenHidden(int id, bool hidden)
+{
+    const auto root = folders.find(id);
+    if (root == folders.end()) return false;
+    bool changed = EditorHidden({SceneKind::Folder, id}) != hidden;
+    if (EditorHidden({SceneKind::Folder, root->second.parent}) == hidden)
+    {
+        if (hiddenChildren.erase(id)) changed = true;
+    }
+    else
+        hiddenChildren[id] = hidden;
+
+    // A command on the parent also resets any exceptions in its descendants.
+    auto pending = root->second.children;
+    while (!pending.empty())
+    {
+        const int child = pending.back();
+        pending.pop_back();
+        if (hiddenChildren.erase(child)) changed = true;
+        const auto& children = folders.at(child).children;
+        pending.insert(pending.end(), children.begin(), children.end());
+    }
+    return changed;
+}
+
 std::vector<int> SceneHierarchy::OrderedFolderIds() const
 {
     std::vector<int> result;
@@ -96,6 +134,7 @@ bool SceneHierarchy::Remove(int id)
     const auto slot = siblings.erase(std::find(siblings.begin(), siblings.end(), id));
     siblings.insert(slot, children.begin(), children.end());
     folders.erase(it);
+    hiddenChildren.erase(id);
     for (int child : children)
     {
         auto& folder = folders.at(child);
@@ -261,11 +300,14 @@ bool SceneHierarchy::Write(std::ostream& out) const
                                                           : 'M';
         out << tag << ' ' << key.index << ' ' << id << '\n';
     }
+    for (const auto& [id, hidden] : hiddenChildren)
+        out << "V " << id << ' ' << static_cast<int>(hidden) << '\n';
     return out.good();
 }
 
-bool SceneHierarchy::Read(std::istream& in)
+bool SceneHierarchy::Read(std::istream& in, unsigned version)
 {
+    if (version < 1 || version > currentVersion) return false;
     SceneHierarchy parsed;
     std::vector<int> order;
     std::set<std::pair<int, std::string>> names;
@@ -286,6 +328,11 @@ bool SceneHierarchy::Read(std::istream& in)
                 return false;
             }
             order.push_back(index);
+        }
+        else if (tag == 'V' && version >= 2)
+        {
+            if (index == 0 || parent > 1 || !parsed.hiddenChildren.emplace(index, parent != 0).second)
+                return false;
         }
         else
         {
@@ -336,6 +383,8 @@ bool SceneHierarchy::Read(std::istream& in)
             return false;
         }
     }
+    for (const auto& [id, hidden] : parsed.hiddenChildren)
+        if (!parsed.folders.contains(id)) return false;
     for (int id : order) parsed.Children(parsed.folders.at(id).parent).push_back(id);
     *this = std::move(parsed);
     return true;

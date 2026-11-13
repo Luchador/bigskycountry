@@ -6,12 +6,14 @@
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
                            CreateExitRamp, CreateEntranceRamp, FlattenSegment };
 struct RampMenuOptions { bool exit, entrance; };
+enum class OutlineOp;
 
 class EditorMenu
 {
 public:
 #ifdef _WIN32
     static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
+    static std::optional<OutlineOp> OpenFolderMenu(void* frame, int screenX, int screenY);
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,

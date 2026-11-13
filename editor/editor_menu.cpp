@@ -11,6 +11,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include "windows_theme.hpp"
+#include "scene_outliner.hpp"
 #include <cwctype>
 #include "menu_ids.h"
 
@@ -375,6 +376,32 @@ namespace
 #endif
 
 #ifdef _WIN32
+namespace
+{
+    UINT TrackCommands(HWND owner, int x, int y, std::span<const MenuItem> items)
+    {
+        HMENU menu = CreatePopupMenu();
+        if (!menu) return 0;
+        MenuBackground(menu, EditorTheme::chrome);
+        UINT chosen = 0;
+        if (std::ranges::all_of(items, [&](const auto& item) { return Insert(menu, item); }))
+            chosen = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, x, y, owner, nullptr);
+        DestroyMenu(menu);
+        return chosen;
+    }
+}
+
+std::optional<OutlineOp> EditorMenu::OpenFolderMenu(void* frame, int screenX, int screenY)
+{
+    constexpr MenuItem items[] = {{BSC_HIDE_CHILDREN, L"&Hide Children"}, {BSC_UNHIDE_CHILDREN, L"&Unhide Children"}};
+    switch (TrackCommands(static_cast<HWND>(frame), screenX, screenY, items))
+    {
+    case BSC_HIDE_CHILDREN: return OutlineOp::HideChildren;
+    case BSC_UNHIDE_CHILDREN: return OutlineOp::UnhideChildren;
+    default: return {};
+    }
+}
+
 bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial)
 {
     constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Add New Material"};
@@ -382,13 +409,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
     const auto& item = onMaterial ? duplicate : add;
     HWND owner = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
                                    SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
-    HMENU menu = CreatePopupMenu();
-    if (!menu) return false;
-    MenuBackground(menu, EditorTheme::chrome);
-    const bool chosen = Insert(menu, item) && TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-                                                             screenX, screenY, owner, nullptr) == item.id;
-    DestroyMenu(menu);
-    return chosen;
+    return TrackCommands(owner, screenX, screenY, {&item, 1}) == item.id;
 }
 #endif
 

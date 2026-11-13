@@ -186,6 +186,7 @@ struct RampLane
     double length, halfTravel, innerPavement, outerPavement, edgeWidth;
     int laneCount = 1;
     double offset = 0.0;
+    int rampIndex = -1; // Source road row for the generated taper's editor handles.
     bool operator==(const RampLane&) const = default;
 };
 
@@ -196,6 +197,7 @@ struct RampSeam
     double taperLength; // Effective length after fitting the current highway.
     double goreDistance, tipDistance, stationDistance; // Along the surfaced centerline, in authored order.
     int outwardSide; // Side of the branch in its own travel frame.
+    int rampIndex = -1;
 };
 
 struct Road : RoadGeometry

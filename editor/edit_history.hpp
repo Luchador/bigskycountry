@@ -33,6 +33,7 @@ struct RoadEditorState
     TransformTarget meshSelection;
     std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
     std::set<SceneKey> SelectedRows() const;
+    bool HasHiddenSelection(const SceneHierarchy& hierarchy) const;
     bool GeometrySelected(SceneKey key) const;
     bool RoadGroupSelected() const { return IsRoadGroup(outlineSelection); }
     auto SelectedRoadRows() const

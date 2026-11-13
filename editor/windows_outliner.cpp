@@ -1,4 +1,5 @@
 #include "windows_outliner.hpp"
+#include "editor_menu.hpp"
 #include "windows_theme.hpp"
 #include "windows_name_dialog.hpp"
 #include "panel_ids.h"
@@ -285,10 +286,13 @@ LRESULT CALLBACK WindowsOutliner::DrawInsertion(HWND hwnd, UINT msg, WPARAM w, L
     if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, DrawInsertion, id);
     const auto result = DefSubclassProc(hwnd, msg, w, l); // Keep the theme's list-view drawing.
     const auto& s = *reinterpret_cast<WindowsOutliner*>(data);
-    if (msg != WM_NOTIFY || !s.drop || !s.drop->IsInsertion()) return result;
+    if (msg != WM_NOTIFY) return result;
     const auto* notification = reinterpret_cast<const NMHDR*>(l);
     if (notification->hwndFrom != s.list || notification->code != NM_CUSTOMDRAW) return result;
     const auto* draw = reinterpret_cast<const NMCUSTOMDRAW*>(l);
+    if (draw->dwDrawStage == CDDS_ITEMPREPAINT && draw->dwItemSpec < s.rows.size() && s.rows[draw->dwItemSpec].hidden)
+        reinterpret_cast<NMLVCUSTOMDRAW*>(l)->clrText = WindowsTheme::Color(EditorTheme::secondary);
+    if (!s.drop || !s.drop->IsInsertion()) return result;
     if (draw->dwDrawStage == CDDS_PREPAINT) return result | CDRF_NOTIFYPOSTPAINT;
     if (draw->dwDrawStage == CDDS_POSTPAINT)
     {
@@ -425,6 +429,22 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         else if (code == LVN_BEGINDRAG)
         {
             s.BeginDrag(reinterpret_cast<NMLISTVIEW*>(l)->iItem);
+        }
+        else if (code == NM_RCLICK)
+        {
+            const auto& hit = *reinterpret_cast<NMITEMACTIVATE*>(l);
+            LVHITTESTINFO row{};
+            row.pt = hit.ptAction;
+            const int i = ListView_SubItemHitTest(s.list, &row);
+            if (i >= 0 && i < static_cast<int>(s.rows.size()) && s.rows[i].key.kind == SceneKind::Folder)
+            {
+                const auto folder = s.rows[i].key;
+                POINT screen = hit.ptAction;
+                ClientToScreen(s.list, &screen);
+                if (const auto op = EditorMenu::OpenFolderMenu(GetParent(hwnd), screen.x, screen.y))
+                    s.Queue({*op, folder});
+                return TRUE;
+            }
         }
         else if (code == NM_CLICK || code == NM_DBLCLK)
         {

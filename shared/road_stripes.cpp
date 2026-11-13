@@ -471,7 +471,7 @@ namespace
                                          (spanEnd.up - spanStart.up) * (direction * perMeter)};
                 road.rampSeams[{lane.station, side}] =
                     {end.At(offset), Math::Normalize(along * direction), cap, std::abs(taper->gore - taper->tip),
-                     taper->gore, taper->tip, taper->stationDistance, side * direction};
+                     taper->gore, taper->tip, taper->stationDistance, side * direction, lane.rampIndex};
             }
             const auto ra = profile(a, wa), rb = profile(b, wb);
             if (boundary.empty()) boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);

@@ -6,6 +6,9 @@
 namespace
 {
     constexpr int header = 46, rowHeight = 20;
+    constexpr float menuRowHeight = 24;
+    constexpr std::array folderActions{OutlineOp::HideChildren, OutlineOp::UnhideChildren};
+    constexpr std::array folderLabels{"Hide Children", "Unhide Children"};
     bool Fill(SDL_Renderer* r, float x, float y, float w, float h, SDL_Color c)
     {
         SDL_FRect rect{x, y, w, h};
@@ -84,6 +87,7 @@ void SdlOutliner::Blur(SDL_Window* window)
         SDL_StopTextInput(window);
     }
     edit.reset();
+    menuFolder.reset();
     focused = dragging = singleOnRelease = false;
     previousClick.reset();
     pressed.reset();
@@ -124,6 +128,7 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
         Blur(window);
         return false;
     }
+    if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) menuFolder.reset();
     if (edit && e.type == SDL_EVENT_TEXT_INPUT)
     {
         if (selectText)
@@ -146,6 +151,17 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
         return false;
     }
     const auto k = e.key.key;
+    if (menuFolder)
+    {
+        if (k == SDLK_ESCAPE) menuFolder.reset();
+        else if (k == SDLK_UP || k == SDLK_DOWN) menuItem = menuItem == 0 ? 1 : 0;
+        else if ((k == SDLK_RETURN || k == SDLK_KP_ENTER) && menuItem >= 0)
+        {
+            cmd = OutlineCommand{folderActions[menuItem], *menuFolder};
+            menuFolder.reset();
+        }
+        return true;
+    }
     if (edit)
     {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_ESCAPE)
@@ -252,6 +268,17 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
 {
     const auto& rows = m.Rows();
     const bool inside = p.x >= 0 && p.x < width && p.y >= 0 && p.y < height;
+    if (menuFolder)
+    {
+        menuItem = SDL_PointInRectFloat(&p, &menuBounds) ? static_cast<int>((p.y - menuBounds.y) / menuRowHeight) : -1;
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        {
+            if (e.button.button == SDL_BUTTON_LEFT && menuItem >= 0)
+                cmd = OutlineCommand{folderActions[menuItem], *menuFolder};
+            menuFolder.reset();
+        }
+        return;
+    }
     if (e.type == SDL_EVENT_MOUSE_WHEEL)
     {
         const float delta = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
@@ -280,6 +307,17 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     }
     const int i = inside && p.y >= header ? scroll + static_cast<int>((p.y - header) / rowHeight) : -1;
     const OutlineRow* row = i >= 0 && i < static_cast<int>(rows.size()) ? &rows[i] : nullptr;
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT && row && row->key.kind == SceneKind::Folder)
+    {
+        Blur(window);
+        focused = true;
+        menuFolder = row->key;
+        constexpr float w = 146, h = 2 * menuRowHeight;
+        menuBounds = {std::clamp(p.x, 0.0f, std::max(0.0f, width - w)),
+                      std::clamp(p.y, 0.0f, std::max(0.0f, height - h)), w, h};
+        menuItem = 0;
+        return;
+    }
     if (dragging)
     {
         cursor = p;
@@ -451,7 +489,7 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         {
             return false;
         }
-        if (!Text(r, x + 13, y + 6, row.label.substr(0, std::max(0, (split - x - 15) / 8)), ink) ||
+        if (!Text(r, x + 13, y + 6, row.label.substr(0, std::max(0, (split - x - 15) / 8)), row.hidden ? muted : ink) ||
             !Text(r, split + 4, y + 6, row.type, muted))
         {
             return false;
@@ -463,6 +501,15 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         const int left = Indent(drop->depth, width);
         if (y >= header && y <= height &&
             !Fill(r, left, std::max(header, y - 1), width - left, 2, EditorTheme::insertionLine)) return false;
+    }
+    if (menuFolder)
+    {
+        for (int i = 0; i < static_cast<int>(folderLabels.size()); ++i)
+        {
+            const float y = menuBounds.y + i * menuRowHeight;
+            if (!Fill(r, menuBounds.x, y, menuBounds.w, menuRowHeight, i == menuItem ? EditorTheme::hover : EditorTheme::chrome) ||
+                !Text(r, menuBounds.x + 8, y + 8, folderLabels[i], ink)) return false;
+        }
     }
     return true;
 }

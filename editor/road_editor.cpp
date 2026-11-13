@@ -159,7 +159,7 @@ SDL_FPoint RoadEditor::PlanGroupHandle(const ObjectTransform& frame) const
 
 std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const
 {
-    if (!state.segments.empty() || !state.groupEndpoints.empty())
+    if (!state.segments.empty() || !state.groupEndpoints.empty() || state.HasHiddenSelection(world.hierarchy))
     {
         return {};
     }
@@ -260,7 +260,7 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera)
 {
     overlay.DrawIntersections(renderer, world, state, camera, scene);
-    if (const Road* road = Selected(world))
+    if (const Road* road = Selected(world); road && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected}))
     {
         overlay.Draw(renderer, *road, state, state.selected, camera, scene);
         overlay.DrawRampControls(renderer, world, *road, camera, scene);
@@ -268,7 +268,8 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     if (state.MultipleRoadsSelected())
     {
         for (auto key : state.SelectedRoadRows())
-            overlay.Draw(renderer, world.roads[key.index], state, key.index, camera, scene);
+            if (!world.hierarchy.EditorHidden(key))
+                overlay.Draw(renderer, world.roads[key.index], state, key.index, camera, scene);
     }
     if (rampDrag) return;
     if (const auto placement = SelectedGizmoPlacement(world, camera))
@@ -739,9 +740,7 @@ void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_F
         return;
     }
     ViewportPicker picker(camera, scene, pointer);
-    for (const Road& road : world.roads) picker.TestRoad(road);
-    for (const auto& [id, junction] : world.IntersectionSurfaces()) picker.TestRoad(junction.geometry);
-    for (const auto& chunk : world.Terrain()) picker.TestMesh(chunk->Instance());
+    picker.TestPlacementSurfaces(world);
 
     // Respect the model's authored pivot, including meshes centered above or below it.
     double baseY = mesh->vertices[mesh->indices.front()].position.y;
@@ -934,7 +933,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         return;
     }
 
-    if (!shift && state.RoadGroupSelected())
+    if (!shift && state.RoadGroupSelected() && !state.HasHiddenSelection(world.hierarchy))
     {
         const auto frame = Inspect(world, state.Target()).value;
         const bool rotate = Near(cursor, PlanGroupHandle(frame));
@@ -948,7 +947,8 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
             return;
         }
     }
-    if (!shift && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
+    const bool visiblePoint = state.selected >= 0 && state.point >= 0 && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected});
+    if (!shift && visiblePoint && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
         Road& road = world.roads[state.selected];
         // At this zoom the rotation handle may overlap another selected point.
@@ -967,6 +967,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     float best = pickRadius;
     for (const auto& [id, item] : world.intersections)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
         {
             const auto p = ToScreen(item.position);
             const float distance = std::hypot(p.x - x, p.y - y);
@@ -1018,8 +1019,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         BeginRoadDrag(road, Drag::Move, shift);
     };
     // An elevated endpoint can project exactly onto the preceding point.
-    if (state.selected >= 0 && state.point >= 0 &&
-        Near(cursor, ToScreen(world.roads[state.selected].points[state.point].position)))
+    if (visiblePoint && Near(cursor, ToScreen(world.roads[state.selected].points[state.point].position)))
     {
         grabPoint(state.selected, state.point);
         return;
@@ -1028,6 +1028,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     // Selected controls get priority where roads overlap.
     auto pickPoint = [&](int roadIndex)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Road, roadIndex})) return false;
         const auto& points = world.roads[roadIndex].points;
         for (size_t i = 0; i < points.size(); ++i)
         {
@@ -1073,6 +1074,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
 {
     for (const auto& [id, item] : world.intersections)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
         if (Near(ToScreen(pos), ToScreen(item.position)))
         {
             return SceneKey{SceneKind::Intersection, id};
@@ -1092,6 +1094,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
     };
     for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, it->first})) continue;
         const auto& geometry = it->second.geometry;
         if (hitRoad(geometry))
         {
@@ -1102,7 +1105,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
         const Road& road = world.roads[i];
-        if (hitRoad(road))
+        if (!world.hierarchy.EditorHidden({SceneKind::Road, i}) && hitRoad(road))
         {
             return SceneKey{SceneKind::Road, i};
         }
@@ -1395,8 +1398,10 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
     }
 
-    for (const auto& chunk : world.Terrain())
+    for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
+        const auto& chunk = world.Terrain()[i];
         const auto& mesh = chunk->Instance().mesh;
         if (!chunk->boundary || !mesh) continue;
         // Give each projected corner its own index. SDL's software renderer can
@@ -1425,8 +1430,10 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 
     for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
     {
-        for (const Road& road : world.roads)
+        for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
         {
+            if (world.hierarchy.EditorHidden({SceneKind::Road, i})) continue;
+            const Road& road = world.roads[i];
             if (!DrawPlanRoad(renderer, road, center, scale, canvas, layer))
             {
                 return false;
@@ -1434,6 +1441,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         }
         for (const auto& [id, junction] : world.IntersectionSurfaces())
         {
+            if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
             if (!DrawPlanRoad(renderer, junction.geometry, center, scale, canvas, layer)) return false;
         }
         if (preview && !DrawPlanRoad(renderer, *preview, center, scale, canvas, layer))
@@ -1446,7 +1454,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 
     for (const SceneKey key : state.SelectedRows())
     {
-        if (!GeometrySelected(key)) continue;
+        if (!GeometrySelected(key) || world.hierarchy.EditorHidden(key)) continue;
         if (key.kind == SceneKind::Road && !DrawPlanRoad(renderer, world.roads[key.index], center, scale, canvas, RoadLayer::Outline))
             return false;
         if (key.kind == SceneKind::Intersection)
@@ -1465,6 +1473,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     const bool group = state.RoadGroupSelected();
     for (const auto& [id, item] : world.intersections)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
         const auto anchors = item.AnchorPositions();
         const bool selected = GeometrySelected({SceneKind::Intersection, id});
         if (group && selected && !world.IntersectionSurfaces().contains(id))
@@ -1499,7 +1508,8 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     {
         for (size_t i = 0; i < road.points.size(); ++i)
         {
-            if (!active && road.points[i].anchor) continue; // The anchor already marks this endpoint.
+            const auto& anchor = road.points[i].anchor;
+            if (!active && anchor && !world.hierarchy.EditorHidden({SceneKind::Intersection, anchor->intersectionId})) continue;
             const SDL_FPoint pos = ToScreen(road.points[i].position);
             if (pos.x < -8 || pos.x > scene.w + 8 || pos.y < -8 || pos.y > scene.h + 8)
             {
@@ -1517,6 +1527,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
 
     for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Road, i})) continue;
         if (!drawPoints(world.roads[i], i == state.selected))
         {
             return false;
@@ -1528,14 +1539,14 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         return false;
     }
 
-    if (group)
+    if (group && !state.HasHiddenSelection(world.hierarchy))
     {
         const auto frame = Inspect(world, state.Target()).value;
         const auto pivot = ToScreen(frame.position), handle = PlanGroupHandle(frame);
         if (!EditorTheme::SetColor(renderer, amber) || !SDL_RenderLine(renderer, pivot.x, pivot.y, handle.x, handle.y) ||
             !drawPoint(pivot, 6, blue) || !drawPoint(handle, 4, amber)) return false;
     }
-    if (!state.drawing && state.selected >= 0 && state.point >= 0)
+    if (!state.drawing && state.selected >= 0 && state.point >= 0 && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected}))
     {
         const Road& road = world.roads[state.selected];
         const SDL_FPoint a = ToScreen(road.points[state.point].position);

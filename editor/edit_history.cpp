@@ -56,6 +56,14 @@ std::set<SceneKey> RoadEditorState::SelectedRows() const
     return {};
 }
 
+bool RoadEditorState::HasHiddenSelection(const SceneHierarchy& hierarchy) const
+{
+    if (!hierarchy.HasVisibilityOverrides()) return false;
+    const auto hidden = [&](SceneKey key) { return hierarchy.EditorHidden(key); };
+    if (!outlineSelection.empty()) return std::ranges::any_of(outlineSelection, hidden);
+    return std::ranges::any_of(SelectedRows(), hidden);
+}
+
 bool RoadEditorState::GeometrySelected(SceneKey key) const
 {
     if (key.kind == SceneKind::Road && key.index == selected) return true;

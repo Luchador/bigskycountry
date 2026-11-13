@@ -34,19 +34,18 @@ void RoadEditor::PressRampControl(WorldDocument& world, const FreeCamera& camera
         high -= std::max(0.0, run);
     }
     if (low > high) return;
-    for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+    const int index = seam.rampIndex;
+    if (index < 0 || index >= static_cast<int>(world.roads.size())) return;
+    const auto& ramp = world.roads[index];
+    if (!ramp.style.oneWay || ramp.points.size() < 2) return;
+    for (bool exit : {true, false})
     {
-        const auto& ramp = world.roads[i];
-        if (!ramp.style.oneWay || ramp.points.size() < 2) continue;
-        for (bool exit : {true, false})
-        {
-            const auto& link = (exit ? ramp.points.front() : ramp.points.back()).ramp;
-            if (!link || link->station != hit.station || link->side != hit.side) continue;
-            rampDrag.emplace(RampHandleDrag{hit, i, exit, *link, seam.goreDistance, start - *grab, *grab,
-                                            low, high, mouse, false, EditSnapshot(state, &ramp)});
-            SDL_CaptureMouse(true);
-            return;
-        }
+        const auto& link = (exit ? ramp.points.front() : ramp.points.back()).ramp;
+        if (!link || link->station != hit.station || link->side != hit.side) continue;
+        rampDrag.emplace(RampHandleDrag{hit, index, exit, *link, seam.goreDistance, start - *grab, *grab,
+                                        low, high, mouse, false, EditSnapshot(state, &ramp)});
+        SDL_CaptureMouse(true);
+        return;
     }
 }
 

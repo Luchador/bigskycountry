@@ -48,8 +48,9 @@ void WorldDocument::RefreshRampConnections(bool force)
             if (point.rampStation) stations.emplace(point.rampStation, i);
     }
     std::map<size_t, std::vector<RampLane>> lanes;
-    for (const Road& ramp : roads)
+    for (int index = 0; index < static_cast<int>(roads.size()); ++index)
     {
+        const Road& ramp = roads[index];
         if (!ramp.style.oneWay || ramp.points.size() < 2) continue;
         for (bool exit : {true, false})
         {
@@ -59,7 +60,9 @@ void WorldDocument::RefreshRampConnections(bool force)
             if (it != stations.end())
             {
                 const bool branchesLeft = roads[it->second].style.oneWay && link->side > 0;
-                lanes[it->second].push_back(HighwayRampLane(ramp.style, *link, exit, branchesLeft));
+                auto lane = HighwayRampLane(ramp.style, *link, exit, branchesLeft);
+                lane.rampIndex = index;
+                lanes[it->second].push_back(lane);
             }
         }
     }

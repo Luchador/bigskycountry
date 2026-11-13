@@ -106,7 +106,9 @@ namespace
     void VisitRampSeams(const WorldDocument& world, const Road& selected, Visit visit)
     {
         const int selectedIndex = static_cast<int>(&selected - world.roads.data());
-        for (const auto& [key, seam] : selected.rampSeams) visit(selectedIndex, key, seam);
+        if (world.hierarchy.EditorHidden({SceneKind::Road, selectedIndex})) return;
+        for (const auto& [key, seam] : selected.rampSeams)
+            if (!world.hierarchy.EditorHidden({SceneKind::Road, seam.rampIndex})) visit(selectedIndex, key, seam);
         if (!selected.style.oneWay || selected.points.size() < 2) return;
         for (const auto* end : {&selected.points.front(), &selected.points.back()})
         {
@@ -114,6 +116,7 @@ namespace
             const auto key = std::pair{end->ramp->station, end->ramp->side};
             for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
             {
+                if (world.hierarchy.EditorHidden({SceneKind::Road, i})) continue;
                 const auto& seams = world.roads[i].rampSeams;
                 const auto seam = seams.find(key);
                 if (seam != seams.end()) { visit(i, key, seam->second); break; }
@@ -226,10 +229,13 @@ std::optional<std::pair<int, int>> RoadOverlay::PickGroupPoint(ViewportPicker& p
 {
     std::optional<std::pair<int, int>> hit;
     for (auto key : selection.SelectedRoadRows())
+    {
+        if (world.hierarchy.EditorHidden(key)) continue;
         VisitPoints(world.roads[key.index], camera, scene, [&](int i, const GizmoPlacement& placement)
         {
             if (picker.TestMesh(Marker(placement))) hit.emplace(key.index, i);
         });
+    }
     return hit;
 }
 
@@ -266,6 +272,7 @@ std::optional<RampLaneHit> RoadOverlay::PickRampLane(ViewportPicker& picker, con
     std::optional<RampLaneHit> hit;
     const auto pickLane = [&](int i, int side)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Road, i})) return;
         VisitSplineTriangles(stroke, camera, world.roads[i].OuterLane(side), [&](Vector3 a, Vector3 b, Vector3 c) {
             if (picker.TestTriangle(a, b, c)) hit = RampLaneHit{i, side};
         });
@@ -362,6 +369,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
     const OverlayStroke stroke(camera, scene, focal);
     for (const auto& [id, item] : world.intersections)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
         const auto anchors = item.AnchorPositions();
         const bool selected = selection.GeometrySelected({SceneKind::Intersection, id});
         if (group && selected && !world.IntersectionSurfaces().contains(id))
@@ -414,22 +422,27 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     // order so picking and material drops agree with the depth buffer.
     for (int i = static_cast<int>(world.Objects().size()) - 1; i >= 0; --i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Object, i})) continue;
         if (picker.TestMesh(world.Objects()[i]->Instance())) hit = {RoadPickKind::Object, i};
     }
     for (int i = static_cast<int>(world.Terrain().size()) - 1; i >= 0; --i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
         if (picker.TestMesh(world.Terrain()[i]->Instance())) hit = {RoadPickKind::Terrain, i};
     }
     for (int i = static_cast<int>(world.meshes.size()) - 1; i >= 0; --i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Mesh, i})) continue;
         if (picker.TestMesh(world.meshes[i])) hit = {RoadPickKind::Mesh, i};
     }
     for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, it->first})) continue;
         if (picker.TestRoad(it->second.geometry)) hit = {RoadPickKind::Intersection, it->first};
     }
     for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Road, i})) continue;
         if (picker.TestRoad(world.roads[i])) hit = {RoadPickKind::Road, i};
     }
 
@@ -439,9 +452,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
         if (hit.kind == RoadPickKind::Object || hit.kind == RoadPickKind::Mesh)
         {
             ViewportPicker ground(camera, scene, picker.mouse);
-            for (const Road& road : world.roads) ground.TestRoad(road);
-            for (const auto& [id, surface] : world.IntersectionSurfaces()) ground.TestRoad(surface.geometry);
-            for (const auto& chunk : world.Terrain()) ground.TestMesh(chunk->Instance());
+            ground.TestPlacementSurfaces(world);
             *placement = ground.PlacementPosition();
         }
         else *placement = picker.PlacementPosition();
@@ -449,6 +460,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
 
     for (const auto& [id, item] : world.intersections)
     {
+        if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
         if (const auto placement = PointPlacement(item.position, camera, scene))
             for (const auto& mesh : IntersectionMarker(*placement, item.yaw))
                 if (picker.TestMesh(mesh)) hit = {RoadPickKind::Intersection, id};
@@ -458,6 +470,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     {
         for (const auto& [id, item] : world.intersections)
         {
+            if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
             for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
             {
                 const auto placement = PointPlacement(item.AnchorPosition(side), camera, scene);
@@ -467,7 +480,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     };
     if (preferAnchor) pickAnchors();
     const double focal = ViewportFocalLength(scene);
-    if (selected && focal > 0)
+    if (selected && focal > 0 && !world.hierarchy.EditorHidden({SceneKind::Road, static_cast<int>(selected - world.roads.data())}))
     {
         const OverlayStroke stroke(camera, scene, focal);
         VisitSegmentTriangles(*selected, stroke, camera, [&](int i, Vector3 a, Vector3 b, Vector3 c)

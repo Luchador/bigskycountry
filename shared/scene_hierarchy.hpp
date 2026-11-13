@@ -42,6 +42,9 @@ class SceneHierarchy
     const auto& Folders() const { return folders; }
     const auto& Members() const { return members; }
     int Parent(SceneKey key) const;
+    bool HasVisibilityOverrides() const { return !hiddenChildren.empty(); }
+    bool EditorHidden(SceneKey key) const;
+    bool SetChildrenHidden(int folder, bool hidden);
     std::vector<int> OrderedFolderIds() const;
     int Create(int parent, std::string name);
     bool Rename(int id, std::string name);
@@ -50,7 +53,8 @@ class SceneHierarchy
     bool Move(const std::set<SceneKey>& keys, int target, FolderPlacement placement = FolderPlacement::Into);
     void ReplaceRange(SceneKind kind, int first, int removed, int inserted, int folder = 0);
     bool Write(std::ostream& out) const;
-    bool Read(std::istream& in);
+    static constexpr unsigned currentVersion = 2;
+    bool Read(std::istream& in, unsigned version = currentVersion);
     bool operator==(const SceneHierarchy&) const = default;
 
   private:
@@ -66,4 +70,6 @@ class SceneHierarchy
     std::vector<int> rootFolders;
     std::map<int, SceneFolder> folders;
     std::map<SceneKey, int> members;
+    // Nearest folder override wins; the world root is visible.
+    std::map<int, bool> hiddenChildren;
 };

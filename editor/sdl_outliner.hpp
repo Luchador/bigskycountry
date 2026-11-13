@@ -14,13 +14,16 @@ class SdlOutliner
                  const SceneOutliner& model, std::optional<OutlineCommand>& cmd);
     void Blur(SDL_Window* window);
     bool Focused() const { return focused; }
-    bool Tracking() const { return pressed.has_value(); }
+    bool Tracking() const { return pressed.has_value() || menuFolder.has_value(); }
 
   private:
     void StartName(SDL_Window* window, bool create, const SceneOutliner& model);
     bool focused = false, dragging = false, singleOnRelease = false, selectText = false;
     int scroll = 0;
     std::optional<SceneKey> anchor, pressed, previousClick;
+    std::optional<SceneKey> menuFolder;
+    SDL_FRect menuBounds{};
+    int menuItem = 0;
     std::optional<OutlineDrop> drop;
     std::optional<OutlineCommand> edit;
     std::string text;

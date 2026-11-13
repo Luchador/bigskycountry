@@ -9,6 +9,7 @@ struct OutlineRow
     std::string label, type;
     int depth;
     bool branch, expanded;
+    bool hidden = false;
     std::string DragLabel(std::size_t count) const;
 };
 
@@ -21,6 +22,8 @@ enum class OutlineOp
     Expand,
     Create,
     Rename,
+    HideChildren,
+    UnhideChildren,
     Remove,
     FillTerrain,
     Move

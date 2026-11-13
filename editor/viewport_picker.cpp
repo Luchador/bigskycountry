@@ -1,6 +1,7 @@
 #include "viewport_picker.hpp"
 #include "free_camera.hpp"
 #include "road.hpp"
+#include "world_document.hpp"
 #include "world_renderer.hpp"
 
 #include <algorithm>
@@ -24,6 +25,16 @@ Vector3 ViewportRay(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse)
 
 ViewportPicker::ViewportPicker(const FreeCamera& view, SDL_Rect scene, SDL_FPoint pointer) : camera(view), mouse(pointer), eye(view.GetPosition()), ray(ViewportRay(view, scene, pointer))
 {
+}
+
+void ViewportPicker::TestPlacementSurfaces(const WorldDocument& world)
+{
+    for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+        if (!world.hierarchy.EditorHidden({SceneKind::Road, i})) TestRoad(world.roads[i]);
+    for (const auto& [id, junction] : world.IntersectionSurfaces())
+        if (!world.hierarchy.EditorHidden({SceneKind::Intersection, id})) TestRoad(junction.geometry);
+    for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+        if (!world.hierarchy.EditorHidden({SceneKind::Terrain, i})) TestMesh(world.Terrain()[i]->Instance());
 }
 
 bool ViewportPicker::TestTriangle(Vector3 a, Vector3 b, Vector3 c)

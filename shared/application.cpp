@@ -184,20 +184,29 @@ namespace
                     return false;
                 }
 
+                const auto hidden = [&](SceneKey key) { return roadTool && world.hierarchy.EditorHidden(key); };
                 for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
                 {
+                    if (hidden({SceneKind::Road, i})) continue;
                     const Road& road = world.roads[i];
                     worldRenderer.SubmitRoad(road, road.style.material, roadTool && roadTool->GeometrySelected({SceneKind::Road, i}));
                 }
                 if (const Road* preview = roadTool ? roadTool->PreviewRoad() : nullptr)
                     worldRenderer.SubmitRoad(*preview, preview->style.material, false);
                 for (const auto& [id, junction] : world.IntersectionSurfaces())
-                    worldRenderer.SubmitRoad(junction.geometry, world.intersections.at(id).material, roadTool && roadTool->GeometrySelected({SceneKind::Intersection, id}));
-
-                for (const auto& instance : world.meshes) worldRenderer.SubmitMesh(instance);
-                for (const auto& chunk : world.Terrain()) worldRenderer.SubmitTerrain(*chunk);
-                for (const auto& object : world.Objects())
                 {
+                    if (hidden({SceneKind::Intersection, id})) continue;
+                    worldRenderer.SubmitRoad(junction.geometry, world.intersections.at(id).material, roadTool && roadTool->GeometrySelected({SceneKind::Intersection, id}));
+                }
+
+                for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
+                    if (!hidden({SceneKind::Mesh, i})) worldRenderer.SubmitMesh(world.meshes[i]);
+                for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+                    if (!hidden({SceneKind::Terrain, i})) worldRenderer.SubmitTerrain(*world.Terrain()[i]);
+                for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
+                {
+                    if (hidden({SceneKind::Object, i})) continue;
+                    const auto& object = world.Objects()[i];
                     if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
                         worldRenderer.SubmitMaterialMesh(marker->Instance(), marker->material);
                     else
@@ -206,9 +215,10 @@ namespace
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
                 worldRenderer.BeginUnlit();
-                for (const auto& object : world.Objects())
+                for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
                 {
-                    if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
+                    if (hidden({SceneKind::Object, i})) continue;
+                    if (const auto* marker = dynamic_cast<const Marker*>(world.Objects()[i].get()))
                         marker->SubmitLabel(worldRenderer, view);
                 }
 

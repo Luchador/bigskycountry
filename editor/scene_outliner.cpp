@@ -201,6 +201,7 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     {
         auto row = std::move(stack.back());
         stack.pop_back();
+        row.hidden = world.hierarchy.EditorHidden(row.key);
         if (row.key.kind == SceneKind::World || row.key.kind == SceneKind::Folder)
         {
             const auto it = children.find(row.key.index);
@@ -283,6 +284,19 @@ bool SceneOutliner::Apply(const OutlineCommand& cmd, WorldDocument& world, RoadE
             return false;
         }
         break;
+    case OutlineOp::HideChildren:
+    case OutlineOp::UnhideChildren:
+    {
+        if (!world.hierarchy.SetChildrenHidden(id, cmd.op == OutlineOp::HideChildren)) return false;
+        auto selected = state.SelectedRows();
+        if (std::erase_if(selected, [&](SceneKey key) {
+                return key.kind != SceneKind::Folder && world.hierarchy.EditorHidden(key);
+            }))
+            state.SelectRows(selected);
+        if (state.anchorSelection && world.hierarchy.EditorHidden({SceneKind::Intersection, state.anchorSelection->intersectionId}))
+            state.anchorSelection.reset();
+        break;
+    }
     case OutlineOp::Remove:
         if (!world.hierarchy.Remove(id))
         {

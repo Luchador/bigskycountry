@@ -521,7 +521,7 @@ bool WorldDocument::Open(const char* documentPath)
         {
             std::istringstream data(std::move(section.payload));
             data.imbue(std::locale::classic());
-            if (sawOutliner || section.version != 1 || !loaded.hierarchy.Read(data))
+            if (sawOutliner || !loaded.hierarchy.Read(data, section.version))
             {
                 return SDL_SetError("Invalid or unsupported OUTL section in '%s'", loaded.path.c_str());
             }
@@ -732,7 +732,7 @@ bool WorldDocument::Save() const
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&
                     (objects.empty() || WriteSection(output, objectTag, ObjectIO::currentVersion, std::move(objectData).str())) &&
                     (terrain.empty() || WriteSection(output, terrainTag, terrainVersion, std::move(terrainData).str())) &&
-                    (!hasOutliner || WriteSection(output, outlinerTag, 1, std::move(outlinerData).str()));
+                    (!hasOutliner || WriteSection(output, outlinerTag, SceneHierarchy::currentVersion, std::move(outlinerData).str()));
     for (const Section& section : otherSections)
     {
         if (!wroteAll)
