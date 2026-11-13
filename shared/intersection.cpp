@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <utility>
 
 namespace
 {
@@ -147,13 +148,14 @@ namespace
         }
         if (positions.size() > 1 && Math::Length(positions.front() - positions.back()) < 1e-7)
             positions.pop_back();
-        for (CDT::VertInd i = 0; i < positions.size(); ++i)
+        if (positions.size() < 3 || !std::in_range<CDT::VertInd>(positions.size())) return;
+        const auto vertexCount = static_cast<CDT::VertInd>(positions.size());
+        for (CDT::VertInd i = 0; i < vertexCount; ++i)
         {
             const auto local = positions[i] - surface.layout.center;
             vertices.push_back({local.x, local.z});
-            edges.emplace_back(i, (i + 1) % positions.size());
+            edges.emplace_back(i, (i + 1) % vertexCount);
         }
-        if (positions.size() < 3) return;
         CDT::RemoveDuplicatesAndRemapEdges(vertices, edges);
         CDT::Triangulation<double> mesh(CDT::VertexInsertionOrder::Auto, CDT::IntersectingConstraintEdges::TryResolve, 0.0);
         mesh.insertVertices(vertices);
