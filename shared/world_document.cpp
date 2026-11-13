@@ -237,6 +237,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
 
 bool WorldDocument::ValidConnections() const
 {
+    std::set<int> sockets, targets;
     std::set<int> stations;
     std::set<std::pair<int, int>> rampEnds;
     for (const auto& road : roads)
@@ -248,6 +249,10 @@ bool WorldDocument::ValidConnections() const
         if (road.points.size() < 2) return SDL_SetError("Road needs two endpoints");
         for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
         {
+            if (point->connectorSocket && !sockets.insert(point->connectorSocket).second)
+                return SDL_SetError("Duplicate ramp connector socket");
+            if (point->connectorTarget && !targets.insert(point->connectorTarget).second)
+                return SDL_SetError("Duplicate ramp connector attachment");
             if (point->ramp)
             {
                 const auto& link = *point->ramp;
@@ -262,6 +267,7 @@ bool WorldDocument::ValidConnections() const
                 return SDL_SetError("Invalid road connection to intersection %d, side %d", ref.intersectionId, ref.side);
         }
     }
+    if (sockets != targets) return SDL_SetError("Missing ramp connector endpoint");
     return true;
 }
 

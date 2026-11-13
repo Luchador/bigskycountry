@@ -25,6 +25,7 @@ struct RoadEditorState
     int selected = -1;
     int point = -1; // Active point for the inspector and gizmo.
     std::set<int> additionalPoints;
+    std::set<std::pair<int, int>> groupEndpoints; // (road row, point index) within the selected road group.
     bool drawing = false;
     std::set<int> segments; // Indices of selected spans in the active road.
 
@@ -82,6 +83,7 @@ struct RoadEditorState
         selected = roadIndex;
         point = pointIndex;
         additionalPoints.clear();
+        groupEndpoints.clear();
         segments.clear();
         meshSelection = {};
         outlineSelection.clear();
@@ -147,6 +149,7 @@ struct EditSnapshot
     int roadFolder = 0; // All sections of a split inherit the original road's folder.
     std::vector<std::string> roadData; // Source records for one contiguous range.
     std::set<int> additionalPoints;
+    std::set<std::pair<int, int>> groupEndpoints; // (road row, point index) within the selected road group.
     std::set<int> segments;
 };
 

@@ -192,7 +192,7 @@ void RoadOverlay::DrawDirection(WorldRenderer& renderer, const Road& ramp, const
         stroke.Draw(renderer, tip, camera.WorldToView(raised - forward * (length * 0.5) + left * (length * 0.35 * side)), EditorColors::amber);
 }
 
-void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
+void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, int roadIndex, const FreeCamera& camera, SDL_Rect scene) const
 {
     const double focal = ViewportFocalLength(scene);
     if (focal <= 0) return;
@@ -214,8 +214,22 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
 
     VisitPoints(road, camera, scene, [&](int i, const GizmoPlacement& placement)
     {
-        renderer.SubmitMesh(Marker(placement), selection.PointSelected(i) ? EditorColors::amber : EditorColors::blue);
+        const bool selected = (roadIndex == selection.selected && selection.PointSelected(i)) ||
+                              selection.groupEndpoints.contains({roadIndex, i});
+        renderer.SubmitMesh(Marker(placement), selected ? EditorColors::amber : EditorColors::blue);
     });
+}
+
+std::optional<std::pair<int, int>> RoadOverlay::PickGroupPoint(ViewportPicker& picker, const WorldDocument& world,
+    const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
+{
+    std::optional<std::pair<int, int>> hit;
+    for (auto key : selection.SelectedRoadRows())
+        VisitPoints(world.roads[key.index], camera, scene, [&](int i, const GizmoPlacement& placement)
+        {
+            if (picker.TestMesh(Marker(placement))) hit.emplace(key.index, i);
+        });
+    return hit;
 }
 
 void RoadOverlay::DrawRampControls(WorldRenderer& renderer, const WorldDocument& world, const Road& selected,

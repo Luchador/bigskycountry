@@ -157,7 +157,7 @@ SDL_FPoint RoadEditor::PlanGroupHandle(const ObjectTransform& frame) const
 
 std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocument& world, const FreeCamera& camera) const
 {
-    if (!state.segments.empty())
+    if (!state.segments.empty() || !state.groupEndpoints.empty())
     {
         return {};
     }
@@ -171,7 +171,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
             return {};
         }
         const RoadPoint& point = road->points[state.point];
-        if (point.ramp) return {};
+        if (point.ramp || point.connectorTarget) return {};
         auto placement = RoadOverlay::PointPlacement(point.position, camera, scene);
         if (placement && gizmo.settings.space == GizmoSpace::Local)
         {
@@ -232,6 +232,11 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
     ViewportPicker surfaces(camera, scene, *pointer);
     const RoadPick hit = overlay.Pick(surfaces, world, Selected(world), camera, scene,
                                       (modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0);
+    if (!gizmoDrag && state.MultipleRoadsSelected() && overlay.PickGroupPoint(surfaces, world, state, camera, scene))
+    {
+        hoveredAxis.reset();
+        return;
+    }
     if (!gizmoDrag && !(modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) && Selected(world) &&
         overlay.PickRampControl(surfaces, world, *Selected(world), camera, scene))
     {
@@ -252,8 +257,13 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world))
     {
-        overlay.Draw(renderer, *road, state, camera, scene);
+        overlay.Draw(renderer, *road, state, state.selected, camera, scene);
         overlay.DrawRampControls(renderer, world, *road, camera, scene);
+    }
+    if (state.MultipleRoadsSelected())
+    {
+        for (auto key : state.SelectedRoadRows())
+            overlay.Draw(renderer, world.roads[key.index], state, key.index, camera, scene);
     }
     if (rampDrag) return;
     if (const auto placement = SelectedGizmoPlacement(world, camera))
@@ -429,7 +439,7 @@ std::optional<RampPlan> RoadEditor::PrepareRamp(EditorCommand command, const Wor
             (!ramp->style.oneWay && ramp->style.GetLaneCount() != 1) || !state.additionalPoints.empty() ||
             (state.point != 0 && state.point != static_cast<int>(ramp->points.size()) - 1)) return {};
         const auto& point = ramp->points[state.point];
-        if (point.anchor) return {};
+        if (point.anchor || point.connectorSocket || point.connectorTarget) return {};
         exit = state.point == 0;
         style = ramp->style;
         style.oneWay = true;
@@ -1132,12 +1142,12 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
 
 void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 {
-    if (state.point >= 0 && road.points[state.point].ramp) return;
+    if (state.point >= 0 && (road.points[state.point].ramp || road.points[state.point].connectorTarget)) return;
     dragStart.emplace(state, &road);
     drag = kind;
     const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
     const bool endpoint = state.point == 0 || state.point + 1 == static_cast<int>(road.points.size());
-    if (state.point >= 0 && state.additionalPoints.empty() && translate && endpoint && shift)
+    if (state.point >= 0 && state.additionalPoints.empty() && translate && endpoint && shift && !road.points[state.point].connectorSocket)
     {
         extensionSource = state.point;
     }
@@ -1856,7 +1866,7 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
         status = "Select one road endpoint first";
         return;
     }
-    if (road->points[state.point].anchor || road->points[state.point].ramp)
+    if (road->points[state.point].Joined())
     {
         status = "This road endpoint is already connected";
         return;
@@ -1967,6 +1977,70 @@ void RoadEditor::FillSelection(WorldDocument& world)
     Save(world);
 }
 
+void RoadEditor::ConnectRamps(WorldDocument& world)
+{
+    if (state.groupEndpoints.size() != 2)
+    {
+        status = "Select one free exit endpoint and one free entrance endpoint";
+        return;
+    }
+    int exitIndex = -1;
+    int entranceIndex = -1;
+    for (const auto& [index, point] : state.groupEndpoints)
+    {
+        Road& road = world.roads.at(index);
+        if (!road.style.oneWay || road.points.size() < 2 || road.points.at(point).Joined()) continue;
+        if (point == 0 && road.points.back().ramp) entranceIndex = index;
+        else if (point + 1 == static_cast<int>(road.points.size()) && road.points.front().ramp)
+            exitIndex = index;
+    }
+    if (exitIndex < 0 || entranceIndex < 0 || exitIndex == entranceIndex)
+    {
+        status = "Select the free end of an exit ramp and the free start of an entrance ramp";
+        return;
+    }
+    Road& exit = world.roads[exitIndex];
+    Road& entrance = world.roads[entranceIndex];
+    const int folder = world.hierarchy.Parent({SceneKind::Road, exitIndex});
+    Road road;
+    road.style = exit.style;
+    road.style.SetLaneCount(1);
+    road.style.curved = true;
+    road.paintMarkings = exit.paintMarkings;
+    if (!ValidRoadSpan(road, exit.points.back().position, entrance.points.front().position))
+    {
+        status = SDL_GetError();
+        return;
+    }
+
+    int lastJoin = 0;
+    for (const auto& source : world.roads)
+        for (const auto& p : source.points) lastJoin = std::max({lastJoin, p.connectorSocket, p.connectorTarget});
+    if (lastJoin > std::numeric_limits<int>::max() - 2 || !(road.id = world.AllocateRoadId())) return;
+
+    EditSnapshot before(state);
+    before.connectedRoadPoints.emplace(exit.id, exit.points);
+    before.connectedRoadPoints.emplace(entrance.id, entrance.points);
+    exit.points.back().connectorSocket = ++lastJoin;
+    entrance.points.front().connectorSocket = ++lastJoin;
+    road.points.resize(2);
+    road.points.front().position = exit.points.back().position;
+    road.points.front().connectorTarget = exit.points.back().connectorSocket;
+    road.points.back().position = entrance.points.front().position;
+    road.points.back().connectorTarget = entrance.points.front().connectorSocket;
+    const int index = static_cast<int>(world.roads.size());
+    world.roads.push_back(std::move(road));
+    world.RefreshRampConnections(true);
+    state.SelectPoint(index, -1);
+    if (folder) world.hierarchy.Move({{SceneKind::Road, index}}, folder);
+    EditSnapshot after(state, &world.roads.back());
+    after.connectedRoadPoints.emplace(world.roads[exitIndex].id, world.roads[exitIndex].points);
+    after.connectedRoadPoints.emplace(world.roads[entranceIndex].id, world.roads[entranceIndex].points);
+    after.roadFolder = folder;
+    outliner.Invalidate();
+    if (history.Record(index, std::move(before), std::move(after))) Save(world);
+}
+
 void RoadEditor::ConnectEndpoint(WorldDocument& world)
 {
     if (!state.anchorSelection || EditingDraft() || drag != Drag::None) return;
@@ -2024,6 +2098,20 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     ViewportPicker picker(camera, scene, mouse);
     const Road* selected = Selected(world);
     const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, shift || subtract);
+    if (state.MultipleRoadsSelected())
+    {
+        if (const auto hitPoint = overlay.PickGroupPoint(picker, world, state, camera, scene))
+        {
+            const auto [index, point] = *hitPoint;
+            const Road& road = world.roads[index];
+            status.clear();
+            if (subtract) state.groupEndpoints.erase(*hitPoint);
+            else if (!shift) state.SelectPoint(index, point);
+            else if (point == 0 || point + 1 == static_cast<int>(road.points.size()))
+                state.groupEndpoints.insert(*hitPoint);
+            return;
+        }
+    }
     if (selected && !shift && !subtract)
     {
         if (const auto control = overlay.PickRampControl(picker, world, *selected, camera, scene))
@@ -2743,7 +2831,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         if (!event.key.repeat && drag == Drag::None)
         {
-            if (state.RoadGroupSelected()) FillSelection(world);
+            if (!state.groupEndpoints.empty()) ConnectRamps(world);
+            else if (state.RoadGroupSelected()) FillSelection(world);
             else ConnectEndpoint(world);
         }
         return EditorEvent::Handled;

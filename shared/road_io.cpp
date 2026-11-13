@@ -124,6 +124,7 @@ namespace RoadIO
             else out << " 0";
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
             if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
+            out << ' ' << p.connectorSocket << ' ' << p.connectorTarget;
             out << '\n';
         }
     }
@@ -198,6 +199,13 @@ namespace RoadIO
                         (i != 0 && i != count - 1)) in.setstate(std::ios::failbit);
                     p.ramp = link;
                 }
+            }
+            if (version >= 15)
+            {
+                in >> p.connectorSocket >> p.connectorTarget;
+                if (p.connectorSocket < 0 || p.connectorTarget < 0 ||
+                    ((p.connectorSocket || p.connectorTarget) && (p.anchor || p.ramp || (i != 0 && i + 1 != count))) ||
+                    (p.connectorSocket && p.connectorTarget)) in.setstate(std::ios::failbit);
             }
             if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
             {

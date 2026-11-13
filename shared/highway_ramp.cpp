@@ -1,5 +1,6 @@
 #include "highway_ramp.hpp"
 #include "world_document.hpp"
+#include "mesh.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -33,10 +34,15 @@ int WorldDocument::NextRampStationId() const
 void WorldDocument::RefreshRampConnections(bool force)
 {
     if (!force && rampRevision == RoadGeometry::latestRevision) return;
+    struct Socket { const Road* road; std::size_t point; };
+    std::map<int, Socket> sockets;
     std::map<int, size_t> stations;
     for (size_t i = 0; i < roads.size(); ++i)
     {
         const Road& host = roads[i];
+        if (host.points.size() < 2) continue;
+        for (std::size_t j : {std::size_t{0}, host.points.size() - 1})
+            if (int id = host.points[j].connectorSocket) sockets.emplace(id, Socket{&host, j});
         if (host.style.GetLaneCount() < 2) continue;
         for (const auto& point : host.points)
             if (point.rampStation) stations.emplace(point.rampStation, i);
@@ -76,6 +82,11 @@ void WorldDocument::RefreshRampConnections(bool force)
         for (int e = 0; e < 2; ++e)
         {
             auto& point = e == 0 ? ramp.points.front() : ramp.points.back();
+            if (point.connectorTarget)
+            {
+                caps[e] = ramp.rampCaps[e]; // Updated after both source ramps have been resolved.
+                continue;
+            }
             if (!point.ramp) continue;
             const auto& link = *point.ramp;
             const auto host = stations.find(link.station);
@@ -93,6 +104,43 @@ void WorldDocument::RefreshRampConnections(bool force)
             ramp.rampCaps = caps;
             ramp.Rebuild();
         }
+    }
+    // Resolve after highway attachments have moved. A connector can occur before
+    // either source in the world file. The pair IDs survive reordering and road splits.
+    for (Road& road : roads)
+    {
+        if (road.points.size() < 2) continue;
+        bool changed = false;
+        for (int e = 0; e < 2; ++e)
+        {
+            RoadPoint& end = e == 0 ? road.points.front() : road.points.back();
+            if (!end.connectorTarget) continue;
+            const auto it = sockets.find(end.connectorTarget);
+            if (it == sockets.end()) continue;
+            const auto [source, i] = it->second;
+            const Vector3 tangent = source->Tangent(i);
+            const auto& position = source->points[i].position;
+            const double heading = std::atan2(tangent.z, tangent.x);
+            const double pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
+            // Match the actual cross-section of the source, including whole-road bank.
+            const auto frame = ObjectTransform{{}, source->rotation}.ToMeshTransform();
+            const Vector3 local = frame.Unrotate(tangent);
+            const double run = std::hypot(local.x, local.z);
+            const Vector3 left = run > 1e-8 * std::abs(local.y)
+                ? Vector3{-local.z / run, 0, local.x / run} : Vector3{0, 0, 1};
+            const RoadMouthFrame cap{frame.Direction(left), frame.y};
+            if (road.rampCaps[e] != cap)
+            {
+                road.rampCaps[e] = cap;
+                changed = true;
+            }
+            if (end.position == position && end.heading == heading && end.pitch == pitch) continue;
+            end.position = position;
+            end.heading = heading;
+            end.pitch = pitch;
+            changed = true;
+        }
+        if (changed) road.Rebuild();
     }
     rampRevision = RoadGeometry::latestRevision;
 }

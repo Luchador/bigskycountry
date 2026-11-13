@@ -123,6 +123,9 @@ struct RoadPoint
     double outgoingHandle = 1.0 / 3.0;
     int rampStation = 0;
     std::optional<RampLink> ramp; // First endpoint exits the highway, last endpoint enters it.
+    int connectorSocket = 0; // Identifies the point on the source ramp.
+    int connectorTarget = 0; // On a connector endpoint, follows the matching socket.
+    bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
 
 struct RoadGeometry

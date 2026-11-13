@@ -139,7 +139,7 @@ EditSnapshot::EditSnapshot(const RoadEditorState& editor, const Road* affectedRo
 }
 
 EditSnapshot::EditSnapshot(const RoadEditorState& editor, std::span<const Road> affectedRoads)
-    : meshSelection(editor.meshSelection), anchorSelection(editor.anchorSelection), outlineSelection(editor.outlineSelection), additionalPoints(editor.additionalPoints), segments(editor.segments)
+    : meshSelection(editor.meshSelection), anchorSelection(editor.anchorSelection), outlineSelection(editor.outlineSelection), additionalPoints(editor.additionalPoints), groupEndpoints(editor.groupEndpoints), segments(editor.segments)
 {
     auto out = Writer();
     RoadIO::WriteStyle(out, editor.defaults);
@@ -235,21 +235,29 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
             newBoundaries.emplace(i, *boundary);
         }
     }
-    std::set<int> removedStations;
+    std::set<int> removedStations, removedJoins;
+    const auto collectJoin = [](const RoadPoint& p) { return p.connectorSocket ? p.connectorSocket : p.connectorTarget; };
+    for (const auto& p : world.roads[index].points)
+        if (int id = collectJoin(p)) removedJoins.insert(id);
+    for (const auto& piece : replacements)
+        for (const auto& p : piece.points) removedJoins.erase(collectJoin(p));
     for (const auto& p : world.roads[index].points)
         if (p.rampStation) removedStations.insert(p.rampStation);
     for (const auto& piece : replacements)
         for (const auto& p : piece.points) removedStations.erase(p.rampStation);
     std::map<int, std::vector<RoadPoint>> disconnected;
-    if (!removedStations.empty())
+    if (!removedStations.empty() || !removedJoins.empty())
     {
         for (Road& ramp : world.roads)
         {
             for (auto& p : ramp.points)
             {
-                if (!p.ramp || !removedStations.contains(p.ramp->station)) continue;
+                const bool loseRamp = p.ramp && removedStations.contains(p.ramp->station);
+                const bool loseJoin = removedJoins.contains(collectJoin(p));
+                if (!loseRamp && !loseJoin) continue;
                 before.connectedRoadPoints.try_emplace(ramp.id, ramp.points);
-                p.ramp.reset();
+                if (loseRamp) p.ramp.reset();
+                if (loseJoin) p.connectorSocket = p.connectorTarget = 0;
                 disconnected[ramp.id] = ramp.points;
             }
         }
@@ -280,6 +288,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     restored.outlineSelection = to.outlineSelection;
     restored.segments = to.segments;
     restored.additionalPoints = to.additionalPoints;
+    restored.groupEndpoints = to.groupEndpoints;
     auto in = Reader(to.editorData);
     RoadIO::ReadStyle(in, restored.defaults);
     bool hasDraft;

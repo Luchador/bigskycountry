@@ -29,8 +29,10 @@ public:
     RoadOverlay();
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
     static Vector3 SplinePosition(const ViewportPicker& pick, SDL_Rect scene);
-    void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection,
+    void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, int roadIndex,
               const FreeCamera& camera, SDL_Rect scene) const;
+    std::optional<std::pair<int, int>> PickGroupPoint(ViewportPicker& picker, const WorldDocument& world,
+        const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const;
     void DrawRampControls(WorldRenderer& renderer, const WorldDocument& world, const Road& selected,
                           const FreeCamera& camera, SDL_Rect scene) const;
     std::optional<RampControlHit> PickRampControl(ViewportPicker& picker, const WorldDocument& world,
