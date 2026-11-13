@@ -8,7 +8,12 @@ struct RoadEditorState;
 
 enum class RoadPickKind { Empty, Road, Segment, Point, Object, Terrain, Mesh, Intersection };
 
-enum class RampControl { Lane, Attachment, Taper };
+enum class RampControl { Attachment, Taper };
+
+struct RampLaneHit
+{
+    int host, side;
+};
 
 struct RampControlHit
 {
@@ -35,17 +40,19 @@ public:
         const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const;
     void DrawRampControls(WorldRenderer& renderer, const WorldDocument& world, const Road& selected,
                           const FreeCamera& camera, SDL_Rect scene) const;
+    std::optional<RampLaneHit> PickRampLane(ViewportPicker& picker, const WorldDocument& world,
+        const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const;
     std::optional<RampControlHit> PickRampControl(ViewportPicker& picker, const WorldDocument& world,
                                                   const Road& selected, const FreeCamera& camera, SDL_Rect scene) const;
     static std::optional<double> LaneDistanceAtPointer(const Road& host, int side, const FreeCamera& camera,
                                                        SDL_Rect scene, SDL_FPoint pointer, double reference);
-    void DrawDirection(WorldRenderer& renderer, const Road& ramp, const FreeCamera& camera, SDL_Rect scene) const;
     void DrawIntersections(WorldRenderer& renderer, const WorldDocument& world, const RoadEditorState& selection,
                            const FreeCamera& camera, SDL_Rect scene) const;
     RoadPick Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected,
                   const FreeCamera& camera, SDL_Rect scene, bool preferAnchor = false, Vector3* placement = nullptr) const;
 
 private:
+    void DrawDirection(WorldRenderer& renderer, const Road& ramp, const FreeCamera& camera, SDL_Rect scene) const;
     std::array<MeshInstance, 2> IntersectionMarker(const GizmoPlacement& placement, double yaw) const;
     MeshInstance Marker(const GizmoPlacement& placement) const;
     std::shared_ptr<const Mesh> marker;

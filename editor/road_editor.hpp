@@ -39,7 +39,6 @@ public:
     const Road* Selected(const WorldDocument& world) const;
     const Road* PreviewRoad() const override
     {
-        if (pendingRamp) return &pendingRamp->preview;
         return anchorRoad && dragChanged ? &*anchorRoad : nullptr;
     }
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
@@ -132,7 +131,6 @@ private:
     }
     bool UpdateWindowTitle();
     bool Save(WorldDocument& world);
-    std::optional<RampPlan> PrepareRamp(EditorCommand command, const WorldDocument& world) const;
     void CreateRamp(EditorCommand command, WorldDocument& world);
     void RunCommand(EditorCommand command, WorldDocument& world, FreeCamera& camera);
     void CommitTransform(WorldDocument& world, EditSnapshot before);
@@ -165,22 +163,9 @@ private:
         int index;
         std::uint64_t revision;
         std::optional<RoadIntersectionInsertion> insertion;
-        std::optional<RampSite> rampSite;
-        Vector3 surfaceHit{};
-
+        std::optional<RampPlan> exitRamp, entranceRamp;
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
-    struct RampPlacement
-    {
-        int hostIndex, hostId;
-        std::uint64_t revision;
-        RampPlan plan;
-        Road preview;
-        bool exit, dragging = false;
-    };
-    std::optional<RampPlacement> pendingRamp;
-    void AimRamp(const FreeCamera& camera, SDL_FPoint pointer);
-    void FinishRamp(WorldDocument& world);
     struct RampHandleDrag
     {
         RampControlHit hit;
@@ -193,7 +178,7 @@ private:
         EditSnapshot before;
     };
     std::optional<RampHandleDrag> rampDrag;
-    void PressRampControl(WorldDocument& world, const FreeCamera& camera, RampControlHit hit, Vector3 position);
+    void PressRampControl(WorldDocument& world, const FreeCamera& camera, RampControlHit hit);
     void MoveRampControl(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void FinishRampControl(WorldDocument& world, bool commit);
     RoadEditorState state;

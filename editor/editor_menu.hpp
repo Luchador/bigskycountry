@@ -4,8 +4,8 @@
 #include <optional>
 
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, CreateRoad, CreateMarker, CreateIntersection,
-                           CreateExitRamp, CreateEntranceRamp, ConnectRamp, SetRampTaper };
-struct RampMenuOptions { bool exit = false, entrance = false, connect = false, taper = false; };
+                           CreateExitRamp, CreateEntranceRamp };
+struct RampMenuOptions { bool exit, entrance; };
 
 class EditorMenu
 {
@@ -14,7 +14,7 @@ public:
     static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
 #endif
     bool Attach(SDL_Window* window);
-    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, RampMenuOptions ramps);
+    std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps);
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -36,11 +36,11 @@ private:
     void* editMenu = nullptr;
     void* viewMenu = nullptr;
 #else
-    RampMenuOptions rampOptions;
+    RampMenuOptions rampOptions{};
     bool intersectionEnabled = true;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;
-    enum class Popup { Closed, Create, Submenu };
+    enum class Popup { Closed, Create, Submenu, Ramp };
     Popup popup = Popup::Closed;
     SDL_FRect rootItem{}, submenu{};
     int activeItem = 0;

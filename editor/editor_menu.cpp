@@ -29,9 +29,9 @@ namespace
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
-    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_MARKER, L"&Marker"},
-                                         {BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"},
-                                         {BSC_CONNECT_RAMP, L"Connect Selected Ramp Here"}, {BSC_RAMP_TAPER, L"Set Ramp Taper End Here"}};
+    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
+                                        {BSC_CREATE_MARKER, L"&Marker"}};
+    constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
     {
@@ -337,19 +337,16 @@ namespace
     constexpr BarMenu menus[] = {{"File", save}, {"Edit", history}, {"View", display}};
     constexpr int barTabWidth = 52, dropdownWidth = 136;
 
-    struct CreateItem
+    constexpr BarAction createItems[] = {{"Create Road", EditorCommand::CreateRoad},
+                                         {"Create Intersection", EditorCommand::CreateIntersection},
+                                         {"Marker", EditorCommand::CreateMarker}};
+    constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
+                                       {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp}};
+    std::span<const BarAction> ViewportActions(bool rampMenu)
     {
-        const char* label;
-        EditorCommand command;
-    };
-    constexpr CreateItem createItems[] = {{"Create Road", EditorCommand::CreateRoad},
-                                          {"Create Intersection", EditorCommand::CreateIntersection},
-                                          {"Marker", EditorCommand::CreateMarker},
-                                          {"Create Exit Ramp", EditorCommand::CreateExitRamp},
-                                          {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp},
-                                          {"Connect Selected Ramp Here", EditorCommand::ConnectRamp},
-                                          {"Set Ramp Taper End Here", EditorCommand::SetRampTaper}};
-    constexpr int createItemCount = static_cast<int>(std::size(createItems));
+        if (rampMenu) return rampItems;
+        return createItems;
+    }
     constexpr float itemHeight = 26;
 }
 #endif
@@ -372,7 +369,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 }
 #endif
 
-std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, RampMenuOptions ramps)
+std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -392,12 +389,21 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return {};
     }
     UINT choice = 0;
-    if (ClientToScreen(hwnd, &at) && AddSubmenu(root, create, createItems))
+    bool ready;
+    if (ramps)
     {
-        if (!canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
-        for (const auto& [id, enabled] : {std::pair{BSC_CREATE_EXIT_RAMP, ramps.exit}, {BSC_CREATE_ENTRANCE_RAMP, ramps.entrance},
-                                           {BSC_CONNECT_RAMP, ramps.connect}, {BSC_RAMP_TAPER, ramps.taper}})
-            if (!enabled) EnableMenuItem(GetSubMenu(root, 0), id, MF_BYCOMMAND | MF_GRAYED);
+        MenuBackground(root, EditorTheme::chrome);
+        ready = Insert(root, rampItems[0]) && Insert(root, rampItems[1]);
+        if (!ramps->exit) EnableMenuItem(root, BSC_CREATE_EXIT_RAMP, MF_BYCOMMAND | MF_GRAYED);
+        if (!ramps->entrance) EnableMenuItem(root, BSC_CREATE_ENTRANCE_RAMP, MF_BYCOMMAND | MF_GRAYED);
+    }
+    else
+    {
+        ready = AddSubmenu(root, create, createItems);
+        if (ready && !canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
+    }
+    if (ready && ClientToScreen(hwnd, &at))
+    {
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
                                   at.x, at.y, hwnd, nullptr);
     }
@@ -408,22 +414,29 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     }
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
-    if (choice == BSC_CONNECT_RAMP) return EditorCommand::ConnectRamp;
-    if (choice == BSC_RAMP_TAPER) return EditorCommand::SetRampTaper;
     if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;
     if (choice == BSC_CREATE_MARKER)
     {
         return EditorCommand::CreateMarker;
     }
 #else
-    rampOptions = ramps;
-    intersectionEnabled = canCreateIntersection;
-    rootItem = {0, 0, 104, itemHeight};
-    submenu = {0, 0, 240, itemHeight * createItemCount};
     const auto fit = [](float start, float extent, int limit)
     {
         return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));
     };
+    if (ramps)
+    {
+        rampOptions = *ramps;
+        submenu = {0, 0, 184, itemHeight * std::size(rampItems)};
+        submenu.x = fit(viewportPoint.x, submenu.w, scene.w);
+        submenu.y = fit(viewportPoint.y, submenu.h, scene.h);
+        activeItem = !ramps->exit && ramps->entrance ? 1 : 0;
+        popup = Popup::Ramp;
+        return {};
+    }
+    intersectionEnabled = canCreateIntersection;
+    rootItem = {0, 0, 104, itemHeight};
+    submenu = {0, 0, 184, itemHeight * std::size(createItems)};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, itemHeight, scene.h);
     submenu.x = rootItem.x + rootItem.w;
@@ -453,8 +466,6 @@ bool EditorMenu::Enabled(EditorCommand command) const
 {
     if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
     if (command == EditorCommand::CreateEntranceRamp) return rampOptions.entrance;
-    if (command == EditorCommand::ConnectRamp) return rampOptions.connect;
-    if (command == EditorCommand::SetRampTaper) return rampOptions.taper;
     if (command == EditorCommand::CreateIntersection) return intersectionEnabled;
     if (command == EditorCommand::Undo) return undoEnabled;
     if (command == EditorCommand::Redo) return redoEnabled;
@@ -559,6 +570,9 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
     {
         return false;
     }
+    const bool rampMenu = popup == Popup::Ramp;
+    const auto items = ViewportActions(rampMenu);
+    const int count = static_cast<int>(items.size());
     switch (event.type)
     {
     case SDL_EVENT_WINDOW_FOCUS_LOST:
@@ -574,24 +588,28 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         {
         case SDLK_ESCAPE: popup = Popup::Closed; break;
         case SDLK_LEFT:
-            popup = Popup::Create;
-            activeItem = 0;
+            if (!rampMenu) { popup = Popup::Create; activeItem = 0; }
             break;
         case SDLK_UP:
         case SDLK_DOWN:
-            if (popup == Popup::Submenu)
+            if (popup != Popup::Create)
             {
                 const int step = event.key.key == SDLK_DOWN ? 1 : -1;
-                do { activeItem = (activeItem + createItemCount + step) % createItemCount; }
-                while (!Enabled(createItems[activeItem].command));
+                for (int i = 0; i < count; ++i)
+                {
+                    activeItem = (activeItem + count + step) % count;
+                    if (Enabled(items[activeItem].command)) break;
+                }
             }
             break;
-        case SDLK_RIGHT: popup = Popup::Submenu; break;
+        case SDLK_RIGHT:
+            if (!rampMenu) popup = Popup::Submenu;
+            break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
-            if (popup == Popup::Submenu)
+            if (popup != Popup::Create)
             {
-                if (Enabled(createItems[activeItem].command)) command = createItems[activeItem].command;
+                if (Enabled(items[activeItem].command)) command = items[activeItem].command;
                 popup = Popup::Closed;
             }
             else
@@ -610,17 +628,17 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
             SDL_RenderCoordinatesFromWindow(renderer, press ? event.button.x : event.motion.x,
                                              press ? event.button.y : event.motion.y, &at.x, &at.y))
         {
-            if ((!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
+            if (!rampMenu && (!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
             {
                 popup = Popup::Submenu;
                 return true;
             }
-            if (popup == Popup::Submenu && SDL_PointInRectFloat(&at, &submenu))
+            if (popup != Popup::Create && SDL_PointInRectFloat(&at, &submenu))
             {
-                activeItem = std::min(static_cast<int>((at.y - submenu.y) / itemHeight), createItemCount - 1);
+                activeItem = std::min(static_cast<int>((at.y - submenu.y) / itemHeight), count - 1);
                 if (press && event.button.button == SDL_BUTTON_LEFT)
                 {
-                    if (Enabled(createItems[activeItem].command)) command = createItems[activeItem].command;
+                    if (Enabled(items[activeItem].command)) command = items[activeItem].command;
                 }
             }
         }
@@ -653,16 +671,17 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     {
         return true;
     }
-    if (!item(rootItem, "Create    >", false))
+    if (popup != Popup::Ramp && !item(rootItem, "Create    >", false))
     {
         return false;
     }
-    if (popup == Popup::Submenu)
+    if (popup != Popup::Create)
     {
+        const auto items = ViewportActions(popup == Popup::Ramp);
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
-        for (int i = 0; i < createItemCount; ++i)
+        for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {
-            if (!item(row, createItems[i].label, i == activeItem, Enabled(createItems[i].command)))
+            if (!item(row, items[i].label, i == activeItem, Enabled(items[i].command)))
             {
                 return false;
             }

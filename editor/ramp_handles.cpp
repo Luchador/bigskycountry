@@ -4,21 +4,9 @@
 #include <algorithm>
 #include <cmath>
 
-void RoadEditor::PressRampControl(WorldDocument& world, const FreeCamera& camera, RampControlHit hit, Vector3 position)
+void RoadEditor::PressRampControl(WorldDocument& world, const FreeCamera& camera, RampControlHit hit)
 {
     const Road& host = world.roads[hit.host];
-    if (hit.control == RampControl::Lane)
-    {
-        const auto site = PickRampSite(host, position, hit.side);
-        if (!site) return;
-        roadMenuTarget = RoadMenuTarget{hit.host, host.revision, {}, site, position};
-        CreateRamp(EditorCommand::CreateExitRamp, world);
-        roadMenuTarget.reset();
-        if (pendingRamp) FinishRamp(world);
-        else status = "Exit ramp needs 60 m of free taper space on this lane";
-        return;
-    }
-
     const auto& seam = host.rampSeams.at({hit.station, hit.side});
     const bool taper = hit.control == RampControl::Taper;
     const double start = taper ? seam.tipDistance : seam.goreDistance;

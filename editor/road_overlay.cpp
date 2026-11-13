@@ -256,25 +256,43 @@ void RoadOverlay::DrawRampControls(WorldRenderer& renderer, const WorldDocument&
     });
 }
 
-std::optional<RampControlHit> RoadOverlay::PickRampControl(ViewportPicker& picker, const WorldDocument& world,
-                                                           const Road& selected, const FreeCamera& camera, SDL_Rect scene) const
+std::optional<RampLaneHit> RoadOverlay::PickRampLane(ViewportPicker& picker, const WorldDocument& world,
+    const RoadEditorState& selection, const FreeCamera& camera, SDL_Rect scene) const
 {
     const double focal = ViewportFocalLength(scene);
     if (focal <= 0) return {};
     const OverlayStroke stroke(camera, scene, focal);
-    std::optional<RampControlHit> hit;
-    const int host = static_cast<int>(&selected - world.roads.data());
+    std::optional<RampLaneHit> hit;
     const auto pickLane = [&](int i, int side)
     {
         VisitSplineTriangles(stroke, camera, world.roads[i].OuterLane(side), [&](Vector3 a, Vector3 b, Vector3 c) {
-            if (picker.TestTriangle(a, b, c)) hit = RampControlHit{RampControl::Lane, i, 0, side};
+            if (picker.TestTriangle(a, b, c)) hit = RampLaneHit{i, side};
         });
     };
-    for (int side : {-1, 1}) pickLane(host, side);
-    std::set<std::pair<int, int>> testedLanes;
+    if (selection.selected >= 0)
+    {
+        const int i = selection.selected;
+        for (int side : {-1, 1}) pickLane(i, side);
+        // Selecting a ramp also draws the guide on its host carriageway.
+        std::set<std::pair<int, int>> tested;
+        VisitRampSeams(world, world.roads[i], [&](int host, auto key, const RampSeam&) {
+            if (host != i && tested.emplace(host, key.second).second) pickLane(host, key.second);
+        });
+    }
+    else if (selection.MultipleRoadsSelected())
+    {
+        for (auto key : selection.SelectedRoadRows())
+            for (int side : {-1, 1}) pickLane(key.index, side);
+    }
+    return hit;
+}
+
+std::optional<RampControlHit> RoadOverlay::PickRampControl(ViewportPicker& picker, const WorldDocument& world,
+                                                           const Road& selected, const FreeCamera& camera, SDL_Rect scene) const
+{
+    std::optional<RampControlHit> hit;
     VisitRampSeams(world, selected, [&](int i, auto key, const RampSeam& seam)
     {
-        if (i != host && testedLanes.emplace(i, key.second).second) pickLane(i, key.second);
         for (bool taper : {false, true})
         {
             const auto point = world.roads[i].OuterLanePosition(key.second, taper ? seam.tipDistance : seam.goreDistance);
