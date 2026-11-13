@@ -230,13 +230,13 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     return fields;
 }
 
-bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b)
+bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b, double minSpacing)
 {
     const double span = Math::Length(a - b);
 
-    if (span < Road::minPointSpacing)
+    if (span < minSpacing)
     {
-        return SDL_SetError("Road points must be at least 0.05 m apart");
+        return SDL_SetError("Road points must be at least %g m apart", minSpacing);
     }
 
     if (!std::isfinite(span))
@@ -253,6 +253,38 @@ bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b)
     {
         return SDL_SetError("The dashed markings exceed the world vertex buffer limit");
     }
+    return true;
+}
+
+bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int active, const std::set<int>& additional,
+                         Vector3 destination, double minSpacing)
+{
+    const auto offset = destination - start[active].position;
+    const auto movedPosition = [&](int i) { return i == active ? destination : start[i].position + offset; };
+    const auto validMove = [&](int i)
+    {
+        const auto moved = movedPosition(i);
+        if (!std::isfinite(moved.x) || !std::isfinite(moved.y) || !std::isfinite(moved.z))
+            return SDL_SetError("Road point position is out of range");
+        for (int j : {i - 1, i + 1})
+        {
+            if (j < 0 || j >= static_cast<int>(start.size())) continue;
+            if (j == active || additional.contains(j))
+            {
+                // A rigidly translated span may already be shorter than the current snap step.
+                if (j > i && moved == movedPosition(j))
+                    return SDL_SetError("Road points would coincide");
+            }
+            else if (!ValidRoadSpan(road, moved, start[j].position, minSpacing)) return false;
+        }
+        return true;
+    };
+
+    // Validate before writing so a blocked span leaves the whole selection at its last accepted pose.
+    if (offset != Vector3{} && (!validMove(active) || !std::ranges::all_of(additional, validMove))) return false;
+    road.points[active].position = destination;
+    for (int i : additional) road.points[i].position = movedPosition(i);
+    road.Rebuild();
     return true;
 }
 
@@ -315,16 +347,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
 
     if (translating)
     {
-        for (int neighbor : {i - 1, i + 1})
-        {
-            if (neighbor < 0 || neighbor >= static_cast<int>(road.points.size()))
-            {
-                continue;
-            }
-
-            if (!ValidRoadSpan(road, t.position, road.points[neighbor].position)) return false;
-        }
-        p.position = t.position;
+        return TranslateRoadPoints(road, road.points, i, target.additionalPoints, t.position);
     }
     else if (field == 3)
     {

@@ -37,7 +37,7 @@ struct RoadEditorState
     {
         if (RoadGroupSelected()) return {SelectionKind::RoadGroup, -1, -1, outlineSelection};
         if (selected < 0) return meshSelection;
-        return {point < 0 ? SelectionKind::Road : SelectionKind::Point, selected, point};
+        return {point < 0 ? SelectionKind::Road : SelectionKind::Point, selected, point, {}, additionalPoints};
     }
 
     bool PointSelected(int index) const

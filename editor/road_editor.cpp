@@ -55,6 +55,13 @@ namespace
             [anchor](const auto& end) { return end.anchor == anchor; });
     }
 
+    int AttachedPoint(const Road& road, IntersectionAnchor anchor)
+    {
+        if (road.points.front().anchor == anchor) return 0;
+        if (road.points.back().anchor == anchor) return static_cast<int>(road.points.size()) - 1;
+        return -1;
+    }
+
     RoadPoint AttachedEndpoint(const Intersection& junction, IntersectionAnchor anchor, bool first)
     {
         const Vector3 tangent = Intersection::Directions(junction.yaw)[anchor.side] * (first ? 1.0 : -1.0);
@@ -782,7 +789,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         if (rotate || (!subtract && Near(cursor, ToScreen(frame.position))))
         {
             BeginGroupDrag(world, rotate ? Drag::Rotate : Drag::Move);
-            grabOffset = pos;
+            planDragStart = pos;
             const Vector3 radial = pos - groupPivot;
             planRotation = DragAngle(std::atan2(radial.z, radial.x));
             snapRotation = subtract;
@@ -792,11 +799,15 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     if (!shift && state.selected >= 0 && state.point >= 0 && Near(cursor, Handle(world.roads[state.selected], state.point)))
     {
         Road& road = world.roads[state.selected];
-        const Vector3 radial = pos - road.points[state.point].position;
-        planRotation = DragAngle(std::atan2(radial.z, radial.x));
-        snapRotation = subtract;
-        BeginRoadDrag(road, Drag::Rotate, false);
-        return;
+        // At this zoom the rotation handle may overlap another selected point.
+        if (std::ranges::none_of(state.additionalPoints, [&](int i) { return Near(cursor, ToScreen(road.points[i].position)); }))
+        {
+            const Vector3 radial = pos - road.points[state.point].position;
+            planRotation = DragAngle(std::atan2(radial.z, radial.x));
+            snapRotation = subtract;
+            BeginRoadDrag(road, Drag::Rotate, false);
+            return;
+        }
     }
 
     // Give the nearest marker the click when zoom brings several within the hit radius.
@@ -833,24 +844,25 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
             return;
         }
         const Road* road = Selected(world);
-        const bool ownEnd = road && state.point >= 0 && road->points[state.point].anchor == closest;
-        if (subtract || !ownEnd)
+        if (!road || AttachedPoint(*road, *closest) < 0)
         {
             SelectAnchor(world, *closest, subtract);
             return;
         }
-        // Shift-dragging the attached endpoint itself still extends the road.
+        // An occupied anchor on this road is also a selectable endpoint.
     }
 
     auto grabPoint = [&](int roadIndex, int point)
     {
         const Road& road = world.roads[roadIndex];
-        state.PickPoint(roadIndex, point, shift, subtract);
+        const bool alreadySelected = roadIndex == state.selected && state.PointSelected(point);
+        state.PickPoint(roadIndex, point, shift || alreadySelected, subtract);
         if (subtract)
         {
             return;
         }
-        grabOffset = road.points[point].position - pos;
+        planDragStart = pos;
+        selectOnlyOnClick = !shift && alreadySelected && !state.additionalPoints.empty();
         BeginRoadDrag(road, Drag::Move, shift);
     };
     // An elevated endpoint can project exactly onto the preceding point.
@@ -947,7 +959,7 @@ void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
     drag = kind;
     const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
     const bool endpoint = state.point == 0 || state.point + 1 == static_cast<int>(road.points.size());
-    if (state.point >= 0 && translate && endpoint && shift)
+    if (state.point >= 0 && state.additionalPoints.empty() && translate && endpoint && shift)
     {
         extensionSource = state.point;
     }
@@ -983,42 +995,37 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
     }
     // Allow the smallest snapped step while retaining the free-drag spacing guard.
     const double minSpacing = drag == Drag::Gizmo && gizmo.settings.snapEnabled
-        ? std::min(0.05, gizmo.settings.StepMeters() * 0.5) : 0.05;
-    if (extensionSource)
+        ? std::min(Road::minPointSpacing, gizmo.settings.StepMeters() * 0.5) : Road::minPointSpacing;
+    if (!extensionSource)
     {
-        const bool inserted = road.points.size() != originalPoints.size();
-        if (Math::Length(position - originalPoints[*extensionSource].position) < minSpacing)
-        {
-            // Returning to the starting point withdraws the preview.
-            if (inserted)
-            {
-                road.points = originalPoints;
-                state.anchorSelection = dragStart->anchorSelection;
-                state.additionalPoints = dragStart->additionalPoints;
-                state.point = *extensionSource;
-                road.Rebuild();
-                dragChanged = false;
-            }
-            return;
-        }
-        if (!inserted)
-        {
-            state.anchorSelection.reset();
-            state.additionalPoints.clear();
-            state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
-            road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
-        }
-    }
-    else if ((state.point > 0 && Math::Length(position - road.points[state.point - 1].position) < minSpacing) ||
-             (state.point + 1 < static_cast<int>(road.points.size()) &&
-              Math::Length(position - road.points[state.point + 1].position) < minSpacing))
-    {
+        if (TranslateRoadPoints(road, originalPoints, state.point, state.additionalPoints, position, minSpacing))
+            dragChanged = position != originalPoints[state.point].position;
         return;
+    }
+    const bool inserted = road.points.size() != originalPoints.size();
+    if (Math::Length(position - originalPoints[*extensionSource].position) < minSpacing)
+    {
+        // Returning to the starting point withdraws the preview.
+        if (inserted)
+        {
+            road.points = originalPoints;
+            state.anchorSelection = dragStart->anchorSelection;
+            state.point = *extensionSource;
+            road.Rebuild();
+            dragChanged = false;
+        }
+        return;
+    }
+    if (!inserted)
+    {
+        state.anchorSelection.reset();
+        state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
+        road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
     }
 
     road.points[state.point].position = position;
     road.Rebuild();
-    dragChanged = extensionSource.has_value() || position != originalPoints[state.point].position;
+    dragChanged = true;
 }
 
 void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
@@ -1053,7 +1060,7 @@ void RoadEditor::UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer)
     const Vector3 pos = ToWorld(mouse.x, mouse.y);
     if (dragStart->roadGroup)
     {
-        if (drag == Drag::Move) TransformGroup(world, pos - grabOffset, {}, 0);
+        if (drag == Drag::Move) TransformGroup(world, pos - planDragStart, {}, 0);
         else
         {
             const Vector3 radial = pos - groupPivot;
@@ -1062,7 +1069,12 @@ void RoadEditor::UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer)
             TransformGroup(world, {}, {0,1,0}, -planRotation.Amount(snapRotation));
         }
     }
-    else if (drag == Drag::Move) MovePoint(world.roads[state.selected], pos + grabOffset);
+    else if (drag == Drag::Move)
+    {
+        const int source = extensionSource.value_or(state.point);
+        if (pos != planDragStart) selectOnlyOnClick = false;
+        MovePoint(world.roads[state.selected], originalPoints[source].position + (pos - planDragStart));
+    }
     else RotatePlanPoint(world.roads[state.selected]);
 }
 
@@ -1095,6 +1107,7 @@ void RoadEditor::Release(WorldDocument& world)
     }
 
     originalPoints.clear();
+    selectOnlyOnClick = false;
     anchorRoad.reset();
     extensionSource.reset();
     gizmoDrag.reset();
@@ -1846,6 +1859,15 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
+        if ((shift || subtract) && selected && state.point >= 0)
+        {
+            const int end = AttachedPoint(*selected, anchor);
+            if (end >= 0)
+            {
+                state.PickPoint(state.selected, end, shift, subtract);
+                return;
+            }
+        }
         if (shift && BeginAnchorRoad(world, anchor, mouse, subtract)) return;
         if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
         else if (shift || subtract) state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
@@ -2833,6 +2855,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             else if (drag == Drag::Rotate || drag == Drag::Move)
             {
                 UpdatePlanDrag(world, pointer);
+                if (selectOnlyOnClick) state.SelectPoint(state.selected, state.point);
             }
             Release(world);
         }

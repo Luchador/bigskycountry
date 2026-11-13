@@ -172,6 +172,7 @@ private:
     Vector3 originalRotation{};
     Vector3 groupPivot{}, groupOffset{};
     std::optional<int> extensionSource; // Original endpoint index for the entire Shift-drag.
+    bool selectOnlyOnClick = false; // In plan view, defer narrowing the selection until release.
 #ifndef _WIN32
     CameraToolbar cameraToolbar;
     std::string draggedAsset;
@@ -192,7 +193,7 @@ private:
     bool initialized = false;
     Drag drag = Drag::None;
     Vector3 measureStart{}, measureEnd{}; // World-space endpoints while Drag::Measure is active.
-    Vector3 grabOffset{};
+    Vector3 planDragStart{};
     SDL_FPoint mouse{};
     SDL_FPoint anchorPress{};
     std::optional<Road> anchorRoad; // Preview only until the left button is released.

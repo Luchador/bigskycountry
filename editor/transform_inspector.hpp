@@ -1,12 +1,12 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "road.hpp"
 #include "scene_hierarchy.hpp"
 #include <optional>
 #include <string_view>
 
 class WorldDocument;
-struct Road;
 
 enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor, RoadGroup };
 struct TransformTarget
@@ -15,6 +15,7 @@ struct TransformTarget
     int index = -1;
     int point = -1;
     std::set<SceneKey> members; // Identifies the exact group, including for queued inspector edits.
+    std::set<int> additionalPoints; // Other control points on the active road.
     bool YawOnly() const
     {
         return kind == SelectionKind::Intersection ||
@@ -48,6 +49,8 @@ struct InspectorEdit
 
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
 bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
-bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b);
+bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b, double minSpacing = Road::minPointSpacing);
+bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int active, const std::set<int>& additional,
+                         Vector3 destination, double minSpacing = Road::minPointSpacing);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, const ObjectTransform& desired);
 std::optional<double> ParseTransformValue(std::string_view text);
