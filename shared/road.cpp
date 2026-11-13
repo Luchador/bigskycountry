@@ -484,6 +484,13 @@ void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value, bool 
     Rebuild();
 }
 
+Vector3 Road::GuideOffset() const
+{
+    if (!style.railroad) return {};
+    const double lift = style.railroad->height + RailroadSettings::tieHeight + RailroadSettings::railHeight;
+    return ObjectTransform{{}, rotation}.ToMeshTransform().y * lift;
+}
+
 void Road::Rebuild()
 {
     MarkRebuilt();
@@ -494,6 +501,7 @@ void Road::Rebuild()
     splineLengthMeters = 0.0;
     pointSamples.clear();
     pavementTriangles.clear();
+    railroadTies.clear();
     edgeTriangles.clear();
     transitionStrips.clear();
     outline.clear();
@@ -531,7 +539,7 @@ void Road::Rebuild()
             // Resolve the oblique cross sections near a ramp join even on a nearly straight branch.
             const EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
                                    i + 1 == points.size() && rampCaps.back() ? RampFrameBlendLength() : 0.0};
-            const double tolerance = ends.start || ends.end ? 0.005 : 0.1;
+            const double tolerance = ends.start || ends.end || style.railroad ? 0.005 : 0.1;
             SampleCubic(curve, tolerance, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double)
             {
                 centerline.push_back(position);
@@ -564,6 +572,12 @@ void Road::Rebuild()
     // Sweep and wind the cross section in the road's own frame, including curbs and paint.
     const bool rotated = rotation != Vector3{};
     const MeshTransform frame = ObjectTransform{points.front().position, rotation}.ToMeshTransform();
+    if (style.railroad)
+    {
+        BuildRailroad(*this, *style.railroad, centerline, tangents, frame, style.edge == RoadEdge::Transition,
+                      style.transitionMaterial);
+        return;
+    }
     std::array<std::optional<RoadMouthFrame>, 2> caps{};
     std::vector<Vector3> trimmed;
     const std::vector<Vector3>* surfacePath = &centerline;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "math.hpp"
+#include "railroad.hpp"
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_rect.h>
 
@@ -55,6 +55,7 @@ struct RoadStyle
     static constexpr const char* defaultMaterial = "surfaces/roads/M_Asphalt01.bmat";
     std::string material = defaultMaterial;
     std::string transitionMaterial;
+    std::optional<RailroadSettings> railroad;
     bool oneWay = false; // All lanes travel from the first point to the last.
     bool leftShoulder = false;
     bool rightShoulder = false;
@@ -158,6 +159,7 @@ struct RoadGeometry
     std::vector<std::array<PavementVertex, 3>> pavementTriangles;
     std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
+    std::vector<RailroadTieRun> railroadTies;
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 };
@@ -217,6 +219,7 @@ struct Road : RoadGeometry
     std::array<std::vector<double>, 2> outerLaneDistances;
     std::span<const Vector3> OuterLane(int side) const;
     Vector3 OuterLanePosition(int side, double distance) const;
+    Vector3 GuideOffset() const; // Lift railroad handles and splines above their raised track.
     double SplineLengthMeters() const { return splineLengthMeters; }
     Vector3 Tangent(std::size_t index) const;
     bool InsertStation(int segment, double t, int stationId);

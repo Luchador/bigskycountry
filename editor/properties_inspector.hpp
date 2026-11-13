@@ -10,7 +10,7 @@ class WorldDocument;
 struct RoadEditorState;
 struct SceneKey;
 
-enum class PropertiesPage { Road, Intersection, Anchor, Terrain, Object, Marker, Other };
+enum class PropertiesPage { Road, Railroad, Intersection, Anchor, Terrain, Object, Marker, Other };
 
 enum class RoadProperty { Names, Material, TransitionMaterial, Markings, Alignment, Layout, Left, Right, Edge, Divided, Median, Width, Count };
 
@@ -30,7 +30,7 @@ struct PropertiesInspector
     bool AllDivided() const { return anyDivided && !Mixed(RoadProperty::Divided); }
     bool HasTransitionSlot() const
     {
-        return page == PropertiesPage::Road && materialSlot && style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge);
+        return (page == PropertiesPage::Road || page == PropertiesPage::Railroad) && materialSlot && style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge);
     }
     bool OneLane() const { return maxLanes == 1; }
     bool ThreeLanes() const { return !style.oneWay && minLanes == 3 && maxLanes == 3; }

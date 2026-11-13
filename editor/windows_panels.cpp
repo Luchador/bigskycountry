@@ -452,6 +452,7 @@ struct WindowsPanels::Impl
         const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
         const int stripHeight = lastInspector && lastInspector->properties.HasTransitionSlot() ? 41 : 0;
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight :
+                           page == PropertiesPage::Railroad ? 211 + stripHeight :
                            page == PropertiesPage::Marker ? 267 :
                            page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
@@ -927,6 +928,11 @@ struct WindowsPanels::Impl
             case IDC_PAINT_MARKINGS: PostAction(RoadAction::TogglePaintMarkings); return;
             case IDC_FINISH: PostAction(RoadAction::Finish); SetFocus(frame); return;
             case IDC_CANCEL_DRAFT: PostAction(RoadAction::Cancel); SetFocus(frame); return;
+            case IDC_BED_WIDTH_LESS: PostAction(RoadAction::NarrowerEmbankment); return;
+            case IDC_BED_WIDTH_MORE: PostAction(RoadAction::WiderEmbankment); return;
+            case IDC_BED_HEIGHT_LESS: PostAction(RoadAction::LowerEmbankment); return;
+            case IDC_BED_HEIGHT_MORE: PostAction(RoadAction::RaiseEmbankment); return;
+            case IDC_BED_TRANSITION: PostAction(RoadAction::ToggleEmbankmentTransition); return;
             case IDC_RADIUS_LESS: PostAction(RoadAction::SmallerRadius); return;
             case IDC_RADIUS_MORE: PostAction(RoadAction::LargerRadius); return;
             case IDC_STOP_LINE: PostAction(RoadAction::ToggleStopLine); return;
@@ -985,6 +991,7 @@ struct WindowsPanels::Impl
         const bool stripChanged = !lastInspector || lastInspector->properties.HasTransitionSlot() != properties.HasTransitionSlot();
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
+        const bool railroad = properties.page == PropertiesPage::Railroad;
         const bool junction = properties.page == PropertiesPage::Intersection;
         if (pageChanged)
         {
@@ -996,13 +1003,18 @@ struct WindowsPanels::Impl
                            IDC_GAP_MORE, IDC_MEDIAN, IDC_CAPTION_ALIGN, IDC_CAPTION_LANES, IDC_CAPTION_SHOULDERS,
                            IDC_CAPTION_EDGES, IDC_CAPTION_GAP, IDC_CAPTION_MEDIAN})
                 ShowWindow(GetDlgItem(road, id), roadPage ? SW_SHOWNA : SW_HIDE);
+            for (int id = IDC_BED_WIDTH_LABEL; id <= IDC_BED_TRANSITION; ++id)
+                ShowWindow(GetDlgItem(road, id), railroad ? SW_SHOWNA : SW_HIDE);
+            const auto slot = DialogSize(road, 7, railroad ? 211 : ROAD_PANEL_HEIGHT);
+            SetWindowPos(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, slot.cx, slot.cy - scroll, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
                 ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
             for (int id : {IDC_MARKER_TEXT_LABEL, IDC_MARKER_TEXT, IDC_MARKER_TEXT_COLOR, IDC_MARKER_CLEAR_MATERIAL})
                 ShowWindow(GetDlgItem(road, id), marker ? SW_SHOWNA : SW_HIDE);
-            ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && !railroad && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_ROAD_MATERIAL), roadPage || properties.materialSlot ? SW_SHOWNA : SW_HIDE);
         }
         if (stripChanged)
@@ -1023,6 +1035,19 @@ struct WindowsPanels::Impl
         InvalidateRect(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, FALSE);
         const auto& style = properties.style;
         const int lanes = style.GetLaneCount();
+        if (railroad)
+        {
+            const auto& bed = *style.railroad;
+            wchar_t value[48];
+            swprintf(value, 48, L"%.2f", bed.width);
+            SetDlgItemTextW(road, IDC_BED_WIDTH_VALUE, value);
+            swprintf(value, 48, L"%.2f", bed.height);
+            SetDlgItemTextW(road, IDC_BED_HEIGHT_VALUE, value);
+            EnableWindow(GetDlgItem(road, IDC_BED_WIDTH_LESS), bed.width > RailroadSettings::tieLength);
+            EnableWindow(GetDlgItem(road, IDC_BED_HEIGHT_LESS), bed.height > 0);
+            CheckDlgButton(road, IDC_BED_TRANSITION, style.edge == RoadEdge::Transition ? BST_CHECKED : BST_UNCHECKED);
+            return;
+        }
         if (!roadPage)
         {
             SetDlgItemTextW(road, IDC_PROPERTY_DETAIL, junction ? L"Corner radius (m)" : Wide(properties.detail).c_str());

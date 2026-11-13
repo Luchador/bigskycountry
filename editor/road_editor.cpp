@@ -36,6 +36,8 @@ namespace
 
     SDL_FRect MaterialSlotRect(const PropertiesInspector& properties, bool strip = false)
     {
+        if (properties.page == PropertiesPage::Railroad)
+            return {12, strip ? 248.0f : 190.0f, 194, 54};
         const float y = (properties.AllDivided() ? 514.0f : 406.0f) +
                         LaneOptionsHeight(properties);
         return {12, y + (strip ? 58 : 0), 194, 54};
@@ -179,7 +181,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         }
         const RoadPoint& point = road->points[state.point];
         if (point.ramp || point.connectorTarget) return {};
-        auto placement = RoadOverlay::PointPlacement(point.position, camera, scene);
+        auto placement = RoadOverlay::PointPlacement(point.position + road->GuideOffset(), camera, scene);
         if (placement && gizmo.settings.space == GizmoSpace::Local)
         {
             placement->localAxes = road->PointAxes(state.point);
@@ -188,7 +190,8 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     }
     const auto fields = Inspect(world, target);
     if (fields.target.kind == SelectionKind::None || fields.roadBound) return {};
-    auto placement = GizmoPlacement::At(fields.value.position, camera, scene);
+    const Vector3 offset = target.kind == SelectionKind::Road ? world.roads.at(target.index).GuideOffset() : Vector3{};
+    auto placement = GizmoPlacement::At(fields.value.position + offset, camera, scene);
     if (placement) placement->yawOnly = target.YawOnly();
     if (placement && gizmo.settings.space == GizmoSpace::Local)
     {
@@ -313,6 +316,15 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
 #ifndef _WIN32
 std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& properties) const
 {
+    if (properties.page == PropertiesPage::Railroad)
+    {
+        const auto& bed = *properties.style.railroad;
+        return {{Action::NarrowerEmbankment, {12, 60, 32, 25}, "-", false, bed.width > RailroadSettings::tieLength},
+                {Action::WiderEmbankment, {174, 60, 32, 25}, "+"},
+                {Action::LowerEmbankment, {12, 113, 32, 25}, "-", false, bed.height > 0},
+                {Action::RaiseEmbankment, {174, 113, 32, 25}, "+"},
+                {Action::ToggleEmbankmentTransition, {12, 149, 194, 28}, "Transition strip", properties.style.edge == RoadEdge::Transition}};
+    }
     if (properties.page == PropertiesPage::Intersection)
         return {{Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
                 {Action::LargerRadius, {174, 73, 32, 28}, "+"}};
@@ -465,15 +477,26 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         CreateRamp(command, world);
         return;
     }
-    if (command == EditorCommand::CreateRoad)
+    if (command == EditorCommand::CreateRoad || command == EditorCommand::CreateRailroad)
     {
-        constexpr double initialLength = 10.0; // meters along world X
+        const bool railroad = command == EditorCommand::CreateRailroad;
+        const double initialLength = railroad ? 50.0 : 10.0;
         EditSnapshot before(state);
         Road road;
         if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
-        road.style = Style(world);
-        road.style.oneWay = false;
-        road.style.material = RoadStyle::defaultMaterial;
+        if (railroad)
+        {
+            road.style.railroad.emplace();
+            road.style.material.clear();
+            road.style.SetLaneCount(1);
+            road.paintMarkings = false;
+        }
+        else
+        {
+            road.style = Style(world).railroad ? state.defaults : Style(world);
+            road.style.oneWay = false;
+            road.style.material = RoadStyle::defaultMaterial;
+        }
         road.points = {{creationPoint, {}}, {creationPoint + Vector3{initialLength, 0, 0}, {}}};
         road.Rebuild();
         world.roads.push_back(std::move(road));
@@ -645,6 +668,7 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     }
     if (group)
     {
+        if (InspectProperties(world, state, false).page == PropertiesPage::Other) return;
         EditRoadGroup(world, [&](RoadProperties& p) { p.style.*materialField = path; });
         return;
     }
@@ -710,7 +734,7 @@ void RoadEditor::BeginDraft(WorldDocument& world)
     if (!state.draft)
     {
         before.emplace(state);
-        const RoadStyle style = Style(world);
+        const RoadStyle style = Style(world).railroad ? state.defaults : Style(world);
         state.draft.emplace().style = style;
         state.draft->style.oneWay = false;
         state.draft->style.material = RoadStyle::defaultMaterial;
@@ -832,7 +856,7 @@ void RoadEditor::EditRoadGroup(WorldDocument& world, const std::function<void(Ro
 void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
 {
     const auto p = InspectProperties(world, state, EditingDraft());
-    if (p.page != PropertiesPage::Road) return;
+    if (p.page != PropertiesPage::Road && p.page != PropertiesPage::Railroad) return;
     if (!EditingDraft() && state.MultipleRoadsSelected())
     {
         EditRoadGroup(world, [&](RoadProperties& road) { p.ApplyRoadStyle(road.style, action); });
@@ -849,7 +873,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     Road* road = index >= 0 ? &world.roads[index] : nullptr;
     EditSnapshot before(state, road);
     current = style;
-    state.defaults = style;
+    if (!style.railroad) state.defaults = style;
     if (road)
     {
         road->Rebuild();
@@ -1508,7 +1532,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
 
     for (const Button& b : Buttons(properties))
     {
-        if (b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings ||
+        if (b.action == Action::ToggleEmbankmentTransition || b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings ||
             b.action == Action::Left || b.action == Action::Right || b.action == Action::Divide)
         {
             const SDL_FRect box{b.rect.x + 2, b.rect.y + 6, 16, 16};
@@ -1542,7 +1566,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
             continue;
         const auto& path = strip ? properties.style.transitionMaterial : properties.material;
         const auto property = strip ? RoadProperty::TransitionMaterial : RoadProperty::Material;
-        const SDL_FRect slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties, strip) : propertyMaterialSlot;
+        const SDL_FRect slot = (properties.page == PropertiesPage::Road || properties.page == PropertiesPage::Railroad) ? MaterialSlotRect(properties, strip) : propertyMaterialSlot;
         const SDL_FRect icon{slot.x + 3, slot.y + 3, 48, 48};
         const char* caption = strip ? "Transition strip" : properties.MaterialCaption();
         if (!Fill(renderer, slot, EditorTheme::list) || !Fill(renderer, icon, EditorTheme::field) ||
@@ -1569,6 +1593,14 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
             return false;
     }
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
+    if (properties.page == PropertiesPage::Railroad)
+    {
+        const auto& bed = *style.railroad;
+        return Text(renderer, 12, 43, "Embankment width (m)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 77, 68, "%.2f", bed.width) &&
+               Text(renderer, 12, 96, "Embankment height (m)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 77, 121, "%.2f", bed.height);
+    }
     if (properties.page == PropertiesPage::Intersection)
         return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
                SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius);
@@ -1711,6 +1743,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
     const int contentHeight = properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
+        properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
         properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
@@ -1769,7 +1802,7 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
     }
     state.anchorSelection.reset();
     const Road* road = Selected(world);
-    if (!road || !state.additionalPoints.empty() || state.point < 0 ||
+    if (!road || road->style.railroad || !state.additionalPoints.empty() || state.point < 0 ||
         (state.point != 0 && state.point + 1 != static_cast<int>(road->points.size())))
     {
         status = "Select one road endpoint first";
@@ -2616,7 +2649,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                         const SDL_FPoint local{point.x + scene.x - roadPanel.x,
                                                point.y + scene.y - roadPanel.y + roadScroll};
                         const auto properties = InspectProperties(world, state, EditingDraft());
-                        const auto slot = properties.page == PropertiesPage::Road ? MaterialSlotRect(properties) : propertyMaterialSlot;
+                        const auto slot = (properties.page == PropertiesPage::Road || properties.page == PropertiesPage::Railroad) ? MaterialSlotRect(properties) : propertyMaterialSlot;
                         const auto stripSlot = MaterialSlotRect(properties, true);
                         const bool strip = properties.HasTransitionSlot() && SDL_PointInRectFloat(&local, &stripSlot);
                         if (properties.materialSlot && local.y >= roadScroll && local.y < roadScroll + roadPanel.h &&

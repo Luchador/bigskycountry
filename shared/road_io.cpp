@@ -19,6 +19,12 @@ namespace
                median >= static_cast<int>(RoadMedian::Concrete) && median <= static_cast<int>(RoadMedian::Grass);
     }
 
+    bool ValidMaterials(const RoadStyle& style)
+    {
+        const bool base = (style.railroad && style.material.empty()) || Material::ValidAssetPath(style.material);
+        return base && (style.transitionMaterial.empty() || Material::ValidAssetPath(style.transitionMaterial));
+    }
+
     bool ValidPoint(Vector3 position, double heading, double pitch)
     {
         return std::isfinite(position.x) && std::isfinite(position.y) &&
@@ -38,8 +44,8 @@ namespace RoadIO
     {
         const int edge = static_cast<int>(style.edge);
         const int median = static_cast<int>(style.median);
-        if ((!style.transitionMaterial.empty() && !Material::ValidAssetPath(style.transitionMaterial)) ||
-            !Material::ValidAssetPath(style.material) ||
+        if (!ValidMaterials(style) ||
+            (style.railroad && (!style.railroad->Valid() || style.edge == RoadEdge::Curb)) ||
             !ValidStyle(style.GetLaneCount(), static_cast<int>(style.threeLaneLayout), style.DividedGap(), edge, median))
         {
             out.setstate(std::ios::failbit);
@@ -49,7 +55,9 @@ namespace RoadIO
             << style.rightShoulder << ' ' << static_cast<int>(style.threeLaneLayout) << ' '
             << style.IsDivided() << ' ' << style.DividedGap() << ' ' << edge << ' ' << median
             << ' ' << std::quoted(style.material) << ' ' << style.SingleLaneExtraWidth()
-            << ' ' << std::quoted(style.transitionMaterial) << ' ' << style.oneWay << '\n';
+            << ' ' << std::quoted(style.transitionMaterial) << ' ' << style.oneWay << ' ' << style.railroad.has_value();
+        if (style.railroad) out << ' ' << style.railroad->width << ' ' << style.railroad->height;
+        out << '\n';
     }
 
     void ReadStyle(std::istream& in, RoadStyle& style, std::uint32_t version)
@@ -74,9 +82,20 @@ namespace RoadIO
         if (version >= 12) in >> std::quoted(style.transitionMaterial);
         style.oneWay = false;
         if (version >= 13) in >> style.oneWay;
+        style.railroad.reset();
+        if (version >= 16)
+        {
+            bool rail = false;
+            if (in >> rail && rail)
+            {
+                auto& track = style.railroad.emplace();
+                if (!(in >> track.width >> track.height) || !track.Valid() ||
+                    (edge != static_cast<int>(RoadEdge::None) && edge != static_cast<int>(RoadEdge::Transition)))
+                    in.setstate(std::ios::failbit);
+            }
+        }
         if (in && divided && style.oneWay) in.setstate(std::ios::failbit);
-        if ((!style.transitionMaterial.empty() && !Material::ValidAssetPath(style.transitionMaterial)) ||
-            !in || !style.SetSingleLaneExtraWidth(extraWidth) || !Material::ValidAssetPath(style.material) ||
+        if (!in || !ValidMaterials(style) || !style.SetSingleLaneExtraWidth(extraWidth) ||
             !ValidStyle(lanes, layout, gap, edge, median) ||
             (version >= 5 && (gap < RoadStyle::minSeparation || (divided && lanes % 2 != 0))))
         {

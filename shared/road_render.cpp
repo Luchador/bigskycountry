@@ -128,6 +128,25 @@ namespace
                     vertices.push_back({ScreenPoint(v.position, focal, viewport), v.color, {}});
                 }, focal, viewport);
             };
+            // Draw the sleepers between the bed and the rails in the top-down view.
+            for (const auto& run : road.railroadTies)
+            {
+                const auto center = ScreenPoint(transform(run.Center()), focal, viewport);
+                const double margin = run.Radius() * focal;
+                if (focal * RailroadSettings::tieSpacing < 0.5 ||
+                    center.x < -margin || center.x > viewport.w + margin ||
+                    center.y < -margin || center.y > viewport.h + margin) continue;
+                const auto& mesh = *RailroadTieMesh();
+                for (int i = 0; i < run.count; ++i)
+                {
+                    const auto tie = run.At(i);
+                    for (int corner : {0, 1, 2, 0, 2, 3})
+                    {
+                        const auto p = transform(tie.Point(mesh.vertices[corner].position));
+                        vertices.push_back({ScreenPoint(p, focal, viewport), {0.36f, 0.27f, 0.20f, 1}, {}});
+                    }
+                }
+            }
             appendEdges(road.edgeTriangles);
             for (const auto& [path, strip] : road.transitionStrips) appendEdges(strip);
             return;
@@ -173,7 +192,7 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
             SubmitMaterialTriangle({t[0].position, t[1].position, t[2].position}, fallback,
                                    {t[0].uv, t[1].uv, t[2].uv});
         }
-        materialRanges.push_back({start, vertices.size(), material});
+        if (!material.empty()) materialRanges.push_back({start, vertices.size(), material});
     }
     for (const auto& triangle : road.edgeTriangles)
     {
@@ -190,6 +209,15 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
         }
         if (!path.empty() && vertices.size() > first)
             materialRanges.push_back({first, vertices.size(), path, nullptr, true});
+    }
+    for (const auto& run : road.railroadTies)
+    {
+        const double radius = run.Radius();
+        const auto center = run.Center();
+        // Once the spacing projects to less than half a pixel, the bed and rails carry the silhouette.
+        if (!SphereVisible(center, radius) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing)
+            continue;
+        for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)});
     }
     solid(road.yellowStripes, yellowPaint);
     solid(road.whiteStripes, whitePaint);

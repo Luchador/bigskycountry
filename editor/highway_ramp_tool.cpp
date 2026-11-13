@@ -6,7 +6,7 @@
 
 std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit, int side)
 {
-    if (host.style.GetLaneCount() < 2) return {};
+    if (host.style.railroad || host.style.GetLaneCount() < 2) return {};
     double best = std::numeric_limits<double>::infinity();
     std::optional<RampSite> site;
     for (int i = 0; i + 1 < static_cast<int>(host.points.size()); ++i)
@@ -37,7 +37,7 @@ std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit, int side)
 std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation, const RoadStyle& style,
                                  bool exit, double length)
 {
-    if (host.style.GetLaneCount() < 2 || !style.oneWay || !newStation || site.segment < 0 ||
+    if (host.style.railroad || host.style.GetLaneCount() < 2 || !style.oneWay || !newStation || site.segment < 0 ||
         site.segment + 1 >= static_cast<int>(host.points.size()) || (site.side != -1 && site.side != 1)) return {};
     int station = newStation;
     if (site.t == 0 || site.t == 1)

@@ -29,7 +29,7 @@ namespace
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
-    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
+    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
                                         {BSC_CREATE_MARKER, L"&Marker"}};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
@@ -338,6 +338,7 @@ namespace
     constexpr int barTabWidth = 52, dropdownWidth = 136;
 
     constexpr BarAction createItems[] = {{"Create Road", EditorCommand::CreateRoad},
+                                         {"Create Railroad", EditorCommand::CreateRailroad},
                                          {"Create Intersection", EditorCommand::CreateIntersection},
                                          {"Marker", EditorCommand::CreateMarker}};
     constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
@@ -412,6 +413,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_CREATE_RAILROAD) return EditorCommand::CreateRailroad;
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
     if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;

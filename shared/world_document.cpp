@@ -9,6 +9,7 @@
 #include "vehicle.hpp"
 
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <filesystem>
 #include <cmath>
 #include <iomanip>
@@ -258,6 +259,8 @@ bool WorldDocument::ValidConnections() const
     for (const Road& road : roads)
     {
         if (road.points.size() < 2) return SDL_SetError("Road needs two endpoints");
+        if (road.style.railroad && std::ranges::any_of(road.points, [](const RoadPoint& p) { return p.Joined() || p.rampStation; }))
+            return SDL_SetError("Railroad control points cannot have highway or junction links");
         for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
         {
             if (point->connectorSocket && !sockets.insert(point->connectorSocket).second)

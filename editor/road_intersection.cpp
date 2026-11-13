@@ -168,7 +168,7 @@ namespace
 std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, RoadPick hit, Vector3 position)
 {
     const int last = static_cast<int>(road.points.size()) - 1;
-    if (last < 1) return {};
+    if (last < 1 || road.style.railroad) return {};
     Location at{};
     if (hit.kind == RoadPickKind::Point)
     {

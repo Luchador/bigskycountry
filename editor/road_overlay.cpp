@@ -72,13 +72,14 @@ namespace
 
     template<typename Visit>
     void VisitSplineTriangles(const OverlayStroke& stroke, const FreeCamera& camera, std::span<const Vector3> samples,
-                              Visit visit, float halfWidth = overlayStrokeWidth, float innerHalfWidth = 0.0f)
+                              Visit visit, float halfWidth = overlayStrokeWidth, float innerHalfWidth = 0.0f,
+                              Vector3 offset = {})
     {
         if (samples.size() < 2) return;
         const Vector3 lift = camera.WorldDirectionToView(markerOffsetPixels);
         const auto display = [&](Vector3 point)
         {
-            const Vector3 v = camera.WorldToView(point);
+            const Vector3 v = camera.WorldToView(point + offset);
             return v + lift * (v.z / stroke.focal); // Match the elevated centers of the point markers.
         };
         Vector3 previous = display(samples.front());
@@ -96,7 +97,7 @@ namespace
         for (int i = 0; i + 1 < static_cast<int>(road.points.size()); ++i)
         {
             VisitSplineTriangles(stroke, camera, road.SegmentSamples(i),
-                                 [&](Vector3 a, Vector3 b, Vector3 c) { visit(i, a, b, c); });
+                                 [&](Vector3 a, Vector3 b, Vector3 c) { visit(i, a, b, c); }, overlayStrokeWidth, 0.0f, road.GuideOffset());
         }
     }
 
@@ -125,7 +126,7 @@ namespace
     {
         for (int i = 0; i < static_cast<int>(road.points.size()); ++i)
         {
-            if (const auto placement = RoadOverlay::PointPlacement(road.points[i].position, camera, scene))
+            if (const auto placement = RoadOverlay::PointPlacement(road.points[i].position + road.GuideOffset(), camera, scene))
             {
                 visit(i, *placement);
             }

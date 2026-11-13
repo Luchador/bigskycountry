@@ -87,6 +87,15 @@ bool ViewportPicker::TestRoad(const RoadGeometry& road)
     };
     testSurface(road.pavementTriangles);
     testSurface(road.edgeTriangles);
+    for (const auto& run : road.railroadTies)
+    {
+        const Vector3 offset = run.Center() - eye;
+        const double along = Math::Dot(offset, ray) / Math::Dot(ray, ray);
+        const auto delta = offset - ray * std::clamp(along, 0.0, depth);
+        const double radius = run.Radius();
+        if (Math::Dot(delta, delta) > radius * radius) continue;
+        for (int i = 0; i < run.count; ++i) TestMesh({RailroadTieMesh(), run.At(i)});
+    }
     for (const auto& [material, strip] : road.transitionStrips) testSurface(strip);
     return depth < previous;
 }

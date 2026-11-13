@@ -18,6 +18,22 @@ double PropertiesInspector::StepGap(bool increase) const
 
 void PropertiesInspector::ApplyRoadStyle(RoadStyle& destination, RoadAction action) const
 {
+    if (destination.railroad)
+    {
+        auto& bed = *destination.railroad;
+        switch (action)
+        {
+        case RoadAction::NarrowerEmbankment: bed.width = std::max(RailroadSettings::tieLength, bed.width - 0.5); break;
+        case RoadAction::WiderEmbankment: bed.width += 0.5; break;
+        case RoadAction::LowerEmbankment: bed.height = std::max(0.0, bed.height - 0.25); break;
+        case RoadAction::RaiseEmbankment: bed.height += 0.25; break;
+        case RoadAction::ToggleEmbankmentTransition:
+            destination.edge = style.edge == RoadEdge::Transition ? RoadEdge::None : RoadEdge::Transition;
+            break;
+        default: break;
+        }
+        return;
+    }
     switch (action)
     {
     case RoadAction::Straight:
@@ -81,6 +97,7 @@ void PropertiesInspector::ApplyRoadStyle(RoadStyle& destination, RoadAction acti
 
 const char* PropertiesInspector::MaterialCaption() const
 {
+    if (page == PropertiesPage::Railroad) return "Embankment material";
     if (page == PropertiesPage::Marker) return "Mesh material";
     if (page == PropertiesPage::Terrain) return "Terrain material";
     return "Pavement material";
@@ -126,7 +143,28 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
     {
         const Road* road = editingDraft ? &*state.draft : group ? &world.roads.at(state.SelectedRoadRows().front().index) :
                            state.selected >= 0 ? &world.roads.at(state.selected) : nullptr;
+        if (group)
+        {
+            const auto rows = state.SelectedRoadRows();
+            if (std::ranges::any_of(rows, [&](auto key) { return world.roads[key.index].style.railroad.has_value(); }))
+            {
+                result.page = PropertiesPage::Other;
+                result.title = "Multiple spline paths";
+                return result;
+            }
+        }
         const auto& first = road ? road->style : state.defaults;
+        if (first.railroad)
+        {
+            result.page = PropertiesPage::Railroad;
+            result.style = first;
+            result.materialSlot = true;
+            result.material = first.material;
+            char title[72];
+            SDL_snprintf(title, sizeof(title), "Railroad | %.2f m", road->SplineLengthMeters());
+            result.title = title;
+            return result;
+        }
         result.style = first;
         result.minLanes = result.maxLanes = first.GetLaneCount();
         result.minExtraWidth = result.maxExtraWidth = first.SingleLaneExtraWidth();
