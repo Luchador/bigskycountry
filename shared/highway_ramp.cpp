@@ -125,10 +125,10 @@ void WorldDocument::RefreshRampConnections(bool force)
             // Match the actual cross-section of the source, including whole-road bank.
             const auto frame = ObjectTransform{{}, source->rotation}.ToMeshTransform();
             const Vector3 local = frame.Unrotate(tangent);
-            const double run = std::hypot(local.x, local.z);
-            const Vector3 left = run > 1e-8 * std::abs(local.y)
-                ? Vector3{-local.z / run, 0, local.x / run} : Vector3{0, 0, 1};
-            const RoadMouthFrame cap{frame.Direction(left), frame.y};
+            const Vector3 up = source->points[i].surfaceUp;
+            const Vector3 across = Math::Cross(local, up);
+            const Vector3 left = Math::Length(across) > 1e-8 ? Math::Normalize(across) : Vector3{0, 0, 1};
+            const RoadMouthFrame cap{frame.Direction(left), frame.Direction(up)};
             if (road.rampCaps[e] != cap)
             {
                 road.rampCaps[e] = cap;

@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <numeric>
 #include <sstream>
 
 namespace
@@ -256,6 +257,98 @@ bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b, double minSpacing)
         return SDL_SetError("The dashed markings exceed the world vertex buffer limit");
     }
     return true;
+}
+
+std::optional<double> FlattenElevation(const Road& road, int segment)
+{
+    if (road.style.railroad || segment < 0 || static_cast<std::size_t>(segment) + 1 >= road.points.size()) return {};
+    const int last = static_cast<int>(road.points.size()) - 1;
+    const auto& a = road.points[segment];
+    const auto& b = road.points[segment + 1];
+    const auto fixed = [](const RoadPoint& point) { return point.anchor || point.ramp || point.connectorTarget; };
+    if (fixed(a) && fixed(b) && a.position.y != b.position.y) return {};
+
+    bool changed = a.position.y != b.position.y;
+    for (int i : {segment, segment + 1})
+    {
+        const auto& point = road.points[i];
+        const double handle = i == segment ? point.outgoingHandle : point.incomingHandle;
+        if (handle == 0) continue;
+        if (road.style.curved && std::abs(road.Tangent(i).y) > 1e-12)
+        {
+            // A linked ramp or connector receives its tangent from the source road.
+            if (point.ramp || point.connectorTarget) return {};
+            changed = true;
+        }
+        if (!road.style.curved && point.anchor && point.heading && road.skewEnds[i == 0 ? 0 : 1] &&
+            std::abs(std::sin(point.pitch)) > 1e-12) changed = true;
+    }
+    const auto frame = ObjectTransform{{}, road.rotation}.ToMeshTransform();
+    const auto levelUp = frame.Unrotate({0, 1, 0});
+    if (!changed && Math::Length(a.surfaceUp - levelUp) < 1e-12 && Math::Length(b.surfaceUp - levelUp) < 1e-12) return {};
+    for (int end = 0; end < 2; ++end)
+    {
+        const auto& cap = road.rampCaps[end];
+        if (cap && (end == 0 ? segment == 0 : segment + 1 == last) &&
+            (std::abs(cap->left.y) > 1e-12 || std::abs(cap->leftPerMeter.y) > 1e-12)) return {};
+    }
+
+    double y = std::midpoint(a.position.y, b.position.y);
+    if (fixed(a)) y = a.position.y;
+    if (fixed(b)) y = b.position.y;
+    const Vector3 start{a.position.x, y, a.position.z}, end{b.position.x, y, b.position.z};
+    if (!ValidRoadSpan(road, start, end) ||
+        (segment > 0 && !ValidRoadSpan(road, road.points[segment - 1].position, start)) ||
+        (segment + 1 < last && !ValidRoadSpan(road, end, road.points[segment + 2].position)))
+        return {};
+    return y;
+}
+
+void FlattenRoadSegment(Road& road, int segment, double elevation)
+{
+    auto& a = road.points[segment];
+    auto& b = road.points[segment + 1];
+    const Vector3 chord = b.position - a.position;
+    const std::array<Vector3, 2> tangents{road.Tangent(segment), road.Tangent(segment + 1)};
+    a.position.y = b.position.y = elevation;
+    a.surfaceUp = b.surfaceUp = ObjectTransform{{}, road.rotation}.ToMeshTransform().Unrotate({0, 1, 0});
+    if (road.style.curved)
+    {
+        // Handles are fractions of a 3D chord. Project the old control polygon
+        // onto XZ so removing the grade preserves the bend viewed from above.
+        const double ratio = Math::Length(chord) / std::hypot(chord.x, chord.z);
+        for (int end = 0; end < 2; ++end)
+        {
+            const int i = segment + end;
+            auto& point = road.points[i];
+            double& handle = end == 0 ? point.outgoingHandle : point.incomingHandle;
+            const Vector3 tangent = tangents[end];
+            const double run = std::hypot(tangent.x, tangent.z);
+            handle *= ratio * run;
+            if (handle == 0 || point.ramp || point.connectorTarget) continue;
+            const Vector3 flat{tangent.x / run, 0, tangent.z / run};
+            // Keep automatic headings whenever moving the points already yields the desired tangent.
+            if (Math::Length(road.Tangent(i) - flat) > 1e-12)
+            {
+                point.heading = std::atan2(flat.z, flat.x);
+                point.pitch = 0;
+            }
+        }
+    }
+    else
+    {
+        // Skewed junction mouths on linear roads still have a Bézier approach.
+        for (auto* p : {&a, &b})
+        {
+            if (p->anchor && p->heading && road.skewEnds[p == &road.points.front() ? 0 : 1])
+            {
+                double& handle = p == &a ? p->outgoingHandle : p->incomingHandle;
+                handle *= Math::Length(chord) / std::hypot(chord.x, chord.z) * std::abs(std::cos(p->pitch));
+                p->pitch = 0;
+            }
+        }
+    }
+    road.Rebuild();
 }
 
 bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int active, const std::set<int>& additional,

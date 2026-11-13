@@ -31,6 +31,7 @@ namespace
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
                                         {BSC_CREATE_MARKER, L"&Marker"}};
+    constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
@@ -370,7 +371,8 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 }
 #endif
 
-std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps)
+std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -401,6 +403,11 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     else
     {
         ready = AddSubmenu(root, create, createItems);
+        if (ready && canFlatten)
+        {
+            ready = Insert(root, flatten);
+            if (!*canFlatten) EnableMenuItem(root, BSC_FLATTEN_SEGMENT, MF_BYCOMMAND | MF_GRAYED);
+        }
         if (ready && !canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
     }
     if (ready && ClientToScreen(hwnd, &at))
@@ -413,6 +420,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_FLATTEN_SEGMENT) return EditorCommand::FlattenSegment;
     if (choice == BSC_CREATE_RAILROAD) return EditorCommand::CreateRailroad;
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
@@ -437,10 +445,14 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return {};
     }
     intersectionEnabled = canCreateIntersection;
-    rootItem = {0, 0, 104, itemHeight};
+    flattenEnabled = canFlatten;
+    flattenFocused = false;
+    const float rootHeight = itemHeight * (canFlatten ? 2 : 1);
+    rootItem = {0, 0, canFlatten ? 152.0f : 104.0f, itemHeight};
     submenu = {0, 0, 184, itemHeight * std::size(createItems)};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
-    rootItem.y = fit(viewportPoint.y, itemHeight, scene.h);
+    rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
+    flattenItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
     submenu.x = rootItem.x + rootItem.w;
     submenu.y = fit(rootItem.y, submenu.h, scene.h);
     if (submenu.x + submenu.w > scene.w)
@@ -452,7 +464,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         else
         {
             submenu.x = fit(rootItem.x, submenu.w, scene.w);
-            const float below = rootItem.y + itemHeight;
+            const float below = rootItem.y + rootHeight;
             const float top = below + submenu.h <= scene.h ? below : rootItem.y - submenu.h;
             submenu.y = fit(top, submenu.h, scene.h);
         }
@@ -590,11 +602,15 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         {
         case SDLK_ESCAPE: popup = Popup::Closed; break;
         case SDLK_LEFT:
-            if (!rampMenu) { popup = Popup::Create; activeItem = 0; }
+            if (popup == Popup::Submenu) { popup = Popup::Create; activeItem = 0; }
             break;
         case SDLK_UP:
         case SDLK_DOWN:
-            if (popup != Popup::Create)
+            if (popup == Popup::Create)
+            {
+                if (flattenEnabled.value_or(false)) flattenFocused = !flattenFocused;
+            }
+            else
             {
                 const int step = event.key.key == SDLK_DOWN ? 1 : -1;
                 for (int i = 0; i < count; ++i)
@@ -605,7 +621,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
             }
             break;
         case SDLK_RIGHT:
-            if (!rampMenu) popup = Popup::Submenu;
+            if (popup == Popup::Create && !flattenFocused) popup = Popup::Submenu;
             break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
@@ -614,10 +630,12 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
                 if (Enabled(items[activeItem].command)) command = items[activeItem].command;
                 popup = Popup::Closed;
             }
-            else
+            else if (flattenFocused)
             {
-                popup = Popup::Submenu;
+                if (flattenEnabled.value_or(false)) command = EditorCommand::FlattenSegment;
+                popup = Popup::Closed;
             }
+            else popup = Popup::Submenu;
             break;
         }
         return true;
@@ -632,7 +650,15 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         {
             if (!rampMenu && (!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
             {
+                flattenFocused = false;
                 popup = Popup::Submenu;
+                return true;
+            }
+            if (!rampMenu && flattenEnabled && SDL_PointInRectFloat(&at, &flattenItem))
+            {
+                flattenFocused = true;
+                popup = press ? Popup::Closed : Popup::Create;
+                if (press && event.button.button == SDL_BUTTON_LEFT && *flattenEnabled) command = EditorCommand::FlattenSegment;
                 return true;
             }
             if (popup != Popup::Create && SDL_PointInRectFloat(&at, &submenu))
@@ -673,9 +699,10 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     {
         return true;
     }
-    if (popup != Popup::Ramp && !item(rootItem, "Create    >", false))
+    if (popup != Popup::Ramp)
     {
-        return false;
+        if (!item(rootItem, "Create    >", !flattenFocused)) return false;
+        if (flattenEnabled && !item(flattenItem, "Flatten Segment", flattenFocused, *flattenEnabled)) return false;
     }
     if (popup != Popup::Create)
     {

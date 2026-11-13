@@ -506,6 +506,22 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
+    if (command == EditorCommand::FlattenSegment)
+    {
+        if (!roadMenuTarget) return;
+        const auto target = std::move(*roadMenuTarget);
+        roadMenuTarget.reset();
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return;
+        Road& road = world.roads[target.index];
+        if (road.revision != target.revision) return;
+        if (const auto height = FlattenElevation(road, target.segment))
+        {
+            EditSnapshot before(state, &road);
+            FlattenRoadSegment(road, target.segment, *height);
+            Commit(world, target.index, std::move(before), &road);
+        }
+        return;
+    }
     if (command == EditorCommand::CreateIntersection)
     {
         if (roadMenuTarget)
@@ -584,6 +600,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     if (state.MultipleRoadsSelected()) overlay.PickGroupPoint(lanePicker, world, state, camera, scene);
     const auto lane = overlay.PickRampLane(lanePicker, world, state, camera, scene);
     std::optional<RampMenuOptions> ramps;
+    std::optional<bool> flattenEnabled;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
     if (lane)
     {
@@ -606,11 +623,20 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         const Road& road = world.roads[index];
         const auto position = hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) :
                                                                  picker.HitPosition();
-        roadMenuTarget = RoadMenuTarget{index, road.revision, PlanRoadIntersection(road, hit, position)};
+        roadMenuTarget = RoadMenuTarget{index, road.revision};
+        if (const auto at = LocateRoadHit(road, hit, position))
+        {
+            roadMenuTarget->insertion = PlanRoadIntersection(road, *at);
+            if (hit.kind != RoadPickKind::Point)
+            {
+                roadMenuTarget->segment = at->segment;
+                flattenEnabled = FlattenElevation(road, at->segment).has_value();
+            }
+        }
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled))
     {
         RunCommand(*command, world, camera);
     }

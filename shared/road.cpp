@@ -354,6 +354,7 @@ bool Road::InsertStation(int segment, double t, int stationId)
         auto& a = points[segment];
         auto& b = points[segment + 1];
         RoadPoint knot{};
+        knot.surfaceUp = SurfaceUp(segment, t);
         knot.rampStation = stationId;
         knot.position = a.position + (b.position - a.position) * t;
         knot.roll = a.roll + t * std::remainder(b.roll - a.roll, 2 * std::numbers::pi);
@@ -408,7 +409,9 @@ bool Road::SubdivideSegments(const std::set<int>& segments)
             if (!end.heading)
                 originalTangents.emplace_back(result.size() + 1, endTangent);
             const Cubic curve = SegmentCurve(start, end, startTangent, endTangent);
-            const auto [left, right] = Split(curve, HalfLengthParameter(curve));
+            const double t = HalfLengthParameter(curve);
+            middle.surfaceUp = SurfaceUp(i, t);
+            const auto [left, right] = Split(curve, t);
             const double leftChord = Math::Length(left.d - left.a), rightChord = Math::Length(right.d - right.a);
             if (leftChord == 0 || rightChord == 0 || !std::isfinite(leftChord) || !std::isfinite(rightChord)) return false;
             middle.position = left.d;
@@ -418,7 +421,11 @@ bool Road::SubdivideSegments(const std::set<int>& segments)
             middle.outgoingHandle = Math::Length(right.b - right.a) / rightChord;
             end.incomingHandle = Math::Length(right.d - right.c) / rightChord;
         }
-        else if (middle.position == start.position || middle.position == end.position) return false;
+        else
+        {
+            if (middle.position == start.position || middle.position == end.position) return false;
+            middle.surfaceUp = SurfaceUp(i, 0.5);
+        }
         result.push_back(middle);
         result.push_back(end);
     }
@@ -484,6 +491,20 @@ void Road::SetMouths(const std::array<std::optional<RoadMouth>, 2>& value, bool 
     Rebuild();
 }
 
+Vector3 Road::SurfaceUp(std::size_t segment, double t) const
+{
+    const auto a = points[segment].surfaceUp, b = points[segment + 1].surfaceUp;
+    if (a == b || t <= 0) return a;
+    if (t >= 1) return b;
+    const auto cross = Math::Cross(a, b);
+    const double sine = Math::Length(cross), cosine = Math::Dot(a, b);
+    if (sine < 1e-12 && cosine > 0) return Math::Normalize(a + (b - a) * t);
+    // Opposite normals need a stable axis for the intervening half turn.
+    const auto axis = sine > 1e-12 ? Math::Normalize(cross) :
+        Math::Normalize(Math::Cross(a, std::abs(a.x) < 0.9 ? Vector3{1,0,0} : Vector3{0,0,1}));
+    return MeshTransform::AxisRotation(axis, std::atan2(sine, cosine) * t).Direction(a);
+}
+
 Vector3 Road::GuideOffset() const
 {
     if (!style.railroad) return {};
@@ -523,7 +544,10 @@ void Road::Rebuild()
             return ManualTangent(p);
         return chord;
     };
-    std::vector<Vector3> tangents;
+    const Vector3 localUp{0, 1, 0};
+    const bool customUp = std::ranges::any_of(points, [&](const RoadPoint& p) { return p.surfaceUp != localUp; });
+    std::vector<Vector3> surfaceUps, tangents;
+    if (customUp) surfaceUps.push_back(points.front().surfaceUp);
     if (style.curved) tangents.push_back(Tangent(0));
     centerline.push_back(points.front().position);
     pointSamples.push_back(0);
@@ -540,8 +564,9 @@ void Road::Rebuild()
             const EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
                                    i + 1 == points.size() && rampCaps.back() ? RampFrameBlendLength() : 0.0};
             const double tolerance = ends.start || ends.end || style.railroad ? 0.005 : 0.1;
-            SampleCubic(curve, tolerance, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double)
+            SampleCubic(curve, tolerance, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double t)
             {
+                if (customUp) surfaceUps.push_back(SurfaceUp(i - 1, t));
                 centerline.push_back(position);
                 tangents.push_back(tangent);
             }, ends);
@@ -552,11 +577,19 @@ void Road::Rebuild()
         {
             const Vector3 chord = Math::Normalize(b - points[i - 1].position);
             const auto start = approachTangent(i - 1, chord), end = approachTangent(i, chord);
-            if (start == chord && end == chord) centerline.push_back(b);
+            if (start == chord && end == chord)
+            {
+                centerline.push_back(b);
+                if (customUp) surfaceUps.push_back(points[i].surfaceUp);
+            }
             else
             {
                 const auto curve = SegmentCurve(points[i - 1], points[i], start, end);
-                SampleCubic(curve, 0.05, 0, 0, 1, [&](Vector3 p, Vector3, double) { centerline.push_back(p); });
+                SampleCubic(curve, 0.05, 0, 0, 1, [&](Vector3 p, Vector3, double t)
+                {
+                    centerline.push_back(p);
+                    if (customUp) surfaceUps.push_back(SurfaceUp(i - 1, t));
+                });
             }
         }
 
@@ -599,7 +632,7 @@ void Road::Rebuild()
             const auto leftAxis = [&](Vector3 direction)
             {
                 const Vector3 local = frame.Unrotate(direction);
-                return Math::Normalize(Vector3{-local.z, 0, local.x});
+                return Math::Normalize(Math::Cross(local, customUp ? surfaceUps[i] : localUp));
             };
             double extent;
             if (!tangents.empty())
@@ -649,33 +682,24 @@ void Road::Rebuild()
             caps[end] = RoadMouthFrame{frame.Unrotate(cap->left), frame.Unrotate(cap->up),
                                        frame.Unrotate(cap->leftPerMeter), frame.Unrotate(cap->upPerMeter)};
     }
+    const auto ups = std::span<const Vector3>{surfaceUps};
+    const auto visibleUps = customUp ? ups.subspan(first, last - first + 1) : ups;
     if (rotated)
     {
         std::vector<Vector3> local;
         local.reserve(surfacePath->size());
         for (Vector3 sample : *surfacePath) local.push_back(frame.Unrotate(sample - frame.origin));
         for (Vector3& tangent : tangents) tangent = frame.Unrotate(tangent);
-        BuildSurface(local, tangents, caps, first);
+        BuildSurface(local, tangents, caps, first, visibleUps);
     }
-    else BuildSurface(*surfacePath, tangents, caps, first);
+    else BuildSurface(*surfacePath, tangents, caps, first, visibleUps);
 
-    // Bevels can turn either way. Give all top surfaces an upward normal once,
-    // when the road changes. Vertical curb risers already face the pavement.
+    // Bevels can turn either way. Roads swept in a single frame use its up
+    // for winding. Banked sections already emit their triangles in sweep order.
     const auto facesDown = [](Vector3 a, Vector3 b, Vector3 c)
     {
         return (b.z - a.z) * (c.x - a.x) < (b.x - a.x) * (c.z - a.z);
     };
-
-    for (auto* mesh : {&whiteStripes, &yellowStripes})
-    {
-        for (Triangle& triangle : *mesh)
-        {
-            if (facesDown(triangle[0], triangle[1], triangle[2]))
-            {
-                std::swap(triangle[1], triangle[2]);
-            }
-        }
-    }
 
     const auto windSurface = [&](auto& surface)
     {
@@ -687,9 +711,19 @@ void Road::Rebuild()
             }
         }
     };
-    windSurface(pavementTriangles);
-    windSurface(edgeTriangles);
-    for (auto& [material, strip] : transitionStrips) windSurface(strip);
+    if (!customUp)
+    {
+        for (auto* mesh : {&whiteStripes, &yellowStripes})
+        {
+            for (Triangle& triangle : *mesh)
+            {
+                if (facesDown(triangle[0], triangle[1], triangle[2])) std::swap(triangle[1], triangle[2]);
+            }
+        }
+        windSurface(pavementTriangles);
+        windSurface(edgeTriangles);
+        for (auto& [material, strip] : transitionStrips) windSurface(strip);
+    }
 
     if (rotated)
     {

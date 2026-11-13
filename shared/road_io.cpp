@@ -31,6 +31,11 @@ namespace
                std::isfinite(position.z) && std::isfinite(heading) && std::isfinite(pitch);
     }
 
+    bool ValidSurfaceUp(Vector3 up)
+    {
+        return std::abs(Math::Length(up) - 1.0) < 1e-6;
+    }
+
     bool ValidHandles(const RoadPoint& point)
     {
         return std::isfinite(point.incomingHandle) && point.incomingHandle >= 0 &&
@@ -124,7 +129,7 @@ namespace RoadIO
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
-            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
+            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp))
             {
                 out.setstate(std::ios::failbit);
                 return;
@@ -143,7 +148,8 @@ namespace RoadIO
             else out << " 0";
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
             if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
-            out << ' ' << p.connectorSocket << ' ' << p.connectorTarget;
+            out << ' ' << p.connectorSocket << ' ' << p.connectorTarget
+                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z;
             out << '\n';
         }
     }
@@ -226,7 +232,8 @@ namespace RoadIO
                     ((p.connectorSocket || p.connectorTarget) && (p.anchor || p.ramp || (i != 0 && i + 1 != count))) ||
                     (p.connectorSocket && p.connectorTarget)) in.setstate(std::ios::failbit);
             }
-            if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p))
+            if (version >= 17) in >> p.surfaceUp.x >> p.surfaceUp.y >> p.surfaceUp.z;
+            if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp))
             {
                 in.setstate(std::ios::failbit);
                 break;

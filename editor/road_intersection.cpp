@@ -8,7 +8,6 @@
 namespace
 {
     using namespace RoadSpline;
-    struct Location { int segment; double t; };
 
     Cubic Curve(const Road& road, int i)
     {
@@ -19,12 +18,12 @@ namespace
         return {a.position, a.position + step, b.position - step, b.position};
     }
 
-    Location Closest(const Road& road, RoadPick hit, Vector3 position)
+    RoadSplineLocation Closest(const Road& road, RoadPick hit, Vector3 position)
     {
         const int count = static_cast<int>(road.points.size()) - 1;
         const int first = hit.kind == RoadPickKind::Segment ? hit.index : 0;
         const int end = hit.kind == RoadPickKind::Segment ? first + 1 : count;
-        Location best{-1, 0};
+        RoadSplineLocation best{-1, 0};
         double distance = std::numeric_limits<double>::infinity();
         for (int i = first; i < end; ++i)
         {
@@ -73,7 +72,7 @@ namespace
 
     // Walk outward in original spline order on each side. Points inside the footprint are
     // replaced by the anchor. Beyond a short approach the original Bézier polygon is retained.
-    bool Approach(const Road& road, Location at, const Intersection& junction, bool forward,
+    bool Approach(const Road& road, RoadSplineLocation at, const Intersection& junction, bool forward,
                   std::vector<RoadPoint>& points)
     {
         const int side = forward ? 0 : 2, step = forward ? 1 : -1;
@@ -125,6 +124,7 @@ namespace
                 join.heading = std::atan2(tangent.z, tangent.x);
                 join.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
                 const double t = std::lerp(start, forward ? 1.0 : 0.0, *cut);
+                join.surfaceUp = road.SurfaceUp(i, t);
                 join.roll = road.points[i].roll + t * std::remainder(road.points[i + 1].roll - road.points[i].roll, 2 * std::numbers::pi);
             }
             if (!ValidRoadSpan(road, join.position, neighbor.position) ||
@@ -165,22 +165,25 @@ namespace
     }
 }
 
-std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, RoadPick hit, Vector3 position)
+std::optional<RoadSplineLocation> LocateRoadHit(const Road& road, RoadPick hit, Vector3 position)
 {
     const int last = static_cast<int>(road.points.size()) - 1;
     if (last < 1 || road.style.railroad) return {};
-    Location at{};
     if (hit.kind == RoadPickKind::Point)
     {
         if (hit.index < 0 || hit.index > last) return {};
-        at = hit.index == last ? Location{last - 1, 1} : Location{hit.index, 0};
+        return hit.index == last ? RoadSplineLocation{last - 1, 1} : RoadSplineLocation{hit.index, 0};
     }
-    else
-    {
-        if (hit.kind == RoadPickKind::Segment && (hit.index < 0 || hit.index >= last)) return {};
-        at = Closest(road, hit, position);
-        if (at.segment < 0) return {};
-    }
+    if (hit.kind != RoadPickKind::Road && hit.kind != RoadPickKind::Segment) return {};
+    if (hit.kind == RoadPickKind::Segment && (hit.index < 0 || hit.index >= last)) return {};
+    const auto at = Closest(road, hit, position);
+    if (at.segment < 0) return {};
+    return at;
+}
+
+std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, RoadSplineLocation at)
+{
+    const int last = static_cast<int>(road.points.size()) - 1;
     const auto [left, right] = Split(Curve(road, at.segment), at.t);
     const bool atStart = at.segment == 0 && at.t == 0;
     const bool atEnd = at.segment == last - 1 && at.t == 1;

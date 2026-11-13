@@ -50,6 +50,10 @@ struct InspectorEdit
 TransformFields Inspect(const WorldDocument& world, TransformTarget target);
 bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const ObjectTransform& transform);
 bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b, double minSpacing = Road::minPointSpacing);
+// Level the span at the returned world Y. An empty result means it is already level
+// or its geometry/attachments prevent the edit.
+std::optional<double> FlattenElevation(const Road& road, int segment);
+void FlattenRoadSegment(Road& road, int segment, double elevation);
 bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int active, const std::set<int>& additional,
                          Vector3 destination, double minSpacing = Road::minPointSpacing);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, const ObjectTransform& desired);

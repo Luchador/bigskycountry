@@ -67,14 +67,15 @@ namespace
         std::vector<Span> spans;
         std::vector<double> distances{0.0}; // Cumulative 3D centerline length at each station.
         std::vector<Vector3> curveLeft; // One cross-section axis per Bézier station.
-        std::vector<Vector3> curveUp;   // Present when easing out of an attached ramp's cut plane.
+        std::vector<Vector3> curveUp;   // Per-station up for a bank override or an attached ramp.
     };
 
-    Vector3 CurveLeft(Vector3 tangent, Vector3 fallback)
+    Vector3 CurveLeft(Vector3 tangent, Vector3 fallback, Vector3 up = {0, 1, 0})
     {
-        const double run = std::hypot(tangent.x, tangent.z);
-        if (run <= 1e-8 * std::abs(tangent.y)) return fallback;
-        return {-tangent.z / run, 0, tangent.x / run};
+        const Vector3 across = Math::Cross(tangent, up);
+        const double run = Math::Length(across);
+        if (run <= 1e-8 * std::abs(Math::Dot(tangent, up))) return fallback;
+        return across * (1.0 / run);
     }
 
     struct CrossSection
@@ -91,6 +92,7 @@ namespace
     void VisitOffsetStations(const RoadPath& path, double offset, Visit visit)
     {
         const auto& spans = path.spans;
+        const auto up = [&](std::size_t i) { return path.curveUp.empty() ? Vector3{0, 1, 0} : path.curveUp[i]; };
         const auto endSection = [&](int end, CrossSection section)
         {
             if (const auto& cap = path.caps[end])
@@ -104,39 +106,45 @@ namespace
         {
             // A sampled spline is smooth here. Sweeping both sides from its tangent
             // gives one cross section at this elevation for every part of the road.
-            endSection(0, {spans.front().start, path.curveLeft.front(), 0.0});
+            endSection(0, {spans.front().start, path.curveLeft.front(), 0.0, 0.0, up(0)});
             for (std::size_t i = 0; i + 1 < spans.size(); ++i)
                 visit(CrossSection{spans[i].end, path.curveLeft[i + 1], path.distances[i + 1], 0.0,
-                                   path.curveUp.empty() ? Vector3{0, 1, 0} : path.curveUp[i + 1]});
-            endSection(1, {spans.back().end, path.curveLeft.back(), path.distances.back()});
+                                   up(i + 1)});
+            endSection(1, {spans.back().end, path.curveLeft.back(), path.distances.back(), 0.0, up(spans.size())});
             return;
         }
 
         // On an inside bend the offset lines intersect before/after the corner.
         // Record that trim distance; a negative entry requests a pavement-style bevel.
+        const auto leftAt = [&](const Span& span, Vector3 normal)
+        {
+            if (normal == Vector3{0, 1, 0}) return span.left;
+            return CurveLeft(span.end - span.start, span.left, normal);
+        };
         std::vector<double> trim(spans.size() + 1, 0.0);
 
         for (std::size_t i = 1; i < spans.size(); ++i)
         {
-            const Vector3 a = spans[i - 1].left;
-            const Vector3 b = spans[i].left;
-            const double turn = a.x * b.z - a.z * b.x;
+            const Vector3 a = leftAt(spans[i - 1], up(i));
+            const Vector3 b = leftAt(spans[i], up(i));
+            const double turn = Math::Dot(Math::Cross(b, a), up(i));
             const double divisor = 1.0 + Math::Dot(a, b);
             trim[i] = divisor > 0.0 ? offset * turn / divisor : -1.0;
         }
 
-        endSection(0, {spans.front().start, spans.front().left, 0.0});
+        endSection(0, {spans.front().start, leftAt(spans.front(), up(0)), 0.0, 0.0, up(0)});
 
         for (std::size_t i = 1; i < spans.size(); ++i)
         {
             const Span& a = spans[i - 1];
             const Span& b = spans[i];
+            const Vector3 leftA = leftAt(a, up(i)), leftB = leftAt(b, up(i));
 
             // Keep a miter only if the trims from both ends fit on each span.
             if (trim[i] >= 0.0 && trim[i] + std::max(0.0, trim[i - 1]) <= a.length && trim[i] + std::max(0.0, trim[i + 1]) <= b.length)
             {
-                const double divisor = 1.0 + Math::Dot(a.left, b.left);
-                visit(CrossSection{b.start, (a.left + b.left) * (1.0 / divisor), path.distances[i]});
+                const double divisor = 1.0 + Math::Dot(leftA, leftB);
+                visit(CrossSection{b.start, (leftA + leftB) * (1.0 / divisor), path.distances[i], 0.0, up(i)});
             }
             else
             {
@@ -145,13 +153,13 @@ namespace
                 const double room = 0.25 * std::min(path.distances[i] - path.distances[i - 1],
                                                     path.distances[i + 1] - path.distances[i]);
                 const double slope = offset == 0.0 ? 0.0 :
-                    std::min(0.5 * Math::Length(a.left - b.left), room / std::abs(offset));
-                visit(CrossSection{a.end, a.left, path.distances[i], -slope});
-                visit(CrossSection{b.start, b.left, path.distances[i], slope});
+                    std::min(0.5 * Math::Length(leftA - leftB), room / std::abs(offset));
+                visit(CrossSection{a.end, leftA, path.distances[i], -slope, up(i)});
+                visit(CrossSection{b.start, leftB, path.distances[i], slope, up(i)});
             }
         }
 
-        endSection(1, {spans.back().end, spans.back().left, path.distances.back()});
+        endSection(1, {spans.back().end, leftAt(spans.back(), up(spans.size())), path.distances.back(), 0.0, up(spans.size())});
     }
 
     struct MarkingPath
@@ -163,7 +171,7 @@ namespace
         void Append(Vector3 center, Vector3 left, double offset, bool curved, const Vector3* up)
         {
             points.push_back(center + left * offset);
-            if (curved) curveLeft.push_back(left);
+            if (curved || up) curveLeft.push_back(left);
             if (up) curveUp.push_back(*up);
         }
     };
@@ -719,13 +727,28 @@ namespace
 }
 
 void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
-                        const std::array<std::optional<RoadMouthFrame>, 2>& caps, std::size_t firstSample)
+                        const std::array<std::optional<RoadMouthFrame>, 2>& caps, std::size_t firstSample,
+                        std::span<const Vector3> surfaceUps)
 {
     RoadPath path;
     path.caps = caps;
     VisitSpans(samples, {}, [&](const Span& span, std::size_t end)
     {
-        if (!tangents.empty())
+        if (!surfaceUps.empty())
+        {
+            const auto station = [&](std::size_t i)
+            {
+                if (!tangents.empty())
+                {
+                    const auto fallback = path.curveLeft.empty() ? span.left : path.curveLeft.back();
+                    path.curveLeft.push_back(CurveLeft(tangents[i], fallback, surfaceUps[i]));
+                }
+                path.curveUp.push_back(surfaceUps[i]);
+            };
+            if (path.spans.empty()) station(end - 1);
+            station(end);
+        }
+        else if (!tangents.empty())
         {
             if (path.spans.empty()) path.curveLeft.push_back(CurveLeft(tangents[end - 1], span.left));
             path.curveLeft.push_back(CurveLeft(tangents[end], path.curveLeft.back()));
@@ -759,7 +782,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
                 const double scale = std::lerp(Math::Length(left), 1.0, blend);
                 path.curveLeft[j] = blendedLeft == Vector3{} ? path.curveLeft[j]
                     : Math::Normalize(blendedLeft) * std::max(1.0, scale);
-                path.curveUp[j] = up + (Vector3{0, 1, 0} - up) * blend;
+                path.curveUp[j] = up + (path.curveUp[j] - up) * blend;
             }
         }
     }

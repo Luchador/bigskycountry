@@ -164,6 +164,7 @@ private:
         std::uint64_t revision;
         std::optional<RoadIntersectionInsertion> insertion;
         std::optional<RampPlan> exitRamp, entranceRamp;
+        int segment = -1;
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
     struct RampHandleDrag

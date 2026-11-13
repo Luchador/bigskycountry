@@ -126,6 +126,7 @@ struct RoadPoint
     std::optional<RampLink> ramp; // First endpoint exits the highway, last endpoint enters it.
     int connectorSocket = 0; // Identifies the point on the source ramp.
     int connectorTarget = 0; // On a connector endpoint, follows the matching socket.
+    Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
     bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
 
@@ -219,6 +220,7 @@ struct Road : RoadGeometry
     std::array<std::vector<double>, 2> outerLaneDistances;
     std::span<const Vector3> OuterLane(int side) const;
     Vector3 OuterLanePosition(int side, double distance) const;
+    Vector3 SurfaceUp(std::size_t segment, double t) const;
     Vector3 GuideOffset() const; // Lift railroad handles and splines above their raised track.
     double SplineLengthMeters() const { return splineLengthMeters; }
     Vector3 Tangent(std::size_t index) const;
@@ -248,7 +250,8 @@ private:
     std::vector<std::string> names;
     std::array<std::optional<RoadMouth>, 2> mouths;
     void BuildSurface(const std::vector<Vector3>& samples, std::span<const Vector3> tangents,
-                      const std::array<std::optional<RoadMouthFrame>, 2>& caps, std::size_t firstSample);
+                      const std::array<std::optional<RoadMouthFrame>, 2>& caps, std::size_t firstSample,
+                      std::span<const Vector3> surfaceUps);
     std::vector<Vector3> centerline;
     double splineLengthMeters = 0.0;
     std::vector<std::size_t> pointSamples; // Centerline index of each control point.
