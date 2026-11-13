@@ -505,6 +505,16 @@ void Road::Rebuild()
         return;
     }
 
+    // In linear alignment an attached end can still have an angled approach.
+    // Ease only that end into the original straight span; the opposite tangent
+    // follows the chord, so the rest of a polyline keeps its authored corners.
+    const auto approachTangent = [&](std::size_t i, Vector3 chord)
+    {
+        const auto& p = points[i];
+        if (!style.curved && p.anchor && p.heading && skewEnds[i == 0 ? 0 : 1])
+            return ManualTangent(p);
+        return chord;
+    };
     std::vector<Vector3> tangents;
     if (style.curved) tangents.push_back(Tangent(0));
     centerline.push_back(points.front().position);
@@ -532,7 +542,14 @@ void Road::Rebuild()
         }
         else
         {
-            centerline.push_back(b);
+            const Vector3 chord = Math::Normalize(b - points[i - 1].position);
+            const auto start = approachTangent(i - 1, chord), end = approachTangent(i, chord);
+            if (start == chord && end == chord) centerline.push_back(b);
+            else
+            {
+                const auto curve = SegmentCurve(points[i - 1], points[i], start, end);
+                SampleCubic(curve, 0.05, 0, 0, 1, [&](Vector3 p, Vector3, double) { centerline.push_back(p); });
+            }
         }
 
         pointSamples.push_back(centerline.size() - 1);
@@ -598,7 +615,7 @@ void Road::Rebuild()
         if (first == last) return; // No remaining cross section clears the junction mouth.
         const Vector3 heading = mouth->outward * (end == 0 ? 1.0 : -1.0);
         const Vector3 left = Math::Cross(heading, {0,1,0});
-        caps[end] = RoadMouthFrame{frame.Unrotate(left), frame.Unrotate({0,1,0})};
+        caps[end] = RoadMouthFrame{frame.Unrotate(left * mouth->lateralScale), frame.Unrotate({0,1,0})};
     }
     if (caps[0] || caps[1])
     {

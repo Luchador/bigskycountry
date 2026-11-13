@@ -14,6 +14,9 @@ struct Intersection
     static constexpr double anchorDistance = 10.0; // Approach centerlines, in meters from the junction center.
     double yaw = 0; // Radians around world Y.
     bool pavedThrough = false; // Keep pavement between opposite arms of an intersection inserted in a road.
+    static constexpr double maxSkew = Math::DegreesToRadians(45.0);
+    std::array<double, IntersectionAnchor::sideCount> skew{}; // Per-anchor yaw relative to its nominal outward axis.
+    Vector3 ApproachDirection(int side) const { return Directions(yaw + skew.at(side)).at(side); }
     static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw);
     Vector3 AnchorPosition(int side) const { return position + Directions(yaw).at(side) * anchorDistance; }
     std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;
@@ -43,6 +46,7 @@ struct IntersectionLayout
     double radius;
     std::array<std::optional<IntersectionApproach>, IntersectionAnchor::sideCount> arms{};
     double yaw = 0;
+    std::array<double, IntersectionAnchor::sideCount> skew{};
     bool operator==(const IntersectionLayout&) const = default;
 };
 
@@ -50,6 +54,9 @@ struct IntersectionSurface
 {
     IntersectionLayout layout{};
     std::array<double, IntersectionAnchor::sideCount> setbacks{};
+    std::array<double, IntersectionAnchor::sideCount> lateralShifts{};
     RoadGeometry geometry;
+    // Position on the skewed approach at the nominal side's cut plane.
+    RoadMouth Mouth(int side) const;
     void Build(const IntersectionLayout& input);
 };

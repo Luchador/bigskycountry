@@ -380,6 +380,11 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
             {
                 const bool active = selection.AnchorHighlighted({id, side});
                 renderer.SubmitMesh(Marker(*anchor), active ? EditorColors::amber : EditorColors::blue);
+                if (selection.InspectingAnchor({id, side}))
+                {
+                    const Vector3 tip = anchor->origin + item.ApproachDirection(side) * (42 * anchor->metersPerPixel);
+                    stroke.Draw(renderer, camera.WorldToView(anchor->origin), camera.WorldToView(tip), EditorColors::amber);
+                }
             }
         }
         const auto placement = PointPlacement(item.position, camera, scene);

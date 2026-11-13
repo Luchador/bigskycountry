@@ -24,7 +24,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 4;
+    constexpr Uint32 intersectionVersion = 5;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -179,7 +179,12 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
 {
     if (intersections.empty() && junctions.empty())
     {
-        for (int index : changedRoads) roads[index].Rebuild();
+        for (std::size_t i = 0; i < roads.size(); ++i)
+        {
+            const bool skewed = roads[i].skewEnds[0] || roads[i].skewEnds[1];
+            roads[i].skewEnds = {};
+            if (skewed || changedRoads.contains(static_cast<int>(i))) roads[i].Rebuild();
+        }
         RefreshRampConnections(true);
         terrainRevision = 0; // Also covers removal of the last road.
         RefreshTerrainFills();
@@ -200,6 +205,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         }
     }
     std::vector<std::array<std::optional<RoadMouth>, 2>> mouths(roads.size());
+    std::vector<std::array<bool, 2>> skewEnds(roads.size());
     std::set<int> active;
     for (const auto& [id, ends] : incident)
     {
@@ -207,10 +213,12 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         const auto& item = intersections.at(id);
         IntersectionLayout layout{item.position, item.cornerRadius};
         layout.yaw = item.yaw;
+        layout.skew = item.skew;
         for (int i = 0; i < sides; ++i)
         {
             if (!ends[i]) continue;
             const auto [road, end] = *ends[i];
+            skewEnds[road][end] = item.skew[i] != 0;
             ++connectedArms; // A loop occupies a separate anchor at each end.
             layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
@@ -219,17 +227,20 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         active.insert(id);
         auto& surface = junctions[id];
         if (layout != surface.layout) surface.Build(layout);
-        const auto directions = Intersection::Directions(item.yaw);
         for (int i = 0; i < sides; ++i)
         {
             if (!ends[i]) continue;
             const auto [road, end] = *ends[i];
-            const Vector3 dir = directions[i];
-            mouths[road][end] = RoadMouth{item.position + dir * Intersection::anchorDistance, item.position + dir * surface.setbacks[i], dir};
+            mouths[road][end] = surface.Mouth(i);
         }
     }
     std::erase_if(junctions, [&](const auto& entry) { return !active.contains(entry.first); });
-    for (std::size_t i = 0; i < roads.size(); ++i) roads[i].SetMouths(mouths[i], changedRoads.contains(static_cast<int>(i)));
+    for (std::size_t i = 0; i < roads.size(); ++i)
+    {
+        const bool skewChanged = roads[i].skewEnds != skewEnds[i];
+        roads[i].skewEnds = skewEnds[i];
+        roads[i].SetMouths(mouths[i], skewChanged || changedRoads.contains(static_cast<int>(i)));
+    }
     RefreshRampConnections(true);
     terrainRevision = 0; // Attachment changes can open a junction without rebuilding a road.
     RefreshTerrainFills();
@@ -540,6 +551,10 @@ bool WorldDocument::Open(const char* documentPath)
                     return SDL_SetError("Invalid intersection heading in INTS");
                 if (section.version >= 4 && !(data >> item.pavedThrough))
                     return SDL_SetError("Invalid through pavement flag in INTS");
+                if (section.version >= 5)
+                    for (double& angle : item.skew)
+                        if (!(data >> angle) || !std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew)
+                            return SDL_SetError("Invalid intersection anchor skew in INTS");
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -651,8 +666,12 @@ bool WorldDocument::Save() const
         if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
             !Material::ValidAssetPath(item.material) ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
-                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough << '\n'))
+                          << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough))
             return SDL_SetError("Cannot save invalid intersection");
+        for (double angle : item.skew)
+            if (!std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew || !(junctionData << ' ' << angle))
+                return SDL_SetError("Cannot save invalid intersection anchor skew");
+        junctionData << '\n';
     }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))

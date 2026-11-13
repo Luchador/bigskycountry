@@ -69,7 +69,7 @@ namespace
 
     RoadPoint AttachedEndpoint(const Intersection& junction, IntersectionAnchor anchor, bool first)
     {
-        const Vector3 tangent = Intersection::Directions(junction.yaw)[anchor.side] * (first ? 1.0 : -1.0);
+        const Vector3 tangent = junction.ApproachDirection(anchor.side) * (first ? 1.0 : -1.0);
         return {junction.AnchorPosition(anchor.side), std::atan2(tangent.z, tangent.x), 0, 0, anchor};
     }
 
@@ -162,7 +162,14 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         return {};
     }
     const auto target = state.Target();
-    if (target.kind == SelectionKind::Anchor) return {};
+    if (target.kind == SelectionKind::Anchor)
+    {
+        if (gizmo.mode != GizmoMode::Rotate) return {};
+        const auto& junction = world.intersections.at(target.index);
+        auto placement = RoadOverlay::PointPlacement(junction.AnchorPosition(target.point), camera, scene);
+        if (placement) placement->yawOnly = true;
+        return placement;
+    }
     if (target.kind == SelectionKind::Point)
     {
         const Road* road = Selected(world);
@@ -2030,7 +2037,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         if (gizmoDrag)
         {
             snapRotation = subtract;
-            if (state.RoadGroupSelected() || state.meshSelection.kind == SelectionKind::Intersection)
+            if (state.RoadGroupSelected() || state.meshSelection.kind == SelectionKind::Intersection ||
+                state.meshSelection.kind == SelectionKind::Anchor)
             {
                 BeginGroupDrag(world, Drag::Gizmo);
             }
@@ -2426,7 +2434,40 @@ void RoadEditor::MoveObjectCopy(WorldDocument& world, const ObjectTransform& pos
 void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
 {
     mouse = pointer;
-    const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings, snapRotation);
+    const auto& target = state.meshSelection;
+    const bool skewing = target.kind == SelectionKind::Anchor;
+    const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings, snapRotation && !skewing);
+    if (skewing && amount)
+    {
+        const auto& start = dragStart->roadGroup->junctions.at(target.index);
+        const double initial = start.skew.at(target.point);
+        const double angle = std::clamp(DragAngle::Snap(initial + *amount, snapRotation),
+                                        -Intersection::maxSkew, Intersection::maxSkew);
+        auto& junction = world.intersections.at(target.index);
+        if (angle == junction.skew[target.point]) return;
+        junction.skew[target.point] = angle;
+        const IntersectionAnchor ref{target.index, target.point};
+        std::set<int> changed;
+        for (const auto& [index, pose] : dragStart->roadGroup->roads)
+        {
+            Road& road = world.roads[index];
+            const int i = AttachedPoint(road, ref);
+            if (i < 0) continue;
+            auto& end = road.points[i];
+            end = pose.points[i];
+            if (angle != initial)
+            {
+                const auto dir = junction.ApproachDirection(ref.side) * (i == 0 ? 1.0 : -1.0);
+                end.heading = std::atan2(dir.z, dir.x);
+                end.pitch = 0;
+            }
+            changed.insert(index);
+        }
+        world.UpdateIntersections(changed);
+        appliedAngle = angle - initial;
+        dragChanged = angle != initial;
+        return;
+    }
     const bool rotating = gizmo.mode == GizmoMode::Rotate;
     if (!amount || (rotating && *amount == appliedAngle))
     {

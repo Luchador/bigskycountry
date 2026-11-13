@@ -164,7 +164,8 @@ struct RoadGeometry
 
 struct RoadMouth
 {
-    Vector3 anchor, center, outward;
+    Vector3 anchor, center, outward; // outward is the normal to the cut plane.
+    double lateralScale = 1.0; // Oblique cuts span more than the perpendicular road width.
     bool operator==(const RoadMouth&) const = default;
 };
 
@@ -223,6 +224,7 @@ struct Road : RoadGeometry
     std::vector<RampLane> rampLanes;
     std::map<std::pair<int, int>, RampSeam> rampSeams; // (station ID, side)
     std::array<std::optional<RoadMouthFrame>, 2> rampCaps{};
+    std::array<bool, 2> skewEnds{}; // Derived from the linked intersection, including unpaved junctions.
 
     double ThreeLaneDividerOffset() const; // Signed distance left of the authored path for a 2+1 layout.
     std::array<Vector3, 3> PointAxes(std::size_t index, bool includeRoll = true) const;

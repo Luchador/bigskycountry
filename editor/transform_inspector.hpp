@@ -18,7 +18,7 @@ struct TransformTarget
     std::set<int> additionalPoints; // Other control points on the active road.
     bool YawOnly() const
     {
-        return kind == SelectionKind::Intersection ||
+        return kind == SelectionKind::Intersection || kind == SelectionKind::Anchor ||
             (kind == SelectionKind::RoadGroup && members.lower_bound({SceneKind::Intersection, 0}) != members.end());
     }
     bool operator==(const TransformTarget&) const = default;

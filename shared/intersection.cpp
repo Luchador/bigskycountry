@@ -1,6 +1,7 @@
 #include "intersection.hpp"
 #include "view_geometry.hpp"
 
+#include <CDT.h>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -131,6 +132,59 @@ namespace
         }
     }
 
+    // The skewed mouths can put the junction center outside a corner's
+    // visibility region. Triangulate the entire inner curb boundary in XZ.
+    void FillPavement(IntersectionSurface& surface, const std::vector<Vector3>& rim,
+                      const std::array<Vector3, sides>& axes)
+    {
+        std::vector<CDT::V2d<double>> vertices;
+        std::vector<CDT::Edge> edges;
+        std::vector<Vector3> positions;
+        for (Vector3 p : rim)
+        {
+            if (!positions.empty() && Math::Length(p - positions.back()) < 1e-7) continue;
+            positions.push_back(p);
+        }
+        if (positions.size() > 1 && Math::Length(positions.front() - positions.back()) < 1e-7)
+            positions.pop_back();
+        for (CDT::VertInd i = 0; i < positions.size(); ++i)
+        {
+            const auto local = positions[i] - surface.layout.center;
+            vertices.push_back({local.x, local.z});
+            edges.emplace_back(i, (i + 1) % positions.size());
+        }
+        if (positions.size() < 3) return;
+        CDT::RemoveDuplicatesAndRemapEdges(vertices, edges);
+        CDT::Triangulation<double> mesh(CDT::VertexInsertionOrder::Auto, CDT::IntersectingConstraintEdges::TryResolve, 0.0);
+        mesh.insertVertices(vertices);
+        mesh.insertEdges(edges);
+        mesh.eraseOuterTrianglesAndHoles();
+        for (const auto& triangle : mesh.triangles)
+        {
+            const auto point = [&](int i)
+            {
+                const auto& p = mesh.vertices[triangle.vertices[i]];
+                return surface.layout.center + Vector3{p.x, 0, p.y};
+            };
+            Pavement(surface, axes, point(0), point(1), point(2));
+        }
+    }
+
+    // A skewed road crosses the side's original cut plane obliquely. Cut the
+    // true-width road ribbon on that plane, keeping the four authoring pivots fixed.
+    struct ApproachCut
+    {
+        Vector3 axis, lateral;
+        double scale, drift;
+    };
+
+    ApproachCut Cut(const IntersectionLayout& layout, int side)
+    {
+        const Vector3 axis = Intersection::Directions(layout.yaw)[side];
+        const double angle = layout.skew[side];
+        return {axis, Math::Cross(axis, up), 1.0 / std::cos(angle), -std::tan(angle)};
+    }
+
     int NextArm(const IntersectionLayout& layout, int side)
     {
         do { side = (side + 1) % sides; } while (!layout.arms[side]);
@@ -177,6 +231,13 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
     return arm;
 }
 
+RoadMouth IntersectionSurface::Mouth(int side) const
+{
+    const auto cut = Cut(layout, side);
+    return {layout.center + cut.axis * Intersection::anchorDistance,
+            layout.center + cut.axis * setbacks[side] + cut.lateral * lateralShifts[side], cut.axis, cut.scale};
+}
+
 void IntersectionSurface::Build(const IntersectionLayout& input)
 {
     layout = input;
@@ -186,18 +247,44 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     setbacks.fill(Intersection::anchorDistance);
     // Provide space for the full facing shoulder of the cross street and the fillet.
     // Only the rendered mouths move. The four authored connection anchors stay put.
+    std::array<ApproachCut, sides> cuts;
+    for (int i = 0; i < sides; ++i) cuts[i] = Cut(layout, i);
+
+    // Each corner needs room for both mouth profiles at their actual lateral
+    // offsets. At opposing 45-degree limits two incident edges can be parallel;
+    // in that case keep the openings apart laterally on their respective sides.
+    lateralShifts.fill(0);
     for (int i = 0; i < sides; ++i)
     {
         const int j = (i + 1) % sides;
         if (!layout.arms[i] || !layout.arms[j]) continue;
         const auto& a = *layout.arms[i];
         const auto& b = *layout.arms[j];
-        const double wa = Profile(a.edge).Width(), wb = Profile(b.edge).Width();
-        const double r = OuterRadius(layout.radius, wa, wb);
-        setbacks[i] = std::max(setbacks[i], b.right + wb + r);
-        setbacks[j] = std::max(setbacks[j], a.left + wa + r);
+        const double edgeA = Profile(a.edge).Width(), edgeB = Profile(b.edge).Width();
+        const double radius = OuterRadius(layout.radius, edgeA, edgeB);
+        setbacks[i] = std::max(setbacks[i], (b.right + edgeB) * cuts[j].scale + radius);
+        setbacks[j] = std::max(setbacks[j], (a.left + edgeA) * cuts[i].scale + radius);
+    }
+    // An oblique approach can run toward one adjacent mouth. Its lateral
+    // position is bounded by the two corner tangencies at the chosen setback.
+    for (int i = 0; i < sides; ++i)
+    {
+        if (!layout.arms[i]) continue;
+        const auto& a = *layout.arms[i];
+        const double edge = Profile(a.edge).Width();
+        const double desired = (setbacks[i] - Intersection::anchorDistance) * cuts[i].drift;
+        // The center must stay inside the mouth's projected pavement span.
+        // This also prevents opposite corners crossing on a narrow branch.
+        double lo = -a.left * cuts[i].scale, hi = a.right * cuts[i].scale;
+        const int prev = (i + sides - 1) % sides, next = (i + 1) % sides;
+        if (layout.arms[next])
+            hi = std::min(hi, setbacks[next] - (a.left + edge) * cuts[i].scale);
+        if (layout.arms[prev])
+            lo = std::max(lo, (a.right + edge) * cuts[i].scale - setbacks[prev]);
+        lateralShifts[i] = std::clamp(desired, lo, hi);
     }
 
+    std::vector<Vector3> pavementRim;
     for (int i = 0; i < sides; ++i)
     {
         if (!layout.arms[i]) continue;
@@ -208,35 +295,22 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         const EdgeProfile pa = Profile(a.edge), pb = Profile(b.edge);
         const double wa = a.left + pa.Width(), wb = b.right + pb.Width();
         const Vector3 center = layout.center;
-        const Vector3 mouth = center + d * setbacks[i];
+        const Vector3 mouth = Mouth(i).center;
         const bool adjacent = j == (i + 1) % sides;
-        const Vector3 nextMouth = center + e * setbacks[j];
-        if (adjacent)
-        {
-            // Split each mouth at the centerline, including across a median tip.
-            Pavement(*this, directions, center, mouth, mouth + n * a.left);
-            Pavement(*this, directions, center, nextMouth + d * b.right, nextMouth);
-        }
-        Vector3 lastBase = mouth;
+        const Vector3 nextMouth = Mouth(j).center;
+        const double scaleA = cuts[i].scale, scaleB = cuts[j].scale;
+        pavementRim.push_back(mouth);
         std::optional<Rim> previous;
         auto emit = [&](const Rim& rim, double t)
         {
             if (previous)
             {
-                if (adjacent) Pavement(*this, directions, center, previous->p[0], rim.p[0]);
-                else
-                {
-                    // A widening T back may be concave relative to the junction center.
-                    const Vector3 base = mouth + (nextMouth - mouth) * t;
-                    Pavement(*this, directions, lastBase, base, rim.p[0]);
-                    Pavement(*this, directions, lastBase, rim.p[0], previous->p[0]);
-                    lastBase = base;
-                }
                 // Carry a strip through a taper to a bare edge. Otherwise each arm owns its half corner.
                 const bool useA = a.edge != RoadEdge::None && (b.edge == RoadEdge::None || t <= .5);
                 const auto& approach = useA ? a : b;
                 Join(*this, *previous, rim, approach, directions);
             }
+            pavementRim.push_back(rim.p[0]);
             geometry.outline.push_back(rim.p.back());
             previous = rim;
         };
@@ -244,11 +318,14 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         {
             emit(Section(p, normal, pa, pb, t), t);
         };
-        add(mouth + n * wa, n, 0);
+        add(mouth + n * (wa * scaleA), n * scaleA, 0);
         if (adjacent)
         {
-            const double r = OuterRadius(layout.radius, pa.Width(), pb.Width());
-            const auto corner = center + d * wb + e * wa;
+            const Vector3 end = nextMouth + d * (wb * scaleB);
+            const Vector3 corner = center + d * (wb * scaleB - lateralShifts[j]) +
+                                            e * (wa * scaleA + lateralShifts[i]);
+            const double r = std::max(0.0, std::min({OuterRadius(layout.radius, pa.Width(), pb.Width()),
+                                      Math::Dot(mouth - corner, d), Math::Dot(nextMouth - corner, e)}));
             const Vector3 arcCenter = corner + (d + e) * r;
             // Offset each axis by its own edge dimensions. This gives concentric
             // arcs for matching curbs and tangent elliptical arcs for unlike edges.
@@ -256,8 +333,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
             {
                 const Vector3 outer = arcCenter - (d * sine + e * cosine) * r;
                 Rim rim = Section(outer, {}, pa, pb, t);
-                const Vector3 apron = outer - d * (sine * pb.cap) - e * (cosine * pa.cap);
-                rim.p[0] = apron - d * (sine * pb.apron) - e * (cosine * pa.apron);
+                const Vector3 apron = outer - d * (sine * pb.cap * scaleB) - e * (cosine * pa.cap * scaleA);
+                rim.p[0] = apron - d * (sine * pb.apron * scaleB) - e * (cosine * pa.apron * scaleA);
                 rim.p[1] = apron;
                 rim.p[2] = apron + up * std::lerp(pa.rise, pb.rise, t);
                 emit(rim, t);
@@ -271,30 +348,36 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
                     cornerSection(k == cornerIntervals ? 1 : std::sin(angle), k == cornerIntervals ? 0 : std::cos(angle), t);
                 }
             }
-            add(center + e * setbacks[j] + d * wb, d, 1);
+            add(end, d * scaleB, 1);
         }
         else
         {
             // Across the closed side of a T there is one continuous boundary.
             // Horizontal end tangents make asymmetric shoulders meet it smoothly.
             const double length = setbacks[i] + setbacks[j];
-            const int intervals = wa == wb && a.edge == b.edge ?
+            const double start = lateralShifts[i] + wa * scaleA;
+            const double finish = -lateralShifts[j] + wb * scaleB;
+            const int intervals = start == finish && a.edge == b.edge ?
                 (a.transitionMaterial == b.transitionMaterial ? 1 : 2) : cornerIntervals;
             for (int k = 1; k <= intervals; ++k)
             {
                 const double t = static_cast<double>(k) / intervals, smooth = t * t * (3 - 2 * t);
-                const double slope = (wb - wa) * 6 * t * (1 - t) / length;
-                const Vector3 normal = Math::Normalize(n + d * slope);
-                add(center + d * (setbacks[i] - length * t) + n * std::lerp(wa, wb, smooth), normal, t);
+                const double slope = (finish - start) * 6 * t * (1 - t) / length;
+                const Vector3 normal = Math::Normalize(n + d * slope) * std::lerp(scaleA, scaleB, t);
+                add(center + d * (setbacks[i] - length * t) + n * std::lerp(start, finish, smooth), normal, t);
             }
         }
     }
 
+    FillPavement(*this, pavementRim, directions);
     for (int i = 0; i < sides; ++i)
     {
         const auto& arm = layout.arms[i];
         if (arm && arm->stopLine)
-            PaintStopLine(geometry, layout.center + directions[i] * setbacks[i], directions[i],
-                          directions[(i + 1) % sides], *arm->stopLine);
+        {
+            const auto mouth = Mouth(i);
+            PaintStopLine(geometry, mouth.center, mouth.outward, cuts[i].lateral,
+                          {arm->stopLine->inner * cuts[i].scale, arm->stopLine->outer * cuts[i].scale});
+        }
     }
 }

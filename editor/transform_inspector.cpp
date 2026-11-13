@@ -65,7 +65,7 @@ double TransformFields::DisplayValue(int field) const
 
 std::string TransformFields::Text(int field) const
 {
-    if (!CanEdit(field) && !(target.kind == SelectionKind::Anchor && ((field >= 0 && field < 3) || field == geographicLocation)))
+    if (!CanEdit(field) && !(target.kind == SelectionKind::Anchor && ((field >= 0 && field < 3) || field == 4 || field == geographicLocation)))
     {
         return {};
     }
@@ -205,6 +205,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
     case SelectionKind::Anchor:
         if (!world.intersections.contains(target.index) || !IntersectionAnchor{target.index, target.point}.Valid()) return {};
         fields.value.position = world.intersections.at(target.index).AnchorPosition(target.point);
+        fields.value.rotation.y = world.intersections.at(target.index).skew[target.point];
         break;
     case SelectionKind::Intersection:
         if (!world.intersections.contains(target.index)) return {};
