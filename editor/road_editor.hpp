@@ -170,6 +170,7 @@ private:
         std::optional<RoadIntersectionInsertion> insertion;
         std::optional<RampPlan> exitRamp, entranceRamp;
         int segment = -1;
+        int point = -1;
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
     struct CrossingMenuTarget

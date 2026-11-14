@@ -4,7 +4,7 @@
 #include <optional>
 
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
-                           CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment };
+                           CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad };
 struct RampMenuOptions { bool exit, entrance; };
 enum class OutlineOp;
 
@@ -17,7 +17,7 @@ public:
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,
-                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false);
+                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<bool> splitEnabled = {});
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -42,13 +42,15 @@ private:
     RampMenuOptions rampOptions{};
     bool intersectionEnabled = true;
     bool crossingAvailable = false, crossingExists = false;
-    std::optional<bool> flattenEnabled;
-    bool flattenFocused = false;
+    // Segment and control-point actions share the second root-menu row.
+    std::optional<bool> roadActionEnabled;
+    EditorCommand roadAction = EditorCommand::FlattenSegment;
+    bool roadActionFocused = false;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;
     enum class Popup { Closed, Create, Submenu, Ramp };
     Popup popup = Popup::Closed;
-    SDL_FRect rootItem{}, flattenItem{}, submenu{};
+    SDL_FRect rootItem{}, roadActionItem{}, submenu{};
     int activeItem = 0;
 #endif
 };

@@ -101,6 +101,12 @@ To fill a block, Shift-click the roads and intersections surrounding it and pres
 
 The optional `TERR` version 3 section distinguishes imported meshes and generated fills. A `mesh` record stores the quoted model path, position XYZ, rotation XYZ in radians, and quoted material path. A `fill` record stores the quoted material path, a counted list of road IDs, and a counted list of intersection IDs. The editor and game regenerate the mesh from those neighbors when loading the world. Versions 1 and 2 still load as imported chunks.
 
+### Splitting roads
+
+Select a road to show its control points, then right-click an interior control point in the 3D viewport and choose **Split Road**, below **Create**. The chosen point becomes the last point of the first road and the first point of the second road. The roads can then be selected and edited separately. The item is disabled on the first and last points because either would produce an empty road.
+
+Both sections inherit the original road's names, material, lane and edge settings, paint setting, and Outliner folder. Bézier tangents are retained at the new ends. Attached intersections and ramp connections stay with their corresponding section, and terrain boundaries include both road IDs. Existing ramp tapers contract if a split shortens their available run. Splitting is one undo/redo step and saves with the world. Railroad control points support the same operation.
+
 ### Moving roads and intersections together
 
 Click a road surface or an intersection center, then **Shift-click** other roads or intersections to add them. **Ctrl-click** a group member to remove it. The Outliner shows the same selection. In the 3D viewport, use **W** to translate or **E** to rotate about the average of the selected road pivots and intersection centers. Groups of roads can rotate on all three axes. A group containing an intersection rotates about Y to keep each crossing level. In local space, the lowest-numbered selected intersection supplies the axes, or the lowest-numbered road if the group contains only roads. The Transform panel shows the pivot’s world position and the reference member’s orientation. Editing either moves or rotates the group. Hold **Ctrl** during a rotation to snap to 5°.

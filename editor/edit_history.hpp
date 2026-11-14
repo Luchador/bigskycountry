@@ -170,6 +170,7 @@ public:
         std::unique_ptr<BSCObject> removed;
     };
     bool Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object = {});
+    bool SplitRoad(WorldDocument& world, RoadEditorState& editor, int index, int point);
     bool ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int index, std::vector<Road> replacements,
                      const Intersection* inserted = nullptr);
     Result Undo(WorldDocument& world, RoadEditorState& editor);

@@ -37,6 +37,7 @@ namespace
                                         {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
     constexpr MenuItem removeCrossing{BSC_RAILROAD_CROSSING,L"Remove Railroad &Crossing"};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
+    constexpr MenuItem splitRoad{BSC_SPLIT_ROAD, L"&Split Road"};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
@@ -416,7 +417,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<bool> canSplit)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -452,6 +453,11 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
             ready = Insert(root, flatten);
             if (!*canFlatten) EnableMenuItem(root, BSC_FLATTEN_SEGMENT, MF_BYCOMMAND | MF_GRAYED);
         }
+        if (ready && canSplit)
+        {
+            ready = Insert(root, splitRoad);
+            if (!*canSplit) EnableMenuItem(root, BSC_SPLIT_ROAD, MF_BYCOMMAND | MF_GRAYED);
+        }
         if (ready)
         {
             HMENU submenu = GetSubMenu(root, 0);
@@ -477,6 +483,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_SPLIT_ROAD) return EditorCommand::SplitRoad;
     if (choice == BSC_FLATTEN_SEGMENT) return EditorCommand::FlattenSegment;
     if (choice == BSC_RAILROAD_CROSSING) return EditorCommand::ToggleRailroadCrossing;
     if (choice == BSC_CREATE_RAILROAD) return EditorCommand::CreateRailroad;
@@ -505,14 +512,15 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     intersectionEnabled = canCreateIntersection;
     this->crossingAvailable = crossingAvailable;
     this->crossingExists = crossingExists;
-    flattenEnabled = canFlatten;
-    flattenFocused = false;
-    const float rootHeight = itemHeight * (canFlatten ? 2 : 1);
-    rootItem = {0, 0, canFlatten ? 152.0f : 104.0f, itemHeight};
+    roadActionEnabled = canSplit.has_value() ? canSplit : canFlatten;
+    roadAction = canSplit.has_value() ? EditorCommand::SplitRoad : EditorCommand::FlattenSegment;
+    roadActionFocused = false;
+    const float rootHeight = itemHeight * (roadActionEnabled ? 2 : 1);
+    rootItem = {0, 0, roadActionEnabled ? 152.0f : 104.0f, itemHeight};
     submenu = {0, 0, 232, itemHeight * std::size(createItems)};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
-    flattenItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
+    roadActionItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
     submenu.x = rootItem.x + rootItem.w;
     submenu.y = fit(rootItem.y, submenu.h, scene.h);
     if (submenu.x + submenu.w > scene.w)
@@ -673,7 +681,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         case SDLK_DOWN:
             if (popup == Popup::Create)
             {
-                if (flattenEnabled.value_or(false)) flattenFocused = !flattenFocused;
+                if (roadActionEnabled.value_or(false)) roadActionFocused = !roadActionFocused;
             }
             else
             {
@@ -686,7 +694,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
             }
             break;
         case SDLK_RIGHT:
-            if (popup == Popup::Create && !flattenFocused) popup = Popup::Submenu;
+            if (popup == Popup::Create && !roadActionFocused) popup = Popup::Submenu;
             break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
@@ -695,9 +703,9 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
                 if (Enabled(items[activeItem].command)) command = items[activeItem].command;
                 popup = Popup::Closed;
             }
-            else if (flattenFocused)
+            else if (roadActionFocused)
             {
-                if (flattenEnabled.value_or(false)) command = EditorCommand::FlattenSegment;
+                if (roadActionEnabled.value_or(false)) command = roadAction;
                 popup = Popup::Closed;
             }
             else popup = Popup::Submenu;
@@ -715,15 +723,15 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         {
             if (!rampMenu && (!press || event.button.button == SDL_BUTTON_LEFT) && SDL_PointInRectFloat(&at, &rootItem))
             {
-                flattenFocused = false;
+                roadActionFocused = false;
                 popup = Popup::Submenu;
                 return true;
             }
-            if (!rampMenu && flattenEnabled && SDL_PointInRectFloat(&at, &flattenItem))
+            if (!rampMenu && roadActionEnabled && SDL_PointInRectFloat(&at, &roadActionItem))
             {
-                flattenFocused = true;
+                roadActionFocused = true;
                 popup = press ? Popup::Closed : Popup::Create;
-                if (press && event.button.button == SDL_BUTTON_LEFT && *flattenEnabled) command = EditorCommand::FlattenSegment;
+                if (press && event.button.button == SDL_BUTTON_LEFT && *roadActionEnabled) command = roadAction;
                 return true;
             }
             if (popup != Popup::Create && SDL_PointInRectFloat(&at, &submenu))
@@ -766,8 +774,8 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     }
     if (popup != Popup::Ramp)
     {
-        if (!item(rootItem, "Create    >", !flattenFocused)) return false;
-        if (flattenEnabled && !item(flattenItem, "Flatten Segment", flattenFocused, *flattenEnabled)) return false;
+        if (!item(rootItem, "Create    >", !roadActionFocused)) return false;
+        if (roadActionEnabled && !item(roadActionItem, roadAction == EditorCommand::SplitRoad ? "Split Road" : "Flatten Segment", roadActionFocused, *roadActionEnabled)) return false;
     }
     if (popup != Popup::Create)
     {

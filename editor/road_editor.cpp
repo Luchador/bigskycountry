@@ -533,6 +533,20 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, target.road, std::move(before), &road);
         return;
     }
+    if (command == EditorCommand::SplitRoad)
+    {
+        if (!roadMenuTarget) return;
+        const auto target = std::move(*roadMenuTarget);
+        roadMenuTarget.reset();
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size()) ||
+            world.roads[target.index].revision != target.revision) return;
+        if (history.SplitRoad(world, state, target.index, target.point))
+        {
+            outliner.Invalidate();
+            Save(world);
+        }
+        return;
+    }
     if (command == EditorCommand::FlattenSegment)
     {
         if (!roadMenuTarget) return;
@@ -620,20 +634,29 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     roadMenuTarget.reset();
     auto picker = rightClick->picker;
     const Road* selected = Selected(world);
-    const RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, false, &creationPoint);
+    RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, false, &creationPoint);
+    int hitRoad = hit.kind == RoadPickKind::Road ? hit.index : state.selected;
     // Test the visible lane stroke against the same depth as the scene and its handles.
     auto lanePicker = picker;
     if (selected) overlay.PickRampControl(lanePicker, world, *selected, camera, scene);
-    if (state.MultipleRoadsSelected()) overlay.PickGroupPoint(lanePicker, world, state, camera, scene);
+    if (state.MultipleRoadsSelected())
+    {
+        if (const auto point = overlay.PickGroupPoint(lanePicker, world, state, camera, scene))
+        {
+            hit = {RoadPickKind::Point, point->second};
+            hitRoad = point->first;
+        }
+    }
     const auto lane = overlay.PickRampLane(lanePicker, world, state, camera, scene);
     crossingMenuTarget.reset();
     double closestCrossing = 10.0;
     int clickedRoad = -1;
     if (hit.kind == RoadPickKind::Road) clickedRoad = hit.index;
-    else if (hit.kind == RoadPickKind::Segment || hit.kind == RoadPickKind::Point) clickedRoad = state.selected;
+    else if (hit.kind == RoadPickKind::Segment || hit.kind == RoadPickKind::Point) clickedRoad = hitRoad;
     if (clickedRoad >= 0)
     {
-        const auto at = hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) : picker.HitPosition();
+        const auto at = hit.kind == RoadPickKind::Point ? world.roads[clickedRoad].points[hit.index].position :
+                        hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) : picker.HitPosition();
         for (int r = 0; r < static_cast<int>(world.roads.size()); ++r)
         {
             const auto& road = world.roads[r];
@@ -664,9 +687,9 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         }
     }
     std::optional<RampMenuOptions> ramps;
-    std::optional<bool> flattenEnabled;
+    std::optional<bool> flattenEnabled, splitEnabled;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
-    if (lane && !crossingMenuTarget)
+    if (lane && !crossingMenuTarget && hit.kind != RoadPickKind::Point)
     {
         const auto& host = world.roads[lane->host];
         roadMenuTarget = RoadMenuTarget{lane->host, host.revision};
@@ -683,11 +706,16 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     }
     else if (hit.kind == RoadPickKind::Road || hit.kind == RoadPickKind::Segment || hit.kind == RoadPickKind::Point)
     {
-        const int index = hit.kind == RoadPickKind::Road ? hit.index : state.selected;
+        const int index = hitRoad;
         const Road& road = world.roads[index];
         const auto position = hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) :
                                                                  picker.HitPosition();
         roadMenuTarget = RoadMenuTarget{index, road.revision};
+        if (hit.kind == RoadPickKind::Point)
+        {
+            roadMenuTarget->point = hit.index;
+            splitEnabled = hit.index > 0 && hit.index + 1 < static_cast<int>(road.points.size());
+        }
         if (const auto at = LocateRoadHit(road, hit, position))
         {
             roadMenuTarget->insertion = PlanRoadIntersection(road, *at);
@@ -700,7 +728,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, splitEnabled))
     {
         RunCommand(*command, world, camera);
     }

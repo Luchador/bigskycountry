@@ -199,6 +199,80 @@ bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after,
     return true;
 }
 
+bool EditHistory::SplitRoad(WorldDocument& world, RoadEditorState& editor, int index, int point)
+{
+    if (index < 0 || index >= static_cast<int>(world.roads.size())) return false;
+    const Road& source = world.roads[index];
+    if (point <= 0 || point + 1 >= static_cast<int>(source.points.size())) return false;
+    std::vector<Road> pieces{source.Section(0, point), source.Section(point, source.points.size() - 1)};
+
+    // The two new endpoints occupy the same position, but a ramp station ID
+    // must have one owner. Keep each ramp on the side containing its attachment
+    // (or its taper when the attachment is exactly at the split).
+    const int station = source.points[point].rampStation;
+    std::set<int> leftSides, rightSides;
+    if (station)
+    {
+        for (const Road& road : world.roads)
+        {
+            if (road.points.size() < 2) continue;
+            for (bool exit : {true, false})
+            {
+                const auto& link = (exit ? road.points.front() : road.points.back()).ramp;
+                if (!link || link->station != station) continue;
+                const double direction = std::abs(link->offset) > 1e-8 ? link->offset :
+                    (exit ? -1.0 : 1.0) * source.style.TravelDirection(link->side);
+                (direction > 0 ? rightSides : leftSides).insert(link->side);
+            }
+        }
+    }
+    int rightStation = 0;
+    if (!rightSides.empty())
+    {
+        rightStation = leftSides.empty() ? station : world.NextRampStationId();
+        if (!rightStation) return SDL_SetError("No highway ramp station IDs available");
+    }
+    if (station)
+    {
+        pieces[0].points.back().rampStation = rightStation == station ? 0 : station;
+        pieces[1].points.front().rampStation = rightStation;
+    }
+    const auto reconnect = [&](std::vector<RoadPoint>& points)
+    {
+        bool changed = false;
+        for (auto& p : points)
+        {
+            if (p.ramp && p.ramp->station == station && rightSides.contains(p.ramp->side) && rightStation != station)
+            {
+                p.ramp->station = rightStation;
+                changed = true;
+            }
+        }
+        return changed;
+    };
+    for (Road& piece : pieces)
+    {
+        reconnect(piece.points);
+        piece.Rebuild();
+    }
+    if (!ReplaceRoad(world, editor, index, std::move(pieces))) return false;
+
+    // Add the dependent attachment edits to the same undo action. The two new
+    // roads were already serialized above; other roads are addressed by stable ID.
+    auto& action = actions.back();
+    for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+    {
+        if (i == index || i == index + 1) continue;
+        Road& road = world.roads[i];
+        auto before = road.points;
+        if (!reconnect(road.points)) continue;
+        action.before.connectedRoadPoints.try_emplace(road.id, std::move(before));
+        action.after.connectedRoadPoints[road.id] = road.points;
+        road.Rebuild();
+    }
+    return true;
+}
+
 bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int index,
                               std::vector<Road> replacements, const Intersection* inserted)
 {
