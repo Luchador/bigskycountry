@@ -5,6 +5,7 @@
 #include <cmath>
 #include <set>
 #include <map>
+#include <limits>
 
 namespace
 {
@@ -31,6 +32,23 @@ namespace
         std::map<Edge, Segment> segments;
         std::vector<std::vector<Index>> polygons;
         std::set<Index> verticalSteps;
+        std::vector<std::array<Vector3, 4>> solidWalls;
+
+        bool Sealed(Point point, double low, double high) const
+        {
+            const Vector3 p{point.x + origin.x, 0, point.y + origin.z};
+            for (const auto& wall : solidWalls)
+            {
+                const Vector3 a = wall[0], b = wall[1], delta = b - a;
+                const double lengthSquared = delta.x * delta.x + delta.z * delta.z;
+                if (lengthSquared < 1e-16) continue;
+                const double t = std::clamp(((p.x - a.x) * delta.x + (p.z - a.z) * delta.z) / lengthSquared, 0.0, 1.0);
+                const Vector3 top = a + delta * t, bottom = wall[3] + (wall[2] - wall[3]) * t;
+                if (std::hypot(top.x - p.x, top.z - p.z) <= 1e-6 && low >= bottom.y - 1e-6 && high <= top.y + 1e-6)
+                    return true;
+            }
+            return false;
+        }
 
         Index AddPoint(Vector3 p)
         {
@@ -126,6 +144,7 @@ namespace
     {
         Index i, j;
         Segment rim;
+        bool solidWall = false;
     };
 
     // Refinement uses the same boundary constraints as the coarse pocket, including holes.
@@ -178,17 +197,40 @@ namespace
                 if (outline.verticalSteps.contains(b)) steps.insert(j);
                 perimeter += std::hypot(rim[1].x - rim[0].x, rim[1].z - rim[0].z);
                 out.boundary.emplace_back(i, j);
-                out.seams.push_back({i, j, rim});
+                const Point middle{(rim[0].x + rim[1].x) * .5 - outline.origin.x,
+                                   (rim[0].z + rim[1].z) * .5 - outline.origin.z};
+                const double height = (rim[0].y + rim[1].y) * .5;
+                out.seams.push_back({i, j, rim, outline.Sealed(middle, height, height)});
             }
+        }
+        // Let terrain meet the original railway toe, below the slab top. Only
+        // lower a shared corner when every higher rim there has a real wall;
+        // otherwise retain the usual upper curb rim and its terrain seam.
+        std::vector<double> low(out.positions.size(), std::numeric_limits<double>::infinity());
+        std::vector<bool> canLower(out.positions.size(), true);
+        for (const auto& seam : out.seams)
+        {
+            low[seam.i] = std::min(low[seam.i], seam.rim[0].y);
+            low[seam.j] = std::min(low[seam.j], seam.rim[1].y);
         }
         for (const auto& seam : out.seams)
         {
-            // Only an actual vertical step in the source mesh can contribute two
-            // elevations at one XZ. An overpass cannot close a terrain boundary.
+            if (!seam.solidWall && seam.rim[0].y > low[seam.i] + 1e-6) canLower[seam.i] = false;
+            if (!seam.solidWall && seam.rim[1].y > low[seam.j] + 1e-6) canLower[seam.j] = false;
+        }
+        for (Index i = 0; i < out.positions.size(); ++i)
+            if (canLower[i] && outline.Sealed(out.points[i], low[i], out.positions[i].y))
+                out.positions[i].y = low[i];
+        for (const auto& seam : out.seams)
+        {
+            // A curb step or an actual concrete slab wall must close the full
+            // elevation difference. An ordinary overpass still cannot seal a pocket.
             const auto fits = [&](Index i, double y)
             {
                 const double height = steps.contains(i) ? RoadStyle::curbHeight : 0.0;
-                return out.positions[i].y - y <= height + 1e-6;
+                const double difference = out.positions[i].y - y;
+                return (difference >= -1e-6 && difference <= height + 1e-6) ||
+                       outline.Sealed(out.points[i], std::min(y, out.positions[i].y), std::max(y, out.positions[i].y));
             };
             if (!fits(seam.i, seam.rim[0].y) || !fits(seam.j, seam.rim[1].y)) return false;
         }
@@ -288,6 +330,7 @@ namespace
         std::map<std::pair<Index, double>, Index> lowerVertices;
         const auto atRoadHeight = [&](Index i, Vector3 rim)
         {
+            // Where terrain is lower, the source slab already provides the wall.
             if (pocket.positions[i].y - rim.y <= 1e-7) return base + i;
             const auto [it, added] = lowerVertices.try_emplace(std::pair{i, rim.y}, static_cast<Index>(mesh.vertices.size()));
             if (added) mesh.vertices.push_back({rim, {}});
@@ -309,10 +352,9 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
     if (first == footprints.end()) return {};
     Outline outline{(*first)->outline.front()};
-    for (const RoadGeometry* footprint : footprints)
+    const auto addRim = [&](const std::vector<Vector3>& rim)
     {
-        const auto& rim = footprint->outline;
-        if (rim.size() < 3) continue;
+        if (rim.size() < 3) return;
         auto& polygon = outline.polygons.emplace_back();
         Vector3 previous = rim.back();
         for (Vector3 p : rim)
@@ -320,6 +362,15 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
             polygon.push_back(outline.AddPoint(p));
             outline.AddEdge(previous, p);
             previous = p;
+        }
+    };
+    for (const RoadGeometry* footprint : footprints)
+    {
+        addRim(footprint->outline);
+        for (const auto& slab : footprint->crossingSlabs)
+        {
+            addRim(slab.outline);
+            outline.solidWalls.insert(outline.solidWalls.end(), slab.walls.begin(), slab.walls.end());
         }
     }
     for (const auto& link : links) outline.AddEdge(link[0], link[1]);

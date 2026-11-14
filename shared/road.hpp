@@ -164,6 +164,14 @@ struct RoadGeometry
     using ColoredSurface = std::vector<std::array<EdgeVertex, 3>>;
     ColoredSurface edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
+    struct CrossingSlab
+    {
+        std::vector<Vector3> outline; // Additional footprint, wider than the road at the crossing.
+        // Top A, top B, bottom B, bottom A: actual solid side faces which can
+        // seal terrain to a lower railway toe without changing the embankment.
+        std::vector<std::array<Vector3, 4>> walls;
+    };
+    std::vector<CrossingSlab> crossingSlabs;
     struct RailroadSegment
     {
         ColoredSurface rails;
@@ -227,7 +235,6 @@ struct Road : RoadGeometry
     std::vector<RailroadCrossingLink> crossings;
     // Generated constraints; authored knots and the railway alignment are preserved.
     std::vector<CrossingProfile> crossingProfiles;
-    std::vector<CrossingApron> crossingAprons;
     // Generated cut lines at active intersections. The authored spline stays editable all the way to the anchor.
     void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths, bool rebuild = false);
 

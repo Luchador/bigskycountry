@@ -27,16 +27,9 @@ struct CrossingProfile
 {
     std::vector<TrackSection> rows;
     double levelWidth = 0, approach = 0;
+    std::size_t slabFirst = 0, slabLast = 0; // Inclusive rows bounding the concrete pad.
+    double slabDepth = 0;                    // Solid sides extend below the unchanged embankment toes.
     bool operator==(const CrossingProfile&) const = default;
-};
-
-struct CrossingApron
-{
-    std::vector<Vector3> rim; // Actual road perimeter, including all crossing cut vertices.
-    Vector3 center, along;
-    double halfLength = 0;
-    CrossingProfile profile;
-    bool operator==(const CrossingApron&) const = default;
 };
 
 struct CrossingSite
@@ -48,4 +41,3 @@ struct CrossingSite
 std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& railway);
 std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road& railway, const CrossingSite& site);
 void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfile>& profiles);
-void ApplyCrossingAprons(RoadGeometry& railway, const std::vector<CrossingApron>& aprons);

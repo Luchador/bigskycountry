@@ -574,6 +574,7 @@ void Road::Rebuild()
     pavementTriangles.clear();
     railroadSegments.clear();
     trackSections.clear();
+    crossingSlabs.clear();
     edgeTriangles.clear();
     transitionStrips.clear();
     outline.clear();
@@ -660,7 +661,6 @@ void Road::Rebuild()
     {
         BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
-        ApplyCrossingAprons(*this, crossingAprons);
         UpdateBounds();
         return;
     }

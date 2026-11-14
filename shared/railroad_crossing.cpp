@@ -2,10 +2,8 @@
 #include "road.hpp"
 #include "world_document.hpp"
 
-#include <CDT.h>
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace
 {
@@ -125,13 +123,9 @@ namespace
     };
     std::vector<double> Bands(const CrossingProfile& profile)
     {
-        const double inner = RailroadSettings::gauge / 2;
-        const double outer = inner + RailroadSettings::headWidth;
-        std::vector<double> values{0, -profile.levelWidth, profile.levelWidth};
+        std::vector<double> values{-profile.levelWidth, profile.levelWidth};
         for (int s : {-1, 1})
         {
-            values.push_back(s * (inner - RailroadSettings::flangeClearance));
-            values.push_back(s * (outer + RailroadSettings::outerClearance));
             const int count = std::max(1, static_cast<int>(std::ceil(profile.approach)));
             for (int i = 1; i <= count; ++i)
                 values.push_back(s * (profile.levelWidth + profile.approach * i / count));
@@ -155,8 +149,7 @@ namespace
                 const auto weight = [&](double v)
                 { return 1 - Ease((std::abs(v) - profile.levelWidth) / profile.approach); };
                 bands.push_back({profile.rows[i - 1], profile.rows[i], offsets[j - 1], offsets[j],
-                                 weight(offsets[j - 1]), weight(offsets[j]),
-                                 Groove((offsets[j - 1] + offsets[j]) / 2)});
+                                 weight(offsets[j - 1]), weight(offsets[j]), false});
             }
         return bands;
     }
@@ -165,8 +158,7 @@ namespace
         const auto n = Math::Cross(b - a, c - a);
         return std::abs(n.y) > 1e-10 ? a.y - (n.x * (p.x - a.x) + n.z * (p.z - a.z)) / n.y : a.y;
     }
-    template <class Emit>
-    void Stamp(Polygon source, const Band& band, bool grooveOnly, Emit emit, RoadGeometry::ColoredSurface& walls)
+    template <class Emit> void Stamp(const Polygon& source, const Band& band, Emit emit)
     {
         const auto q = band.Footprint();
         for (int half = 0; half < 2; ++half)
@@ -174,49 +166,12 @@ namespace
             const auto a = q[0].position, b = q[half ? 2 : 1].position, c = q[half ? 3 : 2].position;
             std::vector<Polygon> ignored;
             auto p = Partition(source, {Vertex(a), Vertex(b), Vertex(c)}, ignored);
-            if (Area(p) < 1e-10)
-                continue;
-            auto top = p;
-            for (size_t i = 0; i < p.size(); ++i)
+            for (auto& vertex : p)
             {
-                const double deck = PlaneY(p[i].position, a, b, c);
-                const double w = std::lerp(band.weightLow, band.weightHigh, band.Lateral(p[i].position));
-                if (grooveOnly)
-                {
-                    top[i].position.y = p[i].position.y;
-                    if (band.groove)
-                        p[i].position.y = std::min(p[i].position.y, deck - RailroadSettings::grooveDepth);
-                }
-                else
-                {
-                    top[i].position.y = std::lerp(p[i].position.y, deck, w);
-                    p[i].position.y = top[i].position.y - (band.groove ? RailroadSettings::grooveDepth : 0);
-                }
+                const double w = std::lerp(band.weightLow, band.weightHigh, band.Lateral(vertex.position));
+                vertex.position.y = std::lerp(vertex.position.y, PlaneY(vertex.position, a, b, c), w);
             }
             Triangulate(p, emit);
-            if (!band.groove)
-                continue;
-            for (size_t i = 0; i < p.size(); ++i)
-            {
-                const size_t j = (i + 1) % p.size();
-                bool edge = false;
-                for (double v : {band.low, band.high})
-                {
-                    const auto l = band.Point(band.a, v), r = band.Point(band.b, v);
-                    const double tolerance = 1e-7 * std::max(1.0, LengthXZ(r - l));
-                    edge |= std::abs(Cross(r - l, p[i].position - l)) < tolerance &&
-                            std::abs(Cross(r - l, p[j].position - l)) < tolerance;
-                }
-                if (!edge)
-                    continue;
-                const SDL_FColor dark{.14f, .14f, .14f, 1};
-                const RoadGeometry::EdgeVertex a0{p[i].position, dark}, a1{top[i].position, dark},
-                    b0{p[j].position, dark}, b1{top[j].position, dark};
-                if (Math::Length(Math::Cross(a1.position - a0.position, b1.position - a0.position)) > 1e-10)
-                    walls.push_back({a0, a1, b1});
-                if (Math::Length(Math::Cross(b1.position - a0.position, b0.position - a0.position)) > 1e-10)
-                    walls.push_back({a0, b1, b0});
-            }
         }
     }
     template <class Surface, class Transform> void Modify(Surface& surface, Transform transform)
@@ -251,9 +206,7 @@ namespace
         }
         surface = std::move(result);
     }
-    template <class Emit>
-    void Process(Polygon polygon, const CrossingProfile& profile, bool groovesOnly, Emit emit,
-                 RoadGeometry::ColoredSurface& walls, bool paint = false)
+    template <class Emit> void Process(Polygon polygon, const CrossingProfile& profile, Emit emit)
     {
         const auto offsets = Bands(profile);
         const double reach = profile.levelWidth + profile.approach;
@@ -271,20 +224,18 @@ namespace
                 {
                     const auto weight = [&](double v)
                     { return 1 - Ease((std::abs(v) - profile.levelWidth) / profile.approach); };
-                    Band band{strip.a,
-                              strip.b,
-                              offsets[i - 1],
-                              offsets[i],
-                              weight(offsets[i - 1]),
-                              weight(offsets[i]),
-                              Groove((offsets[i - 1] + offsets[i]) / 2)};
+                    Band band{strip.a, strip.b, offsets[i - 1], offsets[i], weight(offsets[i - 1]), weight(offsets[i]),
+                              false};
                     std::vector<Polygon> ignored;
                     auto part = Partition(inside, band.Footprint(), ignored);
                     if (Area(part) < 1e-10)
                         continue;
-                    if (paint && band.weightLow == 1 && band.weightHigh == 1)
+                    // The complete pavement/curb/median/paint cross-section ends
+                    // at the two slab edges. Only concrete contains flangeways.
+                    if (row > profile.slabFirst && row <= profile.slabLast && band.weightLow == 1 &&
+                        band.weightHigh == 1)
                         continue;
-                    Stamp(std::move(part), band, groovesOnly, emit, walls);
+                    Stamp(part, band, emit);
                 }
             }
             pending = std::move(remaining);
@@ -360,6 +311,95 @@ namespace
     TrackSection Interpolate(const TrackSection& a, const TrackSection& b, double t)
     {
         return {a.top + (b.top - a.top) * t, a.side + (b.side - a.side) * t};
+    }
+    void SolidQuad(RoadGeometry::ColoredSurface& surface, Vector3 a, Vector3 b, Vector3 c, Vector3 d, SDL_FColor color)
+    {
+        const auto emit = [&](const std::array<V, 3>& t)
+        {
+            surface.push_back({RoadGeometry::EdgeVertex{t[0].position, color},
+                               RoadGeometry::EdgeVertex{t[1].position, color},
+                               RoadGeometry::EdgeVertex{t[2].position, color}});
+        };
+        Triangulate(Quad(a, b, c, d), emit);
+    }
+
+    void BuildSlab(RoadGeometry& road, const CrossingProfile& profile)
+    {
+        constexpr SDL_FColor concrete{.56f, .55f, .52f, 1}, recess{.14f, .14f, .14f, 1};
+        const double inner = RailroadSettings::gauge / 2 - RailroadSettings::flangeClearance;
+        const double outer =
+            RailroadSettings::gauge / 2 + RailroadSettings::headWidth + RailroadSettings::outerClearance;
+        const std::array offsets{-profile.levelWidth, -outer, -inner, inner, outer, profile.levelWidth};
+        const Vector3 depth{0, profile.slabDepth, 0}, groove{0, RailroadSettings::grooveDepth, 0};
+        auto& surface = road.edgeTriangles;
+        for (size_t i = profile.slabFirst + 1; i <= profile.slabLast; ++i)
+        {
+            for (size_t j = 1; j < offsets.size(); ++j)
+            {
+                const Band band{profile.rows[i - 1],
+                                profile.rows[i],
+                                offsets[j - 1],
+                                offsets[j],
+                                1,
+                                1,
+                                Groove((offsets[j - 1] + offsets[j]) / 2)};
+                const auto q = band.Footprint();
+                const auto a = q[0].position, b = q[1].position, c = q[2].position, d = q[3].position;
+                const Vector3 drop = band.groove ? groove : Vector3{};
+                SolidQuad(surface, a - drop, b - drop, c - drop, d - drop, band.groove ? recess : concrete);
+                SolidQuad(surface, d - depth, c - depth, b - depth, a - depth, concrete);
+                if (band.groove)
+                {
+                    SolidQuad(surface, a, a - groove, d - groove, d, recess);
+                    SolidQuad(surface, b - groove, b, c, c - groove, recess);
+                }
+            }
+        }
+        auto& slab = road.crossingSlabs.emplace_back();
+        std::vector<Vector3> bottomRim;
+        const auto point = [&](size_t i, double offset, double drop = 0.0)
+        { return profile.rows[i].top + profile.rows[i].side * offset - Vector3{0, drop, 0}; };
+        const auto end = [&](size_t i, bool reverse)
+        {
+            std::vector<Vector3> cap, bottom;
+            for (size_t j = 1; j < offsets.size(); ++j)
+            {
+                const double drop = Groove((offsets[j - 1] + offsets[j]) / 2) ? RailroadSettings::grooveDepth : 0;
+                cap.push_back(point(i, offsets[j - 1], drop));
+                cap.push_back(point(i, offsets[j], drop));
+                bottom.push_back(point(i, offsets[j - 1]) - depth);
+                bottom.push_back(point(i, offsets[j]) - depth);
+            }
+            if (reverse)
+            {
+                std::reverse(cap.begin(), cap.end());
+                std::reverse(bottom.begin(), bottom.end());
+            }
+            slab.outline.insert(slab.outline.end(), cap.begin(), cap.end());
+            bottomRim.insert(bottomRim.end(), bottom.begin(), bottom.end());
+        };
+        end(profile.slabFirst, false);
+        for (size_t i = profile.slabFirst + 1; i < profile.slabLast; ++i)
+        {
+            slab.outline.push_back(point(i, profile.levelWidth));
+            bottomRim.push_back(point(i, profile.levelWidth) - depth);
+        }
+        end(profile.slabLast, true);
+        for (size_t i = profile.slabLast; i > profile.slabFirst + 1; --i)
+        {
+            slab.outline.push_back(point(i - 1, -profile.levelWidth));
+            bottomRim.push_back(point(i - 1, -profile.levelWidth) - depth);
+        }
+        for (size_t i = 0; i < slab.outline.size(); ++i)
+        {
+            const auto a = slab.outline[i], b = slab.outline[(i + 1) % slab.outline.size()];
+            if (LengthXZ(b - a) < 1e-8)
+                continue;
+            // The skirt extends below ground even at the flangeway floor.
+            const auto bottomA = bottomRim[i], bottomB = bottomRim[(i + 1) % bottomRim.size()];
+            SolidQuad(surface, a, bottomA, bottomB, b, concrete);
+            slab.walls.push_back({a, b, bottomB, bottomA});
+        }
     }
 } // namespace
 
@@ -437,14 +477,18 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
     if (approach < 5 || std::abs(elevation - site.position.y) > approach * .20)
         return {};
     // Reserve room for the whole road, not just the centerline intersection.
-    const double core = (width + level * skew) / sine + 1;
+    constexpr double slabMargin = 3.0; // Pad projects past both sides of the full road footprint.
+    const double core = (width + level * skew) / sine + slabMargin;
     if (railStation < core || rs.back() - railStation < core)
         return {};
     const double reach = level + approach * sine;
-    const double half = (width + reach * skew) / sine + 3;
+    double half = std::max(core, (width + reach * skew) / sine + slabMargin);
+    if (half - core < 1e-6)
+        half = core; // Avoid a near-zero strip at almost perpendicular crossings.
     CrossingProfile result;
     result.levelWidth = level;
     result.approach = approach * sine;
+    result.slabDepth = settings.height + RailroadSettings::tieHeight + RailroadSettings::railHeight + 0.25;
     const auto sample = [&](double at)
     {
         const size_t i = std::clamp<size_t>(
@@ -452,17 +496,23 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
         return Interpolate(railway.trackSections[i - 1], railway.trackSections[i],
                            (at - distances[i - 1]) / (distances[i] - distances[i - 1]));
     };
-    std::vector<double> cuts{center - half, center + half};
+    std::vector<double> cuts{center - half, center - core, center + core, center + half};
     for (double d : distances)
-        if (d > center - half && d < center + half)
+        if (d > center - half && d < center + half &&
+            std::ranges::none_of(cuts, [&](double cut) { return std::abs(cut - d) < 1e-7; }))
             cuts.push_back(d);
     std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
     result.rows.push_back(sample(cuts.front()));
     for (size_t i = 1; i < cuts.size(); ++i)
     {
         const int steps = std::max(1, static_cast<int>(std::ceil(cuts[i] - cuts[i - 1])));
         for (int j = 1; j <= steps; ++j)
             result.rows.push_back(sample(std::lerp(cuts[i - 1], cuts[i], double(j) / steps)));
+        if (cuts[i] == center - core)
+            result.slabFirst = result.rows.size() - 1;
+        if (cuts[i] == center + core)
+            result.slabLast = result.rows.size() - 1;
     }
     // A tight curve can fold a wide approach ribbon back across itself. Leave
     // that layout unmodified instead of emitting overlapping crossing cells.
@@ -487,25 +537,21 @@ void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfil
 {
     for (const auto& profile : profiles)
     {
-        RoadGeometry::ColoredSurface walls;
         const auto stamp = [&](auto& surface)
-        { Modify(surface, [&](Polygon p, auto emit) { Process(std::move(p), profile, false, emit, walls); }); };
+        { Modify(surface, [&](Polygon p, auto emit) { Process(std::move(p), profile, emit); }); };
         stamp(road.pavementTriangles);
         stamp(road.edgeTriangles);
         for (auto& [material, surface] : road.transitionStrips)
             stamp(surface);
-        road.edgeTriangles.insert(road.edgeTriangles.end(), walls.begin(), walls.end());
         for (auto* stripes : {&road.whiteStripes, &road.yellowStripes})
         {
             std::vector<RoadGeometry::Triangle> result;
             for (const auto& tri : *stripes)
             {
                 const Vector3 lift{0, RoadStyle::stripeHeight, 0};
-                Process(
-                    {Vertex(tri[0] - lift), Vertex(tri[1] - lift), Vertex(tri[2] - lift)}, profile, false,
-                    [&](const auto& t)
-                    { result.push_back({t[0].position + lift, t[1].position + lift, t[2].position + lift}); }, walls,
-                    true);
+                Process({Vertex(tri[0] - lift), Vertex(tri[1] - lift), Vertex(tri[2] - lift)}, profile,
+                        [&](const auto& t)
+                        { result.push_back({t[0].position + lift, t[1].position + lift, t[2].position + lift}); });
             }
             *stripes = std::move(result);
         }
@@ -526,198 +572,14 @@ void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfil
                                const auto& band = bands[i / 2];
                                const auto& cell = cells[i];
                                const double w = std::lerp(band.weightLow, band.weightHigh, band.Lateral(p));
-                               p.y =
-                                   std::lerp(p.y, PlaneY(p, cell[0].position, cell[1].position, cell[2].position), w) -
-                                   (band.groove ? RailroadSettings::grooveDepth : 0);
+                               p.y = std::lerp(p.y, PlaneY(p, cell[0].position, cell[1].position, cell[2].position), w);
                                break;
                            }
                        return p;
                    });
     }
-}
-
-namespace
-{
-    // Split on a shared one-meter grid before changing elevation. Neighboring
-    // faces and the logical terrain rim receive identical cut vertices.
-    std::vector<Polygon> Grid(Polygon p, Vector3 origin, Vector3 along)
-    {
-        std::vector<Polygon> pieces{std::move(p)};
-        for (Vector3 axis : {along, Vector3{-along.z, 0, along.x}})
-        {
-            std::vector<Polygon> next;
-            for (auto& part : pieces)
-            {
-                double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-                for (const auto& v : part)
-                {
-                    double d = Math::Dot(v.position - origin, axis);
-                    lo = std::min(lo, d);
-                    hi = std::max(hi, d);
-                }
-                for (double at = std::floor(lo) + 1; at < hi; at += 1)
-                {
-                    const auto a = origin + axis * at, b = a + Vector3{-axis.z, 0, axis.x};
-                    auto slice = Clip(part, a, b);
-                    if (Area(slice) > 1e-10)
-                        next.push_back(std::move(slice));
-                    part = Clip(part, b, a);
-                }
-                if (Area(part) > 1e-10)
-                    next.push_back(std::move(part));
-            }
-            pieces = std::move(next);
-        }
-        return pieces;
-    }
-    Polygon RimPolygon(const CrossingApron& apron)
-    {
-        Polygon rim;
-        for (auto p : apron.rim)
-        {
-            if (!rim.empty() && LengthXZ(p - rim.back().position) < 1e-8)
-                rim.back().position.y = std::max(p.y, rim.back().position.y);
-            else
-                rim.push_back(Vertex(p));
-        }
-        if (rim.size() > 1 && LengthXZ(rim.front().position - rim.back().position) < 1e-8)
-            rim.pop_back();
-        return rim;
-    }
-    std::vector<Polygon> RimTriangles(const Polygon& rim)
-    {
-        using Index = CDT::VertInd;
-        std::vector<CDT::V2d<double>> points;
-        std::vector<CDT::Edge> edges;
-        if (rim.size() < 3 || rim.size() > std::numeric_limits<Index>::max())
-            return {};
-        const Vector3 origin = rim.front().position;
-        for (const auto& v : rim)
-            points.push_back({v.position.x - origin.x, v.position.z - origin.z});
-        const auto count = static_cast<Index>(rim.size());
-        for (Index i = 0; i < count; ++i)
-            edges.emplace_back(i, i + 1 == count ? Index{0} : Index(i + 1));
-        CDT::Triangulation<double> cdt;
-        cdt.insertVertices(points);
-        cdt.insertEdges(edges);
-        cdt.eraseOuterTrianglesAndHoles();
-        std::vector<Polygon> triangles;
-        for (const auto& t : cdt.triangles)
-            triangles.push_back({rim[t.vertices[0]], rim[t.vertices[1]], rim[t.vertices[2]]});
-        return triangles;
-    }
-    Vector3 ApronHeight(Vector3 p, const CrossingApron& apron, const Polygon& rim)
-    {
-        const double end = std::abs(Math::Dot(p - apron.center, apron.along));
-        if (end >= apron.halfLength)
-            return p;
-        double best = std::numeric_limits<double>::infinity(), height = p.y;
-        for (size_t i = 0; i < rim.size(); ++i)
-        {
-            const auto a = rim[i].position, b = rim[(i + 1) % rim.size()].position;
-            const auto v = b - a;
-            const double length = v.x * v.x + v.z * v.z;
-            const double t =
-                length > 1e-12 ? std::clamp(((p.x - a.x) * v.x + (p.z - a.z) * v.z) / length, 0.0, 1.0) : 0;
-            const auto q = a + v * t;
-            const double d = LengthXZ(p - q);
-            if (d < best)
-            {
-                best = d;
-                height = q.y;
-            }
-        }
-        const double blend = (1 - Ease(best / 3.0)) * (1 - Ease((end - (apron.halfLength - 2)) / 2));
-        p.y = std::lerp(p.y, height, blend);
-        return p;
-    }
-} // namespace
-
-void ApplyCrossingAprons(RoadGeometry& railway, const std::vector<CrossingApron>& aprons)
-{
-    for (const auto& apron : aprons)
-    {
-        const auto rim = RimPolygon(apron);
-        std::vector<Polygon> holes;
-        try
-        {
-            holes = RimTriangles(rim);
-        }
-        catch (const std::exception&)
-        {
-            continue;
-        } // A temporarily self-crossing edited road has no usable rim yet.
-        if (holes.empty())
-            continue;
-        const Vector3 side{-apron.along.z, 0, apron.along.x};
-        const auto region = Quad(apron.center - apron.along * apron.halfLength - side * 100,
-                                 apron.center - apron.along * apron.halfLength + side * 100,
-                                 apron.center + apron.along * apron.halfLength + side * 100,
-                                 apron.center + apron.along * apron.halfLength - side * 100);
-        const auto alter = [&](auto& surface)
-        {
-            Modify(surface,
-                   [&](Polygon p, auto emit)
-                   {
-                       std::vector<Polygon> outside;
-                       auto local = Partition(std::move(p), region, outside);
-                       for (const auto& piece : outside)
-                           Triangulate(piece, emit);
-                       if (Area(local) < 1e-10)
-                           return;
-                       std::vector<Polygon> pending{std::move(local)};
-                       for (const auto& hole : holes)
-                       {
-                           std::vector<Polygon> remaining;
-                           for (auto& part : pending)
-                               Partition(std::move(part), hole, remaining);
-                           pending = std::move(remaining);
-                           if (pending.empty())
-                               break;
-                       }
-                       for (auto& piece : pending)
-                           for (auto cell : Grid(std::move(piece), apron.center, apron.along))
-                           {
-                               for (auto& v : cell)
-                                   v.position = ApronHeight(v.position, apron, rim);
-                               Triangulate(cell, emit);
-                           }
-                   });
-        };
-        alter(railway.pavementTriangles);
-        alter(railway.edgeTriangles);
-        for (auto& [material, surface] : railway.transitionStrips)
-            alter(surface);
-        std::vector<Polygon> cells = holes;
-        cells.push_back(region);
-        // Grid cuts on the outline match the mesh's elevation interpolation.
-        for (Vector3 axis : {apron.along, side})
-        {
-            double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-            for (const auto& v : region)
-            {
-                double d = Math::Dot(v.position - apron.center, axis);
-                lo = std::min(lo, d);
-                hi = std::max(hi, d);
-            }
-            for (double d = std::floor(lo) + 1; d < hi; d += 1)
-            {
-                const auto a = apron.center + axis * d, b = Vector3{-axis.z, 0, axis.x} * 200;
-                cells.push_back({Vertex(a - b), Vertex(a + b)});
-            }
-        }
-        CutOutline(railway.outline, cells, [&](Vector3 p, Vector3) { return ApronHeight(p, apron, rim); });
-        // Continue the flangeways through the small ballast apron. The rail
-        // heads remain exposed and the groove floors remain solid.
-        RoadGeometry::ColoredSurface walls;
-        const auto groove = [&](auto& surface)
-        { Modify(surface, [&](Polygon p, auto emit) { Process(std::move(p), apron.profile, true, emit, walls); }); };
-        groove(railway.pavementTriangles);
-        groove(railway.edgeTriangles);
-        for (auto& [material, surface] : railway.transitionStrips)
-            groove(surface);
-        railway.edgeTriangles.insert(railway.edgeTriangles.end(), walls.begin(), walls.end());
-    }
+    for (const auto& profile : profiles)
+        BuildSlab(road, profile);
 }
 
 void WorldDocument::RefreshRailroadCrossings(bool force)
@@ -727,11 +589,9 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
     std::map<int, size_t> byId;
     for (size_t i = 0; i < roads.size(); ++i)
         byId.emplace(roads[i].id, i);
-    std::map<int, std::vector<CrossingApron>> aprons;
     for (auto& road : roads)
     {
         std::vector<CrossingProfile> profiles;
-        std::vector<int> sources;
         for (const auto& link : road.crossings)
         {
             const auto it = byId.find(link.railroadId);
@@ -751,32 +611,12 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
             if (auto profile = PlanRailroadCrossing(road, railway, *best))
             {
                 profiles.push_back(std::move(*profile));
-                sources.push_back(railway.id);
             }
         }
         if (profiles != road.crossingProfiles)
         {
             road.crossingProfiles = std::move(profiles);
             road.Rebuild();
-        }
-        for (size_t i = 0; i < road.crossingProfiles.size(); ++i)
-        {
-            const auto& rows = road.crossingProfiles[i].rows;
-            const auto a = rows.front().top, b = rows.back().top;
-            auto along = b - a;
-            along.y = 0;
-            along = Math::Normalize(along);
-            aprons[sources[i]].push_back(
-                {road.outline, (a + b) * .5, along, LengthXZ(b - a) * .5, road.crossingProfiles[i]});
-        }
-    }
-    for (auto& railway : roads)
-    {
-        auto next = aprons[railway.id];
-        if (next != railway.crossingAprons)
-        {
-            railway.crossingAprons = std::move(next);
-            railway.Rebuild();
         }
     }
     crossingRevision = RoadGeometry::latestRevision;
