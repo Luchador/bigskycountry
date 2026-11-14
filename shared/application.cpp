@@ -23,6 +23,7 @@ namespace
             {
                 return renderer;
             }
+            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Could not start the GPU renderer: %s", SDL_GetError());
         }
 #endif
         return SDL_CreateRenderer(window, nullptr);
@@ -201,7 +202,7 @@ namespace
                 }
 
                 for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
-                    if (!hidden({SceneKind::Mesh, i})) worldRenderer.SubmitMesh(world.meshes[i]);
+                    if (!hidden({SceneKind::Mesh, i})) worldRenderer.SubmitWorldMesh(world.meshes[i]);
                 for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
                     if (!hidden({SceneKind::Terrain, i})) worldRenderer.SubmitTerrain(*world.Terrain()[i]);
                 for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
@@ -209,9 +210,9 @@ namespace
                     if (hidden({SceneKind::Object, i})) continue;
                     const auto& object = world.Objects()[i];
                     if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
-                        worldRenderer.SubmitMaterialMesh(marker->Instance(), marker->material);
+                        worldRenderer.SubmitWorldMesh(marker->Instance(), marker->material);
                     else
-                        worldRenderer.SubmitMesh(object->Instance());
+                        worldRenderer.SubmitWorldMesh(object->Instance());
                 }
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();

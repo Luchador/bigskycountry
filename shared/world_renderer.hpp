@@ -1,13 +1,14 @@
 #pragma once
 
 #include "mesh.hpp"
+#include <optional>
 #include "surface_material.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
 class FreeCamera;
-struct RoadGeometry;
 class TerrainChunk;
+struct RoadGeometry;
 inline constexpr double worldNearDepth = 0.1;
 
 // Packed world-space vectors used by the CPU rasterizer and the GPU vertex layout.
@@ -19,7 +20,8 @@ struct WorldFloat3
     operator Vector3() const { return {x, y, z}; }
 };
 
-// Homogeneous clip position. z / w is near / viewZ, with 1 at the near plane.
+// Dynamic vertices use homogeneous clip positions with reversed depth. Resident
+// GPU vertices use xyz relative to a batch origin and store their residual in view.
 struct WorldDepthVertex
 {
     float x, y, z, w;
@@ -53,6 +55,9 @@ public:
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     enum class MeshUVs { Authored, TerrainProjection };
     void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored);
+    // Long-lived world placements can reuse their GPU vertices across frames.
+    void SubmitWorldMesh(const MeshInstance& instance, const std::string& material = {},
+                         MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();
     // Subsequent solid editor handles depth-test against each other in front of the world.
@@ -92,6 +97,36 @@ private:
         bool selected;
     };
     std::vector<DrawRange> draws;
+    struct ResidentGeometry
+    {
+        SDL_GPUDevice* device = nullptr;
+        SDL_GPUBuffer* buffer = nullptr;
+        ~ResidentGeometry();
+        Vector3 origin{};
+        std::vector<WorldDepthVertex> pendingUpload;
+        std::vector<MaterialRange> parts; // Contiguous, including the untextured gaps.
+        std::string material;
+        std::uint64_t revision = 0, lastFrame = 0, uploadFrame = 0;
+        std::weak_ptr<const Mesh> mesh;
+        MeshTransform transform;
+        bool moving = false;
+        MeshUVs mapping = MeshUVs::Authored;
+        SDL_FColor tint{};
+    };
+    struct ResidentDraw
+    {
+        std::shared_ptr<ResidentGeometry> geometry;
+        size_t before; // Position in the dynamic stream, preserving submission order.
+        bool selected;
+    };
+    std::unordered_map<const void*, std::shared_ptr<ResidentGeometry>> resident;
+    std::vector<ResidentDraw> residentDraws;
+    std::uint64_t frame = 0;
+    bool residentWire = false;
+    std::optional<Vector3> packingOrigin;
+    bool CanRetain(const std::string& material);
+    void CaptureGeometry(ResidentGeometry& geometry, size_t start, size_t firstMaterial);
+    void EmitRoadSurface(const RoadGeometry& road, const std::string& material);
     SurfaceMaterialCache materialCache;
     WorldLighting lights{};
     bool lightGeometry = false;
@@ -111,7 +146,7 @@ private:
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;
     SDL_GPUBuffer* vertexBuffer = nullptr;
     SDL_GPUTransferBuffer* upload = nullptr;
-    Uint32 bufferBytes = 0;
+    Uint32 bufferBytes = 0, uploadBytes = 0;
 
     struct Sample { float depth; bool selected; };
     std::vector<Sample> softwareDepth;

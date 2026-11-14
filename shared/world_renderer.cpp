@@ -19,6 +19,12 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view, const Wo
     focal = std::min(viewport.w, viewport.h) * 0.5;
     scaleX = viewport.w > 0 ? 2.0 * focal / viewport.w : 0.0;
     scaleY = viewport.h > 0 ? 2.0 * focal / viewport.h : 0.0;
+    ++frame;
+    residentDraws.clear();
+    residentWire = false;
+    // Allow brief trips outside the frustum without keeping deleted or distant
+    // geometry indefinitely. SDL defers destruction while a buffer is in flight.
+    std::erase_if(resident, [&](const auto& entry) { return frame - entry.second->lastFrame > 120; });
     vertices.clear();
     outline.clear();
     materialRanges.clear();
@@ -28,11 +34,19 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view, const Wo
     foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedRanges.clear();
     outlineStart = 0;
-    return true;
+    return viewport.w <= 0 || viewport.h <= 0 || PrepareTarget(target, viewport.w, viewport.h);
 }
 
 WorldDepthVertex WorldRenderer::WorldToClip(Vector3 position, SDL_FColor color) const
 {
+    if (packingOrigin)
+    {
+        const Vector3 local = position - *packingOrigin;
+        WorldDepthVertex vertex{float(local.x), float(local.y), float(local.z), 1, color};
+        // Reuse the view channel for the rounding residual of a resident vertex.
+        vertex.view = local - Vector3{vertex.x, vertex.y, vertex.z};
+        return vertex;
+    }
     const Vector3 v = camera->WorldToView(position);
     return {static_cast<float>(v.x * scaleX), static_cast<float>(v.y * scaleY),
             static_cast<float>(worldNearDepth), static_cast<float>(v.z), color};
@@ -93,7 +107,7 @@ bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 
 void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
 {
-    if (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform))
+    if (!instance.mesh || (!packingOrigin && !BoundsVisible(instance.mesh->bounds, &instance.transform)))
     {
         return;
     }
@@ -163,7 +177,7 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
         vertex.lit = lightGeometry;
         vertex.tangent = tangent;
         vertex.handedness = handedness;
-        vertex.view = camera->GetPosition() - p;
+        if (!packingOrigin) vertex.view = camera->GetPosition() - p;
         vertices.push_back(vertex);
     }
 }
@@ -176,7 +190,7 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         return;
     }
     const Mesh& mesh = *instance.mesh;
-    if (!BoundsVisible(mesh.bounds, &instance.transform)) return;
+    if (!packingOrigin && !BoundsVisible(mesh.bounds, &instance.transform)) return;
     const auto normalMatrix = instance.transform.NormalTransform();
     const auto worldNormal = [&](Vector3 n) {
         // Terrain placements are rigid. Object scale can be nonuniform or mirrored.
@@ -199,15 +213,84 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
     if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), material});
 }
 
-void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
+bool WorldRenderer::CanRetain(const std::string& material)
 {
-    const MeshInstance& instance = chunk.Instance();
-    if (chunk.material.empty() || !instance.mesh)
+    if (!device || !lightGeometry || foregroundStart != std::numeric_limits<size_t>::max()) return false;
+    const auto* surface = material.empty() ? nullptr : materialCache.Get(material, device);
+    // Translucent triangles still need global, camera-dependent sorting.
+    return !surface || surface->type != MaterialType::Unlit;
+}
+
+void WorldRenderer::CaptureGeometry(ResidentGeometry& geometry, size_t start, size_t firstMaterial)
+{
+    packingOrigin.reset();
+    geometry.pendingUpload.assign(vertices.begin() + start, vertices.end());
+    size_t cursor = start;
+    for (size_t i = firstMaterial; i < materialRanges.size(); ++i)
     {
-        SubmitMesh(instance, chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
+        auto& part = materialRanges[i];
+        if (cursor < part.first) geometry.parts.push_back({cursor - start, part.first - start, {}});
+        cursor = part.end;
+        part.first -= start;
+        part.end -= start;
+        geometry.parts.push_back(std::move(part));
+    }
+    if (cursor < vertices.size()) geometry.parts.push_back({cursor - start, vertices.size() - start, {}});
+    vertices.resize(start);
+    materialRanges.resize(firstMaterial);
+    geometry.device = device;
+}
+
+void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
+                                    MeshUVs mapping, SDL_FColor tint)
+{
+    if (!instance.mesh) return;
+    const auto emit = [&] {
+        if (material.empty()) SubmitMesh(instance, tint);
+        else SubmitMaterialMesh(instance, material, mapping);
+    };
+    if (!CanRetain(material))
+    {
+        emit();
         return;
     }
-    SubmitMaterialMesh(instance, chunk.material, MeshUVs::TerrainProjection);
+    const auto& bounds = instance.mesh->bounds;
+    if (!BoundsVisible(bounds, &instance.transform)) return;
+    auto& entry = resident[&instance];
+    const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
+    if (sameMesh && entry->transform != instance.transform)
+    {
+        // Stream moving placements. Once stationary, bake the new transform once.
+        entry->lastFrame = frame;
+        entry->transform = instance.transform;
+        entry->moving = true;
+        emit();
+        return;
+    }
+    if (!sameMesh || entry->moving ||
+        entry->material != material || entry->mapping != mapping ||
+        entry->tint.r != tint.r || entry->tint.g != tint.g || entry->tint.b != tint.b)
+    {
+        entry = std::make_shared<ResidentGeometry>();
+        entry->mesh = instance.mesh;
+        entry->transform = instance.transform;
+        entry->material = material;
+        entry->mapping = mapping;
+        entry->tint = tint;
+        entry->origin = bounds.Empty() ? instance.transform.origin : instance.transform.Point((bounds.min + bounds.max) * 0.5);
+        const size_t start = vertices.size(), firstMaterial = materialRanges.size();
+        packingOrigin = entry->origin;
+        emit();
+        CaptureGeometry(*entry, start, firstMaterial);
+    }
+    entry->lastFrame = frame;
+    if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), false});
+}
+
+void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
+{
+    SubmitWorldMesh(chunk.Instance(), chunk.material, MeshUVs::TerrainProjection,
+                    chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
 }
 
 void WorldRenderer::WireframeSubmittedGeometry()
@@ -215,6 +298,7 @@ void WorldRenderer::WireframeSubmittedGeometry()
     // Reserve UVs in this pass for two barycentric coordinates. Clipping and
     // perspective interpolation then preserve the edges of the original triangle.
     constexpr SDL_FPoint corners[] = {{1, 0}, {0, 1}, {0, 0}};
+    residentWire = true;
     wireframeEnd = vertices.size();
     for (size_t i = 0; i < wireframeEnd; ++i)
     {
@@ -288,7 +372,7 @@ void WorldRenderer::BuildDrawRanges()
 
 bool WorldRenderer::End()
 {
-    if (vertices.empty() || viewport.w <= 0 || viewport.h <= 0)
+    if ((vertices.empty() && residentDraws.empty()) || viewport.w <= 0 || viewport.h <= 0)
     {
         return true;
     }
@@ -296,7 +380,6 @@ bool WorldRenderer::End()
     vertices.insert(vertices.begin() + outlineStart, outline.begin(), outline.end());
     foregroundStart = outlineStart + outline.size();
     const SDL_FRect dest{0, 0, static_cast<float>(viewport.w), static_cast<float>(viewport.h)};
-    if (!PrepareTarget(renderer, viewport.w, viewport.h)) return false;
     if (!wireframeEnd)
     {
         for (auto& range : materialRanges)
@@ -304,6 +387,15 @@ bool WorldRenderer::End()
             range.material = materialCache.Get(range.path, device);
             if (range.transitionOnly && range.material && range.material->type != MaterialType::Transition)
                 range.material = nullptr;
+        }
+    }
+    for (const auto& batch : residentDraws)
+    {
+        for (auto& part : batch.geometry->parts)
+        {
+            part.material = !residentWire && !part.path.empty() ? materialCache.Get(part.path, device) : nullptr;
+            if (part.transitionOnly && part.material && part.material->type != MaterialType::Transition)
+                part.material = nullptr;
         }
     }
     BuildDrawRanges();

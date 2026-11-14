@@ -16,6 +16,7 @@ struct MeshTransform
     Vector3 origin{};
     Vector3 x{1, 0, 0}, y{0, 1, 0}, z{0, 0, 1};
 
+    bool operator==(const MeshTransform&) const = default;
     static MeshTransform AxisRotation(Vector3 unitAxis, double radians);
     Vector3 Point(Vector3 p) const { return origin + x * p.x + y * p.y + z * p.z; }
     Vector3 Direction(Vector3 p) const { return x * p.x + y * p.y + z * p.z; }

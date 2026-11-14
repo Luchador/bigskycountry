@@ -1,4 +1,6 @@
 #include "world_renderer.hpp"
+#include "free_camera.hpp"
+#include "editor_colors.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -48,6 +50,11 @@ namespace
 }
 #endif
 
+WorldRenderer::ResidentGeometry::~ResidentGeometry()
+{
+    if (buffer) SDL_ReleaseGPUBuffer(device, buffer);
+}
+
 WorldRenderer::~WorldRenderer()
 {
     if (colorTarget)
@@ -92,7 +99,7 @@ bool WorldRenderer::CreatePipelines()
         return SDL_SetError("No supported depth-stencil format for world rendering");
     }
 
-    SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "VSMain", world_vert_dxil, world_vert_spirv);
+    SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "VSMain", world_vert_dxil, world_vert_spirv, 0, 1);
     if (!vs)
     {
         return false;
@@ -277,10 +284,12 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         softwareDepth.resize(static_cast<std::size_t>(width) * height);
     }
 
-    if (colorTarget)
-    {
-        SDL_DestroyTexture(colorTarget);
-    }
+    if (colorTarget) SDL_DestroyTexture(colorTarget);
+    else if (device)
+        SDL_Log("World renderer: %s on %s", SDL_GetGPUDeviceDriver(device),
+                SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown adapter"));
+    else
+        SDL_Log("World renderer: CPU rasterizer (SDL renderer: %s)", SDL_GetRendererName(renderer));
 
     colorTarget = color;
 
@@ -289,55 +298,61 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
 
 bool WorldRenderer::DrawGPU()
 {
-    if (vertices.size() > std::numeric_limits<Uint32>::max() / sizeof(WorldDepthVertex))
+    // Stage newly visible or edited assets together. Once uploaded, their buffers
+    // stay on the device. Only camera uniforms and dynamic geometry change each frame.
+    constexpr size_t maxVertices = std::numeric_limits<Uint32>::max() / sizeof(WorldDepthVertex);
+    if (vertices.size() > maxVertices) return SDL_SetError("Dynamic world vertex buffer exceeds GPU limit");
+    const auto bytes = static_cast<Uint32>(vertices.size() * sizeof(WorldDepthVertex));
+    struct Upload { ResidentGeometry* geometry; Uint32 offset, size; };
+    std::vector<Upload> uploads;
+    Uint32 total = bytes;
+    for (const auto& draw : residentDraws)
     {
-        return SDL_SetError("World vertex buffer exceeds GPU buffer size limit");
+        auto& mesh = *draw.geometry;
+        if (mesh.pendingUpload.empty() || mesh.uploadFrame == frame) continue;
+        if (mesh.pendingUpload.size() > maxVertices) return SDL_SetError("World mesh exceeds GPU buffer limit");
+        const auto size = static_cast<Uint32>(mesh.pendingUpload.size() * sizeof(WorldDepthVertex));
+        if (size > std::numeric_limits<Uint32>::max() - total) return SDL_SetError("World upload exceeds GPU buffer limit");
+        const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX, size, 0};
+        if (!mesh.buffer) mesh.buffer = SDL_CreateGPUBuffer(device, &info);
+        if (!mesh.buffer) return false;
+        mesh.uploadFrame = frame;
+        uploads.push_back({&mesh, total, size});
+        total += size;
     }
-
-    const Uint32 bytes = static_cast<Uint32>(vertices.size() * sizeof(WorldDepthVertex));
-
+    const auto grow = [](Uint32 required, Uint32 previous) {
+        return static_cast<Uint32>(std::min<Uint64>(std::numeric_limits<Uint32>::max(),
+                                    std::max<Uint64>(required, previous + Uint64(previous) / 2)));
+    };
     if (bytes > bufferBytes)
     {
-        // Leave headroom as new geometry enters the view while moving.
-        const Uint32 capacity = static_cast<Uint32>(std::min<Uint64>(
-            std::numeric_limits<Uint32>::max(), std::max<Uint64>(bytes, bufferBytes + Uint64(bufferBytes) / 2)));
-        const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, capacity, 0};
-        SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(device, &bufferInfo);
-
-        if (!buffer)
-        {
-            return false;
-        }
-
-        const SDL_GPUTransferBufferCreateInfo transferInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, capacity, 0};
-        SDL_GPUTransferBuffer* staging = SDL_CreateGPUTransferBuffer(device, &transferInfo);
-
-        if (!staging)
-        {
-            SDL_ReleaseGPUBuffer(device, buffer);
-            return false;
-        }
-
-        if (vertexBuffer)
-        {
-            SDL_ReleaseGPUBuffer(device, vertexBuffer);
-            SDL_ReleaseGPUTransferBuffer(device, upload);
-        }
-
-        vertexBuffer = buffer;
-        upload = staging;
+        const auto capacity = grow(bytes, bufferBytes);
+        const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX, capacity, 0};
+        auto* replacement = SDL_CreateGPUBuffer(device, &info);
+        if (!replacement) return false;
+        if (vertexBuffer) SDL_ReleaseGPUBuffer(device, vertexBuffer);
+        vertexBuffer = replacement;
         bufferBytes = capacity;
     }
-
-    void* mapped = SDL_MapGPUTransferBuffer(device, upload, true);
-
-    if (!mapped)
+    if (total > uploadBytes)
     {
-        return false;
+        const auto capacity = grow(total, uploadBytes);
+        const SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, capacity, 0};
+        auto* replacement = SDL_CreateGPUTransferBuffer(device, &info);
+        if (!replacement) return false;
+        if (upload) SDL_ReleaseGPUTransferBuffer(device, upload);
+        upload = replacement;
+        uploadBytes = capacity;
     }
-
-    std::memcpy(mapped, vertices.data(), bytes);
-    SDL_UnmapGPUTransferBuffer(device, upload);
+    if (total)
+    {
+        auto* mapped = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device, upload, true));
+        if (!mapped) return false;
+        if (bytes) std::memcpy(mapped, vertices.data(), bytes);
+        for (const auto& item : uploads)
+            std::memcpy(mapped + item.offset, item.geometry->pendingUpload.data(), item.size);
+        SDL_UnmapGPUTransferBuffer(device, upload);
+    }
 
     SDL_GPUColorTargetInfo color{};
     color.texture = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
@@ -362,18 +377,23 @@ bool WorldRenderer::DrawGPU()
         return false;
     }
 
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
-
-    if (!copy)
+    if (total)
     {
-        SDL_CancelGPUCommandBuffer(commands);
-        return false;
+        auto* copy = SDL_BeginGPUCopyPass(commands);
+        if (!copy)
+        {
+            SDL_CancelGPUCommandBuffer(commands);
+            return false;
+        }
+        const auto send = [&](SDL_GPUBuffer* buffer, Uint32 offset, Uint32 size, bool cycle) {
+            const SDL_GPUTransferBufferLocation src{upload, offset};
+            const SDL_GPUBufferRegion dst{buffer, 0, size};
+            SDL_UploadToGPUBuffer(copy, &src, &dst, cycle);
+        };
+        if (bytes) send(vertexBuffer, 0, bytes, true);
+        for (const auto& item : uploads) send(item.geometry->buffer, item.offset, item.size, false);
+        SDL_EndGPUCopyPass(copy);
     }
-
-    const SDL_GPUTransferBufferLocation src{upload, 0};
-    const SDL_GPUBufferRegion dst{vertexBuffer, 0, bytes};
-    SDL_UploadToGPUBuffer(copy, &src, &dst, true);
-    SDL_EndGPUCopyPass(copy);
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
 
@@ -389,8 +409,21 @@ bool WorldRenderer::DrawGPU()
     const SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
                                 pack(lights.moon.radiance), pack(lights.ambient)};
     SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
-    const SDL_GPUBufferBinding binding{vertexBuffer, 0};
-    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+    // Form the origin-to-eye offset in double before packing the shader uniforms.
+    const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };
+    SDL_FColor cameraData[]{axis(camera->Right() * scaleX), axis(camera->Up() * scaleY),
+                            axis(camera->Forward(), float(worldNearDepth)), {}, {}, EditorColors::wire};
+    SDL_GPUBuffer* source = nullptr;
+    const auto bindSource = [&](SDL_GPUBuffer* buffer, const ResidentGeometry* mesh) {
+        if (source == buffer) return;
+        source = buffer;
+        const SDL_GPUBufferBinding binding{buffer, 0};
+        SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+        const Vector3 offset = mesh ? mesh->origin - camera->GetPosition() : Vector3{};
+        cameraData[3] = axis(offset, mesh ? (residentWire ? 2.f : 1.f) : 0.f);
+        cameraData[4] = axis(offset - Vector3{cameraData[3].r, cameraData[3].g, cameraData[3].b});
+        SDL_PushGPUVertexUniformData(commands, 0, cameraData, sizeof(cameraData));
+    };
 
     const auto draw = [&](std::size_t first, std::size_t end, Uint8 marker)
     {
@@ -403,24 +436,54 @@ bool WorldRenderer::DrawGPU()
 
     SDL_GPUGraphicsPipeline* bound = surfacePipeline;
     const SurfaceMaterial* boundMaterial = nullptr;
-    for (const auto& range : draws)
-    {
+    const auto bindPipeline = [&](const SurfaceMaterial* material, bool wire) {
         auto* pipeline = surfacePipeline;
-        if (range.first < wireframeEnd) pipeline = wireframePipeline;
-        else if (range.material)
-            pipeline = range.material->type == MaterialType::Unlit ? translucentPipeline : texturedPipeline;
+        if (wire) pipeline = wireframePipeline;
+        else if (material) pipeline = material->type == MaterialType::Unlit ? translucentPipeline : texturedPipeline;
         if (pipeline != bound)
         {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             bound = pipeline;
         }
-        if (range.material && range.material != boundMaterial) materialCache.Bind(*range.material, commands, pass);
-        boundMaterial = range.material;
-        draw(range.first, range.end, range.selected);
+        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass);
+        boundMaterial = material;
+    };
+    const auto drawResident = [&](const ResidentDraw& batch) {
+        bindSource(batch.geometry->buffer, batch.geometry.get());
+        for (const auto& part : batch.geometry->parts)
+        {
+            bindPipeline(residentWire ? nullptr : part.material, residentWire);
+            draw(part.first, part.end, batch.selected);
+        }
+    };
+    auto batch = residentDraws.begin();
+    for (const auto& range : draws)
+    {
+        size_t first = range.first;
+        // Draw opaque geometry in its original order, including coplanar paint
+        // and the editor overlays. Globally sorted translucent draws come last.
+        const bool translucent = range.material && range.material->type == MaterialType::Unlit;
+        while (batch != residentDraws.end() && (translucent || batch->before < range.end))
+        {
+            const size_t split = translucent ? first : std::clamp(batch->before, first, range.end);
+            if (first < split)
+            {
+                bindSource(vertexBuffer, nullptr);
+                bindPipeline(range.material, first < wireframeEnd);
+                draw(first, split, range.selected);
+                first = split;
+            }
+            drawResident(*batch++);
+        }
+        bindSource(vertexBuffer, nullptr);
+        bindPipeline(range.material, first < wireframeEnd);
+        draw(first, range.end, range.selected);
     }
+    while (batch != residentDraws.end()) drawResident(*batch++);
 
     if (outlineStart < foregroundStart)
     {
+        bindSource(vertexBuffer, nullptr);
         SDL_BindGPUGraphicsPipeline(pass, outlinePipeline);
         draw(outlineStart, foregroundStart, 1);
     }
@@ -438,9 +501,12 @@ bool WorldRenderer::DrawGPU()
             return false;
         }
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
-        SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+        source = nullptr; // Bindings are local to a render pass.
+        bindSource(vertexBuffer, nullptr);
         draw(foregroundStart, vertices.size(), 0);
         SDL_EndGPURenderPass(pass);
     }
-    return SDL_SubmitGPUCommandBuffer(commands);
+    if (!SDL_SubmitGPUCommandBuffer(commands)) return false;
+    for (const auto& item : uploads) std::vector<WorldDepthVertex>().swap(item.geometry->pendingUpload);
+    return true;
 }

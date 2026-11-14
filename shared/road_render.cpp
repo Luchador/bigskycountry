@@ -168,6 +168,13 @@ namespace
         AppendTriangles(road.whiteStripes, whiteStripeColor, transform, focal, viewport, vertices);
     }
 
+    void SubmitColoredSurface(WorldRenderer& renderer, const RoadGeometry::ColoredSurface& surface)
+    {
+        for (const auto& t : surface)
+            renderer.SubmitTriangle({t[0].position, t[1].position, t[2].position},
+                                    {Srgb::ToLinear(t[0].color), Srgb::ToLinear(t[1].color), Srgb::ToLinear(t[2].color)});
+    }
+
     // Draw a batch of road triangles and return whether the operation succeeded.
     bool Submit(SDL_Renderer* renderer, const std::vector<SDL_Vertex>& vertices)
     {
@@ -175,9 +182,8 @@ namespace
     }
 }
 
-void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected)
+void WorldRenderer::EmitRoadSurface(const RoadGeometry& road, const std::string& material)
 {
-    if (!BoundsVisible(road.bounds)) return;
     // The 2D plan uses display colors. Convert those swatches to albedo for the 3D lighting pass.
     static const auto asphalt = Srgb::ToLinear(roadColor);
     static const auto yellowPaint = Srgb::ToLinear(yellowStripeColor);
@@ -200,15 +206,7 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
         }
         if (!material.empty()) materialRanges.push_back({start, vertices.size(), material});
     }
-    const auto submitEdges = [&](const RoadGeometry::ColoredSurface& surface)
-    {
-        for (const auto& triangle : surface)
-        {
-            SubmitTriangle({triangle[0].position, triangle[1].position, triangle[2].position},
-                           {Srgb::ToLinear(triangle[0].color), Srgb::ToLinear(triangle[1].color), Srgb::ToLinear(triangle[2].color)});
-        }
-    };
-    submitEdges(road.edgeTriangles);
+    SubmitColoredSurface(*this, road.edgeTriangles);
     for (const auto& [path, strip] : road.transitionStrips)
     {
         const auto first = vertices.size();
@@ -220,28 +218,66 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
         if (!path.empty() && vertices.size() > first)
             materialRanges.push_back({first, vertices.size(), path, nullptr, true});
     }
-    for (const auto& detail : road.railroadSegments)
+    solid(road.yellowStripes, yellowPaint);
+    solid(road.whiteStripes, whitePaint);
+}
+
+void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected)
+{
+    if (!BoundsVisible(road.bounds)) return;
+    const size_t start = vertices.size();
+    const bool cache = road.revision && CanRetain(material);
+    const size_t previousBatches = residentDraws.size();
+    const auto submitPart = [&](const void* key, Vector3 origin, const std::string& path, auto emit)
     {
-        if (!detail.WithinDistance(camera->GetPosition(), g_ProjectSettings.RailroadDetailDistance())) continue;
-        submitEdges(detail.rails);
-        for (const auto& run : detail.ties)
+        if (!cache)
+        {
+            emit();
+            return;
+        }
+        auto& entry = resident[key];
+        if (!entry || entry->revision != road.revision || entry->material != path)
+        {
+            entry = std::make_shared<ResidentGeometry>();
+            entry->revision = road.revision;
+            entry->material = path;
+            entry->origin = origin;
+            const size_t first = vertices.size(), firstMaterial = materialRanges.size();
+            packingOrigin = origin;
+            emit();
+            CaptureGeometry(*entry, first, firstMaterial);
+        }
+        entry->lastFrame = frame;
+        if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), selected});
+    };
+
+    const Vector3 origin = road.bounds.Empty() ? Vector3{} : (road.bounds.min + road.bounds.max) * 0.5;
+    submitPart(&road, origin, material, [&] { EmitRoadSurface(road, material); });
+    for (const auto& segment : road.railroadSegments)
+    {
+        if (!segment.WithinDistance(camera->GetPosition(), g_ProjectSettings.RailroadDetailDistance())) continue;
+        submitPart(&segment, origin, {}, [&] { SubmitColoredSurface(*this, segment.rails); });
+        for (const auto& run : segment.ties)
         {
             const double radius = run.Radius();
             const auto center = run.Center();
-            // Once the spacing projects to less than half a pixel, the bed and rails carry the silhouette.
             if (!SphereVisible(center, radius) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing)
                 continue;
-            for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)});
+            submitPart(&run, center, {}, [&] {
+                for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)});
+            });
         }
     }
-    solid(road.yellowStripes, yellowPaint);
-    solid(road.whiteStripes, whitePaint);
-    if (selected && start < vertices.size() && viewport.w > 0 && viewport.h > 0)
+    const bool retained = residentDraws.size() != previousBatches;
+    if (selected && (retained || start < vertices.size()) && viewport.w > 0 && viewport.h > 0)
     {
-        if (!selectedRanges.empty() && selectedRanges.back().end == start)
-            selectedRanges.back().end = vertices.size();
-        else
-            selectedRanges.push_back({start, vertices.size()});
+        if (start < vertices.size())
+        {
+            if (!selectedRanges.empty() && selectedRanges.back().end == start)
+                selectedRanges.back().end = vertices.size();
+            else
+                selectedRanges.push_back({start, vertices.size()});
+        }
         const auto transform = [&](Vector3 p) { return camera->WorldToView(p); };
         AppendOutline(road, transform, focal, viewport, [&](SDL_FPoint p, double depth)
         {
