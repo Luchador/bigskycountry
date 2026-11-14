@@ -53,10 +53,10 @@ struct IntersectionLayout
 struct IntersectionSurface
 {
     IntersectionLayout layout{};
+    // Anchor distance plus the rendered mouth's advance along its skewed approach.
     std::array<double, IntersectionAnchor::sideCount> setbacks{};
-    std::array<double, IntersectionAnchor::sideCount> lateralShifts{};
     RoadGeometry geometry;
-    // Position on the skewed approach at the nominal side's cut plane.
+    // A true-width cut perpendicular to the skewed road, beyond the fixed anchor.
     RoadMouth Mouth(int side) const;
     void Build(const IntersectionLayout& input);
 };

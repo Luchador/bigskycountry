@@ -172,19 +172,53 @@ namespace
         }
     }
 
-    // A skewed road crosses the side's original cut plane obliquely. Cut the
-    // true-width road ribbon on that plane, keeping the four authoring pivots fixed.
-    struct ApproachCut
+    struct ApproachFrame
     {
-        Vector3 axis, lateral;
-        double scale, drift;
+        Vector3 anchor, forward, left;
     };
 
-    ApproachCut Cut(const IntersectionLayout& layout, int side)
+    ApproachFrame Frame(const IntersectionLayout& layout, int side)
     {
-        const Vector3 axis = Intersection::Directions(layout.yaw)[side];
-        const double angle = layout.skew[side];
-        return {axis, Math::Cross(axis, up), 1.0 / std::cos(angle), -std::tan(angle)};
+        const Vector3 nominal = Intersection::Directions(layout.yaw)[side];
+        const Vector3 forward = Intersection::Directions(layout.yaw + layout.skew[side])[side];
+        return {layout.center + nominal * Intersection::anchorDistance, forward, Math::Cross(forward, up)};
+    }
+
+    struct Corner
+    {
+        Vector3 start, end, center;
+        double radius, turn;
+    };
+
+    std::optional<Corner> Fillet(const ApproachFrame& a, const ApproachFrame& b,
+                                 double widthA, double widthB, double radius, double angle)
+    {
+        const Vector3 start = a.anchor + a.left * widthA, end = b.anchor - b.left * widthB;
+        if (angle < 1e-6)
+        {
+            // Two parallel approaches can share a rounded nose. Its radius is
+            // limited by the actual space between their facing edges.
+            const double advance = Math::Dot(end - start, a.forward);
+            const Vector3 p = start + a.forward * std::max(0.0, advance);
+            const Vector3 q = end - b.forward * std::min(0.0, advance);
+            const double gap = Math::Dot(q - p, a.left);
+            if (gap <= 1e-6) return {};
+            return Corner{p, q, (p + q) * 0.5, gap * 0.5, std::numbers::pi};
+        }
+        if (angle >= std::numbers::pi - 1e-6) return {};
+        const double sine = -Math::Cross(a.forward, b.forward).y;
+        const double alongA = -Math::Cross(end - start, b.forward).y / sine;
+        const double alongB = -Math::Cross(end - start, a.forward).y / sine;
+        const double cotangent = 1.0 / std::tan(angle * 0.5);
+        // Near-parallel roads must not send their mouths arbitrarily far down
+        // the spline. Tighten the corner to the available approach space.
+        const double reach = std::max(Intersection::anchorDistance, 2 * (std::max(widthA, widthB) + radius));
+        const double furthest = std::max(alongA, alongB);
+        if (furthest > reach) return {};
+        radius = std::min(radius, std::max(0.0, (reach - furthest) / cotangent));
+        const Vector3 p = start + a.forward * (alongA + radius * cotangent);
+        const Vector3 q = end + b.forward * (alongB + radius * cotangent);
+        return Corner{p, q, p + a.left * radius, radius, std::numbers::pi - angle};
     }
 
     int NextArm(const IntersectionLayout& layout, int side)
@@ -235,9 +269,8 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
 
 RoadMouth IntersectionSurface::Mouth(int side) const
 {
-    const auto cut = Cut(layout, side);
-    return {layout.center + cut.axis * Intersection::anchorDistance,
-            layout.center + cut.axis * setbacks[side] + cut.lateral * lateralShifts[side], cut.axis, cut.scale};
+    const auto frame = Frame(layout, side);
+    return {frame.anchor, frame.anchor + frame.forward * (setbacks[side] - Intersection::anchorDistance), frame.forward};
 }
 
 void IntersectionSurface::Build(const IntersectionLayout& input)
@@ -247,43 +280,29 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     geometry = {};
     geometry.MarkRebuilt();
     setbacks.fill(Intersection::anchorDistance);
-    // Provide space for the full facing shoulder of the cross street and the fillet.
-    // Only the rendered mouths move. The four authored connection anchors stay put.
-    std::array<ApproachCut, sides> cuts;
-    for (int i = 0; i < sides; ++i) cuts[i] = Cut(layout, i);
+    std::array<ApproachFrame, sides> frames;
+    std::array<std::optional<Corner>, sides> corners;
+    for (int i = 0; i < sides; ++i) frames[i] = Frame(layout, i);
 
-    // Each corner needs room for both mouth profiles at their actual lateral
-    // offsets. At opposing 45-degree limits two incident edges can be parallel;
-    // in that case keep the openings apart laterally on their respective sides.
-    lateralShifts.fill(0);
-    for (int i = 0; i < sides; ++i)
-    {
-        const int j = (i + 1) % sides;
-        if (!layout.arms[i] || !layout.arms[j]) continue;
-        const auto& a = *layout.arms[i];
-        const auto& b = *layout.arms[j];
-        const double edgeA = Profile(a.edge).Width(), edgeB = Profile(b.edge).Width();
-        const double radius = OuterRadius(layout.radius, edgeA, edgeB);
-        setbacks[i] = std::max(setbacks[i], (b.right + edgeB) * cuts[j].scale + radius);
-        setbacks[j] = std::max(setbacks[j], (a.left + edgeA) * cuts[i].scale + radius);
-    }
-    // An oblique approach can run toward one adjacent mouth. Its lateral
-    // position is bounded by the two corner tangencies at the chosen setback.
+    // Intersect the true-width edge lines, then find the two tangencies of
+    // their circular fillet. Each mouth clears both of its adjoining corners.
+    // Authoring anchors stay fixed; rendered cuts are normal to the approach.
     for (int i = 0; i < sides; ++i)
     {
         if (!layout.arms[i]) continue;
+        const int j = NextArm(layout, i);
+        if (j == i) continue;
         const auto& a = *layout.arms[i];
-        const double edge = Profile(a.edge).Width();
-        const double desired = (setbacks[i] - Intersection::anchorDistance) * cuts[i].drift;
-        // The center must stay inside the mouth's projected pavement span.
-        // This also prevents opposite corners crossing on a narrow branch.
-        double lo = -a.left * cuts[i].scale, hi = a.right * cuts[i].scale;
-        const int prev = (i + sides - 1) % sides, next = (i + 1) % sides;
-        if (layout.arms[next])
-            hi = std::min(hi, setbacks[next] - (a.left + edge) * cuts[i].scale);
-        if (layout.arms[prev])
-            lo = std::max(lo, (a.right + edge) * cuts[i].scale - setbacks[prev]);
-        lateralShifts[i] = std::clamp(desired, lo, hi);
+        const auto& b = *layout.arms[j];
+        const double edgeA = Profile(a.edge).Width(), edgeB = Profile(b.edge).Width();
+        const double angle = ((j - i + sides) % sides) * std::numbers::pi / 2 + layout.skew[i] - layout.skew[j];
+        corners[i] = Fillet(frames[i], frames[j], a.left + edgeA, b.right + edgeB,
+                            OuterRadius(layout.radius, edgeA, edgeB), angle);
+        if (const auto& corner = corners[i])
+        {
+            setbacks[i] = std::max(setbacks[i], Intersection::anchorDistance + Math::Dot(corner->start - frames[i].anchor, frames[i].forward));
+            setbacks[j] = std::max(setbacks[j], Intersection::anchorDistance + Math::Dot(corner->end - frames[j].anchor, frames[j].forward));
+        }
     }
 
     std::vector<Vector3> pavementRim;
@@ -293,14 +312,12 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         const int j = NextArm(layout, i);
         const auto& a = *layout.arms[i];
         const auto& b = *layout.arms[j];
-        const Vector3 d = directions[i], e = directions[j], n = directions[(i + 1) % sides];
+        const auto& frameA = frames[i];
+        const auto& frameB = frames[j];
         const EdgeProfile pa = Profile(a.edge), pb = Profile(b.edge);
         const double wa = a.left + pa.Width(), wb = b.right + pb.Width();
-        const Vector3 center = layout.center;
         const Vector3 mouth = Mouth(i).center;
-        const bool adjacent = j == (i + 1) % sides;
         const Vector3 nextMouth = Mouth(j).center;
-        const double scaleA = cuts[i].scale, scaleB = cuts[j].scale;
         pavementRim.push_back(mouth);
         std::optional<Rim> previous;
         auto emit = [&](const Rim& rim, double t)
@@ -320,53 +337,44 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         {
             emit(Section(p, normal, pa, pb, t), t);
         };
-        add(mouth + n * (wa * scaleA), n * scaleA, 0);
-        if (adjacent)
+        const Vector3 start = mouth + frameA.left * wa;
+        const Vector3 end = nextMouth - frameB.left * wb;
+        add(start, frameA.left, 0);
+        if (const auto& corner = corners[i])
         {
-            const Vector3 end = nextMouth + d * (wb * scaleB);
-            const Vector3 corner = center + d * (wb * scaleB - lateralShifts[j]) +
-                                            e * (wa * scaleA + lateralShifts[i]);
-            const double r = std::max(0.0, std::min({OuterRadius(layout.radius, pa.Width(), pb.Width()),
-                                      Math::Dot(mouth - corner, d), Math::Dot(nextMouth - corner, e)}));
-            const Vector3 arcCenter = corner + (d + e) * r;
-            // Offset each axis by its own edge dimensions. This gives concentric
-            // arcs for matching curbs and tangent elliptical arcs for unlike edges.
-            const auto cornerSection = [&](double sine, double cosine, double t)
+            const int intervals = std::max(1, static_cast<int>(std::ceil(cornerIntervals * corner->turn / (std::numbers::pi / 2))));
+            for (int k = 0; k <= intervals; ++k)
             {
-                const Vector3 outer = arcCenter - (d * sine + e * cosine) * r;
-                Rim rim = Section(outer, {}, pa, pb, t);
-                const Vector3 apron = outer - d * (sine * pb.cap * scaleB) - e * (cosine * pa.cap * scaleA);
-                rim.p[0] = apron - d * (sine * pb.apron * scaleB) - e * (cosine * pa.apron * scaleA);
-                rim.p[1] = apron;
-                rim.p[2] = apron + up * std::lerp(pa.rise, pb.rise, t);
-                emit(rim, t);
-            };
-            if (r == 0) cornerSection(1, 1, 0.5); // Miter both profiles at the square corner.
-            else
-            {
-                for (int k = 0; k <= cornerIntervals; ++k)
-                {
-                    const double t = static_cast<double>(k) / cornerIntervals, angle = t * std::numbers::pi / 2;
-                    cornerSection(k == cornerIntervals ? 1 : std::sin(angle), k == cornerIntervals ? 0 : std::cos(angle), t);
-                }
+                const double t = static_cast<double>(k) / intervals;
+                const double angle = corner->turn * t;
+                const Vector3 normal = k == 0 ? frameA.left : k == intervals ? frameB.left * -1 :
+                    frameA.left * std::cos(angle) + frameA.forward * std::sin(angle);
+                const Vector3 outer = k == 0 ? corner->start : k == intervals ? corner->end :
+                    corner->center - normal * corner->radius;
+                // Ease unlike edge profiles so their pavement and curb edges
+                // also meet the straight road tangentially.
+                add(outer, normal, t * t * (3 - 2 * t));
             }
-            add(end, d * scaleB, 1);
+            add(end, frameB.left * -1, 1);
         }
         else
         {
-            // Across the closed side of a T there is one continuous boundary.
-            // Horizontal end tangents make asymmetric shoulders meet it smoothly.
-            const double length = setbacks[i] + setbacks[j];
-            const double start = lateralShifts[i] + wa * scaleA;
-            const double finish = -lateralShifts[j] + wb * scaleB;
-            const int intervals = start == finish && a.edge == b.edge ?
+            // Close the back of a T (or a parallel/overlapping pair) with a
+            // tangent cubic. Equal, opposite approaches reduce to a straight edge.
+            const double handle = Math::Length(end - start) / 3;
+            const Vector3 p = start - frameA.forward * handle, q = end - frameB.forward * handle;
+            const bool straight = Math::Dot(frameA.forward, frameB.forward) < -1 + 1e-12 &&
+                                  std::abs(Math::Dot(end - start, frameA.left)) < 1e-8;
+            const int intervals = straight && a.edge == b.edge ?
                 (a.transitionMaterial == b.transitionMaterial ? 1 : 2) : cornerIntervals;
             for (int k = 1; k <= intervals; ++k)
             {
-                const double t = static_cast<double>(k) / intervals, smooth = t * t * (3 - 2 * t);
-                const double slope = (finish - start) * 6 * t * (1 - t) / length;
-                const Vector3 normal = Math::Normalize(n + d * slope) * std::lerp(scaleA, scaleB, t);
-                add(center + d * (setbacks[i] - length * t) + n * std::lerp(start, finish, smooth), normal, t);
+                const double t = static_cast<double>(k) / intervals, u = 1 - t;
+                const Vector3 point = start * (u * u * u) + p * (3 * u * u * t) + q * (3 * u * t * t) + end * (t * t * t);
+                const Vector3 tangent = (p - start) * (u * u) + (q - p) * (2 * u * t) + (end - q) * (t * t);
+                const Vector3 normal = k == intervals ? frameB.left * -1 :
+                    Math::Length(tangent) > 1e-8 ? Math::Normalize(Math::Cross(up, tangent)) : frameA.left;
+                add(k == intervals ? end : point, normal, t * t * (3 - 2 * t));
             }
         }
     }
@@ -378,8 +386,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         if (arm && arm->stopLine)
         {
             const auto mouth = Mouth(i);
-            PaintStopLine(geometry, mouth.center, mouth.outward, cuts[i].lateral,
-                          {arm->stopLine->inner * cuts[i].scale, arm->stopLine->outer * cuts[i].scale});
+            PaintStopLine(geometry, mouth.center, mouth.outward, frames[i].left, *arm->stopLine);
         }
     }
     geometry.UpdateBounds();
