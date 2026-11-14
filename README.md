@@ -107,6 +107,12 @@ Select a road to show its control points, then right-click an interior control p
 
 Both sections inherit the original road's names, material, lane and edge settings, paint setting, and Outliner folder. Bézier tangents are retained at the new ends. Attached intersections and ramp connections stay with their corresponding section, and terrain boundaries include both road IDs. Existing ramp tapers contract if a split shortens their available run. Splitting is one undo/redo step and saves with the world. Railroad control points support the same operation.
 
+### Joining road endpoints
+
+Select two roads with **Shift-click**, then **Shift-click** one free endpoint on each road in the 3D viewport. Press **F** to connect them. One road gains a new segment using its existing material and road settings; both roads retain their identities and Outliner folders. Any combination of start and end points is supported. Coincident endpoints are joined directly without adding a zero-length segment.
+
+The new end follows the other road's endpoint and cross-section when it moves. On Bézier roads it also follows that endpoint's tangent. Move the original endpoint to reposition the shared join. The link saves with the world and supports **Ctrl+Z** / **Ctrl+Y**. Once the perimeter is closed, select the surrounding whole roads and intersections and press **F** again to fill it with terrain. The terrain keeps following both roads. The existing exit-to-entrance ramp workflow still creates its separate one-lane connector.
+
 ### Moving roads and intersections together
 
 Click a road surface or an intersection center, then **Shift-click** other roads or intersections to add them. **Ctrl-click** a group member to remove it. The Outliner shows the same selection. In the 3D viewport, use **W** to translate or **E** to rotate about the average of the selected road pivots and intersection centers. Groups of roads can rotate on all three axes. A group containing an intersection rotates about Y to keep each crossing level. In local space, the lowest-numbered selected intersection supplies the axes, or the lowest-numbered road if the group contains only roads. The Transform panel shows the pivot’s world position and the reference member’s orientation. Editing either moves or rotates the group. Hold **Ctrl** during a rotation to snap to 5°.

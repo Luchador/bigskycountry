@@ -363,6 +363,20 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
             outline.AddEdge(previous, p);
             previous = p;
         }
+        // A narrower road's curb can end against a wider road's pavement.
+        // Allow the terrain skirt at both corners of that exposed curb cap,
+        // not just the riser: the top ledge extends another 15 cm outwards.
+        for (std::size_t i = 0; i < rim.size(); ++i)
+        {
+            const std::size_t next = (i + 1) % rim.size();
+            if (polygon[i] != polygon[next] || std::abs(rim[i].y - rim[next].y) < 1e-7) continue;
+            const bool reversed = rim[i].y > rim[next].y;
+            const Vector3 top = reversed ? rim[i] : rim[next];
+            const std::size_t outer = reversed ? (i + rim.size() - 1) % rim.size() : (next + 1) % rim.size();
+            if (std::abs(rim[outer].y - top.y) < 1e-7 &&
+                std::abs(Math::Length(rim[outer] - top) - RoadStyle::curbTopWidth) < 1e-7)
+                outline.verticalSteps.insert(polygon[outer]);
+        }
     };
     for (const RoadGeometry* footprint : footprints)
     {

@@ -106,6 +106,7 @@ private:
     void UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer);
     void FinishAnchorRoad(WorldDocument& world);
     void FillSelection(WorldDocument& world);
+    void ConnectRoads(WorldDocument& world);
     void ConnectRamps(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);

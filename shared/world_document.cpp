@@ -266,9 +266,9 @@ bool WorldDocument::ValidConnections() const
         for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
         {
             if (point->connectorSocket && !sockets.insert(point->connectorSocket).second)
-                return SDL_SetError("Duplicate ramp connector socket");
+                return SDL_SetError("Duplicate road connector socket");
             if (point->connectorTarget && !targets.insert(point->connectorTarget).second)
-                return SDL_SetError("Duplicate ramp connector attachment");
+                return SDL_SetError("Duplicate road connector attachment");
             if (point->ramp)
             {
                 const auto& link = *point->ramp;
@@ -283,7 +283,7 @@ bool WorldDocument::ValidConnections() const
                 return SDL_SetError("Invalid road connection to intersection %d, side %d", ref.intersectionId, ref.side);
         }
     }
-    if (sockets != targets) return SDL_SetError("Missing ramp connector endpoint");
+    if (sockets != targets) return SDL_SetError("Missing road connector endpoint");
     return true;
 }
 

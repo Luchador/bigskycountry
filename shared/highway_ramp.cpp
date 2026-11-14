@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 
 RampLane HighwayRampLane(const RoadStyle& style, const RampLink& link, bool exit, bool branchesLeft)
 {
@@ -108,20 +109,45 @@ void WorldDocument::RefreshRampConnections(bool force)
             ramp.Rebuild();
         }
     }
-    // Resolve after highway attachments have moved. A connector can occur before
-    // either source in the world file. The pair IDs survive reordering and road splits.
+    // Resolve every target position before deriving tangents. A source road can
+    // itself have an attachment at its other end, in any world-file order.
+    std::set<int> moved;
     for (Road& road : roads)
     {
         if (road.points.size() < 2) continue;
-        bool changed = false;
+        for (RoadPoint* end : {&road.points.front(), &road.points.back()})
+        {
+            const auto it = sockets.find(end->connectorTarget);
+            if (!end->connectorTarget || it == sockets.end()) continue;
+            const auto [source, i] = it->second;
+            if (end->position == source->points[i].position) continue;
+            end->position = source->points[i].position;
+            moved.insert(road.id);
+        }
+    }
+    // Pair IDs survive reordering and splitting. A direct road join can use
+    // either end of each road; equal endpoint roles require opposite tangents.
+    for (Road& road : roads)
+    {
+        if (road.points.size() < 2) continue;
+        bool changed = moved.contains(road.id);
         for (int e = 0; e < 2; ++e)
         {
             RoadPoint& end = e == 0 ? road.points.front() : road.points.back();
-            if (!end.connectorTarget) continue;
+            if (!end.connectorTarget)
+            {
+                if (!end.ramp && road.rampCaps[e])
+                {
+                    road.rampCaps[e].reset();
+                    changed = true;
+                }
+                continue;
+            }
             const auto it = sockets.find(end.connectorTarget);
             if (it == sockets.end()) continue;
             const auto [source, i] = it->second;
-            const Vector3 tangent = source->Tangent(i);
+            const double direction = (e == 0) == (i == 0) ? -1.0 : 1.0;
+            const Vector3 tangent = source->Tangent(i) * direction;
             const auto& position = source->points[i].position;
             const double heading = std::atan2(tangent.z, tangent.x);
             const double pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));

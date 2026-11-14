@@ -2047,6 +2047,100 @@ void RoadEditor::FillSelection(WorldDocument& world)
     Save(world);
 }
 
+void RoadEditor::ConnectRoads(WorldDocument& world)
+{
+    if (state.groupEndpoints.size() != 2)
+    {
+        status = "Select one free endpoint on each of two roads";
+        return;
+    }
+    const auto [index, point] = *state.groupEndpoints.begin();
+    const auto [otherIndex, otherPoint] = *state.groupEndpoints.rbegin();
+    const auto available = [&](int r, int p)
+    {
+        if (r < 0 || r >= static_cast<int>(world.roads.size()) || world.hierarchy.EditorHidden({SceneKind::Road, r})) return false;
+        const Road& road = world.roads[r];
+        return !road.style.railroad && road.points.size() >= 2 &&
+               (p == 0 || p + 1 == static_cast<int>(road.points.size())) && !road.points[p].Joined();
+    };
+    if (index == otherIndex || !available(index, point) || !available(otherIndex, otherPoint))
+    {
+        status = "Select one free endpoint on each of two different roads";
+        return;
+    }
+    const auto rampEnd = [&](int r, int p, bool exit)
+    {
+        const Road& road = world.roads[r];
+        return road.style.oneWay && (exit ? p + 1 == static_cast<int>(road.points.size()) && road.points.front().ramp
+                                         : p == 0 && road.points.back().ramp);
+    };
+    if ((rampEnd(index, point, true) && rampEnd(otherIndex, otherPoint, false)) ||
+        (rampEnd(otherIndex, otherPoint, true) && rampEnd(index, point, false)))
+    {
+        ConnectRamps(world); // Keep the existing separate one-lane ramp connector workflow.
+        return;
+    }
+    Road& road = world.roads[index];
+    Road& source = world.roads[otherIndex];
+    const bool first = point == 0;
+    const Vector3 destination = source.points[otherPoint].position;
+    const bool weld = Math::Length(destination - road.points[point].position) < Road::minPointSpacing;
+    const Vector3 start = road.points[weld ? (first ? 1 : point - 1) : point].position;
+    if (!ValidRoadSpan(road, start, destination))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    int join = 0;
+    for (const Road& item : world.roads)
+        for (const auto& p : item.points) join = std::max({join, p.connectorSocket, p.connectorTarget});
+    if (join == std::numeric_limits<int>::max()) { status = "No road connection IDs available"; return; }
+    ++join;
+    EditSnapshot before(state, &road);
+    before.connectedRoadPoints.emplace(source.id, source.points);
+    const auto planLength = [](const Road& r, std::size_t start = 0)
+    {
+        double distance = 0;
+        for (std::size_t i = start; i + 1 < r.points.size(); ++i)
+        {
+            const auto samples = r.SegmentSamples(i);
+            for (std::size_t j = 1; j < samples.size(); ++j)
+                distance += std::hypot(samples[j].x - samples[j - 1].x, samples[j].z - samples[j - 1].z);
+        }
+        return distance;
+    };
+    const double previousLength = planLength(road);
+    if (!weld)
+    {
+        auto& previous = road.points[point];
+        if (road.style.curved && !previous.heading)
+        {
+            const Vector3 tangent = road.Tangent(point);
+            previous.heading = std::atan2(tangent.z, tangent.x);
+            previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
+        }
+        RoadPoint end{destination};
+        end.connectorTarget = join;
+        road.points.insert(first ? road.points.begin() : road.points.end(), end);
+    }
+    else road.points[point].connectorTarget = join;
+    source.points[otherPoint].connectorSocket = join;
+    source.Rebuild();
+    road.Rebuild();
+    world.RefreshRampConnections(true);
+    // Keep authored crossing stations on the original spans after prepending or
+    // appending the connection. No generated geometry is stored in the history.
+    const double length = planLength(road);
+    const double added = first && !weld ? length - planLength(road, 1) : 0;
+    if (length > 0)
+        for (auto& crossing : road.crossings)
+            crossing.roadFraction = std::clamp((crossing.roadFraction * previousLength + added) / length, 0.0, 1.0);
+    state.SelectPoint(index, first ? 0 : static_cast<int>(road.points.size()) - 1);
+    EditSnapshot after(state, &road);
+    after.connectedRoadPoints.emplace(source.id, source.points);
+    if (history.Record(index, std::move(before), std::move(after))) Save(world);
+}
+
 void RoadEditor::ConnectRamps(WorldDocument& world)
 {
     if (state.groupEndpoints.size() != 2)
@@ -2930,7 +3024,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         if (!event.key.repeat && drag == Drag::None)
         {
-            if (!state.groupEndpoints.empty()) ConnectRamps(world);
+            if (!state.groupEndpoints.empty()) ConnectRoads(world);
             else if (state.RoadGroupSelected()) FillSelection(world);
             else ConnectEndpoint(world);
         }
