@@ -6,6 +6,7 @@
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
                            CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad };
 struct RampMenuOptions { bool exit, entrance; };
+struct SplitMenuOptions { bool enabled, railroad; };
 enum class OutlineOp;
 
 class EditorMenu
@@ -17,7 +18,7 @@ public:
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,
-                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<bool> splitEnabled = {});
+                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<SplitMenuOptions> split = {});
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -45,6 +46,7 @@ private:
     // Segment and control-point actions share the second root-menu row.
     std::optional<bool> roadActionEnabled;
     EditorCommand roadAction = EditorCommand::FlattenSegment;
+    const char* roadActionLabel = "Flatten Segment";
     bool roadActionFocused = false;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;

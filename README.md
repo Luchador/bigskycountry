@@ -223,6 +223,8 @@ In **Settings → Project Settings → Optimization**, enter the **Rail and tie 
 
 In the 3D viewport, right-click and choose **Create → Create Railroad** to place 50 m of standard-gauge track. Select its teal spline or control points to edit it as you would a road. **Shift-drag** either endpoint to extend the track, or select a span and press **Ctrl+Q** to subdivide it. The control-point elevation is the base of the embankment.
 
+To break a long railroad into smaller, independently editable pieces, select it and right-click an interior control point, then choose **Split Railroad** below **Create**. The first and last points cannot be split. If there is no control point where you want the cut, select that spline segment and use **Ctrl+Q** first. Both pieces inherit the track's embankment settings, materials, names, and Outliner folder. Bézier tangents keep the rails aligned at the cut; existing crossings and terrain boundary references follow their corresponding pieces. **Ctrl+Z** and **Ctrl+Y** undo and redo the split. Subsequent edits rebuild the edited piece's track geometry rather than the original full-length railroad.
+
 The railroad inspector adjusts the flat crest width and the bed height in meters. The initial crest is 4 m wide and 0.75 m high. The rails have 1.435 m of clear gauge and the timber ties are spaced every 0.60 m along the track. Enable **Transition strip** for a 0.40 m blend at each toe and drop a Transition material onto the strip slot. The embankment has its own material slot.
 
 ### Editing road control points

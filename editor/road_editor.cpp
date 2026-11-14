@@ -687,7 +687,8 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         }
     }
     std::optional<RampMenuOptions> ramps;
-    std::optional<bool> flattenEnabled, splitEnabled;
+    std::optional<bool> flattenEnabled;
+    std::optional<SplitMenuOptions> split;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
     if (lane && !crossingMenuTarget && hit.kind != RoadPickKind::Point)
     {
@@ -714,7 +715,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         if (hit.kind == RoadPickKind::Point)
         {
             roadMenuTarget->point = hit.index;
-            splitEnabled = hit.index > 0 && hit.index + 1 < static_cast<int>(road.points.size());
+            split = SplitMenuOptions{hit.index > 0 && hit.index + 1 < static_cast<int>(road.points.size()), road.style.railroad.has_value()};
         }
         if (const auto at = LocateRoadHit(road, hit, position))
         {
@@ -728,7 +729,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, splitEnabled))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split))
     {
         RunCommand(*command, world, camera);
     }

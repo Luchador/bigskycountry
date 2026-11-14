@@ -38,6 +38,7 @@ namespace
     constexpr MenuItem removeCrossing{BSC_RAILROAD_CROSSING,L"Remove Railroad &Crossing"};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
     constexpr MenuItem splitRoad{BSC_SPLIT_ROAD, L"&Split Road"};
+    constexpr MenuItem splitRailroad{BSC_SPLIT_ROAD, L"&Split Railroad"};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
@@ -417,7 +418,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<bool> canSplit)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -453,10 +454,10 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
             ready = Insert(root, flatten);
             if (!*canFlatten) EnableMenuItem(root, BSC_FLATTEN_SEGMENT, MF_BYCOMMAND | MF_GRAYED);
         }
-        if (ready && canSplit)
+        if (ready && split)
         {
-            ready = Insert(root, splitRoad);
-            if (!*canSplit) EnableMenuItem(root, BSC_SPLIT_ROAD, MF_BYCOMMAND | MF_GRAYED);
+            ready = Insert(root, split->railroad ? splitRailroad : splitRoad);
+            if (!split->enabled) EnableMenuItem(root, BSC_SPLIT_ROAD, MF_BYCOMMAND | MF_GRAYED);
         }
         if (ready)
         {
@@ -512,8 +513,9 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     intersectionEnabled = canCreateIntersection;
     this->crossingAvailable = crossingAvailable;
     this->crossingExists = crossingExists;
-    roadActionEnabled = canSplit.has_value() ? canSplit : canFlatten;
-    roadAction = canSplit.has_value() ? EditorCommand::SplitRoad : EditorCommand::FlattenSegment;
+    roadActionEnabled = split ? std::optional{split->enabled} : canFlatten;
+    roadAction = split ? EditorCommand::SplitRoad : EditorCommand::FlattenSegment;
+    roadActionLabel = split ? (split->railroad ? "Split Railroad" : "Split Road") : "Flatten Segment";
     roadActionFocused = false;
     const float rootHeight = itemHeight * (roadActionEnabled ? 2 : 1);
     rootItem = {0, 0, roadActionEnabled ? 152.0f : 104.0f, itemHeight};
@@ -775,7 +777,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     if (popup != Popup::Ramp)
     {
         if (!item(rootItem, "Create    >", !roadActionFocused)) return false;
-        if (roadActionEnabled && !item(roadActionItem, roadAction == EditorCommand::SplitRoad ? "Split Road" : "Flatten Segment", roadActionFocused, *roadActionEnabled)) return false;
+        if (roadActionEnabled && !item(roadActionItem, roadActionLabel, roadActionFocused, *roadActionEnabled)) return false;
     }
     if (popup != Popup::Create)
     {
