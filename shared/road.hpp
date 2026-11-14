@@ -1,6 +1,7 @@
 #pragma once
 
 #include "railroad.hpp"
+#include "railroad_crossing.hpp"
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_rect.h>
 
@@ -175,6 +176,7 @@ struct RoadGeometry
         Vector3 lower, upper; // Bounds of the sampled track centerline.
     };
     std::vector<RailroadSegment> railroadSegments;
+    std::vector<TrackSection> trackSections; // Exact rail-head sweep stations for grade crossings.
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 };
@@ -222,6 +224,10 @@ struct Road : RoadGeometry
     RoadStyle style;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
+    std::vector<RailroadCrossingLink> crossings;
+    // Generated constraints; authored knots and the railway alignment are preserved.
+    std::vector<CrossingProfile> crossingProfiles;
+    std::vector<CrossingApron> crossingAprons;
     // Generated cut lines at active intersections. The authored spline stays editable all the way to the anchor.
     void SetMouths(const std::array<std::optional<RoadMouth>, 2>& mouths, bool rebuild = false);
 

@@ -164,6 +164,7 @@ namespace
             if (roadTool)
             {
                 world.RefreshRampConnections();
+                world.RefreshRailroadCrossings();
                 world.RefreshTerrainFills();
             }
             const Uint64 now = SDL_GetTicksNS();

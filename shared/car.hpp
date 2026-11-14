@@ -15,7 +15,7 @@ struct CarHandling
     double lateralForceHeight = 0.70; // Fraction of contact-to-COM height used to reduce cornering roll.
     double springStrength = 25000, suspensionDamping = 3200;
     double suspensionLength = 0.52, wheelRadius = 0.35;
-    double steeringAngle = 0.55, steeringResponse = 9;
+    double steeringAngle = 0.35, steeringResponse = 2;
     double yawAssist = 4, antiRoll = 5;
 };
 

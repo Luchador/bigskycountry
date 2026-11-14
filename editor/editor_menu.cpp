@@ -34,7 +34,8 @@ namespace
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
-                                        {BSC_CREATE_MARKER, L"&Marker"}};
+                                        {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
+    constexpr MenuItem removeCrossing{BSC_RAILROAD_CROSSING,L"Remove Railroad &Crossing"};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
@@ -363,7 +364,8 @@ namespace
     constexpr BarAction createItems[] = {{"Create Road", EditorCommand::CreateRoad},
                                          {"Create Railroad", EditorCommand::CreateRailroad},
                                          {"Create Intersection", EditorCommand::CreateIntersection},
-                                         {"Marker", EditorCommand::CreateMarker}};
+                                         {"Marker", EditorCommand::CreateMarker},
+                                         {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing}};
     constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
                                        {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp}};
     std::span<const BarAction> ViewportActions(bool rampMenu)
@@ -414,7 +416,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -450,6 +452,19 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
             ready = Insert(root, flatten);
             if (!*canFlatten) EnableMenuItem(root, BSC_FLATTEN_SEGMENT, MF_BYCOMMAND | MF_GRAYED);
         }
+        if (ready)
+        {
+            HMENU submenu = GetSubMenu(root, 0);
+            if (!crossingAvailable) EnableMenuItem(submenu, BSC_RAILROAD_CROSSING, MF_BYCOMMAND | MF_GRAYED);
+            if (crossingExists)
+            {
+                MENUITEMINFOW item{sizeof(item)};
+                item.fMask = MIIM_DATA | MIIM_STRING;
+                item.dwItemData = reinterpret_cast<ULONG_PTR>(&removeCrossing);
+                item.dwTypeData = const_cast<wchar_t*>(removeCrossing.label);
+                SetMenuItemInfoW(submenu, BSC_RAILROAD_CROSSING, FALSE, &item);
+            }
+        }
         if (ready && !canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
     }
     if (ready && ClientToScreen(hwnd, &at))
@@ -463,6 +478,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return EditorCommand::CreateRoad;
     }
     if (choice == BSC_FLATTEN_SEGMENT) return EditorCommand::FlattenSegment;
+    if (choice == BSC_RAILROAD_CROSSING) return EditorCommand::ToggleRailroadCrossing;
     if (choice == BSC_CREATE_RAILROAD) return EditorCommand::CreateRailroad;
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
@@ -487,11 +503,13 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return {};
     }
     intersectionEnabled = canCreateIntersection;
+    this->crossingAvailable = crossingAvailable;
+    this->crossingExists = crossingExists;
     flattenEnabled = canFlatten;
     flattenFocused = false;
     const float rootHeight = itemHeight * (canFlatten ? 2 : 1);
     rootItem = {0, 0, canFlatten ? 152.0f : 104.0f, itemHeight};
-    submenu = {0, 0, 184, itemHeight * std::size(createItems)};
+    submenu = {0, 0, 232, itemHeight * std::size(createItems)};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
     flattenItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
@@ -523,6 +541,7 @@ bool EditorMenu::Enabled(EditorCommand command) const
     if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
     if (command == EditorCommand::CreateEntranceRamp) return rampOptions.entrance;
     if (command == EditorCommand::CreateIntersection) return intersectionEnabled;
+    if (command == EditorCommand::ToggleRailroadCrossing) return crossingAvailable;
     if (command == EditorCommand::Undo) return undoEnabled;
     if (command == EditorCommand::Redo) return redoEnabled;
     return true;
@@ -756,7 +775,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {
-            if (!item(row, items[i].label, i == activeItem, Enabled(items[i].command)))
+            if (!item(row, (items[i].command == EditorCommand::ToggleRailroadCrossing && crossingExists ? "Remove Railroad Crossing" : items[i].label), i == activeItem, Enabled(items[i].command)))
             {
                 return false;
             }

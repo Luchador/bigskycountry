@@ -336,6 +336,25 @@ Road Road::Section(std::size_t first, std::size_t last) const
         if (first > 0) preserveTangent(first, 0);
         if (last + 1 < points.size()) preserveTangent(last, last - first);
     }
+    // Keep only crossings belonging to the surviving section, with stations
+    // remapped to its new length. A removed section cannot move a crossing elsewhere.
+    double total = 0, begin = 0, finish = 0;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i)
+    {
+        if (i == first) begin = total;
+        const auto samples = SegmentSamples(i);
+        for (std::size_t j = 1; j < samples.size(); ++j)
+            total += std::hypot(samples[j].x-samples[j-1].x, samples[j].z-samples[j-1].z);
+        if (i + 1 == last) finish = total;
+    }
+    if (finish > begin)
+        for (auto link : crossings)
+        {
+            const double station = link.roadFraction * total;
+            if (station < begin || station > finish) continue;
+            link.roadFraction = (station - begin) / (finish - begin);
+            result.crossings.push_back(link);
+        }
     result.Rebuild();
     return result;
 }
@@ -554,6 +573,7 @@ void Road::Rebuild()
     pointSamples.clear();
     pavementTriangles.clear();
     railroadSegments.clear();
+    trackSections.clear();
     edgeTriangles.clear();
     transitionStrips.clear();
     outline.clear();
@@ -640,6 +660,7 @@ void Road::Rebuild()
     {
         BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
+        ApplyCrossingAprons(*this, crossingAprons);
         UpdateBounds();
         return;
     }
@@ -794,5 +815,6 @@ void Road::Rebuild()
             vertex = frame.Point(vertex);
         }
     }
+    ApplyRailroadCrossings(*this, crossingProfiles);
     UpdateBounds();
 }

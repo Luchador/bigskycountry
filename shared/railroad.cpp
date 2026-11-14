@@ -6,7 +6,7 @@
 
 namespace
 {
-    constexpr double headWidth = 0.075, footWidth = 0.145, webWidth = 0.018;
+    constexpr double headWidth = RailroadSettings::headWidth, footWidth = 0.145, webWidth = 0.018;
     constexpr double footHeight = 0.02, headBottom = 0.12;
     constexpr double tieWidth = 0.23;
     constexpr SDL_FColor steel{0.51f, 0.48f, 0.45f, 1}, polished{0.76f, 0.77f, 0.78f, 1};
@@ -215,6 +215,8 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
     const double railBase = height + RailroadSettings::tieHeight;
     const double railCenter = (RailroadSettings::gauge + headWidth) / 2;
     const double outerWidth = toe + (transition ? RoadStyle::stripWidth : 0);
+    for (const auto& s : sections)
+        mesh.trackSections.push_back({s.Point(0, railBase + RailroadSettings::railHeight), s.axes.z});
     for (const auto& s : sections) mesh.outline.push_back(s.Point(-outerWidth, 0));
     for (auto it = sections.rbegin(); it != sections.rend(); ++it) mesh.outline.push_back(it->Point(outerWidth, 0));
 

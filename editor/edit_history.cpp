@@ -4,6 +4,7 @@
 #include "world_document.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -270,6 +271,37 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
             }
         }
     }
+    std::map<int, std::vector<RailroadCrossingLink>> reboundCrossings;
+    const auto& original = world.roads[index];
+    if (original.style.railroad)
+    {
+        for (auto& road : world.roads)
+        {
+            if (road.style.railroad || road.crossings.empty()) continue;
+            const auto oldSites = FindRailroadCrossings(road, original);
+            std::vector<RailroadCrossingLink> links;
+            for (auto link : road.crossings)
+            {
+                if (link.railroadId != original.id) { links.push_back(link); continue; }
+                const auto score = [&](const CrossingSite& site) { return std::abs(site.link.roadFraction-link.roadFraction)+std::abs(site.link.railFraction-link.railFraction); };
+                if (oldSites.empty()) { if (!replacements.empty()) links.push_back(link); continue; }
+                const auto old = std::min_element(oldSites.begin(), oldSites.end(), [&](const auto& a, const auto& b) { return score(a)<score(b); });
+                std::optional<CrossingSite> nearest;
+                double distance = 0.1;
+                for (const auto& piece : replacements)
+                    for (const auto& site : FindRailroadCrossings(road, piece))
+                    {
+                        const double d = std::hypot(site.position.x-old->position.x, site.position.z-old->position.z);
+                        if (d < distance) { nearest = site; distance = d; }
+                    }
+                if (nearest) links.push_back(nearest->link);
+            }
+            if (links == road.crossings) continue;
+            before.connectedCrossings.emplace(road.id, road.crossings);
+            road.crossings = links;
+            reboundCrossings.emplace(road.id, std::move(links));
+        }
+    }
     const std::size_t count = replacements.size();
     world.hierarchy.ReplaceRange(SceneKind::Road, index, 1, static_cast<int>(count), before.roadFolder);
     ReplaceRoadRange(world.roads, index, 1, std::move(replacements));
@@ -277,6 +309,7 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
     else editor.SelectPoint(count ? index : -1, -1);
     EditSnapshot after(editor, std::span(world.roads).subspan(index, count));
     after.connectedRoadPoints = std::move(disconnected);
+    after.connectedCrossings = std::move(reboundCrossings);
     after.roadFolder = before.roadFolder;
     after.splitBoundaries = std::move(newBoundaries);
     if (inserted) after.junction = EditSnapshot::Junction{junctionId, *inserted};
@@ -359,6 +392,12 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
             road.Rebuild();
         }
     }
+    for (auto& road : roads)
+        if (const auto it = to.connectedCrossings.find(road.id); it != to.connectedCrossings.end())
+        {
+            road.crossings = it->second;
+            road.Rebuild();
+        }
     for (const auto& [i, boundary] : to.splitBoundaries) world.Terrain().at(i)->boundary = boundary;
     if (to.junction)
     {

@@ -172,6 +172,14 @@ private:
         int segment = -1;
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
+    struct CrossingMenuTarget
+    {
+        int road;
+        std::uint64_t revision;
+        CrossingSite site;
+        int existing = -1;
+    };
+    std::optional<CrossingMenuTarget> crossingMenuTarget;
     struct RampHandleDrag
     {
         RampControlHit hit;

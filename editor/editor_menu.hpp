@@ -4,7 +4,7 @@
 #include <optional>
 
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
-                           CreateExitRamp, CreateEntranceRamp, FlattenSegment };
+                           CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment };
 struct RampMenuOptions { bool exit, entrance; };
 enum class OutlineOp;
 
@@ -17,7 +17,7 @@ public:
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,
-                                              std::optional<bool> flattenEnabled);
+                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false);
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -41,6 +41,7 @@ private:
 #else
     RampMenuOptions rampOptions{};
     bool intersectionEnabled = true;
+    bool crossingAvailable = false, crossingExists = false;
     std::optional<bool> flattenEnabled;
     bool flattenFocused = false;
     int openMenu = -1, barRow = 0;

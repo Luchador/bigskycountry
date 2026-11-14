@@ -187,6 +187,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
             if (skewed || changedRoads.contains(static_cast<int>(i))) roads[i].Rebuild();
         }
         RefreshRampConnections(true);
+        RefreshRailroadCrossings(true);
         terrainRevision = 0; // Also covers removal of the last road.
         RefreshTerrainFills();
         return;
@@ -243,6 +244,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         roads[i].SetMouths(mouths[i], skewChanged || changedRoads.contains(static_cast<int>(i)));
     }
     RefreshRampConnections(true);
+    RefreshRailroadCrossings(true);
     terrainRevision = 0; // Attachment changes can open a junction without rebuilding a road.
     RefreshTerrainFills();
 }
@@ -613,6 +615,8 @@ bool WorldDocument::Open(const char* documentPath)
     {
         if (road.id && !used.insert(road.id).second) return SDL_SetError("Duplicate road ID in ROAD");
         loaded.lastRoadId = std::max(loaded.lastRoadId, road.id);
+        for (const auto& crossing : road.crossings)
+            loaded.lastRoadId = std::max(loaded.lastRoadId, crossing.railroadId);
     }
     for (Road& road : loaded.roads)
     {

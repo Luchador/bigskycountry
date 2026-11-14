@@ -126,6 +126,12 @@ namespace RoadIO
         }
         out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z << '\n';
         out << road.id << ' ' << road.paintMarkings << ' ' << std::quoted(road.NameList()) << '\n';
+        out << road.crossings.size() << '\n';
+        for (const auto& crossing : road.crossings)
+        {
+            if (!crossing.Valid() || road.style.railroad) { out.setstate(std::ios::failbit); return; }
+            out << crossing.railroadId << ' ' << crossing.roadFraction << ' ' << crossing.railFraction << '\n';
+        }
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
@@ -176,6 +182,19 @@ namespace RoadIO
             {
                 in.setstate(std::ios::failbit);
                 return road;
+            }
+        }
+        if (version >= 18)
+        {
+            std::int64_t count = 0;
+            if (!(in >> count) || count < 0 || count > 100000 || (count && road.style.railroad))
+            { in.setstate(std::ios::failbit); return road; }
+            for (std::int64_t i = 0; i < count; ++i)
+            {
+                RailroadCrossingLink crossing;
+                if (!(in >> crossing.railroadId >> crossing.roadFraction >> crossing.railFraction) || !crossing.Valid())
+                { in.setstate(std::ios::failbit); return road; }
+                road.crossings.push_back(crossing);
             }
         }
         std::int64_t count;

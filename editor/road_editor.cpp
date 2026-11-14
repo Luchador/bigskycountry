@@ -517,6 +517,22 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, state.selected, std::move(before), &world.roads.back());
         return;
     }
+    if (command == EditorCommand::ToggleRailroadCrossing)
+    {
+        if (!crossingMenuTarget) return;
+        const auto target = *crossingMenuTarget;
+        crossingMenuTarget.reset();
+        if (target.road < 0 || target.road >= static_cast<int>(world.roads.size())) return;
+        auto& road = world.roads[target.road];
+        if (road.revision != target.revision) return;
+        EditSnapshot before(state, &road);
+        if (target.existing >= 0) road.crossings.erase(road.crossings.begin() + target.existing);
+        else road.crossings.push_back(target.site.link);
+        road.Rebuild();
+        state.SelectRows({{SceneKind::Road, target.road}});
+        Commit(world, target.road, std::move(before), &road);
+        return;
+    }
     if (command == EditorCommand::FlattenSegment)
     {
         if (!roadMenuTarget) return;
@@ -610,10 +626,47 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     if (selected) overlay.PickRampControl(lanePicker, world, *selected, camera, scene);
     if (state.MultipleRoadsSelected()) overlay.PickGroupPoint(lanePicker, world, state, camera, scene);
     const auto lane = overlay.PickRampLane(lanePicker, world, state, camera, scene);
+    crossingMenuTarget.reset();
+    double closestCrossing = 10.0;
+    int clickedRoad = -1;
+    if (hit.kind == RoadPickKind::Road) clickedRoad = hit.index;
+    else if (hit.kind == RoadPickKind::Segment || hit.kind == RoadPickKind::Point) clickedRoad = state.selected;
+    if (clickedRoad >= 0)
+    {
+        const auto at = hit.kind == RoadPickKind::Segment ? RoadOverlay::SplinePosition(picker, scene) : picker.HitPosition();
+        for (int r = 0; r < static_cast<int>(world.roads.size()); ++r)
+        {
+            const auto& road = world.roads[r];
+            if (road.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, r})) continue;
+            for (int t = 0; t < static_cast<int>(world.roads.size()); ++t)
+            {
+                const auto& track = world.roads[t];
+                if ((r != clickedRoad && t != clickedRoad) || !track.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, t})) continue;
+                const auto sites = FindRailroadCrossings(road, track);
+                for (const auto& site : sites)
+                {
+                    const double distance = std::hypot(at.x-site.position.x, at.z-site.position.z);
+                    if (distance >= closestCrossing) continue;
+                    int existing = -1;
+                    for (int i = 0; i < static_cast<int>(road.crossings.size()); ++i)
+                    {
+                        const auto& link = road.crossings[i];
+                        if (link.railroadId != track.id) continue;
+                        const auto score = [&](const CrossingSite& candidate) { return std::abs(link.roadFraction-candidate.link.roadFraction)+std::abs(link.railFraction-candidate.link.railFraction); };
+                        const auto match = std::min_element(sites.begin(), sites.end(), [&](const auto& a, const auto& b) { return score(a)<score(b); });
+                        if (match->link == site.link) { existing = i; break; }
+                    }
+                    if (existing < 0 && !PlanRailroadCrossing(road, track, site)) continue;
+                    closestCrossing = distance;
+                    crossingMenuTarget = CrossingMenuTarget{r, road.revision, site, existing};
+                }
+            }
+        }
+    }
     std::optional<RampMenuOptions> ramps;
     std::optional<bool> flattenEnabled;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
-    if (lane)
+    if (lane && !crossingMenuTarget)
     {
         const auto& host = world.roads[lane->host];
         roadMenuTarget = RoadMenuTarget{lane->host, host.revision};
@@ -647,7 +700,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0))
     {
         RunCommand(*command, world, camera);
     }

@@ -112,6 +112,7 @@ struct EditSnapshot
     std::map<int, RoadProperties> roadProperties;
     // Additional authored points changed by planting a ramp station or disconnecting an end.
     std::map<int, std::vector<RoadPoint>> connectedRoadPoints; // Stable road ID.
+    std::map<int, std::vector<RailroadCrossingLink>> connectedCrossings; // Rebound after a railway split.
     struct TerrainPlacement
     {
         std::string modelPath;

@@ -8,6 +8,10 @@ struct RoadGeometry;
 struct RailroadSettings
 {
     static constexpr double gauge = 1.435; // Between the inner faces of the rail heads.
+    static constexpr double headWidth = 0.075;
+    static constexpr double flangeClearance = 0.06; // Game crossing groove, on the gauge side.
+    static constexpr double outerClearance = 0.01;
+    static constexpr double grooveDepth = 0.06;
     static constexpr double tieLength = 2.6;
     static constexpr double tieSpacing = 0.60;
     static constexpr double tieHeight = 0.18;

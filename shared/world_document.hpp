@@ -48,6 +48,7 @@ public:
     // Loading and history can restore a perimeter before all of its sources exist.
     TerrainChunk* PlaceTerrainFill(TerrainBoundary boundary, bool allowOpen = false);
     void RefreshTerrainFills();
+    void RefreshRailroadCrossings(bool force = false);
     // Restore history at a specific outliner index after successfully loading the chunk.
     void MoveLastTerrainTo(std::size_t index);
     bool RemoveTerrain(std::size_t index);
@@ -83,6 +84,7 @@ private:
     int lastRoadId = 0;
     std::uint64_t rampRevision = 0;
     std::uint64_t terrainRevision = 0;
+    std::uint64_t crossingRevision = 0;
     void RebuildTerrain(TerrainChunk& chunk, const std::map<int, const Road*>& byId);
     struct Section
     {
