@@ -43,10 +43,16 @@ namespace
         return {12, y + (strip ? 58 : 0), 194, 54};
     }
 
+    SDL_FRect DeadEndBox(const PropertiesInspector& properties)
+    {
+        const auto slot = MaterialSlotRect(properties, properties.HasTransitionSlot());
+        return {12, slot.y + slot.h + 28, 194, 22};
+    }
+
     float RoadStyleBottom(const PropertiesInspector& properties)
     {
         const auto slot = MaterialSlotRect(properties, properties.HasTransitionSlot());
-        return slot.y + slot.h + 8;
+        return slot.y + slot.h + 8 + (properties.deadEndLength ? 70 : 0);
     }
 #endif
     constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
@@ -533,6 +539,21 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, target.road, std::move(before), &road);
         return;
     }
+    if (command == EditorCommand::CreateDeadEnd)
+    {
+        if (!roadMenuTarget) return;
+        const auto target = *roadMenuTarget;
+        roadMenuTarget.reset();
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return;
+        auto& road = world.roads[target.index];
+        if (road.revision != target.revision || !road.CanDeadEnd(target.point) || road.points[target.point].deadEndLength > 0) return;
+        EditSnapshot before(state, &road);
+        state.SelectPoint(target.index, target.point);
+        road.points[target.point].deadEndLength = Road::defaultDeadEndLength;
+        road.Rebuild();
+        Commit(world, target.index, std::move(before), &road);
+        return;
+    }
     if (command == EditorCommand::SplitRoad)
     {
         if (!roadMenuTarget) return;
@@ -689,6 +710,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     std::optional<RampMenuOptions> ramps;
     std::optional<bool> flattenEnabled;
     std::optional<SplitMenuOptions> split;
+    std::optional<bool> deadEnd;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
     if (lane && !crossingMenuTarget && hit.kind != RoadPickKind::Point)
     {
@@ -715,6 +737,8 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         if (hit.kind == RoadPickKind::Point)
         {
             roadMenuTarget->point = hit.index;
+            if (!road.style.railroad && (hit.index == 0 || hit.index + 1 == static_cast<int>(road.points.size())))
+                deadEnd = road.CanDeadEnd(hit.index) && road.points[hit.index].deadEndLength == 0;
             split = SplitMenuOptions{hit.index > 0 && hit.index + 1 < static_cast<int>(road.points.size()), road.style.railroad.has_value()};
         }
         if (const auto at = LocateRoadHit(road, hit, position))
@@ -729,7 +753,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd))
     {
         RunCommand(*command, world, camera);
     }
@@ -1263,7 +1287,9 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
     {
         state.anchorSelection.reset();
         state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
-        road.points.insert(road.points.begin() + state.point, RoadPoint{position, {}});
+        RoadPoint end{position, {}};
+        end.deadEndLength = originalPoints[*extensionSource].deadEndLength;
+        road.points.insert(road.points.begin() + state.point, end);
     }
 
     road.points[state.point].position = position;
@@ -1720,6 +1746,13 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
             !Fill(renderer, markerColorSwatch, {rgb[0], rgb[1], rgb[2], 255}) ||
             !transformPanel.DrawField(renderer, markerColorBox, state.Target(), InspectorEdit::markerTextColor, FormatTextColor(rgb), true))
             return false;
+    }
+    if (properties.deadEndLength)
+    {
+        const auto box = DeadEndBox(properties);
+        if (!Text(renderer, 12, box.y - 16, "End transition (m)", muted) ||
+            !transformPanel.DrawField(renderer, box, state.Target(), InspectorEdit::deadEndLength, properties.DeadEndText(), true) ||
+            !Text(renderer, 12, box.y + 29, "0 = no dead end", muted)) return false;
     }
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
     if (properties.page == PropertiesPage::Railroad)
@@ -2188,6 +2221,9 @@ void RoadEditor::ConnectRamps(WorldDocument& world)
     before.connectedRoadPoints.emplace(entrance.id, entrance.points);
     exit.points.back().connectorSocket = ++lastJoin;
     entrance.points.front().connectorSocket = ++lastJoin;
+    // The new connector replaces any terminal blend on either source ramp.
+    if (exit.points.back().deadEndLength > 0) exit.Rebuild();
+    if (entrance.points.front().deadEndLength > 0) entrance.Rebuild();
     road.points.resize(2);
     road.points.front().position = exit.points.back().position;
     road.points.front().connectorTarget = exit.points.back().connectorSocket;
@@ -2542,6 +2578,20 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
+    if (edit.field == InspectorEdit::deadEndLength)
+    {
+        if (edit.target.kind != SelectionKind::Point || EditingDraft()) return;
+        auto& road = world.roads.at(edit.target.index);
+        if (!road.CanDeadEnd(edit.target.point)) return;
+        const auto value = ParseTransformValue(edit.text);
+        if (!value || *value < 0) { status = "End transition length must be zero or a positive number of meters"; return; }
+        if (road.points[edit.target.point].deadEndLength == *value) return;
+        EditSnapshot before(state, &road);
+        road.points[edit.target.point].deadEndLength = *value;
+        road.Rebuild();
+        Commit(world, edit.target.index, std::move(before), &road);
+        return;
+    }
     if (edit.field == InspectorEdit::roadNames)
     {
         if (!EditingDraft() && state.MultipleRoadsSelected())
@@ -3264,6 +3314,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 }
                 const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
+                const auto deadEndBox = DeadEndBox(properties);
+                if (properties.deadEndLength && SDL_PointInRectFloat(&local, &deadEndBox))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::deadEndLength, properties.DeadEndText());
+                    return EditorEvent::Handled;
+                }
                 if (properties.roadNames && SDL_PointInRectFloat(&local, &roadNamesBox))
                 {
                     transformPanel.StartEdit(window, state.Target(), InspectorEdit::roadNames, *properties.roadNames);

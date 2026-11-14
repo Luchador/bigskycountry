@@ -342,6 +342,77 @@ namespace
         if (line.empty() || line.back() != point) line.push_back(point);
     }
 
+    // Continue the terminal cross section, sharing its exact edge vertices.
+    // The red channel fades along the cap and, for side strips, across its corners.
+    std::optional<std::array<Vector3, 2>> BuildDeadEnd(Road& road, const RoadPath& path, int end, Vector3 tangent)
+    {
+        const auto& point = end ? road.points.back() : road.points.front();
+        if (point.deadEndLength <= 0) return {};
+        CrossSection section{};
+        bool first = true;
+        VisitOffsetStations(path, 0, [&](const CrossSection& station)
+        {
+            if (end || first) section = station;
+            first = false;
+        });
+        const Vector3 outward = Math::Normalize(tangent) * (end ? 1.0 : -1.0);
+        if (outward == Vector3{}) return {};
+        struct Rim { double offset, height, red; };
+        const auto side = [&](int sign)
+        {
+            const double width = sign < 0 ? road.style.RightWidth() : road.style.LeftWidth();
+            std::vector<Rim> rim{{0, 0, 1}};
+            if (road.style.HalfMedianWidth() > 0) rim.push_back({sign * road.style.HalfMedianWidth(), 0, 1});
+            if (road.style.IsDivided()) rim.push_back({sign * road.style.HalfSeparation(), 0, 1});
+            rim.push_back({sign * width, 0, 1});
+            if (road.style.edge != RoadEdge::None)
+                rim.push_back({sign * (width + RoadStyle::stripWidth), 0, road.style.edge == RoadEdge::Transition ? 0.0 : 1.0});
+            if (road.style.edge == RoadEdge::Curb)
+            {
+                rim.push_back({sign * (width + RoadStyle::stripWidth), RoadStyle::curbHeight, 1});
+                rim.push_back({sign * (width + road.style.EdgeWidth()), RoadStyle::curbHeight, 1});
+            }
+            return rim;
+        };
+        auto rim = side(-1);
+        std::reverse(rim.begin(), rim.end());
+        const auto left = side(1);
+        rim.insert(rim.end(), left.begin() + 1, left.end());
+        const auto vertex = [&](const Rim& at, double fraction)
+        {
+            const double remaining = 1.0 - fraction;
+            const Vector3 p = section.At(at.offset) + outward * (point.deadEndLength * fraction)
+                            + section.up * (at.height * remaining);
+            const bool positive = at.offset >= 0;
+            const double gap = road.style.HalfSeparation();
+            const double tileWidth = std::abs(at.offset) < gap ? 2 * RoadStyle::innerShoulderWidth : road.style.TravelLaneWidth();
+            const double centerU = road.style.GetLaneCount() * 0.5 + (road.style.IsDivided() && !positive ? 1 : 0);
+            const double u = centerU - (positive ? 1 : -1) * (std::abs(at.offset) - gap) / tileWidth;
+            const double v = (section.distance + (end ? 1 : -1) * point.deadEndLength * fraction) / RoadStyle::laneWidth;
+            return Road::TransitionVertex{p, {static_cast<float>(at.red * remaining), 0, 0, 1},
+                                          {static_cast<float>(u), static_cast<float>(v)}};
+        };
+        auto& strip = road.transitionStrips[road.style.transitionMaterial];
+        const auto emit = [&](std::array<Road::TransitionVertex, 3> t)
+        {
+            if (Math::Length(Math::Cross(t[1].position - t[0].position, t[2].position - t[0].position)) < 1e-12) return;
+            if (!end) std::swap(t[1], t[2]);
+            strip.push_back(t);
+        };
+        for (std::size_t i = 1; i < rim.size(); ++i)
+        {
+            // A center row lets corner weights fade in both directions instead
+            // of depending on which diagonal happens to triangulate the quad.
+            for (int row = 0; row < 2; ++row)
+            {
+                const auto a = vertex(rim[i-1], row * 0.5), b = vertex(rim[i], row * 0.5);
+                const auto c = vertex(rim[i], (row+1) * 0.5), d = vertex(rim[i-1], (row+1) * 0.5);
+                emit({a, b, c}); emit({a, c, d});
+            }
+        }
+        return std::array{vertex(rim.front(), 1).position, vertex(rim.back(), 1).position};
+    }
+
     // Use the same cross sections for pavement, its outline and any edge treatment.
     // Adjacent spans then meet at the same elevation along the entire join.
     void BuildRoadSide(Road& road, const RoadPath& path, int side, bool hasGradedBend, const std::vector<Taper>& tapers)
@@ -474,7 +545,8 @@ namespace
                      taper->gore, taper->tip, taper->stationDistance, side * direction, lane.rampIndex};
             }
             const auto ra = profile(a, wa), rb = profile(b, wb);
-            if (boundary.empty()) boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);
+            if (boundary.empty() && road.points.front().deadEndLength == 0)
+                boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);
             if (boundary.empty() || boundary.back() != ra[faces]) boundary.push_back(ra[faces]);
             boundary.push_back(rb[faces]);
             lastRim = rb;
@@ -572,7 +644,8 @@ namespace
                 AddEdgeFace(road, side, ra, rb, 2, RoadEdgeColor::top, RoadEdgeColor::top);
             }
         });
-        for (int i = faces - 1; i >= 0; --i) boundary.push_back(lastRim[i]);
+        if (road.points.back().deadEndLength == 0)
+            for (int i = faces - 1; i >= 0; --i) boundary.push_back(lastRim[i]);
 
         AppendBoundary(road, side, boundary);
         for (auto& divider : dividers)
@@ -799,6 +872,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
         return a.left != b.left && (a.start.y != a.end.y || b.start.y != b.end.y);
     }) != spans.end();
     const double halfTravelWidth = laneCount * style.TravelLaneWidth() * 0.5;
+    std::size_t rightBoundaryCount = 0;
 
     for (int side : {-1, 1})
     {
@@ -839,6 +913,7 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
             laneCenterlines.resize(taper.firstGuide + taper.lane.laneCount);
         }
         BuildRoadSide(*this, path, side, hasGradedBend, tapers);
+        if (side < 0) rightBoundaryCount = outline.size();
         if (paintMarkings && !style.IsDivided() && tapers.empty())
         {
             // Place the white stripe wholly inside the travel edge, beside any shoulder.
@@ -847,6 +922,12 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
                        style.oneWay && side > 0 ? yellowStripes : whiteStripes);
         }
     }
+    const Vector3 firstTangent = tangents.empty() ? spans.front().end - spans.front().start : tangents.front();
+    const Vector3 lastTangent = tangents.empty() ? spans.back().end - spans.back().start : tangents.back();
+    if (const auto cap = BuildDeadEnd(*this, path, 1, lastTangent))
+        outline.insert(outline.begin() + rightBoundaryCount, cap->begin(), cap->end());
+    if (const auto cap = BuildDeadEnd(*this, path, 0, firstTangent))
+        outline.insert(outline.end(), cap->rbegin(), cap->rend());
     if (!paintMarkings || style.IsDivided()) return;
 
     if (style.oneWay)

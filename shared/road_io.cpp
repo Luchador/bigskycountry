@@ -135,7 +135,9 @@ namespace RoadIO
         out << road.points.size() << '\n';
         for (const RoadPoint& p : road.points)
         {
-            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp))
+            if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp) ||
+                !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
+                (p.deadEndLength > 0 && !road.CanDeadEnd(static_cast<int>(&p - road.points.data()))))
             {
                 out.setstate(std::ios::failbit);
                 return;
@@ -155,7 +157,7 @@ namespace RoadIO
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
             if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
             out << ' ' << p.connectorSocket << ' ' << p.connectorTarget
-                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z;
+                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z << ' ' << p.deadEndLength;
             out << '\n';
         }
     }
@@ -252,6 +254,10 @@ namespace RoadIO
                     (p.connectorSocket && p.connectorTarget)) in.setstate(std::ios::failbit);
             }
             if (version >= 17) in >> p.surfaceUp.x >> p.surfaceUp.y >> p.surfaceUp.z;
+            if (version >= 19) in >> p.deadEndLength;
+            if (!std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
+                (p.deadEndLength > 0 && (count < 2 || (i != 0 && i + 1 != count) || road.style.railroad || p.Joined() || p.rampStation)))
+                in.setstate(std::ios::failbit);
             if (!in || !ValidPoint(p.position, heading, p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp))
             {
                 in.setstate(std::ios::failbit);

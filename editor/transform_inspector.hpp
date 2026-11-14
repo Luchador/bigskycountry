@@ -42,6 +42,7 @@ struct InspectorEdit
     static constexpr int markerText = TransformFields::geographicLocation + 1;
     static constexpr int markerTextColor = markerText + 1;
     static constexpr int roadNames = markerTextColor + 1;
+    static constexpr int deadEndLength = roadNames + 1;
     TransformTarget target;
     int field;
     std::string text;

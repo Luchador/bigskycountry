@@ -263,6 +263,8 @@ struct WindowsPanels::Impl
 
     std::optional<std::string> FieldText(int id) const
     {
+        if (id == IDC_DEAD_END_LENGTH && lastInspector && lastInspector->properties.deadEndLength)
+            return lastInspector->properties.DeadEndText();
         if (id == IDC_ROAD_NAMES && lastInspector)
             return lastInspector->properties.roadNames.value_or("");
         if (id == IDC_MARKER_TEXT && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
@@ -293,7 +295,7 @@ struct WindowsPanels::Impl
     {
         if (inspected && *inspected == fields) return;
         const bool changedTarget = !inspected || inspected->target != fields.target;
-        if (changedTarget && GetFocus() == GetDlgItem(road, IDC_ROAD_NAMES)) SetFocus(frame);
+        if (changedTarget && (GetFocus() == GetDlgItem(road, IDC_ROAD_NAMES) || GetFocus() == GetDlgItem(road, IDC_DEAD_END_LENGTH))) SetFocus(frame);
         inspected = fields;
         for (int field = 0; field <= TransformFields::geographicLocation; ++field)
         {
@@ -307,7 +309,8 @@ struct WindowsPanels::Impl
     {
         const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
         const bool roadNames = field == InspectorEdit::roadNames && lastInspector && lastInspector->properties.roadNames;
-        if (inspected && (roadNames || marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
+        const bool deadEnd = field == InspectorEdit::deadEndLength && lastInspector && lastInspector->properties.deadEndLength;
+        if (inspected && (deadEnd || roadNames || marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
         {
             pendingEdits.push_back({inspected->target, field, ReadEdit(control)});
             SDL_Event event{};
@@ -453,7 +456,8 @@ struct WindowsPanels::Impl
         GetClientRect(road, &client);
         const auto page = lastInspector ? lastInspector->properties.page : PropertiesPage::Road;
         const int stripHeight = lastInspector && lastInspector->properties.HasTransitionSlot() ? 41 : 0;
-        const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight :
+        const int endHeight = lastInspector && lastInspector->properties.deadEndLength ? 36 : 0;
+        const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight + endHeight :
                            page == PropertiesPage::Railroad ? 211 + stripHeight :
                            page == PropertiesPage::Marker ? 267 :
                            page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150;
@@ -990,6 +994,8 @@ struct WindowsPanels::Impl
         const bool refreshNames = pageChanged || lastInspector->selected != data.selected ||
                                   lastInspector->properties.roadNames != properties.roadNames ||
                                   lastInspector->properties.Mixed(RoadProperty::Names) != properties.Mixed(RoadProperty::Names);
+        const bool refreshDeadEnd = pageChanged || lastInspector->selected != data.selected || lastInspector->point != data.point ||
+                                   lastInspector->properties.deadEndLength != properties.deadEndLength;
         const bool stripChanged = !lastInspector || lastInspector->properties.HasTransitionSlot() != properties.HasTransitionSlot();
         lastInspector = data;
         const bool roadPage = properties.page == PropertiesPage::Road;
@@ -1022,6 +1028,20 @@ struct WindowsPanels::Impl
         if (stripChanged)
         {
             ShowWindow(GetDlgItem(road, IDC_TRANSITION_MATERIAL), properties.HasTransitionSlot() ? SW_SHOWNA : SW_HIDE);
+            LayoutInspectorScroll();
+        }
+        if (pageChanged || stripChanged || refreshDeadEnd)
+        {
+            const int top = ROAD_PANEL_HEIGHT + (properties.HasTransitionSlot() ? 41 : 0);
+            for (int id : {IDC_DEAD_END_LABEL, IDC_DEAD_END_LENGTH, IDC_DEAD_END_HINT})
+            {
+                const auto at = DialogSize(road, id == IDC_DEAD_END_LENGTH ? 103 : 7,
+                                          top + (id == IDC_DEAD_END_LABEL ? 4 : id == IDC_DEAD_END_HINT ? 20 : 0));
+                SetWindowPos(GetDlgItem(road, id), nullptr, at.cx, at.cy - scroll, 0, 0,
+                             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                ShowWindow(GetDlgItem(road, id), properties.deadEndLength ? SW_SHOWNA : SW_HIDE);
+            }
+            if (refreshDeadEnd) RestoreField(IDC_DEAD_END_LENGTH);
             LayoutInspectorScroll();
         }
         InvalidateRect(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, FALSE);
@@ -1530,8 +1550,9 @@ struct WindowsPanels::Impl
 
         const int id = GetDlgCtrlID(focus);
         const int field = id == IDC_MARKER_TEXT ? InspectorEdit::markerText :
-                          id == IDC_ROAD_NAMES ? InspectorEdit::roadNames : id - IDC_LOC_X;
-        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
+                          id == IDC_ROAD_NAMES ? InspectorEdit::roadNames :
+                          id == IDC_DEAD_END_LENGTH ? InspectorEdit::deadEndLength : id - IDC_LOC_X;
+        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || id == IDC_DEAD_END_LENGTH || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (msg->message == WM_KEYDOWN)

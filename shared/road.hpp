@@ -128,6 +128,7 @@ struct RoadPoint
     int connectorSocket = 0; // Identifies the source endpoint of a road/ramp join.
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
+    double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
     bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
 
@@ -227,6 +228,9 @@ struct RampSeam
 struct Road : RoadGeometry
 {
     static constexpr double minPointSpacing = 0.05; // Meters between neighboring control points.
+    static constexpr double defaultDeadEndLength = 5.0;
+    bool CanDeadEnd(int point) const;
+    bool HasDeadEnd() const;
     int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
     bool paintMarkings = true;
     RoadStyle style;

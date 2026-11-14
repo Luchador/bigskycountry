@@ -4,6 +4,13 @@
 #include <algorithm>
 #include <charconv>
 
+std::string PropertiesInspector::DeadEndText() const
+{
+    char text[48];
+    SDL_snprintf(text, sizeof(text), "%.2f", deadEndLength.value_or(0.0));
+    return text;
+}
+
 int PropertiesInspector::StepLanes(bool increase) const
 {
     int count = increase ? maxLanes + 1 : minLanes - 1;
@@ -177,6 +184,9 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.material = first.material;
             result.roadNames = road->NameList();
             result.paintMarkings = road->paintMarkings;
+            result.hasDeadEnd = road->HasDeadEnd();
+            if (!editingDraft && !group && target.kind == SelectionKind::Point && road->CanDeadEnd(target.point))
+                result.deadEndLength = road->points[target.point].deadEndLength;
         }
 
         double meters = road ? road->SplineLengthMeters() : 0;
@@ -192,6 +202,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             for (const auto key : state.SelectedRoadRows())
             {
                 ++roadCount;
+                result.hasDeadEnd |= world.roads.at(key.index).HasDeadEnd();
                 const auto& other = world.roads.at(key.index);
                 const auto& s = other.style;
                 meters += other.SplineLengthMeters();

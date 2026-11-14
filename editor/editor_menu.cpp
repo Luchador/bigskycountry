@@ -28,6 +28,7 @@ namespace
     // Owner-draw data must live as long as the menu, including while Windows tracks a popup.
     constexpr MenuItem file{0, L"&File", 0, true}, edit{0, L"&Edit", 0, true}, view{0, L"&View", 0, true},
                        settings{0, L"&Settings", 0, true}, create{0, L"&Create"};
+    constexpr MenuItem deadEndItem{BSC_CREATE_DEAD_END, L"&Dead End"};
     constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
@@ -367,13 +368,14 @@ namespace
                                          {"Create Railroad", EditorCommand::CreateRailroad},
                                          {"Create Intersection", EditorCommand::CreateIntersection},
                                          {"Marker", EditorCommand::CreateMarker},
-                                         {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing}};
+                                         {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing},
+                                         {"Dead End", EditorCommand::CreateDeadEnd}};
     constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
                                        {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp}};
-    std::span<const BarAction> ViewportActions(bool rampMenu)
+    std::span<const BarAction> ViewportActions(bool rampMenu, bool deadEnd)
     {
         if (rampMenu) return rampItems;
-        return createItems;
+        return std::span<const BarAction>{createItems}.first(std::size(createItems) - (deadEnd ? 0 : 1));
     }
     constexpr float itemHeight = 26;
 }
@@ -418,7 +420,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -449,6 +451,11 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     else
     {
         ready = AddSubmenu(root, create, createItems);
+        if (ready && deadEnd)
+        {
+            ready = Insert(GetSubMenu(root, 0), deadEndItem);
+            if (!*deadEnd) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_DEAD_END, MF_BYCOMMAND | MF_GRAYED);
+        }
         if (ready && canFlatten)
         {
             ready = Insert(root, flatten);
@@ -484,6 +491,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_CREATE_DEAD_END) return EditorCommand::CreateDeadEnd;
     if (choice == BSC_SPLIT_ROAD) return EditorCommand::SplitRoad;
     if (choice == BSC_FLATTEN_SEGMENT) return EditorCommand::FlattenSegment;
     if (choice == BSC_RAILROAD_CROSSING) return EditorCommand::ToggleRailroadCrossing;
@@ -511,6 +519,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         return {};
     }
     intersectionEnabled = canCreateIntersection;
+    deadEndEnabled = deadEnd;
     this->crossingAvailable = crossingAvailable;
     this->crossingExists = crossingExists;
     roadActionEnabled = split ? std::optional{split->enabled} : canFlatten;
@@ -519,7 +528,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     roadActionFocused = false;
     const float rootHeight = itemHeight * (roadActionEnabled ? 2 : 1);
     rootItem = {0, 0, roadActionEnabled ? 152.0f : 104.0f, itemHeight};
-    submenu = {0, 0, 232, itemHeight * std::size(createItems)};
+    submenu = {0, 0, 232, itemHeight * static_cast<float>(ViewportActions(false, deadEnd.has_value()).size())};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
     roadActionItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
@@ -548,6 +557,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
 #ifndef _WIN32
 bool EditorMenu::Enabled(EditorCommand command) const
 {
+    if (command == EditorCommand::CreateDeadEnd) return deadEndEnabled.value_or(false);
     if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
     if (command == EditorCommand::CreateEntranceRamp) return rampOptions.entrance;
     if (command == EditorCommand::CreateIntersection) return intersectionEnabled;
@@ -660,7 +670,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         return false;
     }
     const bool rampMenu = popup == Popup::Ramp;
-    const auto items = ViewportActions(rampMenu);
+    const auto items = ViewportActions(rampMenu, deadEndEnabled.has_value());
     const int count = static_cast<int>(items.size());
     switch (event.type)
     {
@@ -781,7 +791,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     }
     if (popup != Popup::Create)
     {
-        const auto items = ViewportActions(popup == Popup::Ramp);
+        const auto items = ViewportActions(popup == Popup::Ramp, deadEndEnabled.has_value());
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {

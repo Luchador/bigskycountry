@@ -562,8 +562,25 @@ void RoadGeometry::UpdateBounds()
     }
 }
 
+bool Road::CanDeadEnd(int point) const
+{
+    return !style.railroad && points.size() >= 2 && point >= 0 &&
+        (point == 0 || point + 1 == static_cast<int>(points.size())) &&
+        !points[point].Joined() && points[point].rampStation == 0;
+}
+
+bool Road::HasDeadEnd() const
+{
+    return (CanDeadEnd(0) && points.front().deadEndLength > 0) ||
+        (CanDeadEnd(static_cast<int>(points.size()) - 1) && points.back().deadEndLength > 0);
+}
+
 void Road::Rebuild()
 {
+    // Topology edits can turn a capped endpoint into an interior point or a
+    // connected end. The new connection owns that boundary instead of the cap.
+    for (int i = 0; i < static_cast<int>(points.size()); ++i)
+        if (!CanDeadEnd(i)) points[i].deadEndLength = 0;
     MarkRebuilt();
     rampSeams.clear();
     laneCenterlines.clear();

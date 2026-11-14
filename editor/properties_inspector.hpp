@@ -20,6 +20,9 @@ struct PropertiesInspector
     std::string title, detail, material, markerText;
     std::optional<std::string> roadNames; // Also present for an unnamed road or draft.
     bool paintMarkings = true;
+    bool hasDeadEnd = false;
+    std::optional<double> deadEndLength; // Editable only for the selected free endpoint.
+    std::string DeadEndText() const;
     RoadStyle style;
     std::bitset<static_cast<size_t>(RoadProperty::Count)> mixed;
     bool Mixed(RoadProperty property) const { return mixed.test(static_cast<size_t>(property)); }
@@ -30,7 +33,8 @@ struct PropertiesInspector
     bool AllDivided() const { return anyDivided && !Mixed(RoadProperty::Divided); }
     bool HasTransitionSlot() const
     {
-        return (page == PropertiesPage::Road || page == PropertiesPage::Railroad) && materialSlot && style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge);
+        return (page == PropertiesPage::Road || page == PropertiesPage::Railroad) && materialSlot &&
+            (hasDeadEnd || (style.edge == RoadEdge::Transition && !Mixed(RoadProperty::Edge)));
     }
     bool OneLane() const { return maxLanes == 1; }
     bool ThreeLanes() const { return !style.oneWay && minLanes == 3 && maxLanes == 3; }
