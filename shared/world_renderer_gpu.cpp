@@ -1,5 +1,5 @@
 #include "world_renderer.hpp"
-#include "free_camera.hpp"
+#include "camera_view.hpp"
 #include "editor_colors.hpp"
 
 #include <algorithm>

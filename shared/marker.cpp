@@ -1,5 +1,5 @@
 #include "marker.hpp"
-#include "free_camera.hpp"
+#include "camera_view.hpp"
 #include "world_renderer.hpp"
 #include <ttf2mesh.h>
 #include <algorithm>
@@ -102,7 +102,7 @@ bool Marker::SetText(std::string value)
     return true;
 }
 
-MeshInstance Marker::Label(const FreeCamera& camera) const
+MeshInstance Marker::Label(const CameraView& camera) const
 {
     if (text.empty() || !IsLoaded()) return {};
     if (!lettering) lettering = MakeLettering(text, localLabelRadius);
@@ -135,7 +135,7 @@ MeshInstance Marker::Label(const FreeCamera& camera) const
     return {lettering, {labelOrigin, right * std::abs(scale.x), {0, std::abs(scale.y), 0}, forward}};
 }
 
-void Marker::SubmitLabel(WorldRenderer& renderer, const FreeCamera& camera) const
+void Marker::SubmitLabel(WorldRenderer& renderer, const CameraView& camera) const
 {
     const auto label = Label(camera);
     if (!label.mesh) return;

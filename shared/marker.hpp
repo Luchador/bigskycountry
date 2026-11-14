@@ -4,7 +4,7 @@
 #include <array>
 #include <optional>
 
-class FreeCamera;
+class CameraView;
 class WorldRenderer;
 
 class Marker final : public BSCObject
@@ -19,13 +19,13 @@ public:
     std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Marker>(*this); }
     const std::string& Text() const { return text; }
     bool SetText(std::string value);
-    void SubmitLabel(WorldRenderer& renderer, const FreeCamera& camera) const;
+    void SubmitLabel(WorldRenderer& renderer, const CameraView& camera) const;
     std::string material; // Per-instance .bmat path. Empty uses the GLB's mesh colors.
     using TextColor = std::array<Uint8, 3>;
     TextColor textColor{255, 255, 255}; // Display RGB for the unlit lettering.
 
 private:
-    MeshInstance Label(const FreeCamera& camera) const;
+    MeshInstance Label(const CameraView& camera) const;
     mutable double localLabelRadius = 0;
     std::string text = "Marker";
     mutable std::shared_ptr<const Mesh> lettering;

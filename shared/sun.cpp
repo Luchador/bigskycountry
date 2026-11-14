@@ -85,7 +85,7 @@ bool Sun::Load(SDL_Renderer* renderer)
     return true;
 }
 
-bool Sun::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, SDL_FColor baseSkyAtSun)
+bool Sun::Draw(SDL_Renderer* renderer, const CameraView& camera, Vector3 direction, SDL_Rect viewport, SDL_FColor baseSkyAtSun)
 {
     if (!texture && !Load(renderer))
     {

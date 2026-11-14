@@ -32,7 +32,7 @@ bool Moon::Load(SDL_Renderer* renderer)
     return true;
 }
 
-bool Moon::Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport)
+bool Moon::Draw(SDL_Renderer* renderer, const CameraView& camera, Vector3 direction, SDL_Rect viewport)
 {
     if (!texture && !Load(renderer))
     {

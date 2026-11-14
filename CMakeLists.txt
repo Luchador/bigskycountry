@@ -87,6 +87,17 @@ add_library(BigSkyApplication STATIC
     shared/sun.cpp
     shared/sun_shader.cpp
     shared/application.cpp
+    shared/camera_view.cpp
+    shared/game_world.cpp
+    shared/game_session.cpp
+    shared/world_collision.cpp
+    shared/pawn.cpp
+    shared/player.cpp
+    shared/player_controller.cpp
+    shared/player_camera.cpp
+    shared/gameplay_input.cpp
+    shared/car.cpp
+    shared/test_pawn_meshes.cpp
     shared/free_camera.cpp
     shared/input.cpp
     shared/geographic_coordinates.cpp

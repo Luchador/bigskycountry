@@ -6,7 +6,7 @@
 #include <array>
 #include <SDL3/SDL.h>
 
-class FreeCamera;
+class CameraView;
 class TerrainChunk;
 struct RoadGeometry;
 inline constexpr double worldNearDepth = 0.1;
@@ -44,7 +44,7 @@ public:
 
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
-    bool Begin(SDL_Renderer* renderer, const FreeCamera& camera, const WorldLighting* lights = nullptr);
+    bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr);
     void BeginUnlit() { lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
@@ -76,7 +76,7 @@ private:
                                 const std::array<SDL_FPoint, 3>& uv, const std::array<Vector3, 3>* smoothNormals = nullptr);
     WorldDepthVertex WorldToClip(Vector3 position, SDL_FColor color) const;
     SDL_Renderer* renderer = nullptr;
-    const FreeCamera* camera = nullptr;
+    const CameraView* camera = nullptr;
     SDL_Rect viewport{};
     double focal = 0, scaleX = 0, scaleY = 0;
     std::vector<WorldDepthVertex> vertices;

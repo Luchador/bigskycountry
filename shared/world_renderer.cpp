@@ -1,5 +1,5 @@
 #include "world_renderer.hpp"
-#include "free_camera.hpp"
+#include "camera_view.hpp"
 #include "terrain_chunk.hpp"
 #include "editor_colors.hpp"
 
@@ -7,7 +7,7 @@
 #include <cmath>
 #include <limits>
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const FreeCamera& view, const WorldLighting* environment)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {

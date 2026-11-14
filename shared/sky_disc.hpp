@@ -4,7 +4,7 @@
 #include <SDL3/SDL.h>
 #include <array>
 
-class FreeCamera;
+class CameraView;
 
 namespace SkyDisc
 {
@@ -17,5 +17,5 @@ namespace SkyDisc
 
     // Project a textured disc at infinity, clipped to the horizon and viewport.
     // The visible disc bounds set the angular diameter independently of transparent padding.
-    DiscMesh Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color);
+    DiscMesh Project(const CameraView& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color);
 }

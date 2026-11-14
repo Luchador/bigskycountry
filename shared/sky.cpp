@@ -4,7 +4,7 @@
 
 #include "sky.hpp"
 #include "solar_aureole.hpp"
-#include "free_camera.hpp"
+#include "camera_view.hpp"
 
 #include <algorithm>
 #include <array>
@@ -153,7 +153,7 @@ void Sky::UpdateGrid()
     }
 }
 
-bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
+bool Sky::Draw(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes)
 {
     SDL_Rect content;
     if (!SDL_GetRenderViewport(renderer, &content))
@@ -196,7 +196,7 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDa
            moon.Draw(renderer, camera, moonDirection, viewport); // Draw full moon
 }
 
-void Sky::BuildGradient(const FreeCamera& camera, int width, int height)
+void Sky::BuildGradient(const CameraView& camera, int width, int height)
 {
     const Vector3 sunDirection = environment.lights.sun.direction;
     const Vector3 moonDirection = environment.lights.moon.direction;

@@ -1,12 +1,12 @@
 #include "sky_disc.hpp"
-#include "free_camera.hpp"
+#include "camera_view.hpp"
 #include "view_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
 
-SkyDisc::DiscMesh SkyDisc::Project(const FreeCamera& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color)
+SkyDisc::DiscMesh SkyDisc::Project(const CameraView& camera, Vector3 direction, SDL_Rect viewport, const SDL_Texture& texture, SDL_Rect discBounds, double angularDiameter, SDL_FColor color)
 {
     const Vector3 right = (direction.x == 0.0 && direction.z == 0.0) ? Vector3{1.0, 0.0, 0.0} : Math::Normalize(Math::Cross({0.0, 1.0, 0.0}, direction));
     const Vector3 up = Math::Cross(direction, right);

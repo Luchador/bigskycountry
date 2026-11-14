@@ -7,6 +7,7 @@
 #include "project_settings.hpp"
 #include "free_camera.hpp"
 #include "input.hpp"
+#include "game_session.hpp"
 #include "marker.hpp"
 #include "world_state.hpp"
 #include "world_document.hpp"
@@ -71,7 +72,12 @@ namespace
             const double distance = std::max(1.0, Math::Length(hi - lo));
             freeCamera.LookAt(focus + Vector3{0, distance * 0.5, -distance}, focus);
         }
-        const FreeCamera gameView = freeCamera;
+        std::unique_ptr<GameSession> game;
+        if (mode == ApplicationMode::Game)
+        {
+            game = std::make_unique<GameSession>(window, world);
+            if (!game->Start()) return false;
+        }
         Uint64 previousTime = SDL_GetTicksNS();
         const bool vsyncEnabled = SDL_SetRenderVSync(renderer, 1);
 
@@ -115,25 +121,29 @@ namespace
                     }
                 }
 
-                if (event.type == SDL_EVENT_QUIT ||
-                    (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat))
+                if (event.type == SDL_EVENT_QUIT) return true;
+                if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat)
                 {
+                    if (game && !input.IsCameraEnabled() && game->MouseCaptured())
+                    {
+                        if (!game->ReleaseMouse()) return false;
+                        continue;
+                    }
                     return true;
                 }
 
-                if (mode == ApplicationMode::Game && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F1 && !event.key.repeat)
+                if (game && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F1 && !event.key.repeat)
                 {
-                    if (!input.SetCameraEnabled(!input.IsCameraEnabled()))
-                    {
-                        return false;
-                    }
-
-                    const char* title = "Big Sky Country";
-
-                    if (!SDL_SetWindowTitle(window, title))
-                    {
-                        return false;
-                    }
+                    const bool debug = !input.IsCameraEnabled();
+                    if (debug)
+                        freeCamera.LookAt(game->View().GetPosition(), game->View().GetPosition() + game->View().Forward());
+                    if (!input.SetCameraEnabled(debug) || !game->SetDebugCamera(debug)) return false;
+                    continue;
+                }
+                if (game && !input.IsCameraEnabled())
+                {
+                    if (!game->Handle(event)) return false;
+                    continue;
                 }
 
                 // The editor consumes wheel events used for top-down map zoom.
@@ -163,7 +173,7 @@ namespace
             if (mode == ApplicationMode::Game)
             {
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
-                world.TickObjects(static_cast<float>(elapsedNanoseconds / 1.0e9));
+                game->Update(elapsedNanoseconds / 1.0e9);
             }
 
             if (input.IsCameraEnabled() && (!roadTool || (roadTool->ViewportFocused() && !roadTool->DraggingGizmo())))
@@ -172,7 +182,7 @@ namespace
                 freeCamera.Update(input.ReadCameraInput(mode), cameraElapsedSeconds);
             }
 
-            const FreeCamera& view = input.IsCameraEnabled() ? freeCamera : gameView;
+            const CameraView& view = game && !input.IsCameraEnabled() ? game->View() : freeCamera;
 
             if (roadTool && !roadTool->SetContentViewport(renderer))
             {
@@ -215,6 +225,8 @@ namespace
                         worldRenderer.SubmitWorldMesh(object->Instance());
                 }
 
+                if (game) game->Submit(worldRenderer);
+
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
                 worldRenderer.BeginUnlit();
                 for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
@@ -226,7 +238,7 @@ namespace
 
                 if (roadTool)
                 {
-                    roadTool->SubmitGizmos(worldRenderer, world, view);
+                    roadTool->SubmitGizmos(worldRenderer, world, freeCamera);
                 }
 
                 if (!worldRenderer.End())
@@ -234,6 +246,8 @@ namespace
                     return false;
                 }
             }
+
+            if (game && !game->DrawHUD(renderer)) return false;
 
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {

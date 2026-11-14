@@ -5,7 +5,7 @@
 #include <SDL3/SDL.h>
 #include <memory>
 
-class FreeCamera;
+class CameraView;
 
 class Sun
 {
@@ -13,7 +13,7 @@ public:
     // Local civil minutes since midnight. Returns an apparent direction in east/up/north axes.
     static Vector3 Direction(double minutes);
     static SDL_FColor Tint(double elevationRadians);
-    bool Draw(SDL_Renderer* renderer, const FreeCamera& camera, Vector3 direction, SDL_Rect viewport,
+    bool Draw(SDL_Renderer* renderer, const CameraView& camera, Vector3 direction, SDL_Rect viewport,
               SDL_FColor baseSkyAtSun = {0.0f, 0.0f, 0.0f, 1.0f});
 
 private:

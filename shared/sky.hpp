@@ -6,7 +6,7 @@
 #include <SDL3/SDL.h>
 #include <vector>
 
-class FreeCamera;
+class CameraView;
 
 struct SkyPalette
 {
@@ -25,14 +25,14 @@ class Sky
 {
 public:
     // Use one Sky per renderer and destroy it before the renderer.
-    bool Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes);
+    bool Draw(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes);
     const WorldLighting& Lighting() const { return environment.lights; }
 
 private:
     Sun sun;
     Moon moon;
     void UpdateGrid();
-    void BuildGradient(const FreeCamera& camera, int width, int height);
+    void BuildGradient(const CameraView& camera, int width, int height);
     SkyEnvironment environment{};
     double lastTime = -1;
     Vector3 lastDirection{};
