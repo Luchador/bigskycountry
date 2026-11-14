@@ -477,6 +477,10 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
         else if (code == LVN_KEYDOWN)
         {
             const auto vk = reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey;
+            if (vk == 'Z' && GetCapture() != hwnd && !(GetKeyState(VK_CONTROL) & 0x8000) &&
+                !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+                !(GetKeyState(VK_LWIN) & 0x8000) && !(GetKeyState(VK_RWIN) & 0x8000))
+                s.Queue({OutlineOp::FocusSelection});
             if (vk == VK_ESCAPE && GetCapture() == hwnd)
             {
                 ReleaseCapture();

@@ -49,7 +49,7 @@ public:
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
-    void SubmitTerrain(const TerrainChunk& chunk);
+    void SubmitTerrain(const TerrainChunk& chunk, bool selected = false);
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     bool SphereVisible(Vector3 center, double radius) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
@@ -127,6 +127,7 @@ private:
     bool CanRetain(const std::string& material);
     void CaptureGeometry(ResidentGeometry& geometry, size_t start, size_t firstMaterial);
     void EmitRoadSurface(const RoadGeometry& road, const std::string& material);
+    void AppendSelectionVertex(SDL_FPoint point, double depth, double lift = 0);
     SurfaceMaterialCache materialCache;
     WorldLighting lights{};
     bool lightGeometry = false;

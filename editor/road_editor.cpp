@@ -8,6 +8,7 @@
 #include "road_render.hpp"
 #include "world_renderer.hpp"
 #include "free_camera.hpp"
+#include "selection_bounds.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1522,6 +1523,16 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         const auto count = static_cast<int>(corners.size());
         if (!SDL_RenderGeometryRaw(renderer, nullptr, &corners.front().x, sizeof(SDL_FPoint), &TerrainChunk::groundColor, 0,
                                    nullptr, 0, count, indices.data(), count, sizeof(int))) return false;
+        if (GeometrySelected({SceneKind::Terrain, i}))
+        {
+            if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange))) return false;
+            for (const auto& edge : chunk->Outline())
+            {
+                const auto a = ToScreen(chunk->Instance().transform.Point(edge.a));
+                const auto b = ToScreen(chunk->Instance().transform.Point(edge.b));
+                if (!SDL_RenderLine(renderer, a.x, a.y, b.x, b.y)) return false;
+            }
+        }
     }
 
     std::optional<Road> preview;
@@ -1925,6 +1936,38 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
            SDL_SetRenderViewport(renderer, &toolbar) && cameraToolbar.Draw(renderer, width, camera, gizmo.settings) &&
            SDL_SetRenderViewport(renderer, nullptr) && menu.DrawBar(renderer, width) && outlinePanel.DrawDragBadge(renderer, outlineArea);
 #endif
+}
+
+void RoadEditor::FocusSelection(const WorldDocument& world, FreeCamera& camera)
+{
+    if (drag != Drag::None || rampDrag || scene.w <= 0 || scene.h <= 0) return;
+    const auto bounds = SelectionBounds(world, state);
+    if (bounds.Empty()) return;
+    const auto target = (bounds.min + bounds.max) * 0.5;
+    constexpr double margin = 1.2;
+    if (planView)
+    {
+        center = target;
+        const auto size = bounds.max - bounds.min;
+        scale = std::min(scene.w / (margin * std::max(10.0, size.x)),
+                         scene.h / (margin * std::max(10.0, size.z)));
+        initialized = true;
+        return;
+    }
+    // Fit all eight corners at the current heading/pitch. Account for depth
+    // as well as aspect ratio, so long roads and tall/scaled objects all fit.
+    const double focal = ViewportFocalLength(scene);
+    double distance = 10.0;
+    for (double x : {bounds.min.x, bounds.max.x})
+        for (double y : {bounds.min.y, bounds.max.y})
+            for (double z : {bounds.min.z, bounds.max.z})
+            {
+                const auto p = camera.WorldDirectionToView(Vector3{x, y, z} - target);
+                distance = std::max({distance, margin * std::abs(p.x) * 2.0 * focal / scene.w - p.z,
+                                     margin * std::abs(p.y) * 2.0 * focal / scene.h - p.z,
+                                     worldNearDepth + 1.0 - p.z});
+            }
+    camera.LookAt(target - camera.Forward() * distance, target);
 }
 
 void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
@@ -2967,7 +3010,15 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         std::optional<OutlineCommand> outlineCommand;
         if (outlinePanel.Key(window, event, outliner, outlineCommand))
         {
-            if (outlineCommand) ApplyOutline(*outlineCommand, world);
+            if (outlineCommand)
+            {
+                if (outlineCommand->op == OutlineOp::FocusSelection)
+                {
+                    if (!SetContentViewport(renderer)) return EditorEvent::Error;
+                    FocusSelection(world, camera);
+                }
+                else ApplyOutline(*outlineCommand, world);
+            }
             return EditorEvent::Handled;
         }
         std::optional<InspectorEdit> edit;
@@ -3007,7 +3058,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     }
     if (const auto cmd = panels.TakeOutlineCommand(event))
     {
-        ApplyOutline(*cmd, world);
+        if (cmd->op == OutlineOp::FocusSelection)
+        {
+            if (!SetContentViewport(renderer)) return EditorEvent::Error;
+            FocusSelection(world, camera);
+        }
+        else ApplyOutline(*cmd, world);
         return EditorEvent::Handled;
     }
     if (const auto edit = panels.TakeInspectorEdit(event))
@@ -3084,6 +3140,15 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
         !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
     {
+        if (event.key.key == SDLK_Z && !SDL_GetWindowRelativeMouseMode(window))
+        {
+            if (!event.key.repeat)
+            {
+                if (!SetContentViewport(renderer)) return EditorEvent::Error;
+                FocusSelection(world, camera);
+            }
+            return EditorEvent::Handled;
+        }
         if (event.key.key == SDLK_ESCAPE && state.anchorSelection && drag == Drag::None)
         {
             state.anchorSelection.reset();

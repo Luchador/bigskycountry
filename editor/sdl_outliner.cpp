@@ -223,6 +223,11 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
     {
         return false;
     }
+    if (k == SDLK_Z && !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI)))
+    {
+        if (!e.key.repeat) cmd = OutlineCommand{OutlineOp::FocusSelection};
+        return true;
+    }
     if (!m.Rows().empty() && (k == SDLK_UP || k == SDLK_DOWN))
     {
         const int current = m.Selection().empty() ? -1 : Index(m, *m.Selection().begin());

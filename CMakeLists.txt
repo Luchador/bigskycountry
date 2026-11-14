@@ -77,6 +77,7 @@ add_library(BigSkyApplication STATIC
     shared/scene_hierarchy.cpp
     shared/world_document.cpp
     shared/terrain_fill.cpp
+    shared/terrain_chunk.cpp
     shared/world_terrain.cpp
     shared/road_render.cpp
     shared/world_renderer_gpu.cpp
@@ -149,6 +150,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
+    editor/selection_bounds.cpp
     editor/highway_ramp_tool.cpp
     editor/ramp_handles.cpp
     editor/road_intersection.cpp

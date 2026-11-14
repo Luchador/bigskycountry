@@ -69,6 +69,7 @@ bool RoadEditorState::GeometrySelected(SceneKey key) const
 {
     if (key.kind == SceneKind::Road && key.index == selected) return true;
     if (key.kind == SceneKind::Intersection && meshSelection == TransformTarget{SelectionKind::Intersection, key.index}) return true;
+    if (key.kind == SceneKind::Terrain && meshSelection == TransformTarget{SelectionKind::Terrain, key.index}) return true;
     return outlineSelection.contains(key);
 }
 

@@ -221,7 +221,8 @@ namespace
                 for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
                     if (!hidden({SceneKind::Mesh, i})) worldRenderer.SubmitWorldMesh(world.meshes[i]);
                 for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
-                    if (!hidden({SceneKind::Terrain, i})) worldRenderer.SubmitTerrain(*world.Terrain()[i]);
+                    if (!hidden({SceneKind::Terrain, i}))
+                        worldRenderer.SubmitTerrain(*world.Terrain()[i], roadTool && roadTool->GeometrySelected({SceneKind::Terrain, i}));
                 for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
                 {
                     if (hidden({SceneKind::Object, i})) continue;

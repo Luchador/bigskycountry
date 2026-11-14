@@ -21,6 +21,13 @@ public:
     using MeshPlacement::Instance;
     using MeshPlacement::SetMesh;
 
+    struct OutlineEdge
+    {
+        Vector3 a, b, normal; // Adjacent face normal, for surface-aligned outline depth.
+    };
+    // Local-space boundary edges, rebuilt lazily when the mesh changes.
+    const std::vector<OutlineEdge>& Outline() const;
+
     std::optional<TerrainBoundary> boundary;
     static constexpr SDL_FColor groundColor{0.28f, 0.40f, 0.19f, 1};
 
@@ -38,4 +45,8 @@ public:
         }
         return MeshPlacement::SetTransform(t);
     }
+
+private:
+    mutable std::weak_ptr<const Mesh> outlinedMesh;
+    mutable std::vector<OutlineEdge> outline;
 };

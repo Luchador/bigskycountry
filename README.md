@@ -99,6 +99,8 @@ The test grid at `assets/models/terrain/test_grid.glb` has 10 × 10 shared verti
 
 Drag a material from the Content Browser’s **Textures** tab onto a chunk in the 3D viewport. The assignment belongs to that placement, saves with the world, and supports **Ctrl+Z** and **Ctrl+Y**. The texture repeats every 4 m in the chunk’s local coordinates.
 
+Selected terrain chunks have an orange boundary outline, including when multiple chunks are selected in the Outliner. The outline follows the mesh perimeter rather than the interior triangle edges and updates when the terrain is regenerated.
+
 To fill a block, Shift-click the roads and intersections surrounding it and press **F**. You can also select the group in the Outliner and press **F** there. The chunk inherits the Outliner folder of the first boundary road in world order that belongs to a folder. If all boundary roads are at the world root, the chunk stays there. The new terrain follows the outer edge of the pavement, shoulder, transition strip, or curb and the rounded corners of generated intersections. At intersections without generated pavement, the boundary follows the attached anchors to the junction center. The interior has shared vertices at roughly 8 m spacing, with wider spacing on very large blocks. **View → Wireframe** shows the triangles. Move the surrounding roads to reshape the chunk, or select the chunk to assign a material or press **Delete**. If the perimeter opens, the chunk keeps its material and boundary links and becomes visible again when the loop closes.
 
 The optional `TERR` version 3 section distinguishes imported meshes and generated fills. A `mesh` record stores the quoted model path, position XYZ, rotation XYZ in radians, and quoted material path. A `fill` record stores the quoted material path, a counted list of road IDs, and a counted list of intersection IDs. The editor and game regenerate the mesh from those neighbors when loading the world. Versions 1 and 2 still load as imported chunks.
@@ -196,6 +198,8 @@ New roads default to **Bézier** alignment. For a one-lane road, **Extra width (
 For an even lane count, enable **Divided road** in the road inspector. The lane buttons then add or remove one lane in each direction. **Separation (m)** measures between the inside edges of the opposing travel lanes and changes in 0.5 m steps. At 2 m, the two 1 m paved inner shoulders meet. A wider separation adds a flush **Concrete** or **Grass** median between them. For example, a 6 m separation gives a 4 m median. Each carriageway has a solid yellow line along its inner lane edge.
 
 Use **Tab** or **Shift+Tab** to move between the viewport and controls. In the 3D viewport, hold the **right mouse button** to look around and fly. **W/S** move forward and backward, **A/D** move left and right, and **Q/E** move down and up. Releasing the button stops keyboard movement immediately.
+
+Press **Z** in the viewport or Scene Outliner to focus the camera on the current selection. Multiple selected items are framed together, and a selected folder frames its visible contents. The 3D view keeps its viewing direction and fits the selection with a little padding; the top-down view centers and zooms to fit. Selected control points or road segments focus just those elements. **Ctrl+Z** still undoes edits, and typing in a text field does not move the camera.
 
 Choose **View → Wireframe** to see the visible triangle edges of roads, terrain chunks, and placed objects in the 3D viewport. Choose it again to restore shaded surfaces.
 

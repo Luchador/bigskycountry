@@ -2,6 +2,7 @@
 #include "camera_view.hpp"
 #include "terrain_chunk.hpp"
 #include "editor_colors.hpp"
+#include "view_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -287,10 +288,54 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
     if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), false});
 }
 
-void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk)
+void WorldRenderer::AppendSelectionVertex(SDL_FPoint point, double depth, double lift)
 {
+    const double x = (2.0 * point.x / viewport.w - 1.0) * depth;
+    const double y = (1.0 - 2.0 * point.y / viewport.h) * depth;
+    const double strokeDepth = std::max(worldNearDepth, depth - lift);
+    const double biased = std::min(depth, worldNearDepth * 1.0001 * depth / strokeDepth);
+    outline.push_back({static_cast<float>(x), static_cast<float>(y),
+                       static_cast<float>(biased), static_cast<float>(depth), EditorColors::orange});
+}
+
+void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk, bool selected)
+{
+    const auto& instance = chunk.Instance();
+    if (selected && (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform))) return;
+    const auto start = vertices.size(), firstResident = residentDraws.size();
     SubmitWorldMesh(chunk.Instance(), chunk.material, MeshUVs::TerrainProjection,
                     chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
+    if (!selected || viewport.w <= 0 || viewport.h <= 0) return;
+    // Both cached GPU batches and streamed/software triangles participate in
+    // the same depth/stencil selection mask used by roads and intersections.
+    for (auto i = firstResident; i < residentDraws.size(); ++i) residentDraws[i].selected = true;
+    if (start < vertices.size())
+    {
+        if (!selectedRanges.empty() && selectedRanges.back().end == start) selectedRanges.back().end = vertices.size();
+        else selectedRanges.push_back({start, vertices.size()});
+    }
+    const auto sides = ViewGeometry::SidePlanes(focal, viewport);
+    for (const auto& edge : chunk.Outline())
+    {
+        const auto a = camera->WorldToView(instance.transform.Point(edge.a));
+        const auto b = camera->WorldToView(instance.transform.Point(edge.b));
+        const auto stroke = ViewGeometry::ProjectStroke(a, b, sides, focal, viewport, worldNearDepth, 1.5f);
+        if (!stroke) continue;
+        const auto normal = camera->WorldDirectionToView(instance.transform.Direction(edge.normal));
+        const double plane = Math::Dot(normal, a);
+        for (int i : {0, 1, 2, 0, 2, 3})
+        {
+            const auto p = stroke->corners[i];
+            const Vector3 ray{(p.x - viewport.w * 0.5) / focal, (viewport.h * 0.5 - p.y) / focal, 1};
+            const double denominator = Math::Dot(normal, ray);
+            const double surfaceDepth = denominator != 0 ? plane / denominator : 0;
+            // The inward half of a thick line must follow its adjacent face.
+            // A constant endpoint depth hides the far rim even on flat terrain.
+            const double depth = std::isfinite(surfaceDepth) && surfaceDepth >= worldNearDepth ? surfaceDepth :
+                                 (i < 2 ? stroke->startDepth : stroke->endDepth);
+            AppendSelectionVertex(p, depth);
+        }
+    }
 }
 
 void WorldRenderer::WireframeSubmittedGeometry()

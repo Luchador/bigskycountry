@@ -26,6 +26,7 @@ enum class OutlineOp
     UnhideChildren,
     Remove,
     FillTerrain,
+    FocusSelection,
     Move
 };
 struct OutlineCommand

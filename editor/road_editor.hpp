@@ -90,6 +90,7 @@ private:
     bool RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocument& world, const PropertiesInspector& properties);
 #endif
     void ChangeView(WorldDocument& world, FreeCamera& camera);
+    void FocusSelection(const WorldDocument& world, FreeCamera& camera);
     void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
                         std::optional<SDL_FPoint> viewportPoint, bool strip = false);
     void PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position);
