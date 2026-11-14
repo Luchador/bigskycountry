@@ -52,6 +52,7 @@ add_library(BigSkyApplication STATIC
     "${ttf2mesh_SOURCE_DIR}/ttf2mesh.c"
     shared/marker.cpp
     "${cjson_SOURCE_DIR}/cJSON.c"
+    shared/project_settings.cpp
     shared/asset_paths.cpp
     shared/material.cpp
     shared/dds_texture.cpp
@@ -93,7 +94,7 @@ add_library(BigSkyApplication STATIC
     shared/texture_loader.cpp
     shared/world_state.cpp
 )
-set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
+set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp shared/project_settings.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
 target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)

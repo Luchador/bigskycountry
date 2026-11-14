@@ -24,6 +24,7 @@ function(bigsky_stage source destination)
     set(cooked_files "${cooked_files}" PARENT_SCOPE)
 endfunction()
 
+bigsky_stage("${asset_root}/project-settings.json" "project-settings.json")
 bigsky_stage("${asset_root}/fonts/OpenSans-Semibold.ttf" "fonts/OpenSans-Semibold.ttf")
 
 foreach(model IN LISTS model_sources)

@@ -522,7 +522,7 @@ void Road::Rebuild()
     splineLengthMeters = 0.0;
     pointSamples.clear();
     pavementTriangles.clear();
-    railroadTies.clear();
+    railroadSegments.clear();
     edgeTriangles.clear();
     transitionStrips.clear();
     outline.clear();
@@ -607,7 +607,7 @@ void Road::Rebuild()
     const MeshTransform frame = ObjectTransform{points.front().position, rotation}.ToMeshTransform();
     if (style.railroad)
     {
-        BuildRailroad(*this, *style.railroad, centerline, tangents, frame, style.edge == RoadEdge::Transition,
+        BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
         return;
     }

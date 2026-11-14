@@ -30,7 +30,8 @@ struct RailroadTieRun
 };
 
 void BuildRailroad(RoadGeometry& geometry, const RailroadSettings& settings, std::span<const Vector3> samples,
-                   std::span<const Vector3> tangents, const MeshTransform& frame, bool transition,
+                   std::span<const Vector3> tangents, std::span<const std::size_t> controlSamples,
+                   const MeshTransform& frame, bool transition,
                    const std::string& transitionMaterial);
 
 // All ties share a single solid mesh, in meters, with X along the track.

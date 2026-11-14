@@ -158,9 +158,21 @@ struct RoadGeometry
     // Junction corners can inherit different strip materials from their adjoining roads.
     std::map<std::string, std::vector<std::array<TransitionVertex, 3>>> transitionStrips;
     std::vector<std::array<PavementVertex, 3>> pavementTriangles;
-    std::vector<std::array<EdgeVertex, 3>> edgeTriangles; // Vertex-colored outer edges and median surfaces.
+    using ColoredSurface = std::vector<std::array<EdgeVertex, 3>>;
+    ColoredSurface edgeTriangles; // Vertex-colored outer edges and median surfaces.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
-    std::vector<RailroadTieRun> railroadTies;
+    struct RailroadSegment
+    {
+        ColoredSurface rails;
+        std::vector<RailroadTieRun> ties;
+        void AddTrackSample(Vector3 position);
+        bool WithinDistance(Vector3 eye, double meters) const;
+
+    private:
+        std::vector<Vector3> track;
+        Vector3 lower, upper; // Bounds of the sampled track centerline.
+    };
+    std::vector<RailroadSegment> railroadSegments;
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 };

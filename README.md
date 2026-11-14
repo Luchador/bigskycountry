@@ -187,6 +187,8 @@ Press **R** to switch between the 3D and top-down views. In the top-down viewpor
 
 ### Railroads
 
+In **Settings → Project Settings → Optimization**, enter the **Rail and tie render distance (m)** and press **Enter** or **Apply**. The default is **300 m**. The game and editor measure to the nearest point on each control-point segment’s sampled track. Beyond that distance the embankment and transition strip remain visible. Set the distance to **0** to hide rails and ties at all distances. The editor saves the project-wide value in `assets/project-settings.json` and stages it in `build/cooked` for the game.
+
 In the 3D viewport, right-click and choose **Create → Create Railroad** to place 50 m of standard-gauge track. Select its teal spline or control points to edit it as you would a road. **Shift-drag** either endpoint to extend the track, or select a span and press **Ctrl+Q** to subdivide it. The control-point elevation is the base of the embankment.
 
 The railroad inspector adjusts the flat crest width and the bed height in meters. The initial crest is 4 m wide and 0.75 m high. The rails have 1.435 m of clear gauge and the timber ties are spaced every 0.60 m along the track. Enable **Transition strip** for a 0.40 m blend at each toe and drop a Transition material onto the strip slot. The embankment has its own material slot.

@@ -16,6 +16,7 @@ namespace
     {
         MeshTransform axes;
         double distance;
+        std::size_t sampleIndex;
 
         Vector3 Point(double lateral, double height) const
         {
@@ -32,11 +33,11 @@ namespace
         return {center, forward, Math::Cross(side, forward), side};
     }
 
-    void SolidQuad(RoadGeometry& mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, SDL_FColor color)
+    void SolidQuad(RoadGeometry::ColoredSurface& surface, Vector3 a, Vector3 b, Vector3 c, Vector3 d, SDL_FColor color)
     {
         const RoadGeometry::EdgeVertex va{a, color}, vb{b, color}, vc{c, color}, vd{d, color};
-        if (a != b && b != c && a != c) mesh.edgeTriangles.push_back({va, vb, vc});
-        if (a != c && c != d && a != d) mesh.edgeTriangles.push_back({va, vc, vd});
+        if (a != b && b != c && a != c) surface.push_back({va, vb, vc});
+        if (a != c && c != d && a != d) surface.push_back({va, vc, vd});
     }
 
     // Follow the outside contour of the foot, web and head. The gauge is set by
@@ -49,24 +50,24 @@ namespace
         {webWidth / 2, footHeight}, {footWidth / 2, footHeight}, {footWidth / 2, 0}
     };
 
-    void Rail(RoadGeometry& mesh, const Section& a, const Section& b, double center, double base)
+    void Rail(RoadGeometry::ColoredSurface& surface, const Section& a, const Section& b, double center, double base)
     {
         for (std::size_t i = 0; i < std::size(railProfile); ++i)
         {
             const auto p = railProfile[i], q = railProfile[(i + 1) % std::size(railProfile)];
-            SolidQuad(mesh, a.Point(center + p.lateral, base + p.height), a.Point(center + q.lateral, base + q.height),
+            SolidQuad(surface, a.Point(center + p.lateral, base + p.height), a.Point(center + q.lateral, base + q.height),
                       b.Point(center + q.lateral, base + q.height), b.Point(center + p.lateral, base + p.height),
                       p.height == RailroadSettings::railHeight && q.height == p.height ? polished : steel);
         }
     }
 
-    void EndFace(RoadGeometry& mesh, const Section& section, ProfilePoint left, ProfilePoint right,
+    void EndFace(RoadGeometry::ColoredSurface& surface, const Section& section, ProfilePoint left, ProfilePoint right,
                  double bottom, SDL_FColor color, bool first)
     {
         auto a = section.Point(left.lateral, bottom), b = section.Point(right.lateral, bottom);
         auto c = section.Point(right.lateral, right.height), d = section.Point(left.lateral, left.height);
-        if (first) SolidQuad(mesh, a, b, c, d, color);
-        else SolidQuad(mesh, d, c, b, a, color);
+        if (first) SolidQuad(surface, a, b, c, d, color);
+        else SolidQuad(surface, d, c, b, a, color);
     }
 
     void BedBand(RoadGeometry& mesh, const Section& a, const Section& b, ProfilePoint left, ProfilePoint right)
@@ -96,6 +97,37 @@ namespace
         triangles.push_back({v0, v1, v2});
         triangles.push_back({v0, v2, v3});
     }
+}
+
+void RoadGeometry::RailroadSegment::AddTrackSample(Vector3 p)
+{
+    if (track.empty()) lower = upper = p;
+    else
+    {
+        lower = {std::min(lower.x, p.x), std::min(lower.y, p.y), std::min(lower.z, p.z)};
+        upper = {std::max(upper.x, p.x), std::max(upper.y, p.y), std::max(upper.z, p.z)};
+    }
+    track.push_back(p);
+}
+
+bool RoadGeometry::RailroadSegment::WithinDistance(Vector3 eye, double meters) const
+{
+    if (meters <= 0 || track.empty()) return false;
+    const double limit = meters * meters;
+    const Vector3 nearest{std::clamp(eye.x, lower.x, upper.x), std::clamp(eye.y, lower.y, upper.y),
+                          std::clamp(eye.z, lower.z, upper.z)};
+    const Vector3 outside = eye - nearest;
+    if (Math::Dot(outside, outside) > limit) return false;
+
+    for (std::size_t i = 1; i < track.size(); ++i)
+    {
+        const Vector3 along = track[i] - track[i - 1], offset = eye - track[i - 1];
+        const double lengthSquared = Math::Dot(along, along);
+        const double t = lengthSquared > 0 ? std::clamp(Math::Dot(offset, along) / lengthSquared, 0.0, 1.0) : 0.0;
+        const Vector3 delta = offset - along * t;
+        if (Math::Dot(delta, delta) <= limit) return true;
+    }
+    return false;
 }
 
 bool RailroadSettings::Valid() const
@@ -141,10 +173,11 @@ const std::shared_ptr<const Mesh>& RailroadTieMesh()
 }
 
 void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::span<const Vector3> samples,
-                   std::span<const Vector3> tangents, const MeshTransform& frame, bool transition,
+                   std::span<const Vector3> tangents, std::span<const std::size_t> controlSamples,
+                   const MeshTransform& frame, bool transition,
                    const std::string& material)
 {
-    if (samples.size() < 2 || !settings.Valid()) return;
+    if (samples.size() < 2 || controlSamples.size() < 2 || !settings.Valid()) return;
     std::vector<Section> sections;
     for (std::size_t i = 0; i < samples.size(); ++i)
     {
@@ -158,7 +191,7 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
             direction = Math::Normalize(next + previous);
             if (direction == Vector3{}) direction = next == Vector3{} ? frame.x : next;
         }
-        sections.push_back({TrackFrame(samples[i], direction, frame), sections.empty() ? 0 : sections.back().distance + step});
+        sections.push_back({TrackFrame(samples[i], direction, frame), sections.empty() ? 0 : sections.back().distance + step, i});
     }
     if (sections.size() < 2) return;
 
@@ -190,36 +223,53 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
         const auto& end = first ? sections.front() : sections.back();
         if (height > 0)
         {
-            for (std::size_t i = 1; i < bed.size(); ++i) EndFace(mesh, end, bed[i - 1], bed[i], 0, ballast, first);
+            for (std::size_t i = 1; i < bed.size(); ++i) EndFace(mesh.edgeTriangles, end, bed[i - 1], bed[i], 0, ballast, first);
             if (transition)
             {
-                EndFace(mesh, end, {-outerWidth, 0}, bed.front(), 0, ballast, first);
-                EndFace(mesh, end, bed.back(), {outerWidth, 0}, 0, ballast, first);
+                EndFace(mesh.edgeTriangles, end, {-outerWidth, 0}, bed.front(), 0, ballast, first);
+                EndFace(mesh.edgeTriangles, end, bed.back(), {outerWidth, 0}, 0, ballast, first);
             }
         }
+    }
+
+    const auto railCaps = [&](RoadGeometry::ColoredSurface& rails, const Section& end, bool first)
+    {
         for (const double center : {-railCenter, railCenter})
         {
             const auto cap = [&](double width, double low, double high)
             {
-                EndFace(mesh, end, {center - width / 2, railBase + high}, {center + width / 2, railBase + high}, railBase + low, steel, first);
+                EndFace(rails, end, {center - width / 2, railBase + high}, {center + width / 2, railBase + high}, railBase + low, steel, first);
             };
             cap(footWidth, 0, footHeight);
             cap(webWidth, footHeight, headBottom);
             cap(headWidth, headBottom, RailroadSettings::railHeight);
         }
-    }
+    };
 
     // The first center sits half a spacing from the start. Carry stationing
     // across all spline spans so adding a control point cannot restart the ties.
+    std::size_t segment = 0;
     double tieStation = RailroadSettings::tieSpacing / 2;
     for (std::size_t i = 1; i < sections.size(); ++i)
     {
         const auto& a = sections[i - 1];
         const auto& b = sections[i];
+        const auto previous = segment;
+        while (segment + 2 < controlSamples.size() && b.sampleIndex > controlSamples[segment + 1]) ++segment;
+        if (i == 1 || previous != segment)
+        {
+            auto& detail = mesh.railroadSegments.emplace_back();
+            detail.AddTrackSample(a.Point(0, railBase));
+        }
+        auto& detail = mesh.railroadSegments.back();
+        detail.AddTrackSample(b.Point(0, railBase));
+        if (i == 1) railCaps(detail.rails, a, true);
+        if (i + 1 == sections.size()) railCaps(detail.rails, b, false);
+
         for (std::size_t j = 1; j < bed.size(); ++j) BedBand(mesh, a, b, bed[j - 1], bed[j]);
         for (int side : {-1, 1})
         {
-            Rail(mesh, a, b, side * railCenter, railBase);
+            Rail(detail.rails, a, b, side * railCenter, railBase);
             if (transition) Transition(mesh, a, b, toe, toeHeight, side, material);
         }
         const auto tieAt = [&](double distance)
@@ -235,7 +285,7 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
         {
             const double remaining = std::floor((limit - tieStation) / RailroadSettings::tieSpacing);
             const int count = 1 + static_cast<int>(std::min<double>(remaining, RailroadTieRun::capacity - 1));
-            mesh.railroadTies.push_back({tieAt(tieStation), tieAt(tieStation + (count - 1) * RailroadSettings::tieSpacing), count});
+            detail.ties.push_back({tieAt(tieStation), tieAt(tieStation + (count - 1) * RailroadSettings::tieSpacing), count});
             tieStation += count * RailroadSettings::tieSpacing;
         }
     }

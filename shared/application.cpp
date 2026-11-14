@@ -4,6 +4,7 @@
 #include "world_renderer.hpp"
 #include "sky.hpp"
 #include "application.hpp"
+#include "project_settings.hpp"
 #include "free_camera.hpp"
 #include "input.hpp"
 #include "marker.hpp"
@@ -270,7 +271,9 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
 
     if (success)
     {
-        WorldDocument world(mode == ApplicationMode::Editor ? AssetRoot::Project : AssetRoot::Cooked);
+        const auto location = mode == ApplicationMode::Editor ? AssetRoot::Project : AssetRoot::Cooked;
+        if (!g_ProjectSettings.Load(location)) SDL_Log("Project Settings: %s", SDL_GetError());
+        WorldDocument world(location);
         success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window, world.models)) &&
                   RunWindowLoop(window, renderer, mode, world, roadTool);
     }

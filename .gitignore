@@ -1,6 +1,7 @@
 /build/
 # Track built-in assets needed by the editor and game.
 /assets/*
+!/assets/project-settings.json
 !/assets/fonts/
 /assets/fonts/*
 !/assets/fonts/OpenSans-Semibold.ttf

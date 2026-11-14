@@ -7,6 +7,7 @@ class SdlTransformPanel
 public:
     static constexpr int height = 112;
     bool HasPendingEdit() const { return Focused() && dirty && buffer != initialText; }
+    const std::string& EditedText() const { return buffer; }
     bool Focused() const { return field >= 0; }
     void Blur(SDL_Window* window);
     void Click(SDL_Window* window, SDL_FPoint pos, int width, const TransformFields& fields);

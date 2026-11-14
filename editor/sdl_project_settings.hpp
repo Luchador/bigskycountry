@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SDL3/SDL.h>
+#include "sdl_transform_panel.hpp"
 
 class SdlProjectSettings
 {
@@ -11,5 +11,9 @@ public:
 
 private:
     bool Paint() const;
+    void Close();
+    void Apply();
+    SDL_Renderer* renderer = nullptr;
+    SdlTransformPanel distanceField;
     SDL_Window* window = nullptr; // The editor frame owns the utility window.
 };

@@ -1,4 +1,5 @@
 #include "windows_panels.hpp"
+#include "project_settings_field.hpp"
 #include "outliner_splitter.hpp"
 #include "marker.hpp"
 #include "properties_inspector.hpp"
@@ -1397,6 +1398,19 @@ struct WindowsPanels::Impl
             self.projectSettings = dialog;
             SetWindowLongPtrW(dialog, DWLP_USER, l);
             WindowsTheme::ApplyDialog(dialog);
+            SetDlgItemTextW(dialog, IDC_RAIL_DETAIL_DISTANCE, Wide(RailroadDistanceField::Text()).c_str());
+            SendDlgItemMessageW(dialog, IDC_RAIL_DETAIL_DISTANCE, EM_SETLIMITTEXT, 64, 0);
+            return TRUE;
+        }
+        if (message == WM_COMMAND && LOWORD(w) == IDOK)
+        {
+            HWND field = GetDlgItem(dialog, IDC_RAIL_DETAIL_DISTANCE);
+            if (RailroadDistanceField::Apply(ReadEdit(field)))
+                SetWindowTextW(field, Wide(RailroadDistanceField::Text()).c_str());
+            else
+                MessageBoxW(dialog, Wide(SDL_GetError()).c_str(), L"Project Settings", MB_OK | MB_ICONERROR);
+            SetFocus(field);
+            SendMessageW(field, EM_SETSEL, 0, -1);
             return TRUE;
         }
         if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(w) == IDCANCEL))
