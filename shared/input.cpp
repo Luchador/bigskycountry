@@ -31,6 +31,28 @@ bool Input::IsCameraEnabled() const
     return cameraEnabled;
 }
 
+bool Input::CoalesceMouseMotion(SDL_Event& event)
+{
+    if (event.type != SDL_EVENT_MOUSE_MOTION) return true;
+    const int queued = SDL_PeepEvents(nullptr, 0, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+    if (queued < 0) return false;
+    SDL_Event next;
+    for (int i = 0; i < queued; ++i)
+    {
+        const int count = SDL_PeepEvents(&next, 1, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        if (count < 0) return false;
+        if (!count || next.type != SDL_EVENT_MOUSE_MOTION || next.motion.windowID != event.motion.windowID ||
+            next.motion.which != event.motion.which || next.motion.state != event.motion.state) return true;
+        // Leave SDL's internal poll sentinel in place so this frame's event
+        // loop still ends. Bound the batch to avoid chasing new input forever.
+        if (SDL_PeepEvents(&next, 1, SDL_GETEVENT, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) != 1) return false;
+        next.motion.xrel += event.motion.xrel;
+        next.motion.yrel += event.motion.yrel;
+        event = next;
+    }
+    return true;
+}
+
 bool Input::HandleEvent(const SDL_Event& event)
 {
     if (!cameraEnabled || SDL_GetWindowFromEvent(&event) != window)

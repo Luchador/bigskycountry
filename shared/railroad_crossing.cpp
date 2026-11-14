@@ -589,16 +589,33 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
     std::map<int, size_t> byId;
     for (size_t i = 0; i < roads.size(); ++i)
         byId.emplace(roads[i].id, i);
+    std::erase_if(crossingSources, [&](const auto& entry)
+    {
+        const auto it = byId.find(entry.first);
+        return it == byId.end() || roads[it->second].crossings.empty();
+    });
     for (auto& road : roads)
     {
+        if (road.crossings.empty() && road.crossingProfiles.empty()) continue;
+        CrossingSources sources{road.revision};
+        for (const auto& link : road.crossings)
+        {
+            const auto it = byId.find(link.railroadId);
+            sources.railroads.emplace_back(link, it == byId.end() ? 0 : roads[it->second].revision);
+        }
+        const auto cached = crossingSources.find(road.id);
+        if (!force && cached != crossingSources.end() && cached->second == sources) continue;
         std::vector<CrossingProfile> profiles;
+        std::map<int, std::vector<CrossingSite>> sites;
         for (const auto& link : road.crossings)
         {
             const auto it = byId.find(link.railroadId);
             if (it == byId.end())
                 continue; // Deleting a source disables its crossing; undo can restore it.
             const auto& railway = roads[it->second];
-            auto candidates = FindRailroadCrossings(road, railway);
+            const auto [found, inserted] = sites.try_emplace(link.railroadId);
+            if (inserted) found->second = FindRailroadCrossings(road, railway);
+            const auto& candidates = found->second;
             if (candidates.empty())
                 continue;
             const auto score = [&](const CrossingSite& site)
@@ -617,6 +634,12 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
         {
             road.crossingProfiles = std::move(profiles);
             road.Rebuild();
+        }
+        if (!road.crossings.empty())
+        {
+            // Rebuilding the derived approaches changes the road revision too.
+            sources.roadRevision = road.revision;
+            crossingSources.insert_or_assign(road.id, std::move(sources));
         }
     }
     crossingRevision = RoadGeometry::latestRevision;

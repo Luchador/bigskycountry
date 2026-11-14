@@ -6,6 +6,43 @@
 #include "world_renderer.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+
+namespace
+{
+    bool RayBounds(const Bounds3& bounds, Vector3 eye, Vector3 ray, double depth)
+    {
+        if (bounds.Empty()) return true; // Editor helper meshes can have no cached bounds.
+        double near = worldNearDepth, far = depth;
+        const std::array origins{eye.x, eye.y, eye.z}, directions{ray.x, ray.y, ray.z};
+        const std::array low{bounds.min.x, bounds.min.y, bounds.min.z}, high{bounds.max.x, bounds.max.y, bounds.max.z};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            if (directions[axis] == 0)
+            {
+                if (origins[axis] < low[axis] || origins[axis] > high[axis]) return false;
+                continue;
+            }
+            const double a = (low[axis] - origins[axis]) / directions[axis];
+            const double b = (high[axis] - origins[axis]) / directions[axis];
+            near = std::max(near, std::min(a, b));
+            far = std::min(far, std::max(a, b));
+            if (near > far) return false;
+        }
+        return true;
+    }
+
+    Bounds3 WorldBounds(const Bounds3& bounds, const MeshTransform& transform)
+    {
+        if (bounds.Empty()) return bounds;
+        const auto center = transform.Point((bounds.min + bounds.max) * 0.5);
+        const auto extent = (bounds.max - bounds.min) * 0.5;
+        const auto absolute = [](Vector3 v) { return Vector3{std::abs(v.x), std::abs(v.y), std::abs(v.z)}; };
+        const auto radius = absolute(transform.x) * extent.x + absolute(transform.y) * extent.y + absolute(transform.z) * extent.z;
+        return {center - radius, center + radius};
+    }
+}
 
 double ViewportFocalLength(SDL_Rect scene)
 {
@@ -85,6 +122,7 @@ Vector3 ViewportPicker::PlacementPosition(double modelBaseY) const
 
 bool ViewportPicker::TestRoad(const RoadGeometry& road)
 {
+    if (!RayBounds(road.bounds, eye, ray, depth)) return false;
     const double previous = depth;
     for (const auto* surface : {&road.whiteStripes, &road.yellowStripes})
     {
@@ -125,6 +163,7 @@ bool ViewportPicker::TestMesh(const MeshInstance& instance)
     }
 
     const Mesh& mesh = *instance.mesh;
+    if (!RayBounds(WorldBounds(mesh.bounds, instance.transform), eye, ray, depth)) return false;
     const bool mirrored = instance.transform.Determinant() < 0;
 
     const auto vertex = [&](std::size_t i)

@@ -25,6 +25,10 @@ public:
     bool SetCameraEnabled(bool enabled);
     bool IsCameraEnabled() const;
 
+    // Merge only consecutive motion events from the same device/window/button
+    // state. Stop at keys and button transitions so drag commits keep their order.
+    static bool CoalesceMouseMotion(SDL_Event& event);
+
 private:
     SDL_Window* window;
     bool cameraEnabled = false;

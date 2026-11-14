@@ -85,6 +85,14 @@ private:
     std::uint64_t rampRevision = 0;
     std::uint64_t terrainRevision = 0;
     std::uint64_t crossingRevision = 0;
+    struct CrossingSources
+    {
+        std::uint64_t roadRevision = 0;
+        std::vector<std::pair<RailroadCrossingLink, std::uint64_t>> railroads;
+        bool operator==(const CrossingSources&) const = default;
+    };
+    // One transient entry per road with crossings; no edit history or mesh copies.
+    std::map<int, CrossingSources> crossingSources;
     void RebuildTerrain(TerrainChunk& chunk, const std::map<int, const Road*>& byId);
     struct Section
     {

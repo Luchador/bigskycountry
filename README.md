@@ -227,6 +227,10 @@ To break a long railroad into smaller, independently editable pieces, select it 
 
 The railroad inspector adjusts the flat crest width and the bed height in meters. The initial crest is 4 m wide and 0.75 m high. The rails have 1.435 m of clear gauge and the timber ties are spaced every 0.60 m along the track. Enable **Transition strip** for a 0.40 m blend at each toe and drop a Transition material onto the strip slot. The embankment has its own material slot.
 
+Railroad saves contain the current control points and settings, not generated track meshes or undo history. Rebuilding replaces the generated geometry. Splitting reduces how much track a subsequent edit rebuilds; additional control points and more complex curves can still increase that work.
+
+During viewport drags, consecutive queued left-mouse movements are combined before editing the spline, preserving key and button transitions. Picking rejects road and mesh bounds that the cursor ray misses before checking individual triangles. Crossing updates reuse unchanged road/railroad pairs; changes to either source still recalculate the crossing.
+
 ### Editing road control points
 
 Click a road to show its control points, then click a point to select it. Press **W** for the translation arrows or **E** for the rotation rings. Drag a red (X), green (Y), or blue (Z) handle. The green arrow changes elevation. Rotating a Bézier point adjusts its tangent, while rotating a straight-road point pivots the neighboring spans around it. Release the mouse to save the edit, or press **Esc** during the drag to cancel. Each drag can be undone with **Ctrl+Z** and redone with **Ctrl+Y**.

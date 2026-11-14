@@ -90,6 +90,12 @@ namespace
 
             while (SDL_PollEvent(&event))
             {
+                // Dragging a spline rebuilds its geometry. Process the latest
+                // queued pointer position, instead of rebuilding at mouse polling
+                // frequency. Keep right-button gesture thresholds and camera input unchanged.
+                if (roadTool && roadTool->ViewportFocused() && event.type == SDL_EVENT_MOUSE_MOTION &&
+                    event.motion.windowID == SDL_GetWindowID(window) && event.motion.state == SDL_BUTTON_LMASK &&
+                    !Input::CoalesceMouseMotion(event)) return false;
                 if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && SDL_GetWindowFromEvent(&event) == window)
                 {
                     event.type = SDL_EVENT_QUIT;

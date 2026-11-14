@@ -1,0 +1,215 @@
+diff --git a/README.md b/README.md
+index 5a36da4894d4e975bb5abd9a4b5e97b94592c842..9eefc1dedded161956f616fb504bf43a7c795def 100644
+--- a/README.md
++++ b/README.md
+@@ -227,6 +227,10 @@ To break a long railroad into smaller, independently editable pieces, select it
+ 
+ The railroad inspector adjusts the flat crest width and the bed height in meters. The initial crest is 4 m wide and 0.75 m high. The rails have 1.435 m of clear gauge and the timber ties are spaced every 0.60 m along the track. Enable **Transition strip** for a 0.40 m blend at each toe and drop a Transition material onto the strip slot. The embankment has its own material slot.
+ 
++Railroad saves contain the current control points and settings, not generated track meshes or undo history. Rebuilding replaces the generated geometry. Splitting reduces how much track a subsequent edit rebuilds; additional control points and more complex curves can still increase that work.
++
++During viewport drags, consecutive queued left-mouse movements are combined before editing the spline, preserving key and button transitions. Picking rejects road and mesh bounds that the cursor ray misses before checking individual triangles. Crossing updates reuse unchanged road/railroad pairs; changes to either source still recalculate the crossing.
++
+ ### Editing road control points
+ 
+ Click a road to show its control points, then click a point to select it. Press **W** for the translation arrows or **E** for the rotation rings. Drag a red (X), green (Y), or blue (Z) handle. The green arrow changes elevation. Rotating a Bézier point adjusts its tangent, while rotating a straight-road point pivots the neighboring spans around it. Release the mouse to save the edit, or press **Esc** during the drag to cancel. Each drag can be undone with **Ctrl+Z** and redone with **Ctrl+Y**.
+diff --git a/editor/viewport_picker.cpp b/editor/viewport_picker.cpp
+index 3aa12e02ed74502590538eed9bde8ded1a425fc8..5565bb62819d387768f170ef37818c9d4fcadac8 100644
+--- a/editor/viewport_picker.cpp
++++ b/editor/viewport_picker.cpp
+@@ -6,6 +6,43 @@
+ #include "world_renderer.hpp"
+ 
+ #include <algorithm>
++#include <array>
++#include <cmath>
++
++namespace
++{
++    bool RayBounds(const Bounds3& bounds, Vector3 eye, Vector3 ray, double depth)
++    {
++        if (bounds.Empty()) return true; // Editor helper meshes can have no cached bounds.
++        double near = worldNearDepth, far = depth;
++        const std::array origins{eye.x, eye.y, eye.z}, directions{ray.x, ray.y, ray.z};
++        const std::array low{bounds.min.x, bounds.min.y, bounds.min.z}, high{bounds.max.x, bounds.max.y, bounds.max.z};
++        for (int axis = 0; axis < 3; ++axis)
++        {
++            if (directions[axis] == 0)
++            {
++                if (origins[axis] < low[axis] || origins[axis] > high[axis]) return false;
++                continue;
++            }
++            const double a = (low[axis] - origins[axis]) / directions[axis];
++            const double b = (high[axis] - origins[axis]) / directions[axis];
++            near = std::max(near, std::min(a, b));
++            far = std::min(far, std::max(a, b));
++            if (near > far) return false;
++        }
++        return true;
++    }
++
++    Bounds3 WorldBounds(const Bounds3& bounds, const MeshTransform& transform)
++    {
++        if (bounds.Empty()) return bounds;
++        const auto center = transform.Point((bounds.min + bounds.max) * 0.5);
++        const auto extent = (bounds.max - bounds.min) * 0.5;
++        const auto absolute = [](Vector3 v) { return Vector3{std::abs(v.x), std::abs(v.y), std::abs(v.z)}; };
++        const auto radius = absolute(transform.x) * extent.x + absolute(transform.y) * extent.y + absolute(transform.z) * extent.z;
++        return {center - radius, center + radius};
++    }
++}
+ 
+ double ViewportFocalLength(SDL_Rect scene)
+ {
+@@ -85,6 +122,7 @@ Vector3 ViewportPicker::PlacementPosition(double modelBaseY) const
+ 
+ bool ViewportPicker::TestRoad(const RoadGeometry& road)
+ {
++    if (!RayBounds(road.bounds, eye, ray, depth)) return false;
+     const double previous = depth;
+     for (const auto* surface : {&road.whiteStripes, &road.yellowStripes})
+     {
+@@ -125,6 +163,7 @@ bool ViewportPicker::TestMesh(const MeshInstance& instance)
+     }
+ 
+     const Mesh& mesh = *instance.mesh;
++    if (!RayBounds(WorldBounds(mesh.bounds, instance.transform), eye, ray, depth)) return false;
+     const bool mirrored = instance.transform.Determinant() < 0;
+ 
+     const auto vertex = [&](std::size_t i)
+diff --git a/shared/application.cpp b/shared/application.cpp
+index 20a5585d2f2cdffd12451c2c0e51f0e2401f7686..bc437cb03ac484136aaae077318e2a226a9007b5 100644
+--- a/shared/application.cpp
++++ b/shared/application.cpp
+@@ -90,6 +90,12 @@ namespace
+ 
+             while (SDL_PollEvent(&event))
+             {
++                // Dragging a spline rebuilds its geometry. Process the latest
++                // queued pointer position, instead of rebuilding at mouse polling
++                // frequency. Keep right-button gesture thresholds and camera input unchanged.
++                if (roadTool && roadTool->ViewportFocused() && event.type == SDL_EVENT_MOUSE_MOTION &&
++                    event.motion.windowID == SDL_GetWindowID(window) && event.motion.state == SDL_BUTTON_LMASK &&
++                    !Input::CoalesceMouseMotion(event)) return false;
+                 if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && SDL_GetWindowFromEvent(&event) == window)
+                 {
+                     event.type = SDL_EVENT_QUIT;
+diff --git a/shared/input.cpp b/shared/input.cpp
+index f1428754b513963c7184f6320ec1c92812b0fb96..fcb1f2c0de69ebef9d8017860a5031db331cb684 100644
+--- a/shared/input.cpp
++++ b/shared/input.cpp
+@@ -31,6 +31,28 @@ bool Input::IsCameraEnabled() const
+     return cameraEnabled;
+ }
+ 
++bool Input::CoalesceMouseMotion(SDL_Event& event)
++{
++    if (event.type != SDL_EVENT_MOUSE_MOTION) return true;
++    const int queued = SDL_PeepEvents(nullptr, 0, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
++    if (queued < 0) return false;
++    SDL_Event next;
++    for (int i = 0; i < queued; ++i)
++    {
++        const int count = SDL_PeepEvents(&next, 1, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
++        if (count < 0) return false;
++        if (!count || next.type != SDL_EVENT_MOUSE_MOTION || next.motion.windowID != event.motion.windowID ||
++            next.motion.which != event.motion.which || next.motion.state != event.motion.state) return true;
++        // Leave SDL's internal poll sentinel in place so this frame's event
++        // loop still ends. Bound the batch to avoid chasing new input forever.
++        if (SDL_PeepEvents(&next, 1, SDL_GETEVENT, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) != 1) return false;
++        next.motion.xrel += event.motion.xrel;
++        next.motion.yrel += event.motion.yrel;
++        event = next;
++    }
++    return true;
++}
++
+ bool Input::HandleEvent(const SDL_Event& event)
+ {
+     if (!cameraEnabled || SDL_GetWindowFromEvent(&event) != window)
+diff --git a/shared/input.hpp b/shared/input.hpp
+index 0db7a3486a797359bfe560a4912fa7c73deb46bf..3cb7a43e36c9b097aa8a5e6707e5d7b93fba119b 100644
+--- a/shared/input.hpp
++++ b/shared/input.hpp
+@@ -25,6 +25,10 @@ public:
+     bool SetCameraEnabled(bool enabled);
+     bool IsCameraEnabled() const;
+ 
++    // Merge only consecutive motion events from the same device/window/button
++    // state. Stop at keys and button transitions so drag commits keep their order.
++    static bool CoalesceMouseMotion(SDL_Event& event);
++
+ private:
+     SDL_Window* window;
+     bool cameraEnabled = false;
+diff --git a/shared/railroad_crossing.cpp b/shared/railroad_crossing.cpp
+index 39f3c06ed196659d2c0f271956c0ccf3f9e17232..3d99b821fe795082aea8c9729c14ab332a9397bf 100644
+--- a/shared/railroad_crossing.cpp
++++ b/shared/railroad_crossing.cpp
+@@ -589,16 +589,33 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
+     std::map<int, size_t> byId;
+     for (size_t i = 0; i < roads.size(); ++i)
+         byId.emplace(roads[i].id, i);
++    std::erase_if(crossingSources, [&](const auto& entry)
++    {
++        const auto it = byId.find(entry.first);
++        return it == byId.end() || roads[it->second].crossings.empty();
++    });
+     for (auto& road : roads)
+     {
++        if (road.crossings.empty() && road.crossingProfiles.empty()) continue;
++        CrossingSources sources{road.revision};
++        for (const auto& link : road.crossings)
++        {
++            const auto it = byId.find(link.railroadId);
++            sources.railroads.emplace_back(link, it == byId.end() ? 0 : roads[it->second].revision);
++        }
++        const auto cached = crossingSources.find(road.id);
++        if (!force && cached != crossingSources.end() && cached->second == sources) continue;
+         std::vector<CrossingProfile> profiles;
++        std::map<int, std::vector<CrossingSite>> sites;
+         for (const auto& link : road.crossings)
+         {
+             const auto it = byId.find(link.railroadId);
+             if (it == byId.end())
+                 continue; // Deleting a source disables its crossing; undo can restore it.
+             const auto& railway = roads[it->second];
+-            auto candidates = FindRailroadCrossings(road, railway);
++            const auto [found, inserted] = sites.try_emplace(link.railroadId);
++            if (inserted) found->second = FindRailroadCrossings(road, railway);
++            const auto& candidates = found->second;
+             if (candidates.empty())
+                 continue;
+             const auto score = [&](const CrossingSite& site)
+@@ -618,6 +635,12 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
+             road.crossingProfiles = std::move(profiles);
+             road.Rebuild();
+         }
++        if (!road.crossings.empty())
++        {
++            // Rebuilding the derived approaches changes the road revision too.
++            sources.roadRevision = road.revision;
++            crossingSources.insert_or_assign(road.id, std::move(sources));
++        }
+     }
+     crossingRevision = RoadGeometry::latestRevision;
+ }
+diff --git a/shared/world_document.hpp b/shared/world_document.hpp
+index a4229ce6f85b97a8f368f4bcbd685c2a79f6f120..f1aa111aaa4ca635f3484edf8d03be8391a99d1c 100644
+--- a/shared/world_document.hpp
++++ b/shared/world_document.hpp
+@@ -85,6 +85,14 @@ private:
+     std::uint64_t rampRevision = 0;
+     std::uint64_t terrainRevision = 0;
+     std::uint64_t crossingRevision = 0;
++    struct CrossingSources
++    {
++        std::uint64_t roadRevision = 0;
++        std::vector<std::pair<RailroadCrossingLink, std::uint64_t>> railroads;
++        bool operator==(const CrossingSources&) const = default;
++    };
++    // One transient entry per road with crossings; no edit history or mesh copies.
++    std::map<int, CrossingSources> crossingSources;
+     void RebuildTerrain(TerrainChunk& chunk, const std::map<int, const Road*>& byId);
+     struct Section
+     {
