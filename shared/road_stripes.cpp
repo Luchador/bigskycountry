@@ -190,6 +190,7 @@ namespace
         std::vector<Vector3> points;
         std::vector<Vector3> curveLeft, curveUp;
         std::vector<double> widths; // Optional paint-width multiplier while a lane appears/disappears.
+        std::vector<bool> hiddenSpans; // Optional mask for the span ending at each point; the first entry is unused.
 
         void Append(Vector3 center, Vector3 left, double offset, bool curved, const Vector3* up)
         {
@@ -393,12 +394,24 @@ namespace
         {
             if (!road.paintMarkings) return;
             MarkingPath line;
-            for (const auto& s : stations)
+            for (std::size_t i = 0; i < stations.size(); ++i)
             {
+                const auto& s = stations[i];
                 // PaintStrip expects the authored left axis for upward-facing triangles
                 // on both carriageways; these pavement stations point outward instead.
                 line.Append(s.center, s.lateral * side, side * profile.Mix(s.distance, offset), true, &s.up);
                 line.widths.push_back(profile.Mix(s.distance, visible));
+                if (dashed && !yellow)
+                {
+                    // Keep white lane dividers off the taper, including spans that
+                    // straddle the end of a transition on a curved segment.
+                    const double start = stations[i ? i - 1 : i].distance;
+                    const auto middle = profile.At((start + s.distance) * 0.5);
+                    const auto blending = [](Road::LaneBlend b)
+                    { return b.from != b.to && b.mix > 0 && b.mix < 1; };
+                    line.hiddenSpans.push_back(i && (middle.from != middle.to ||
+                        blending(profile.At(start)) || blending(profile.At(s.distance))));
+                }
             }
             auto& triangles = yellow ? road.yellowStripes : road.whiteStripes;
             if (dashed) PaintDashes(line, triangles);
@@ -815,6 +828,11 @@ namespace
 
         VisitSpans(path.points, initialLeft, [&](const Span& span, std::size_t i)
         {
+            if (!path.hiddenSpans.empty() && path.hiddenSpans[i])
+            {
+                havePrevious = false;
+                return;
+            }
             const auto& startCap = path.caps.front();
             const auto& endCap = path.caps.back();
             const bool atStart = i == 1 && startCap.has_value();
@@ -869,6 +887,7 @@ namespace
         if (!path.curveLeft.empty()) dash.curveLeft.push_back(path.curveLeft.front());
         if (!path.curveUp.empty()) dash.curveUp.push_back(path.curveUp.front());
         if (!path.widths.empty()) dash.widths.push_back(path.widths.front());
+        if (!path.hiddenSpans.empty()) dash.hiddenSpans.push_back(false);
 
         Vector3 dashLeft = defaultLeft;
         const auto emitDash = [&]
@@ -890,6 +909,7 @@ namespace
             const auto addPoint = [&](Vector3 point, double fraction)
             {
                 dash.points.push_back(point);
+                if (!path.hiddenSpans.empty()) dash.hiddenSpans.push_back(path.hiddenSpans[i]);
                 if (!path.widths.empty()) dash.widths.push_back(std::lerp(path.widths[i - 1], path.widths[i], fraction));
                 if (!path.curveLeft.empty())
                 {
@@ -931,6 +951,7 @@ namespace
                     dash.curveLeft.clear();
                     dash.curveUp.clear();
                     dash.widths.clear();
+                    dash.hiddenSpans.clear();
                 }
                 else
                 {

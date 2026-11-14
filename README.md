@@ -253,6 +253,8 @@ Select a road's cyan control spline segment, then use **Segment lanes** in the i
 
 The adjacent segments provide smooth transitions between the edited configuration and the rest of the road. For example, changing a middle segment from two to four lanes gives it four lanes, with widening and narrowing tapers on the neighboring segments. Pavement, lane markings, green lane guides, shoulders, curbs, and transition strips follow the changing width. If differently edited segments meet directly, their adjoining halves share the taper. Terrain fills follow the new outer edges, and intersections use each connecting endpoint's lane count.
 
+Dashed white lane dividers are omitted wherever the lane count transitions. They resume on constant-width sections with their dash spacing preserved. Solid edge lines, yellow markings, and the editor's green lane guides remain visible through the transitions.
+
 Select the whole road and change its lane count to restore a uniform configuration, clearing its segment overrides. Other inspector properties still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
 
 ### Editing road control points
