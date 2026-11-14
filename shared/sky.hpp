@@ -25,12 +25,18 @@ class Sky
 {
 public:
     // Use one Sky per renderer and destroy it before the renderer.
-    bool Draw(SDL_Renderer* renderer, const FreeCamera& camera, const SkyEnvironment& environment);
+    bool Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes);
+    const WorldLighting& Lighting() const { return environment.lights; }
 
 private:
     Sun sun;
     Moon moon;
     void UpdateGrid();
+    void BuildGradient(const FreeCamera& camera, int width, int height);
+    SkyEnvironment environment{};
+    double lastTime = -1;
+    Vector3 lastDirection{};
+    int lastWidth = 0, lastHeight = 0;
     std::vector<double> sampleX;
     std::vector<double> sampleY;
     std::vector<SDL_Vertex> vertices;

@@ -1,5 +1,6 @@
 #include "world_renderer.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -297,7 +298,10 @@ bool WorldRenderer::DrawGPU()
 
     if (bytes > bufferBytes)
     {
-        const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, bytes, 0};
+        // Leave headroom as new geometry enters the view while moving.
+        const Uint32 capacity = static_cast<Uint32>(std::min<Uint64>(
+            std::numeric_limits<Uint32>::max(), std::max<Uint64>(bytes, bufferBytes + Uint64(bufferBytes) / 2)));
+        const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, capacity, 0};
         SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(device, &bufferInfo);
 
         if (!buffer)
@@ -305,7 +309,7 @@ bool WorldRenderer::DrawGPU()
             return false;
         }
 
-        const SDL_GPUTransferBufferCreateInfo transferInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes, 0};
+        const SDL_GPUTransferBufferCreateInfo transferInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, capacity, 0};
         SDL_GPUTransferBuffer* staging = SDL_CreateGPUTransferBuffer(device, &transferInfo);
 
         if (!staging)
@@ -322,7 +326,7 @@ bool WorldRenderer::DrawGPU()
 
         vertexBuffer = buffer;
         upload = staging;
-        bufferBytes = bytes;
+        bufferBytes = capacity;
     }
 
     void* mapped = SDL_MapGPUTransferBuffer(device, upload, true);

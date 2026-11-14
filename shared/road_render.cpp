@@ -177,6 +177,7 @@ namespace
 
 void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected)
 {
+    if (!BoundsVisible(road.bounds)) return;
     // The 2D plan uses display colors. Convert those swatches to albedo for the 3D lighting pass.
     static const auto asphalt = Srgb::ToLinear(roadColor);
     static const auto yellowPaint = Srgb::ToLinear(yellowStripeColor);

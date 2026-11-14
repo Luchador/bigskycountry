@@ -44,33 +44,29 @@ void FreeCamera::ScrollSpeed(double wheelSteps)
     }
 }
 
-Vector3 FreeCamera::Forward() const
+void FreeCamera::SetOrientation(double newYaw, double newPitch)
 {
-    const double cosPitch = std::cos(pitch);
-
-    return { std::sin(yaw) * cosPitch, std::sin(pitch), std::cos(yaw) * cosPitch };
-}
-
-Vector3 FreeCamera::Right() const
-{
-    return { std::cos(yaw), 0.0, -std::sin(yaw) };
+    if (yaw == newYaw && pitch == newPitch) return;
+    yaw = newYaw;
+    pitch = newPitch;
+    const double sinYaw = std::sin(yaw), cosYaw = std::cos(yaw), cosPitch = std::cos(pitch);
+    forward = {sinYaw * cosPitch, std::sin(pitch), cosYaw * cosPitch};
+    right = {cosYaw, 0.0, -sinYaw};
+    up = Math::Cross(forward, right);
 }
 
 void FreeCamera::LookAt(Vector3 eye, Vector3 target)
 {
     const Vector3 direction = target - eye;
     position = eye;
-    yaw = std::atan2(direction.x, direction.z);
-    pitch = std::clamp(std::atan2(direction.y, std::hypot(direction.x, direction.z)), -pitchLimit, pitchLimit);
+    SetOrientation(std::atan2(direction.x, direction.z),
+                   std::clamp(std::atan2(direction.y, std::hypot(direction.x, direction.z)), -pitchLimit, pitchLimit));
 }
 
 void FreeCamera::Update(const CameraInput& input, double elapsedSeconds)
 {
-    yaw = std::remainder(yaw + input.lookX * lookSensitivity, 2.0 * std::numbers::pi);
-    pitch = std::clamp(pitch - input.lookY * lookSensitivity, -pitchLimit, pitchLimit);
-
-    const Vector3 forward = Forward();
-    const Vector3 right = Right();
+    SetOrientation(std::remainder(yaw + input.lookX * lookSensitivity, 2.0 * std::numbers::pi),
+                   std::clamp(pitch - input.lookY * lookSensitivity, -pitchLimit, pitchLimit));
 
     const Vector3 worldUp = { 0.0, 1.0, 0.0 };
     const Vector3 move = forward * input.forward + right * input.right + worldUp * input.up;
@@ -84,19 +80,12 @@ Vector3 FreeCamera::WorldToView(Vector3 point) const
 
 Vector3 FreeCamera::WorldDirectionToView(Vector3 direction) const
 {
-    const Vector3 forward = Forward();
-    const Vector3 right = Right();
-
-    const Vector3 up = Math::Cross(forward, right);
-
     return { Math::Dot(direction, right), Math::Dot(direction, up), Math::Dot(direction, forward) };
 }
 
 Vector3 FreeCamera::ViewRay(double x, double y) const
 {
-    const Vector3 forward = Forward();
-    const Vector3 right = Right();
-    return forward + right * x + Math::Cross(forward, right) * y;
+    return forward + right * x + up * y;
 }
 
 std::optional<Vector3> FreeCamera::PickGround(Vector3 direction, double nearDepth) const

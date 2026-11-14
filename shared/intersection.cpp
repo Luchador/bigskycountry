@@ -382,4 +382,5 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
                           {arm->stopLine->inner * cuts[i].scale, arm->stopLine->outer * cuts[i].scale});
         }
     }
+    geometry.UpdateBounds();
 }

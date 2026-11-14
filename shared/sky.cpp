@@ -153,7 +153,7 @@ void Sky::UpdateGrid()
     }
 }
 
-bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const SkyEnvironment& environment)
+bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, double timeOfDayMinutes)
 {
     SDL_Rect content;
     if (!SDL_GetRenderViewport(renderer, &content))
@@ -168,6 +168,36 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const SkyEnviro
         return true;
     }
 
+    // Translation cannot change the sky. Reuse the gradient while the editor
+    // clock, camera orientation and viewport size are all unchanged.
+    const Vector3 direction = camera.ViewRay(0, 0);
+    const bool timeChanged = timeOfDayMinutes != lastTime;
+    if (timeChanged)
+    {
+        environment = SkyEnvironment::At(timeOfDayMinutes);
+        lastTime = timeOfDayMinutes;
+    }
+    if (timeChanged || direction != lastDirection || width != lastWidth || height != lastHeight)
+    {
+        BuildGradient(camera, width, height);
+        lastDirection = direction;
+        lastWidth = width;
+        lastHeight = height;
+    }
+    const Vector3 sunDirection = environment.lights.sun.direction;
+    const Vector3 moonDirection = environment.lights.moon.direction;
+    const Vector3 horizontalSun = Math::Normalize({sunDirection.x, 0.0, sunDirection.z});
+    const SkyPalette& colors = environment.colors;
+    const SDL_Rect viewport{0, 0, width, height};
+    return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
+           SDL_RenderClear(renderer) &&
+           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) && // Draw sky mesh
+           sun.Draw(renderer, camera, sunDirection, viewport, SampleSky(colors, horizontalSun, sunDirection)) && // Draw sun
+           moon.Draw(renderer, camera, moonDirection, viewport); // Draw full moon
+}
+
+void Sky::BuildGradient(const FreeCamera& camera, int width, int height)
+{
     const Vector3 sunDirection = environment.lights.sun.direction;
     const Vector3 moonDirection = environment.lights.moon.direction;
     const SkyPalette& colors = environment.colors;
@@ -248,11 +278,4 @@ bool Sky::Draw(SDL_Renderer* renderer, const FreeCamera& camera, const SkyEnviro
             vertex.color = lunarAureole.Brighten(sunlitSky, ray);
         }
     }
-
-    const SDL_Rect viewport{0, 0, width, height};
-    return SDL_SetRenderDrawColorFloat(renderer, colors.zenith.r, colors.zenith.g, colors.zenith.b, 1.0f) &&
-           SDL_RenderClear(renderer) &&
-           SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size())) && // Draw sky mesh
-           sun.Draw(renderer, camera, sunDirection, viewport, SampleSky(colors, horizontalSun, sunDirection)) && // Draw sun
-           moon.Draw(renderer, camera, moonDirection, viewport); // Draw full moon
 }

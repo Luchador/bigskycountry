@@ -27,8 +27,8 @@ class FreeCamera
         std::optional<Vector3> PickGround(Vector3 worldRay, double nearDepth) const;
 
     private:
-        Vector3 Forward() const;
-        Vector3 Right() const;
+        void SetOrientation(double newYaw, double newPitch);
+        Vector3 forward{0, 0, 1}, right{1, 0, 0}, up{0, 1, 0};
 
         Vector3 position;
         double yaw = 0.0;

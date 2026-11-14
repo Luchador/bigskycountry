@@ -349,6 +349,7 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
         return nullptr;
     }
 
+    mesh->UpdateBounds();
     mesh->assetPath = name;
     loaded.emplace(name, mesh);
     return mesh;

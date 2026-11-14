@@ -341,7 +341,11 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
             AppendPocket(*mesh, pocket);
         }
         for (auto& vertex : mesh->vertices) vertex.normal = Math::Normalize(vertex.normal);
-        if (!mesh->indices.empty()) return mesh;
+        if (!mesh->indices.empty())
+        {
+            mesh->UpdateBounds();
+            return mesh;
+        }
     }
     catch (const CDT::Error& e)
     {

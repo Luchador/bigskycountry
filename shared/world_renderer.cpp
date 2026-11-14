@@ -56,6 +56,32 @@ void WorldRenderer::SubmitTriangle(const std::array<Vector3, 3>& positions, cons
     }
 }
 
+bool WorldRenderer::BoundsVisible(const Bounds3& bounds, const MeshTransform* placement) const
+{
+    if (bounds.Empty()) return true; // Unbounded editor overlays use normal clipping.
+    // Reject only if every corner is outside the same plane. Transform corners
+    // with the full instance matrix so mirrored and sheared placements work too.
+    unsigned outside = 31;
+    for (int i = 0; i < 8 && outside; ++i)
+    {
+        Vector3 p{(i & 1) ? bounds.max.x : bounds.min.x, (i & 2) ? bounds.max.y : bounds.min.y,
+                  (i & 4) ? bounds.max.z : bounds.min.z};
+        if (placement) p = placement->Point(p);
+        const Vector3 v = camera->WorldToView(p);
+        // Allow for rounding when world positions are packed into float clip coordinates.
+        const double pad = 1e-6 * std::max(1.0, std::abs(v.z));
+        const double x = v.x * scaleX, y = v.y * scaleY, farSide = v.z + pad;
+        unsigned mask = 0;
+        if (farSide < worldNearDepth) mask |= 1;
+        if (x < -farSide) mask |= 2;
+        if (x > farSide) mask |= 4;
+        if (y < -farSide) mask |= 8;
+        if (y > farSide) mask |= 16;
+        outside &= mask;
+    }
+    return outside == 0;
+}
+
 bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 {
     const Vector3 p = camera->WorldToView(center);
@@ -67,7 +93,7 @@ bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 
 void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
 {
-    if (!instance.mesh)
+    if (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform))
     {
         return;
     }
@@ -150,6 +176,7 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         return;
     }
     const Mesh& mesh = *instance.mesh;
+    if (!BoundsVisible(mesh.bounds, &instance.transform)) return;
     const auto normalMatrix = instance.transform.NormalTransform();
     const auto worldNormal = [&](Vector3 n) {
         // Terrain placements are rigid. Object scale can be nonuniform or mirrored.

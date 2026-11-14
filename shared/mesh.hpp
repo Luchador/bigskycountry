@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -26,6 +27,14 @@ struct MeshTransform
     bool Valid() const;
 };
 
+struct Bounds3
+{
+    static constexpr double inf = std::numeric_limits<double>::infinity();
+    Vector3 min{inf, inf, inf}, max{-inf, -inf, -inf};
+    bool Empty() const { return min.x > max.x; }
+    void Include(Vector3 point);
+};
+
 struct MeshVertex
 {
     Vector3 position;
@@ -36,6 +45,8 @@ struct MeshVertex
 
 struct Mesh
 {
+    Bounds3 bounds; // Local space. Filled when an imported or generated world mesh is finished.
+    void UpdateBounds();
     std::string assetPath; // Relative to assets/models.
     std::vector<MeshVertex> vertices;
     std::vector<std::uint32_t> indices; // Triangle list; front winding matches the world renderer.

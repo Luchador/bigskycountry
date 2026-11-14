@@ -76,6 +76,7 @@ namespace
 
         while (true)
         {
+            const Uint64 frameStart = SDL_GetTicksNS();
             input.BeginFrame();
 
             SDL_Event event;
@@ -179,8 +180,7 @@ namespace
 
             if (!roadTool || !roadTool->IsPlanView())
             {
-                const auto environment = SkyEnvironment::At(g_WorldState.GetTimeOfDayMinutes());
-                if (!sky.Draw(renderer, view, environment) || !worldRenderer.Begin(renderer, view, &environment.lights))
+                if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) || !worldRenderer.Begin(renderer, view, &sky.Lighting()))
                 {
                     return false;
                 }
@@ -241,7 +241,9 @@ namespace
 
             if (!vsyncEnabled)
             {
-                SDL_Delay(16);
+                constexpr Uint64 frameBudget = SDL_NS_PER_SECOND / 60;
+                const Uint64 workTime = SDL_GetTicksNS() - frameStart;
+                if (workTime < frameBudget) SDL_DelayNS(frameBudget - workTime);
             }
         }
     }

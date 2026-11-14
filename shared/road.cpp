@@ -512,6 +512,37 @@ Vector3 Road::GuideOffset() const
     return ObjectTransform{{}, rotation}.ToMeshTransform().y * lift;
 }
 
+void RoadGeometry::UpdateBounds()
+{
+    bounds = {};
+    const auto includeSurface = [&](const auto& surface)
+    {
+        for (const auto& triangle : surface)
+            for (const auto& vertex : triangle) bounds.Include(vertex.position);
+    };
+    includeSurface(pavementTriangles);
+    includeSurface(edgeTriangles);
+    for (const auto& [material, strip] : transitionStrips) includeSurface(strip);
+    for (const auto* stripes : {&whiteStripes, &yellowStripes})
+        for (const auto& triangle : *stripes)
+            for (Vector3 p : triangle) bounds.Include(p);
+    for (Vector3 p : outline) bounds.Include(p);
+    for (const auto& segment : railroadSegments)
+    {
+        includeSurface(segment.rails);
+        // Tie centers interpolate between the end frames, and each tie fits
+        // within this much padding in any orientation.
+        constexpr double pad = RailroadSettings::tieLength;
+        constexpr Vector3 padding{pad, pad, pad};
+        for (const auto& run : segment.ties)
+            for (Vector3 p : {run.first.origin, run.last.origin})
+            {
+                bounds.Include(p - padding);
+                bounds.Include(p + padding);
+            }
+    }
+}
+
 void Road::Rebuild()
 {
     MarkRebuilt();
@@ -609,6 +640,7 @@ void Road::Rebuild()
     {
         BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
+        UpdateBounds();
         return;
     }
     std::array<std::optional<RoadMouthFrame>, 2> caps{};
@@ -762,4 +794,5 @@ void Road::Rebuild()
             vertex = frame.Point(vertex);
         }
     }
+    UpdateBounds();
 }

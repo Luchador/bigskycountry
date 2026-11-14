@@ -135,7 +135,9 @@ struct RoadGeometry
     // Monotonic token shared by all generated road and junction footprints.
     inline static std::uint64_t latestRevision = 0;
     std::uint64_t revision = 0;
-    void MarkRebuilt() { revision = ++latestRevision; }
+    void MarkRebuilt() { revision = ++latestRevision; bounds = {}; }
+    Bounds3 bounds; // World space, including paint, rails and selection outlines.
+    void UpdateBounds();
 
     using Triangle = std::array<Vector3, 3>;
     struct PavementVertex

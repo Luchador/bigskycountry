@@ -60,6 +60,7 @@ public:
     bool End();
 
 private:
+    bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();

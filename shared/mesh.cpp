@@ -1,8 +1,21 @@
 #include "mesh.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <utility>
+
+void Bounds3::Include(Vector3 p)
+{
+    min = {std::min(min.x, p.x), std::min(min.y, p.y), std::min(min.z, p.z)};
+    max = {std::max(max.x, p.x), std::max(max.y, p.y), std::max(max.z, p.z)};
+}
+
+void Mesh::UpdateBounds()
+{
+    bounds = {};
+    for (const MeshVertex& vertex : vertices) bounds.Include(vertex.position);
+}
 
 MeshTransform MeshTransform::AxisRotation(Vector3 unitAxis, double radians)
 {
