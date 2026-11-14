@@ -1108,6 +1108,7 @@ struct WindowsPanels::Impl
         };
         check(IDC_PAINT_MARKINGS, RoadProperty::Markings, properties.paintMarkings);
         choice(IDC_ALIGNMENT, RoadProperty::Alignment, style.curved, 2);
+        SetDlgItemTextW(road, IDC_CAPTION_LANES, properties.segmentSelection ? L"Segment lanes" : L"Lanes");
         if (properties.minLanes == properties.maxLanes) SetDlgItemInt(road, IDC_LANE_COUNT, lanes, FALSE);
         else SetDlgItemTextW(road, IDC_LANE_COUNT, L"Mixed");
         EnableWindow(GetDlgItem(road, IDC_FEWER), properties.CanStepLanes(false));

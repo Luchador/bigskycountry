@@ -202,10 +202,11 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
     if (focal <= 0) return;
     const OverlayStroke stroke(camera, scene, focal);
     const int laneCount = road.style.GetLaneCount();
+    const bool variable = road.HasLaneOverrides();
     for (size_t lane = 0; lane < road.laneCenterlines.size(); ++lane)
     {
         // An odd road's middle lane shares the editing spline. Leave a green rim around it.
-        const bool middle = laneCount % 2 != 0 && lane == static_cast<size_t>(laneCount / 2);
+        const bool middle = !variable && laneCount % 2 != 0 && lane == static_cast<size_t>(laneCount / 2);
         VisitSplineTriangles(stroke, camera, road.laneCenterlines[lane],
             [&](Vector3 a, Vector3 b, Vector3 c) { renderer.SubmitTriangle(a, b, c, EditorColors::laneGreen); },
             middle ? 2 * overlayStrokeWidth : overlayStrokeWidth, middle ? overlayStrokeWidth : 0.0f);

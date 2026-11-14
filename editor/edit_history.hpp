@@ -94,10 +94,16 @@ struct RoadEditorState
 // Authored inspector values only. Control points, junction links and generated meshes stay in place.
 struct RoadProperties
 {
-    explicit RoadProperties(const Road& road) : style(road.style), names(road.NameList()), paintMarkings(road.paintMarkings) {}
+    explicit RoadProperties(const Road& road) : style(road.style), names(road.NameList()), paintMarkings(road.paintMarkings)
+    {
+        laneNeighbors = road.laneNeighbors;
+        for (const auto& point : road.points) segmentLanes.push_back(point.segmentLanes);
+    }
     RoadStyle style;
     std::string names;
     bool paintMarkings;
+    std::vector<int> segmentLanes;
+    std::array<int, 2> laneNeighbors{};
     bool operator==(const RoadProperties&) const = default;
     void Apply(Road& road) const;
 };

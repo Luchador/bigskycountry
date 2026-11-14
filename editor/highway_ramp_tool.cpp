@@ -6,7 +6,7 @@
 
 std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit, int side)
 {
-    if (host.style.railroad || host.style.GetLaneCount() < 2) return {};
+    if (host.style.railroad || host.MaximumLaneCount() < 2) return {};
     double best = std::numeric_limits<double>::infinity();
     std::optional<RampSite> site;
     for (int i = 0; i + 1 < static_cast<int>(host.points.size()); ++i)
@@ -31,14 +31,21 @@ std::optional<RampSite> PickRampSite(const Road& host, Vector3 hit, int side)
         RoadSpline::SampleCubic(RoadSpline::SegmentCurve(a, b, host.Tangent(i), host.Tangent(i + 1)), 0.02, 0, 0, 1,
             [&](Vector3 next, Vector3, double t) { inspect(prev, next, prevT, t); prev = next; prevT = t; });
     }
+    if (site)
+    {
+        const auto lanes = host.SegmentLaneBlend(site->segment, site->t);
+        if (std::lerp(double(lanes.from), double(lanes.to), lanes.mix) < 2.0 - 1e-8) return {};
+    }
     return site;
 }
 
 std::optional<RampPlan> PlanRamp(const Road& host, RampSite site, int newStation, const RoadStyle& style,
                                  bool exit, double length)
 {
-    if (host.style.railroad || host.style.GetLaneCount() < 2 || !style.oneWay || !newStation || site.segment < 0 ||
+    if (host.style.railroad || host.MaximumLaneCount() < 2 || !style.oneWay || !newStation || site.segment < 0 ||
         site.segment + 1 >= static_cast<int>(host.points.size()) || (site.side != -1 && site.side != 1)) return {};
+    const auto lanes = host.SegmentLaneBlend(site.segment, site.t);
+    if (std::lerp(double(lanes.from), double(lanes.to), lanes.mix) < 2.0 - 1e-8) return {};
     int station = newStation;
     if (site.t == 0 || site.t == 1)
     {

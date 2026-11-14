@@ -44,7 +44,7 @@ void WorldDocument::RefreshRampConnections(bool force)
         if (host.points.size() < 2) continue;
         for (std::size_t j : {std::size_t{0}, host.points.size() - 1})
             if (int id = host.points[j].connectorSocket) sockets.emplace(id, Socket{&host, j});
-        if (host.style.GetLaneCount() < 2) continue;
+        if (host.MaximumLaneCount() < 2) continue;
         for (const auto& point : host.points)
             if (point.rampStation) stations.emplace(point.rampStation, i);
     }
@@ -61,7 +61,7 @@ void WorldDocument::RefreshRampConnections(bool force)
             if (it != stations.end())
             {
                 const bool branchesLeft = roads[it->second].style.oneWay && link->side > 0;
-                auto lane = HighwayRampLane(ramp.style, *link, exit, branchesLeft);
+                auto lane = HighwayRampLane(ramp.EndpointStyle(exit), *link, exit, branchesLeft);
                 lane.rampIndex = index;
                 lanes[it->second].push_back(lane);
             }

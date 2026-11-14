@@ -171,7 +171,14 @@ void RoadProperties::Apply(Road& road) const
 {
     if (road.NameList() != names) road.SetNameList(names);
     road.style.material = style.material;
-    if (road.style != style || road.paintMarkings != paintMarkings)
+    bool lanesChanged = road.laneNeighbors != laneNeighbors;
+    road.laneNeighbors = laneNeighbors;
+    for (std::size_t i = 0; i < std::min(road.points.size(), segmentLanes.size()); ++i)
+    {
+        lanesChanged |= road.points[i].segmentLanes != segmentLanes[i];
+        road.points[i].segmentLanes = segmentLanes[i];
+    }
+    if (lanesChanged || road.style != style || road.paintMarkings != paintMarkings)
     {
         road.style = style;
         road.paintMarkings = paintMarkings;

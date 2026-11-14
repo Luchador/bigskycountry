@@ -124,7 +124,11 @@ namespace RoadIO
             out.setstate(std::ios::failbit);
             return;
         }
-        out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z << '\n';
+        for (int count : road.laneNeighbors)
+            if (count < 0 || count > RoadStyle::maxLanes || (count && (road.style.railroad || (road.style.IsDivided() && count % 2))))
+            { out.setstate(std::ios::failbit); return; }
+        out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z
+            << ' ' << road.laneNeighbors[0] << ' ' << road.laneNeighbors[1] << '\n';
         out << road.id << ' ' << road.paintMarkings << ' ' << std::quoted(road.NameList()) << '\n';
         out << road.crossings.size() << '\n';
         for (const auto& crossing : road.crossings)
@@ -136,6 +140,8 @@ namespace RoadIO
         for (const RoadPoint& p : road.points)
         {
             if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp) ||
+                p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
+                (p.segmentLanes && (road.style.railroad || (road.style.IsDivided() && p.segmentLanes % 2))) ||
                 !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
                 (p.deadEndLength > 0 && !road.CanDeadEnd(static_cast<int>(&p - road.points.data()))))
             {
@@ -157,7 +163,7 @@ namespace RoadIO
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
             if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
             out << ' ' << p.connectorSocket << ' ' << p.connectorTarget
-                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z << ' ' << p.deadEndLength;
+                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z << ' ' << p.deadEndLength << ' ' << p.segmentLanes;
             out << '\n';
         }
     }
@@ -171,6 +177,13 @@ namespace RoadIO
         {
             in.setstate(std::ios::failbit);
             return road;
+        }
+        if (version >= 20)
+        {
+            in >> road.laneNeighbors[0] >> road.laneNeighbors[1];
+            for (int count : road.laneNeighbors)
+                if (count < 0 || count > RoadStyle::maxLanes || (count && (road.style.railroad || (road.style.IsDivided() && count % 2))))
+                    in.setstate(std::ios::failbit);
         }
         if (version >= 8 && (!(in >> road.id) || road.id < 0))
         {
@@ -255,6 +268,9 @@ namespace RoadIO
             }
             if (version >= 17) in >> p.surfaceUp.x >> p.surfaceUp.y >> p.surfaceUp.z;
             if (version >= 19) in >> p.deadEndLength;
+            if (version >= 20) in >> p.segmentLanes;
+            if (p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
+                (p.segmentLanes && (road.style.railroad || (road.style.IsDivided() && p.segmentLanes % 2)))) in.setstate(std::ios::failbit);
             if (!std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
                 (p.deadEndLength > 0 && (count < 2 || (i != 0 && i + 1 != count) || road.style.railroad || p.Joined() || p.rampStation)))
                 in.setstate(std::ios::failbit);

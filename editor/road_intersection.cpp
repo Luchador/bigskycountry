@@ -106,7 +106,9 @@ namespace
             {
                 const Vector3 offset = neighbor.position - junction.position;
                 const double lateral = Math::Cross(axis, offset).y * step;
-                if (run < -Road::minPointSpacing || lateral > road.style.RightWidth() || -lateral > road.style.LeftWidth()) return false;
+                const double half = road.MaximumHalfTravelWidth() + road.style.HalfSeparation();
+                if (run < -Road::minPointSpacing || lateral > half + (road.style.rightShoulder ? RoadStyle::shoulderWidth : 0.0) ||
+                    -lateral > half + (road.style.leftShoulder ? RoadStyle::shoulderWidth : 0.0)) return false;
                 continue;
             }
 
@@ -116,6 +118,7 @@ namespace
             if (!cut) return false;
             const auto kept = Split(outward, *cut).second;
             RoadPoint anchor{anchorPosition, -junction.yaw};
+            anchor.segmentLanes = road.points[i].segmentLanes;
             RoadPoint join = anchor;
             if (blend)
             {

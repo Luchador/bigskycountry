@@ -50,6 +50,8 @@ All framing integers are unsigned and little-endian. The file begins with the fo
 
 `ROAD` version 19 appends the dead-end transition length in meters to each point, after its version-17 surface-up vector. Zero disables the cap; positive values are valid only at free road endpoints. Earlier versions load without dead ends.
 
+`ROAD` version 20 appends an outgoing segment lane count to each point. Zero inherits the road-wide count; 1–10 explicitly sets that segment's count. The last point's value is unused. Two lane counts after the whole-road rotation preserve neighboring lane configurations at free endpoints created by a split; zero means no external neighbor. Older worlds default these values to zero. Divided roads require even counts, and railroads cannot have lane overrides.
+
 Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 
 ### Static mesh assets
@@ -244,6 +246,14 @@ Select a road and right-click either free end control point, then choose **Creat
 With that endpoint selected, edit **End transition (m)** in the inspector and press **Enter**. Set it to **0** to remove the dead end. Assign a **Transition** material to the road's **Transition strip material** slot, which is available whenever the road has a dead end, even with Road edges set to None. The strip uses red vertex color to blend from the material's inner layer at the pavement to its outer layer at the far edge.
 
 Both ends can have independent lengths. Changes save with the world and support undo/redo. Moving or rotating the road keeps its ends attached; Shift-dragging an endpoint carries its dead end to the new endpoint. Splitting retains caps only at the original outer ends. Connecting a capped endpoint to another road or intersection removes its cap. Railroads, interior control points, and connected endpoints cannot receive dead ends.
+
+### Per-segment lane counts
+
+Select a road's cyan control spline segment, then use **Segment lanes** in the inspector to change that segment's lane count. **Shift+click** adds other segments on the same road. A mixed selection displays **Mixed**; the plus/minus buttons set all selected segments to the same count. Divided roads change in steps of two.
+
+The adjacent segments provide smooth transitions between the edited configuration and the rest of the road. For example, changing a middle segment from two to four lanes gives it four lanes, with widening and narrowing tapers on the neighboring segments. Pavement, lane markings, green lane guides, shoulders, curbs, and transition strips follow the changing width. If differently edited segments meet directly, their adjoining halves share the taper. Terrain fills follow the new outer edges, and intersections use each connecting endpoint's lane count.
+
+Select the whole road and change its lane count to restore a uniform configuration, clearing its segment overrides. Other inspector properties still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
 
 ### Editing road control points
 

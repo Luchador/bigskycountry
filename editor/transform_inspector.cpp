@@ -249,7 +249,7 @@ bool ValidRoadSpan(const Road& road, Vector3 a, Vector3 b, double minSpacing)
 
     // Each 12 m dash cycle needs at least one six-vertex quad per dashed divider.
     // The shared GPU vertex buffer has a 32-bit byte size.
-    const int dividers = std::max(0, road.style.GetLaneCount() - 2);
+    const int dividers = std::max(0, road.MaximumLaneCount() - 2);
     const double dashBytes = span / RoadStyle::dashPeriod * dividers * 6 * sizeof(WorldDepthVertex);
 
     if (dashBytes > std::numeric_limits<Uint32>::max())

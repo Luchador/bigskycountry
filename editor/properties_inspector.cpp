@@ -160,7 +160,9 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
                 return result;
             }
         }
-        const auto& first = road ? road->style : state.defaults;
+        auto first = road ? road->style : state.defaults;
+        result.segmentSelection = road && !editingDraft && !group && state.point < 0 && !state.segments.empty() && !first.railroad;
+        if (result.segmentSelection) first.SetLaneCount(road->SegmentLaneCount(*state.segments.begin()));
         if (first.railroad)
         {
             result.page = PropertiesPage::Railroad;
@@ -233,10 +235,39 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         }
         if (road && !editingDraft)
         {
+            bool firstCount = true;
+            const auto counts = [&](const Road& item, bool selectedSegments)
+            {
+                result.canDivide &= item.CanDivideAllSegments();
+                for (std::size_t i = 0; i + 1 < item.points.size(); ++i)
+                {
+                    if (selectedSegments && !state.segments.contains(static_cast<int>(i))) continue;
+                    const int count = item.SegmentLaneCount(i);
+                    if (firstCount) result.minLanes = result.maxLanes = count;
+                    firstCount = false;
+                    result.minLanes = std::min(result.minLanes, count);
+                    result.maxLanes = std::max(result.maxLanes, count);
+                }
+            };
+            if (group)
+                for (const auto key : state.SelectedRoadRows()) counts(world.roads.at(key.index), false);
+            else counts(*road, result.segmentSelection);
+            if (result.minLanes != result.maxLanes) result.mixed.set(static_cast<std::size_t>(RoadProperty::Width));
+            else result.style.SetLaneCount(result.minLanes);
+            if (result.segmentSelection)
+            {
+                meters = 0;
+                for (int segment : state.segments)
+                {
+                    const auto samples = road->SegmentSamples(segment);
+                    for (std::size_t i = 1; i < samples.size(); ++i) meters += Math::Length(samples[i] - samples[i - 1]);
+                }
+            }
             constexpr double metersPerMile = 1609.344;
             char length[96];
             SDL_snprintf(length, sizeof(length), "%.2f m (%.3f mi)", meters, meters / metersPerMile);
-            result.title = group ? std::to_string(roadCount) + " roads | " : "Length: ";
+            result.title = result.segmentSelection ? std::to_string(state.segments.size()) + (state.segments.size() == 1 ? " segment | " : " segments | ") :
+                           group ? std::to_string(roadCount) + " roads | " : "Length: ";
             result.title += length;
         }
         else result.title = editingDraft ? "Road editor | Draft" : "Road defaults";

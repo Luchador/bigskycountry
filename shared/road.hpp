@@ -129,6 +129,7 @@ struct RoadPoint
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
     double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
+    int segmentLanes = 0; // Outgoing segment override. Zero inherits the road and can taper to edited neighbors.
     bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
 
@@ -234,6 +235,17 @@ struct Road : RoadGeometry
     int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
     bool paintMarkings = true;
     RoadStyle style;
+    std::array<int, 2> laneNeighbors{}; // Lane context retained at free ends when a taper is split into separate roads.
+    int SegmentLaneCount(std::size_t segment) const;
+    int MaximumLaneCount() const;
+    double MaximumHalfTravelWidth() const;
+    bool HasLaneOverrides() const;
+    bool CanDivideAllSegments() const;
+    RoadStyle EndpointStyle(bool first) const;
+    bool SetSegmentLaneCounts(const std::set<int>& segments, int count);
+    void SetLaneCount(int count); // Whole road: replace the default and clear segment overrides.
+    struct LaneBlend { int from, to; double mix; };
+    LaneBlend SegmentLaneBlend(std::size_t segment, double fraction) const;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     std::vector<RailroadCrossingLink> crossings;
@@ -251,6 +263,7 @@ struct Road : RoadGeometry
     std::vector<std::vector<Vector3>> laneCenterlines;
     // Same indices as the outer lane centerlines, including equal-distance bevel stations.
     std::array<std::vector<double>, 2> outerLaneDistances;
+    std::array<std::vector<Vector3>, 2> outerLaneCenterlines; // Independent of lane guide runs through tapers.
     std::span<const Vector3> OuterLane(int side) const;
     Vector3 OuterLanePosition(int side, double distance) const;
     Vector3 SurfaceUp(std::size_t segment, double t) const;

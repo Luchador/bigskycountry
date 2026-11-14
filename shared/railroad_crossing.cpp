@@ -467,7 +467,8 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
     const double toe = settings.width / 2 + settings.height * 2 +
                        (railway.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
     const double level = toe + 0.5;
-    const double width = std::max(road.style.LeftWidth(), road.style.RightWidth()) + road.style.EdgeWidth();
+    const double width = road.MaximumHalfTravelWidth() + road.style.HalfSeparation() + road.style.EdgeWidth() +
+                        (road.style.leftShoulder || road.style.rightShoulder ? RoadStyle::shoulderWidth : 0.0);
     const double skew = std::abs(Math::Dot(direction, forward));
     const double deckRun = (level + width * skew) / sine;
     const double available = std::min(station, s.back() - station) - deckRun;

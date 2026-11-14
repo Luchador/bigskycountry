@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace
@@ -42,8 +43,94 @@ namespace
 
 std::span<const Vector3> Road::OuterLane(int side) const
 {
+    if (HasLaneOverrides()) return outerLaneCenterlines[side > 0];
     if (laneCenterlines.empty()) return {};
     return laneCenterlines[side < 0 ? 0 : style.GetLaneCount() - 1];
+}
+
+int Road::SegmentLaneCount(std::size_t segment) const
+{
+    return segment + 1 < points.size() && points[segment].segmentLanes ? points[segment].segmentLanes : style.GetLaneCount();
+}
+
+int Road::MaximumLaneCount() const
+{
+    int count = std::max({style.GetLaneCount(), laneNeighbors[0], laneNeighbors[1]});
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) count = std::max(count, SegmentLaneCount(i));
+    return count;
+}
+
+bool Road::HasLaneOverrides() const
+{
+    if (laneNeighbors[0] || laneNeighbors[1]) return true;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) if (points[i].segmentLanes) return true;
+    return false;
+}
+
+double Road::MaximumHalfTravelWidth() const
+{
+    double width = 0;
+    const auto consider = [&](int count)
+    {
+        if (count) width = std::max(width, count * (RoadStyle::laneWidth + (count == 1 ? style.SingleLaneExtraWidth() : 0)) * 0.5);
+    };
+    consider(style.GetLaneCount());
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) consider(points[i].segmentLanes);
+    for (int count : laneNeighbors) consider(count);
+    return width;
+}
+
+bool Road::CanDivideAllSegments() const
+{
+    if (!style.CanDivide()) return false;
+    if (laneNeighbors[0] % 2 || laneNeighbors[1] % 2) return false;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) if (SegmentLaneCount(i) % 2) return false;
+    return true;
+}
+
+RoadStyle Road::EndpointStyle(bool first) const
+{
+    auto result = style;
+    if (points.size() >= 2) result.SetLaneCount(SegmentLaneCount(first ? 0 : points.size() - 2));
+    return result;
+}
+
+bool Road::SetSegmentLaneCounts(const std::set<int>& segments, int count)
+{
+    if (style.railroad || count < 1 || count > RoadStyle::maxLanes || (style.IsDivided() && count % 2) ||
+        segments.empty() || *segments.begin() < 0 || static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size()) return false;
+    bool changed = false;
+    for (int i : segments)
+    {
+        changed |= points[i].segmentLanes != count;
+        points[i].segmentLanes = count;
+    }
+    return changed;
+}
+
+void Road::SetLaneCount(int count)
+{
+    style.SetLaneCount(count);
+    for (auto& point : points) point.segmentLanes = 0;
+    laneNeighbors = {};
+}
+
+Road::LaneBlend Road::SegmentLaneBlend(std::size_t segment, double fraction) const
+{
+    const int own = SegmentLaneCount(segment);
+    if (segment + 1 >= points.size()) return {own, own, 0};
+    const double t = std::clamp(fraction, 0.0, 1.0);
+    const auto ease = [](double u) { return u * u * u * (u * (u * 6 - 15) + 10); };
+    const int before = segment > 0 && points[segment - 1].segmentLanes ? SegmentLaneCount(segment - 1) :
+                       segment == 0 && laneNeighbors[0] && !points.front().Joined() ? laneNeighbors[0] : own;
+    const int after = segment + 2 < points.size() && points[segment + 1].segmentLanes ? SegmentLaneCount(segment + 1) :
+                      segment + 2 == points.size() && laneNeighbors[1] && !points.back().Joined() ? laneNeighbors[1] : own;
+    if (!points[segment].segmentLanes) return {before, after, ease(t)};
+    // Different edited segments can touch without a spare transition segment.
+    // Share that taper across their adjoining halves; their midpoint counts stay exact.
+    if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
+    if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
+    return {own, own, 0};
 }
 
 Vector3 Road::OuterLanePosition(int side, double distance) const
@@ -307,6 +394,7 @@ Road Road::NewSection() const
     result.names = names;
     result.paintMarkings = paintMarkings;
     result.style = style;
+    result.laneNeighbors = laneNeighbors;
     result.rotation = rotation;
     return result;
 }
@@ -315,6 +403,8 @@ Road Road::Section(std::size_t first, std::size_t last) const
 {
     Road result = NewSection();
     result.points.assign(points.begin() + first, points.begin() + last + 1);
+    result.laneNeighbors = {first > 0 ? points[first - 1].segmentLanes : laneNeighbors[0],
+                            last + 1 < points.size() ? points[last].segmentLanes : laneNeighbors[1]};
     // An automatic tangent at a cut may depend on the neighbor we just removed.
     // Keep the surviving Bézier span's original shape at that new endpoint.
     const auto preserveTangent = [&](std::size_t source, std::size_t endpoint)
@@ -373,6 +463,7 @@ bool Road::InsertStation(int segment, double t, int stationId)
         auto& a = points[segment];
         auto& b = points[segment + 1];
         RoadPoint knot{};
+        knot.segmentLanes = a.segmentLanes;
         knot.surfaceUp = SurfaceUp(segment, t);
         knot.rampStation = stationId;
         knot.position = a.position + (b.position - a.position) * t;
@@ -418,6 +509,7 @@ bool Road::SubdivideSegments(const std::set<int>& segments)
         }
         RoadPoint& start = result.back();
         RoadPoint middle{};
+        middle.segmentLanes = start.segmentLanes;
         middle.position = start.position + (end.position - start.position) * 0.5;
         middle.roll = start.roll + 0.5 * std::remainder(end.roll - start.roll, 2 * std::numbers::pi);
         if (style.curved)
@@ -585,6 +677,7 @@ void Road::Rebuild()
     rampSeams.clear();
     laneCenterlines.clear();
     for (auto& distances : outerLaneDistances) distances.clear();
+    for (auto& line : outerLaneCenterlines) line.clear();
     centerline.clear();
     splineLengthMeters = 0.0;
     pointSamples.clear();
@@ -624,14 +717,21 @@ void Road::Rebuild()
     for (std::size_t i = 1; i < points.size(); ++i)
     {
         const Vector3 b = points[i].position;
+        const auto early = SegmentLaneBlend(i - 1, 0.25), late = SegmentLaneBlend(i - 1, 0.75);
+        const bool laneTransition = !style.railroad && (early.from != early.to || late.from != late.to);
 
         if (style.curved)
         {
             const Vector3 endTangent = Tangent(i);
             const Cubic curve = SegmentCurve(points[i - 1], points[i], tangents.back(), endTangent);
             // Resolve the oblique cross sections near a ramp join even on a nearly straight branch.
-            const EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
+            EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
                                    i + 1 == points.size() && rampCaps.back() ? RampFrameBlendLength() : 0.0};
+            if (laneTransition)
+            {
+                ends.start = std::numeric_limits<double>::infinity();
+                ends.spacing = std::max(0.25, Math::Length(b - points[i - 1].position) / 64.0);
+            }
             const double tolerance = ends.start || ends.end || style.railroad ? 0.005 : 0.1;
             SampleCubic(curve, tolerance, 0, 0, 1, [&](Vector3 position, Vector3 tangent, double t)
             {
@@ -646,7 +746,7 @@ void Road::Rebuild()
         {
             const Vector3 chord = Math::Normalize(b - points[i - 1].position);
             const auto start = approachTangent(i - 1, chord), end = approachTangent(i, chord);
-            if (start == chord && end == chord)
+            if (start == chord && end == chord && !laneTransition)
             {
                 centerline.push_back(b);
                 if (customUp) surfaceUps.push_back(points[i].surfaceUp);
@@ -654,11 +754,13 @@ void Road::Rebuild()
             else
             {
                 const auto curve = SegmentCurve(points[i - 1], points[i], start, end);
+                const EndSampling sampling{laneTransition ? std::numeric_limits<double>::infinity() : 0.0, 0.0,
+                    std::max(0.25, Math::Length(b - points[i - 1].position) / 64.0)};
                 SampleCubic(curve, 0.05, 0, 0, 1, [&](Vector3 p, Vector3, double t)
                 {
                     centerline.push_back(p);
                     if (customUp) surfaceUps.push_back(SurfaceUp(i - 1, t));
-                });
+                }, sampling);
             }
         }
 
@@ -693,7 +795,8 @@ void Road::Rebuild()
         // Only trim the incident end. A later section of the same road may loop back.
         // The whole cross section must clear the cut. On an oblique approach the
         // inside shoulder can still cross the junction after the centerline has left it.
-        const double width = std::max(style.LeftWidth(), style.RightWidth()) + style.EdgeWidth();
+        const auto endStyle = EndpointStyle(end == 0);
+        const double width = std::max(endStyle.LeftWidth(), endStyle.RightWidth()) + endStyle.EdgeWidth();
         const Vector3 outward = frame.Unrotate(mouth->outward);
         const auto clearsMouth = [&](std::size_t i)
         {
@@ -825,6 +928,8 @@ void Road::Rebuild()
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);
         for (auto& lane : laneCenterlines)
+            for (Vector3& point : lane) point = frame.Point(point);
+        for (auto& lane : outerLaneCenterlines)
             for (Vector3& point : lane) point = frame.Point(point);
         for (auto& [material, strip] : transitionStrips) moveSurface(strip);
         for (Vector3& vertex : outline)

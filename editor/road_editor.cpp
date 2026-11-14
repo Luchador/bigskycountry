@@ -999,15 +999,33 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
 {
     const auto p = InspectProperties(world, state, EditingDraft());
     if (p.page != PropertiesPage::Road && p.page != PropertiesPage::Railroad) return;
+    const bool lanes = !p.style.railroad && (action == Action::More || action == Action::Fewer);
+    if (lanes && p.segmentSelection)
+    {
+        auto& road = world.roads[state.selected];
+        EditSnapshot before(state, &road);
+        if (!road.SetSegmentLaneCounts(state.segments, p.StepLanes(action == Action::More))) return;
+        road.Rebuild();
+        Commit(world, state.selected, std::move(before), &road);
+        return;
+    }
     if (!EditingDraft() && state.MultipleRoadsSelected())
     {
-        EditRoadGroup(world, [&](RoadProperties& road) { p.ApplyRoadStyle(road.style, action); });
+        EditRoadGroup(world, [&](RoadProperties& road)
+        {
+            p.ApplyRoadStyle(road.style, action);
+            if (lanes)
+            {
+                std::fill(road.segmentLanes.begin(), road.segmentLanes.end(), 0);
+                road.laneNeighbors = {};
+            }
+        });
         return;
     }
     RoadStyle& current = Style(world);
     RoadStyle style = current;
     p.ApplyRoadStyle(style, action);
-    if (style == current)
+    if (style == current && !(lanes && state.selected >= 0 && world.roads[state.selected].HasLaneOverrides()))
     {
         return;
     }
@@ -1018,6 +1036,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     if (!style.railroad) state.defaults = style;
     if (road)
     {
+        if (lanes) road->SetLaneCount(style.GetLaneCount());
         road->Rebuild();
     }
     Commit(world, index, std::move(before), road);
@@ -1290,6 +1309,8 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
         RoadPoint end{position, {}};
         end.deadEndLength = originalPoints[*extensionSource].deadEndLength;
+        if (state.point == 0) end.segmentLanes = road.points.front().segmentLanes;
+        else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
         road.points.insert(road.points.begin() + state.point, end);
     }
 
@@ -1805,7 +1826,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
         (!Text(renderer, 12, 406 + offset, "Separation (m)", muted) ||
          !SDL_RenderDebugTextFormat(renderer, 80, 432 + offset, properties.minGap == properties.maxGap ? "%.2f" : "Mixed", style.DividedGap()) ||
          !Text(renderer, 12, 460 + offset, properties.Mixed(RoadProperty::Median) ? "Median (mixed)" : "Median", muted))) return false;
-    if (!Text(renderer, 12, 132, properties.Mixed(RoadProperty::Alignment) ? "Alignment (mixed)" : "Alignment", muted) || !Text(renderer, 12, 194, "Lanes (total)", muted) ||
+    if (!Text(renderer, 12, 132, properties.Mixed(RoadProperty::Alignment) ? "Alignment (mixed)" : "Alignment", muted) || !Text(renderer, 12, 194, properties.segmentSelection ? "Segment lanes" : "Lanes (total)", muted) ||
         !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
         !Text(renderer, 12, 312 + offset, properties.Mixed(RoadProperty::Edge) ? "Road edges (mixed)" : "Road edges", muted) ||
         !SDL_RenderDebugTextFormat(renderer, 89, 220, properties.minLanes == properties.maxLanes ? "%d" : "Mixed", laneCount) ||
@@ -2198,6 +2219,8 @@ void RoadEditor::ConnectRoads(WorldDocument& world)
         }
         RoadPoint end{destination};
         end.connectorTarget = join;
+        if (first) end.segmentLanes = road.points.front().segmentLanes;
+        else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
         road.points.insert(first ? road.points.begin() : road.points.end(), end);
     }
     else road.points[point].connectorTarget = join;
@@ -2295,7 +2318,7 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
     if (!state.anchorSelection) return;
     Road& road = world.roads[state.selected];
     const bool first = state.point == 0;
-    const RoadPoint point = AttachedEndpoint(junction->second, anchor, first);
+    RoadPoint point = AttachedEndpoint(junction->second, anchor, first);
     RoadPoint& previous = road.points[state.point];
     if (!ValidRoadSpan(road, previous.position, point.position))
     {
@@ -2311,6 +2334,8 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
         previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
     const int index = first ? 0 : static_cast<int>(road.points.size());
+    if (first) point.segmentLanes = road.points.front().segmentLanes;
+    else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
     road.points.insert(road.points.begin() + index, point);
     road.Rebuild();
     state.SelectPoint(state.selected, index);

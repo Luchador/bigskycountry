@@ -210,7 +210,7 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions
 
 IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first, bool paintStopLine)
 {
-    const auto& style = road.style;
+    const auto style = road.EndpointStyle(first);
     IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
                              first ? style.RightWidth() : style.LeftWidth(), style.edge, {},
                              style.edge == RoadEdge::Transition ? style.transitionMaterial : std::string{}};
