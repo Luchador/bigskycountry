@@ -26,11 +26,15 @@ void PlayerCamera::Update(const Pawn& pawn, double fraction, double seconds, con
     const auto settings = pawn.CameraSettings();
     const auto transform = pawn.InterpolatedTransform(fraction);
     const auto frame = transform.ToMeshTransform();
-    if (settings.mode == PawnCameraMode::Chase)
+    if (settings.mode == PawnCameraMode::Chase && std::hypot(frame.z.x, frame.z.z) > 0.2)
     {
         const double heading = std::atan2(frame.z.x, frame.z.z);
-        yaw += std::remainder(heading - lastPawnYaw, 2 * std::numbers::pi);
-        lastPawnYaw = heading;
+        // Follow chassis yaw smoothly through jumps and rollovers. A nearly
+        // vertical forward axis has no useful horizontal heading.
+        const double turn = std::remainder(heading - lastPawnYaw, 2 * std::numbers::pi) *
+                            (1.0 - std::exp(-8.0 * seconds));
+        yaw += turn;
+        lastPawnYaw += turn;
     }
     Vector3 direction{std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
     const Vector3 pivot = frame.Point(settings.pivot);

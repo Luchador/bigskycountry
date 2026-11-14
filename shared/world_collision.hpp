@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "rigid_body.hpp"
 #include <optional>
 
 class WorldDocument;
@@ -21,6 +22,8 @@ public:
     std::optional<Hit> Raycast(Vector3 origin, Vector3 direction, double distance, bool walkableOnly = false) const;
     std::optional<Hit> Ground(Vector3 feet, double above, double below) const;
     bool SphereBlocked(Vector3 center, double radius) const;
+    // Physical contacts include floor and ceiling faces as well as obstacles.
+    std::optional<BodyContact> SphereContact(Vector3 center, double radius) const;
 
 private:
     struct Triangle { Vector3 a, b, c, normal; Bounds3 bounds; };
@@ -31,4 +34,5 @@ private:
     size_t BuildNode(size_t first, size_t count);
     void Trace(size_t node, Vector3 origin, Vector3 direction, bool walkableOnly, std::optional<Hit>& hit, double& distance) const;
     bool Overlap(size_t node, Vector3 center, double radius) const;
+    void Contact(size_t node, Vector3 center, double radius, std::optional<BodyContact>& result) const;
 };

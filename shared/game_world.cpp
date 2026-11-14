@@ -1,6 +1,8 @@
 #include "game_world.hpp"
+#include "car.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 PawnHandle GameWorld::Add(std::unique_ptr<Pawn> pawn)
 {
@@ -29,8 +31,25 @@ bool GameWorld::Remove(PawnHandle handle)
 
 void GameWorld::Step(double seconds)
 {
-    for (auto& pawn : pawns) pawn->previous = pawn->GetTransform();
-    for (auto& pawn : pawns) pawn->Simulate(seconds, *this);
+    if (!std::isfinite(seconds) || seconds <= 0) return;
+    int steps = 1;
+    for (auto& pawn : pawns)
+    {
+        pawn->previous = pawn->GetTransform();
+        steps = std::max(steps, pawn->SimulationSubsteps(seconds));
+    }
+    const double dt = seconds / steps;
+    for (int step = 0; step < steps; ++step)
+    {
+        for (auto& pawn : pawns) pawn->Simulate(dt, *this);
+        for (size_t i = 0; i < pawns.size(); ++i)
+        {
+            auto* car = dynamic_cast<Car*>(pawns[i].get());
+            if (!car) continue;
+            for (size_t j = i + 1; j < pawns.size(); ++j)
+                if (auto* other = dynamic_cast<Car*>(pawns[j].get())) car->ResolveCollision(*other);
+        }
+    }
 }
 
 bool GameWorld::SphereBlocked(Vector3 center, double radius, PawnHandle ignore) const

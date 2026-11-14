@@ -1,5 +1,13 @@
 My project Big Sky Country
 
+## Vehicle physics
+
+The test car uses a rigid body with gravity, angular momentum, four raycast suspension contacts, and a rounded collision hull. Drive up a ramp to launch; the car carries its takeoff velocity and rotation into the air, then lands through the suspension and chassis contacts. Tire forces act only at grounded wheels. Roads, terrain, and world meshes provide static collision, and simulated cars exchange collision impulses.
+
+Use **W/S** to accelerate or brake/reverse, **A/D** to steer, **Space** for the handbrake, and **F** to enter or exit a stopped car. Steering becomes less sensitive at speed, with strong grip and roll assistance for arcade handling. The handbrake loosens the rear tires for tighter turns. The chase camera stays level with the horizon and follows heading smoothly.
+
+`CarHandling` in `shared/car.hpp` holds mass, center of mass, speed limits, braking, grip, suspension, steering, and roll assistance. `Vehicle::acceleration` controls drive acceleration. Distances are engine meters, speeds are meters per second, and angles are radians. Physics advances inside the existing 60 Hz game step, with smaller substeps for suspension stability and fast impacts. `shared/rigid_body.*` supplies reusable force, torque, integration, and collision-impulse code.
+
 ## Material textures
 
 New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor wrap it along the road spline. U repeats once across each travel lane. V starts at the first control point and repeats every 5 m of 3D centerline length, including elevation changes. The pattern continues onto the shoulders. Markings, curbs, and medians use their own colors.

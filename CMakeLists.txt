@@ -96,6 +96,7 @@ add_library(BigSkyApplication STATIC
     shared/player_controller.cpp
     shared/player_camera.cpp
     shared/gameplay_input.cpp
+    shared/rigid_body.cpp
     shared/car.cpp
     shared/test_pawn_meshes.cpp
     shared/free_camera.cpp

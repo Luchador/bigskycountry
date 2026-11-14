@@ -61,7 +61,7 @@ bool Player::Interact()
     }
     auto* vehicle = dynamic_cast<Vehicle*>(active);
     if (!vehicle) return false;
-    if (auto* car = dynamic_cast<Car*>(vehicle); car && std::abs(car->Speed()) > 1.0)
+    if (auto* car = dynamic_cast<Car*>(vehicle); car && (Math::Length(car->Velocity()) > 1.0 || Math::Length(car->AngularVelocity()) > 0.7))
     {
         notice = "Stop the car before exiting.";
         return false;

@@ -212,3 +212,35 @@ bool WorldCollision::SphereBlocked(Vector3 center, double radius) const
 {
     return !nodes.empty() && Overlap(0, center, radius);
 }
+
+void WorldCollision::Contact(size_t index, Vector3 center, double radius, std::optional<BodyContact>& result) const
+{
+    const auto& node = nodes[index];
+    const Vector3 nearest{std::clamp(center.x, node.bounds.min.x, node.bounds.max.x),
+                          std::clamp(center.y, node.bounds.min.y, node.bounds.max.y),
+                          std::clamp(center.z, node.bounds.min.z, node.bounds.max.z)};
+    if (Math::Length(center - nearest) >= radius) return;
+    if (!node.count)
+    {
+        Contact(node.left, center, radius, result);
+        Contact(node.right, center, radius, result);
+        return;
+    }
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+    {
+        const auto& triangle = triangles[i];
+        const Vector3 point = ClosestPoint(center, triangle.a, triangle.b, triangle.c);
+        const Vector3 offset = center - point;
+        const double distance = Math::Length(offset);
+        const double penetration = radius - distance;
+        if (penetration > 0 && (!result || penetration > result->penetration))
+            result = BodyContact{point, distance > 1e-10 ? offset * (1.0 / distance) : triangle.normal, penetration};
+    }
+}
+
+std::optional<BodyContact> WorldCollision::SphereContact(Vector3 center, double radius) const
+{
+    std::optional<BodyContact> contact;
+    if (!nodes.empty()) Contact(0, center, radius, contact);
+    return contact;
+}

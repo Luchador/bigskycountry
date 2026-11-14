@@ -27,6 +27,7 @@ class Pawn : public BSCObject
 public:
     virtual PawnInputProfile InputProfile() const { return PawnInputProfile::OnFoot; }
     virtual PawnCameraSettings CameraSettings() const { return {}; }
+    virtual int SimulationSubsteps(double seconds) const { return 1; }
     virtual void Simulate(double seconds, GameWorld& world) {}
     virtual bool BlocksSphere(Vector3 center, double radius) const { return false; }
     std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Pawn>(*this); }
