@@ -334,8 +334,22 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
                 {Action::ToggleEmbankmentTransition, {12, 149, 194, 28}, "Transition strip", properties.style.edge == RoadEdge::Transition}};
     }
     if (properties.page == PropertiesPage::Intersection)
-        return {{Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
-                {Action::LargerRadius, {174, 73, 32, 28}, "+"}};
+    {
+        static constexpr std::array labels{"Standard  v", "North/South  v", "East/West  v"};
+        std::vector<Button> buttons{
+            {Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
+            {Action::LargerRadius, {174, 73, 32, 28}, "+"},
+            {Action::ChooseIntersectionPaint, {12, 210, 194, 28}, labels.at(static_cast<int>(properties.intersectionPaint))}};
+#ifndef _WIN32
+        if (intersectionPaintOpen)
+        {
+            buttons.push_back({Action::StandardIntersectionPaint, {12, 240, 194, 28}, "Standard", properties.intersectionPaint == IntersectionPaint::Standard});
+            buttons.push_back({Action::NorthSouthIntersectionPaint, {12, 268, 194, 28}, "North/South", properties.intersectionPaint == IntersectionPaint::NorthSouth});
+            buttons.push_back({Action::EastWestIntersectionPaint, {12, 296, 194, 28}, "East/West", properties.intersectionPaint == IntersectionPaint::EastWest});
+        }
+#endif
+        return buttons;
+    }
     if (properties.page == PropertiesPage::Anchor)
         return {{Action::ToggleStopLine, {12, 73, 194, 28}, "Stop line", properties.stopLine}};
     if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
@@ -933,6 +947,14 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
 {
     switch (action)
     {
+    case Action::ChooseIntersectionPaint:
+#ifndef _WIN32
+        intersectionPaintOpen = !intersectionPaintOpen;
+#endif
+        return;
+    case Action::StandardIntersectionPaint:
+    case Action::NorthSouthIntersectionPaint:
+    case Action::EastWestIntersectionPaint:
     case Action::ToggleStopLine:
     case Action::SmallerRadius:
     case Action::LargerRadius:
@@ -943,7 +965,13 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         auto& item = world.intersections.at(target.index);
         EditSnapshot before(state), after(state);
         before.junction = EditSnapshot::Junction{target.index, item};
+#ifndef _WIN32
+        intersectionPaintOpen = false;
+#endif
         if (editAnchor) item.stopLines.flip(target.point);
+        else if (action == Action::StandardIntersectionPaint) item.paint = IntersectionPaint::Standard;
+        else if (action == Action::NorthSouthIntersectionPaint) item.paint = IntersectionPaint::NorthSouth;
+        else if (action == Action::EastWestIntersectionPaint) item.paint = IntersectionPaint::EastWest;
         else item.cornerRadius = std::max(0.0, item.cornerRadius + (action == Action::LargerRadius ? 1.0 : -1.0));
         after.junction = EditSnapshot::Junction{target.index, item};
         if (history.Record(-1, std::move(before), std::move(after))) Save(world);
@@ -1850,6 +1878,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     }
     if (properties.page == PropertiesPage::Intersection)
         return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
+               Text(renderer, 12, 192, "Continue paint markings", muted) &&
                SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius);
     if (properties.page != PropertiesPage::Road)
         return Text(renderer, 12, 48, properties.detail.c_str(), muted);
@@ -1990,7 +2019,10 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     {
         return false;
     }
-    const int contentHeight = properties.page == PropertiesPage::Road ?
+    if (properties.page != PropertiesPage::Intersection || intersectionPaintOwner != state.Target().index)
+        intersectionPaintOpen = false;
+    intersectionPaintOwner = properties.page == PropertiesPage::Intersection ? state.Target().index : -1;
+    const int contentHeight = properties.page == PropertiesPage::Intersection ? (intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
         properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
@@ -3526,9 +3558,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     if (button.enabled && SDL_PointInRectFloat(&local, &button.rect))
                     {
                         Activate(button.action, world);
-                        break;
+                        return EditorEvent::Handled;
                     }
                 }
+                intersectionPaintOpen = false;
             }
             return e.type == SDL_EVENT_MOUSE_WHEEL && !planView ? EditorEvent::Pass : EditorEvent::Handled;
         }

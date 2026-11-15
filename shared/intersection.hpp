@@ -1,7 +1,10 @@
 #pragma once
 
 #include "road.hpp"
+#include "road_paint.hpp"
 #include <bitset>
+
+enum class IntersectionPaint { Standard, NorthSouth, EastWest };
 
 // Authoring data for a flat junction. Its center is at world elevation position.y.
 struct Intersection
@@ -12,6 +15,7 @@ struct Intersection
     std::bitset<IntersectionAnchor::sideCount> stopLines{0b1111}; // One setting per anchor, including free anchors.
     static constexpr double stopLineWidth = 0.6; // Meters along the direction of travel.
     static constexpr double anchorDistance = 10.0; // Approach centerlines, in meters from the junction center.
+    IntersectionPaint paint = IntersectionPaint::Standard;
     double yaw = 0; // Radians around world Y.
     bool pavedThrough = false; // Keep pavement between opposite arms of an intersection inserted in a road.
     static constexpr double maxSkew = Math::DegreesToRadians(45.0);
@@ -36,6 +40,7 @@ struct IntersectionApproach
     };
     std::optional<LaneSpan> stopLine;
     std::string transitionMaterial;
+    RoadPaintProfile paint;
     static IntersectionApproach FromRoad(const Road& road, bool first, bool paintStopLine);
     bool operator==(const IntersectionApproach&) const = default;
 };
@@ -45,6 +50,7 @@ struct IntersectionLayout
     Vector3 center;
     double radius;
     std::array<std::optional<IntersectionApproach>, IntersectionAnchor::sideCount> arms{};
+    IntersectionPaint paint = IntersectionPaint::Standard;
     double yaw = 0;
     std::array<double, IntersectionAnchor::sideCount> skew{};
     bool operator==(const IntersectionLayout&) const = default;

@@ -301,6 +301,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.page = PropertiesPage::Intersection;
         result.title = "Intersection " + std::to_string(target.index);
         result.radius = item.cornerRadius;
+        result.intersectionPaint = item.paint;
         result.material = item.material;
         result.materialSlot = true;
     }

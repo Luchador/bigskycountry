@@ -32,5 +32,9 @@ enum class RoadAction
     SmallerRadius,
     LargerRadius,
     ToggleStopLine,
+    ChooseIntersectionPaint,
+    StandardIntersectionPaint,
+    NorthSouthIntersectionPaint,
+    EastWestIntersectionPaint,
     ToggleInvincible
 };

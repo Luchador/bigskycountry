@@ -460,7 +460,7 @@ struct WindowsPanels::Impl
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight + endHeight :
                            page == PropertiesPage::Railroad ? 211 + stripHeight :
                            page == PropertiesPage::Marker ? 267 :
-                           page == PropertiesPage::Intersection || page == PropertiesPage::Terrain ? 192 : 150;
+                           page == PropertiesPage::Intersection ? 232 : page == PropertiesPage::Terrain ? 192 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, height).cy - 1;
         si.nPage = static_cast<UINT>(client.bottom);
@@ -994,6 +994,12 @@ struct WindowsPanels::Impl
             static constexpr RoadAction alignment[] = {RoadAction::Straight, RoadAction::Curve};
             static constexpr RoadAction layout[] = {RoadAction::TwoNorthbound, RoadAction::TwoSouthbound, RoadAction::CenterTurn};
             static constexpr RoadAction edge[] = {RoadAction::NoEdge, RoadAction::Transition, RoadAction::Curb};
+            if (id == IDC_INTERSECTION_PAINT && i >= 0 && i < 3)
+            {
+                static constexpr RoadAction paint[] = {RoadAction::StandardIntersectionPaint,
+                    RoadAction::NorthSouthIntersectionPaint, RoadAction::EastWestIntersectionPaint};
+                PostAction(paint[i]);
+            }
             if (id == IDC_ALIGNMENT && i >= 0 && i < 2)
             {
                 PostAction(alignment[i]);
@@ -1051,7 +1057,7 @@ struct WindowsPanels::Impl
             const auto slot = DialogSize(road, 7, railroad ? 211 : ROAD_PANEL_HEIGHT);
             SetWindowPos(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, slot.cx, slot.cy - scroll, 0, 0,
                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-            for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
+            for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE, IDC_INTERSECTION_PAINT_LABEL, IDC_INTERSECTION_PAINT})
                 ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
@@ -1116,6 +1122,7 @@ struct WindowsPanels::Impl
                 swprintf(radius, 48, L"%.2f", properties.radius);
                 SetDlgItemTextW(road, IDC_RADIUS_VALUE, radius);
                 EnableWindow(GetDlgItem(road, IDC_RADIUS_LESS), properties.radius > 0);
+                SendDlgItemMessageW(road, IDC_INTERSECTION_PAINT, CB_SETCURSEL, static_cast<int>(properties.intersectionPaint), 0);
             }
             CheckDlgButton(road, IDC_STOP_LINE, properties.stopLine ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(road, IDC_INVINCIBLE, properties.invincible ? BST_CHECKED : BST_UNCHECKED);
@@ -1749,6 +1756,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     {
         SendDlgItemMessageW(p.road, id, EM_SETLIMITTEXT, 120, 0);
     }
+    Choices(p.road, IDC_INTERSECTION_PAINT, {L"Standard", L"North/South", L"East/West"});
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
     Choices(p.road, IDC_MEDIAN, {L"Concrete", L"Grass"});

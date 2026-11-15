@@ -159,6 +159,8 @@ private:
     SdlTransformPanel transformPanel;
     SdlProjectSettings projectSettings;
     int roadScroll = 0, roadScrollMax = 0;
+    bool intersectionPaintOpen = false;
+    int intersectionPaintOwner = -1;
 #endif
     struct ViewportClick
     {

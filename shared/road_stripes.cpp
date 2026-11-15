@@ -1,4 +1,5 @@
 #include "road.hpp"
+#include "road_paint.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1194,5 +1195,90 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
             const auto divider = OffsetPath(path, side * (throughLaneStart + lane * RoadStyle::laneWidth));
             PaintDashes(divider, whiteStripes);
         }
+    }
+}
+
+void BuildConnectingRoadPaint(RoadGeometry& geometry, const RoadMouth& a, const RoadMouth& b,
+                              RoadPaintProfile profileA, RoadPaintProfile profileB)
+{
+    if (!profileA.enabled || !profileB.enabled) return;
+    // Enter A against its outward frame, leave B along its outward frame.
+    profileA.divider = -profileA.divider;
+    profileA.oneWay = -profileA.oneWay;
+    struct Line { double offset; bool yellow, dashed; };
+    const auto pattern = [](const RoadPaintProfile& p)
+    {
+        std::map<int, Line> lines;
+        const double half = p.lanes * p.laneWidth * 0.5;
+        for (int side : {-1, 1})
+        {
+            const int index = side > 0 ? 1 : 0;
+            const bool yellowEdge = p.oneWay == side;
+            lines[index + (yellowEdge ? 2 : 0)] =
+                {side * (p.separation + half - stripeWidth * 0.5), yellowEdge, false};
+            if (p.oneWay) continue;
+            if (p.lanes > 1)
+            {
+                double offset = p.divider + side * yellowPairOffset;
+                if (p.separation > 0) offset = side * (p.separation + stripeWidth * 0.5);
+                else if (p.centerTurn) offset = side * (RoadStyle::laneWidth * 0.5 + yellowPairOffset);
+                lines[10 + index] = {offset, true, false};
+            }
+            if (p.centerTurn)
+                lines[20 + index] = {side * (RoadStyle::laneWidth * 0.5 - yellowPairOffset), true, true};
+            if (p.lanes == 3 && !p.centerTurn)
+            {
+                if (side * p.divider < 0) lines[100 + index * 16] = {-p.divider, false, true};
+            }
+            else
+            {
+                const double inner = p.separation + (p.centerTurn ? RoadStyle::laneWidth * 0.5 : 0);
+                for (int lane = 1; lane < p.lanes / 2; ++lane)
+                    lines[100 + index * 16 + lane] = {side * (inner + lane * RoadStyle::laneWidth), false, true};
+            }
+        }
+        if (p.oneWay)
+            for (int lane = 1; lane < p.lanes; ++lane)
+                lines[200 + lane] = {-half + lane * p.laneWidth, false, true};
+        return lines;
+    };
+    const auto first = pattern(profileA), last = pattern(profileB);
+    const double length = Math::Length(b.center - a.center);
+    if (length < 1e-6) return;
+    const Vector3 p0 = a.center, p1 = p0 - a.outward * (length / 3.0);
+    const Vector3 p3 = b.center, p2 = p3 - b.outward * (length / 3.0);
+    struct Section { Vector3 center, left; double blend; };
+    std::vector<Section> sections;
+    const int intervals = static_cast<int>(std::clamp(std::ceil(length * 2), 16.0, 4096.0));
+    sections.reserve(intervals + 1);
+    for (int i = 0; i <= intervals; ++i)
+    {
+        const double t = double(i) / intervals, u = 1 - t;
+        const Vector3 center = p0 * (u*u*u) + p1 * (3*u*u*t) + p2 * (3*u*t*t) + p3 * (t*t*t);
+        const Vector3 tangent = (p1 - p0) * (u*u) + (p2 - p1) * (2*u*t) + (p3 - p2) * (t*t);
+        sections.push_back({center, Math::Normalize(Math::Cross(tangent, {0, 1, 0})), t*t*(3 - 2*t)});
+    }
+    auto combined = first;
+    combined.insert(last.begin(), last.end());
+    for (const auto& [key, line] : combined)
+    {
+        const auto begin = first.find(key), end = last.find(key);
+        // Like road lane transitions, omit dashed white dividers while lane
+        // configurations differ. Edge/center lines still meet both mouths exactly.
+        if (line.dashed && !line.yellow && (profileA.lanes != profileB.lanes ||
+            profileA.oneWay != profileB.oneWay || profileA.centerTurn != profileB.centerTurn ||
+            profileA.divider != profileB.divider || profileA.separation != profileB.separation)) continue;
+        const double offsetA = begin == first.end() ? end->second.offset : begin->second.offset;
+        const double offsetB = end == last.end() ? begin->second.offset : end->second.offset;
+        MarkingPath path;
+        for (const auto& section : sections)
+        {
+            path.points.push_back(section.center + section.left * std::lerp(offsetA, offsetB, section.blend));
+            path.curveLeft.push_back(section.left);
+            path.widths.push_back(std::lerp(begin == first.end() ? 0.0 : 1.0, end == last.end() ? 0.0 : 1.0, section.blend));
+        }
+        auto& mesh = line.yellow ? geometry.yellowStripes : geometry.whiteStripes;
+        if (line.dashed) PaintDashes(path, mesh);
+        else PaintStrip(path, -stripeWidth * 0.5, stripeWidth * 0.5, mesh);
     }
 }

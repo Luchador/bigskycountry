@@ -133,6 +133,43 @@ namespace
         }
     }
 
+    void ContinuePaint(IntersectionSurface& surface)
+    {
+        const auto& layout = surface.layout;
+        if (layout.paint == IntersectionPaint::Standard) return;
+        const int a = layout.paint == IntersectionPaint::NorthSouth ? 1 : 0;
+        const int b = a + 2;
+        if (!layout.arms[a] || !layout.arms[b]) return;
+        RoadGeometry paint;
+        BuildConnectingRoadPaint(paint, surface.Mouth(a), surface.Mouth(b),
+                                 layout.arms[a]->paint, layout.arms[b]->paint);
+        // Skewed/asymmetric junctions may have a concave pavement outline.
+        // Clip to its triangulation so paint never floats across a corner or curb.
+        const auto append = [&](const auto& source, auto& destination)
+        {
+            for (const auto& stripe : source)
+            {
+                for (const auto& pavement : surface.geometry.pavementTriangles)
+                {
+                    ViewGeometry::Polygon polygon{{stripe[0], stripe[1], stripe[2]}, 3};
+                    for (int i = 0; i < 3 && polygon.count >= 3; ++i)
+                    {
+                        const Vector3 start = pavement[i].position;
+                        const Vector3 normal = Math::Cross(Vector3{0, 1, 0}, pavement[(i + 1) % 3].position - start);
+                        polygon = ViewGeometry::Clip(polygon, normal, Math::Dot(start, normal));
+                    }
+                    for (int i = 2; i < polygon.count; ++i)
+                    {
+                        const auto a = polygon.points[0], b = polygon.points[i - 1], c = polygon.points[i];
+                        if (Math::Cross(b - a, c - a).y > 1e-10) destination.push_back({a, b, c});
+                    }
+                }
+            }
+        };
+        append(paint.whiteStripes, surface.geometry.whiteStripes);
+        append(paint.yellowStripes, surface.geometry.yellowStripes);
+    }
+
     // The skewed mouths can put the junction center outside a corner's
     // visibility region. Triangulate the entire inner curb boundary in XZ.
     void FillPavement(IntersectionSurface& surface, const std::vector<Vector3>& rim,
@@ -248,6 +285,9 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
     IntersectionApproach arm{first ? style.LeftWidth() : style.RightWidth(),
                              first ? style.RightWidth() : style.LeftWidth(), style.edge, {},
                              style.edge == RoadEdge::Transition ? style.transitionMaterial : std::string{}};
+    arm.paint = {style.GetLaneCount(), style.TravelLaneWidth(), style.HalfSeparation(),
+                 style.GetLaneCount() == 3 && !style.HasCenterTurnLane() ? road.ThreeLaneDividerOffset() * (first ? 1 : -1) : 0,
+                 style.HasCenterTurnLane(), style.oneWay ? (first ? 1 : -1) : 0, road.paintMarkings};
     if (!paintStopLine || !road.paintMarkings || (style.oneWay && first)) return arm;
     if (style.oneWay)
     {
@@ -380,6 +420,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     }
 
     FillPavement(*this, pavementRim, directions);
+    ContinuePaint(*this);
     for (int i = 0; i < sides; ++i)
     {
         const auto& arm = layout.arms[i];

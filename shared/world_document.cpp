@@ -25,7 +25,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 5;
+    constexpr Uint32 intersectionVersion = 6;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -214,6 +214,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         int connectedArms = 0;
         const auto& item = intersections.at(id);
         IntersectionLayout layout{item.position, item.cornerRadius};
+        layout.paint = item.paint;
         layout.yaw = item.yaw;
         layout.skew = item.skew;
         for (int i = 0; i < sides; ++i)
@@ -560,6 +561,13 @@ bool WorldDocument::Open(const char* documentPath)
                     for (double& angle : item.skew)
                         if (!(data >> angle) || !std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew)
                             return SDL_SetError("Invalid intersection anchor skew in INTS");
+                if (section.version >= 6)
+                {
+                    int paint;
+                    if (!(data >> paint) || paint < 0 || paint > 2)
+                        return SDL_SetError("Invalid intersection paint mode in INTS");
+                    item.paint = static_cast<IntersectionPaint>(paint);
+                }
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -671,14 +679,14 @@ bool WorldDocument::Save() const
     {
         const auto p = item.position;
         if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
-            !Material::ValidAssetPath(item.material) ||
+            !Material::ValidAssetPath(item.material) || static_cast<unsigned>(item.paint) > 2 ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
                           << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough))
             return SDL_SetError("Cannot save invalid intersection");
         for (double angle : item.skew)
             if (!std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew || !(junctionData << ' ' << angle))
                 return SDL_SetError("Cannot save invalid intersection anchor skew");
-        junctionData << '\n';
+        junctionData << ' ' << static_cast<int>(item.paint) << '\n';
     }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))

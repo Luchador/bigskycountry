@@ -2,6 +2,7 @@
 
 #include "marker.hpp"
 #include "road.hpp"
+#include "intersection.hpp"
 #include "road_action.hpp"
 #include <bitset>
 #include <string_view>
@@ -54,6 +55,7 @@ struct PropertiesInspector
     bool materialSlot = false, invincible = false;
     bool stopLine = false;
     double radius = 0;
+    IntersectionPaint intersectionPaint = IntersectionPaint::Standard;
     bool operator==(const PropertiesInspector&) const = default;
 };
 
