@@ -81,6 +81,7 @@ add_library(BigSkyApplication STATIC
     shared/terrain_chunk.cpp
     shared/world_terrain.cpp
     shared/road_render.cpp
+    shared/plan_renderer.cpp
     shared/world_renderer_gpu.cpp
     shared/world_renderer_software.cpp
     shared/sky_disc.cpp

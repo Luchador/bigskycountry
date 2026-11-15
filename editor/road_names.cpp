@@ -172,6 +172,31 @@ struct RoadNames::Cache
     std::unordered_map<std::string, Label> labels;
     SDL_Renderer* owner = nullptr;
     Uint64 frame = 0;
+    struct PlanSource
+    {
+        std::uint64_t revision;
+        std::string name;
+        bool operator==(const PlanSource&) const = default;
+    };
+    std::vector<PlanSource> planSources;
+    std::vector<Placement> planLabels;
+    Vector3 planCenter{};
+    double planScale = 0;
+    int planWidth = 0, planHeight = 0;
+    bool planValid = false;
+
+    void PruneLabels()
+    {
+        for (auto it = labels.begin(); it != labels.end();)
+        {
+            if (frame - it->second.used > 120)
+            {
+                SDL_DestroyTexture(it->second.texture);
+                it = labels.erase(it);
+            }
+            else ++it;
+        }
+    }
 
     bool LoadFont()
     {
@@ -276,6 +301,8 @@ bool RoadNames::Draw(SDL_Renderer* renderer, const WorldDocument& world, const C
     if (scene.w <= 0 || scene.h <= 0) return true;
     if (cache->owner != renderer)
     {
+        cache->planLabels.clear();
+        cache->planValid = false;
         cache->labels.clear(); // Textures belong to their original renderer.
         cache->owner = renderer;
     }
@@ -283,6 +310,32 @@ bool RoadNames::Draw(SDL_Renderer* renderer, const WorldDocument& world, const C
     const SDL_Rect viewport{0, 0, scene.w, scene.h};
     const double focal = planView ? 1 : ViewportFocalLength(scene);
     const LabelView view{camera, viewport, planView, planCenter, planScale, focal, ViewGeometry::SidePlanes(focal, viewport)};
+    std::vector<Cache::PlanSource> sources;
+    if (planView)
+    {
+        for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+        {
+            const auto& road = world.roads[i];
+            if (road.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, i}) || !view.Visible(road.bounds)) continue;
+            auto name = road.NameList();
+            if (!name.empty()) sources.push_back({road.revision, std::move(name)});
+        }
+        if (cache->planValid && cache->planSources == sources && cache->planCenter == planCenter &&
+            cache->planScale == planScale && cache->planWidth == scene.w && cache->planHeight == scene.h)
+        {
+            // Idle map frames reuse both projected splines and label placement.
+            // Refresh the texture ages so a cached layout cannot outlive its labels.
+            for (const auto& p : cache->planLabels)
+            {
+                cache->labels.at(*p.name).used = cache->frame;
+                if (!SDL_RenderTextureRotated(renderer, p.label->texture, nullptr, &p.rect, p.angle, nullptr, SDL_FLIP_NONE)) return false;
+            }
+            cache->PruneLabels();
+            return true;
+        }
+    }
+    cache->planValid = false;
+    cache->planLabels.clear();
     struct Candidate { Run run; const Label* label; const std::string* name; };
     std::vector<Candidate> candidates;
     for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
@@ -322,16 +375,18 @@ bool RoadNames::Draw(SDL_Renderer* renderer, const WorldDocument& world, const C
             }
             if (placed.size() >= 128) break;
         }
+    if (planView)
+    {
+        cache->planSources = std::move(sources);
+        cache->planLabels = placed;
+        cache->planCenter = planCenter;
+        cache->planScale = planScale;
+        cache->planWidth = scene.w;
+        cache->planHeight = scene.h;
+        cache->planValid = true;
+    }
     // Renames, deletions and travelling around the map must not retain an
     // unbounded history of label textures. Shared names use a single cache entry.
-    for (auto it = cache->labels.begin(); it != cache->labels.end();)
-    {
-        if (cache->frame - it->second.used > 120)
-        {
-            SDL_DestroyTexture(it->second.texture);
-            it = cache->labels.erase(it);
-        }
-        else ++it;
-    }
+    cache->PruneLabels();
     return true;
 }

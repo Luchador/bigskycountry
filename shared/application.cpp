@@ -311,6 +311,7 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, error, window);
     }
 
+    if (roadTool) roadTool->ReleaseRenderResources();
     SDL_DestroyRenderer(renderer);
     if (renderWindow && renderWindow != window)
     {

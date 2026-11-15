@@ -1545,7 +1545,7 @@ bool RoadEditor::DrawMeasurement(SDL_Renderer* renderer) const
     return Fill(renderer, box, EditorTheme::preview) && Text(renderer, box.x + pad, box.y + pad, label, ink);
 }
 
-bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const
+bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
 {
     constexpr SDL_Color amber = EditorColors::ToBytes(EditorColors::amber);
     constexpr SDL_Color blue = EditorColors::ToBytes(EditorColors::blue);
@@ -1556,6 +1556,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     }
 
     const SDL_Rect canvas{0, 0, scene.w, scene.h};
+    if (!planRenderer.Begin(renderer, center, scale, canvas)) return false;
     double spacing = std::pow(10.0, std::floor(std::log10(100.0 / scale)));
 
     if (spacing * scale < 35.0)
@@ -1590,42 +1591,27 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
     for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
     {
         if (world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
-        const auto& chunk = world.Terrain()[i];
-        const auto& mesh = chunk->Instance().mesh;
-        if (!chunk->boundary || !mesh) continue;
-        // Give each projected corner its own index. SDL's software renderer can
-        // otherwise combine adjacent grid triangles into a rectangle across a diagonal.
-        std::vector<SDL_FPoint> corners;
-        corners.reserve(mesh->indices.size());
-        for (auto index : mesh->indices) corners.push_back(ToScreen(mesh->vertices[index].position));
-        std::vector<int> indices(corners.size());
-        std::iota(indices.begin(), indices.end(), 0);
-        const auto count = static_cast<int>(corners.size());
-        if (!SDL_RenderGeometryRaw(renderer, nullptr, &corners.front().x, sizeof(SDL_FPoint), &TerrainChunk::groundColor, 0,
-                                   nullptr, 0, count, indices.data(), count, sizeof(int))) return false;
-        if (GeometrySelected({SceneKind::Terrain, i}))
-        {
-            if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange))) return false;
-            for (const auto& edge : chunk->Outline())
-            {
-                const auto a = ToScreen(chunk->Instance().transform.Point(edge.a));
-                const auto b = ToScreen(chunk->Instance().transform.Point(edge.b));
-                if (!SDL_RenderLine(renderer, a.x, a.y, b.x, b.y)) return false;
-            }
-        }
+        planRenderer.Terrain(*world.Terrain()[i]);
     }
 
-    std::optional<Road> preview;
-
-    if (state.drawing && !state.draft->points.empty())
+    if (state.drawing && state.draft && !state.draft->points.empty())
     {
-        preview = state.draft;
-        if (drag != Drag::Measure && mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h)
+        const auto& draft = *state.draft;
+        const bool append = drag != Drag::Measure && mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h;
+        const Vector3 end = append ? ToWorld(mouse.x, mouse.y) : Vector3{};
+        // Draft knots are authored without rebuilding the road. Compare their
+        // small input list, not generated triangles, including undo/style edits.
+        if (!planDraft || planDraft->style != draft.style || planDraft->paintMarkings != draft.paintMarkings ||
+            planDraft->points.size() != draft.points.size() + append ||
+            !std::equal(draft.points.begin(), draft.points.end(), planDraft->points.begin()) ||
+            (append && planDraft->points.back().position != end))
         {
-            preview->points.push_back({ToWorld(mouse.x, mouse.y), {}});
+            planDraft = draft;
+            if (append) planDraft->points.push_back({end, {}});
+            planDraft->Rebuild();
         }
-        preview->Rebuild();
     }
+    else planDraft.reset();
 
     for (RoadLayer layer : {RoadLayer::Pavement, RoadLayer::Stripes})
     {
@@ -1633,22 +1619,30 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) 
         {
             if (world.hierarchy.EditorHidden({SceneKind::Road, i})) continue;
             const Road& road = world.roads[i];
-            if (!DrawPlanRoad(renderer, road, center, scale, canvas, layer))
-            {
-                return false;
-            }
+            planRenderer.Road(road, layer);
         }
         for (const auto& [id, junction] : world.IntersectionSurfaces())
         {
             if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
-            if (!DrawPlanRoad(renderer, junction.geometry, center, scale, canvas, layer)) return false;
+            planRenderer.Road(junction.geometry, layer);
         }
-        if (preview && !DrawPlanRoad(renderer, *preview, center, scale, canvas, layer))
+        if (planDraft) planRenderer.Road(*planDraft, layer);
+        if (const Road* road = PreviewRoad()) planRenderer.Road(*road, layer);
+    }
+    if (!planRenderer.End()) return false;
+
+    for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
+    {
+        if (!GeometrySelected({SceneKind::Terrain, i}) || world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
+        const auto& chunk = world.Terrain()[i];
+        if (!chunk->boundary || !chunk->Instance().mesh) continue;
+        if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange))) return false;
+        for (const auto& edge : chunk->Outline())
         {
-            return false;
+            const auto a = ToScreen(chunk->Instance().transform.Point(edge.a));
+            const auto b = ToScreen(chunk->Instance().transform.Point(edge.b));
+            if (!SDL_RenderLine(renderer, a.x, a.y, b.x, b.y)) return false;
         }
-        if (const Road* road = PreviewRoad(); road && !DrawPlanRoad(renderer, *road, center, scale, canvas, layer))
-            return false;
     }
 
     for (const SceneKey key : state.SelectedRows())
@@ -2057,6 +2051,11 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
     Release(world);
     rightClick.reset();
     planView = !planView;
+    if (!planView)
+    {
+        planRenderer.Clear();
+        planDraft.reset();
+    }
     if (planView && !initialized)
     {
         if (state.meshSelection.kind != SelectionKind::None || state.RoadGroupSelected())

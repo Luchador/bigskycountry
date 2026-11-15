@@ -18,6 +18,7 @@
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
 #include "road_names.hpp"
+#include "plan_renderer.hpp"
 #include "road_intersection.hpp"
 #include "highway_ramp_tool.hpp"
 #include "viewport_picker.hpp"
@@ -52,6 +53,7 @@ public:
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;
     bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
+    void ReleaseRenderResources() override { planRenderer.Clear(); planDraft.reset(); }
 
 private:
     enum class Drag
@@ -84,7 +86,7 @@ private:
     Vector3 ToWorld(float x, float y) const;
     SDL_FPoint ToScreen(Vector3 point) const;
     SDL_FPoint Handle(const Road& road, int index) const;
-    bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world) const;
+    bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world);
     bool DrawMeasurement(SDL_Renderer* renderer) const;
     bool DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const;
 #ifndef _WIN32
@@ -205,6 +207,8 @@ private:
     EditorMenu menu;
     RoadOverlay overlay;
     RoadNames roadNames;
+    PlanRenderer planRenderer;
+    std::optional<Road> planDraft;
     TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
     std::optional<int> hoveredAxis;

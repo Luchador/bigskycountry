@@ -223,6 +223,8 @@ In the road inspector, enter one or more comma-separated **Road names**, such as
 
 Press **R** to switch between the 3D and top-down views. In the top-down viewport, press **N** to start or resume a road draft.
 
+The top-down view retains road, intersection, road-bounded terrain, rail, and tie geometry in GPU buffers on the Direct3D 12/Vulkan renderer. Panning and zooming update camera uniforms instead of reprojecting and uploading every triangle. Geometry edits invalidate the affected batches; offscreen surfaces are culled before submission, and railroad detail distance still applies. Draft previews and road-name layouts are reused until their inputs change. Other SDL renderers use cached CPU geometry, with projection/clipping repeated only when geometry or the view changes. Cached geometry is released when leaving the top-down view.
+
 ### At-grade railroad crossings
 
 Arrange a road and a railroad so their splines cross in plan view. In the 3D viewport, right-click either surface near the crossing and choose **Create → Create Railroad Crossing**. At an existing crossing, that item becomes **Remove Railroad Crossing**. Creation/removal supports undo and redo and saves with the world.

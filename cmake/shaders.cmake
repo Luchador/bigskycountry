@@ -61,5 +61,7 @@ bigsky_shader(world.hlsl vs_6_0 VSMain world_vert world_vert_dxil world_vert_spi
 bigsky_shader(world.hlsl ps_6_0 PSMain world_frag world_frag_dxil world_frag_spirv)
 bigsky_shader(world.hlsl ps_6_0 WireframePS wireframe_frag wireframe_frag_dxil wireframe_frag_spirv)
 bigsky_shader(world.hlsl ps_6_0 MaterialPS material_frag material_frag_dxil material_frag_spirv)
+bigsky_shader(plan.hlsl vs_6_0 VSMain plan_vert plan_vert_dxil plan_vert_spirv)
+bigsky_shader(plan.hlsl ps_6_0 PSMain plan_frag plan_frag_dxil plan_frag_spirv)
 target_include_directories(BigSkyApplication PRIVATE "${output_dir}")
 target_compile_definitions(BigSkyApplication PRIVATE BIGSKY_WORLD_GPU)
