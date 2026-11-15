@@ -52,6 +52,9 @@ struct Material
     static unsigned Revision();
     static unsigned ImageRevision();
     static void RefreshAssets();
+    static void RefreshDefinitions();
+    // Rename links live beside definitions and are cooked for saved worlds/undo references.
+    static std::string ResolveFile(const std::string& file);
     bool Load(const std::string& file);
     bool Save(const std::string& file) const;
 };

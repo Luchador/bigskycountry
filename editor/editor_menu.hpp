@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <optional>
+#include "material_action.hpp"
 
 enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ToggleRoadNames, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
                            CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
@@ -13,7 +14,7 @@ class EditorMenu
 {
 public:
 #ifdef _WIN32
-    static bool OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
+    static std::optional<MaterialAction> OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial);
     static std::optional<OutlineOp> OpenFolderMenu(void* frame, int screenX, int screenY);
 #endif
     bool Attach(SDL_Window* window);

@@ -9,6 +9,7 @@ public:
     void StartDrag(const std::string& path);
     bool Handle(const SDL_Event& event);
     bool Draw();
+    void AssetChanged(const std::string& before, const std::string& after);
     bool Focused() const { return window && SDL_GetKeyboardFocus() == window; }
 
 private:

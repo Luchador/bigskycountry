@@ -35,7 +35,7 @@ public:
 #else
     bool ViewportFocused() const override
     {
-        return !projectSettings.Focused() && !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused();
+        return !projectSettings.Focused() && !browser.Focused() && !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused();
     }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;

@@ -53,6 +53,17 @@ bool WindowsMaterialEditor::Open(HWND owner, TextureCatalog& assets, const std::
     return true;
 }
 
+void WindowsMaterialEditor::AssetChanged(const std::string& before, const std::string& after)
+{
+    if (!window || editor.Path() != before) return;
+    if (after.empty()) DestroyWindow(window);
+    else
+    {
+        editor.Retarget(after);
+        SetWindowTextW(window, WindowsNameDialog::Wide("Material Editor - " + after).c_str());
+    }
+}
+
 void WindowsMaterialEditor::Layout()
 {
     RECT area{};

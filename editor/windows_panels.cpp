@@ -618,6 +618,40 @@ struct WindowsPanels::Impl
             MessageBoxW(frame, Wide(error).c_str(), L"Duplicate Material", MB_OK | MB_ICONWARNING);
     }
 
+    void MaterialActionFor(MaterialAction action, const std::string& path)
+    {
+        if (action == MaterialAction::Duplicate) { DuplicateMaterial(path); return; }
+        auto& catalog = browser->Textures();
+        if (action == MaterialAction::Rename)
+        {
+            std::string name = path.substr(path.find_last_of('/') + 1);
+            name.resize(name.size() - 5);
+            while (auto input = WindowsNameDialog::Prompt(frame, L"Rename Material", name))
+            {
+                name = *input;
+                std::string renamed, error;
+                if (catalog.RenameMaterial(path, name, renamed, error))
+                {
+                    materialEditor.AssetChanged(path, renamed);
+                    PopulateTextures(renamed, true);
+                    break;
+                }
+                MessageBoxW(frame, Wide(error).c_str(), L"Rename Material", MB_OK | MB_ICONWARNING);
+            }
+        }
+        else if (action == MaterialAction::Delete && ContentBrowser::ConfirmMaterialDelete(frameWindow, path))
+        {
+            std::string error;
+            if (catalog.DeleteMaterial(path, error))
+            {
+                materialEditor.AssetChanged(path, {});
+                PopulateTextures({}, true);
+            }
+            else MessageBoxW(frame, Wide(error).c_str(), L"Delete Material", MB_OK | MB_ICONWARNING);
+        }
+        SetFocus(GetDlgItem(models, IDC_TEXTURES));
+    }
+
     bool TextureContextMenu(HWND source, POINT at)
     {
         if (browser->ActiveTab() != ContentBrowser::Tab::Textures) return false;
@@ -651,11 +685,11 @@ struct WindowsPanels::Impl
         }
         else if (source != models || local.y < DialogSize(models, 0, BROWSER_PAGE_TOP).cy) return false;
 
-        if (EditorMenu::OpenMaterialMenu(frameWindow, at.x, at.y, !material.empty()))
+        if (auto action = EditorMenu::OpenMaterialMenu(frameWindow, at.x, at.y, !material.empty()))
         {
             if (!material.empty())
             {
-                DuplicateMaterial(material);
+                MaterialActionFor(*action, material);
                 return true;
             }
             auto& catalog = browser->Textures();
@@ -799,7 +833,7 @@ struct WindowsPanels::Impl
         line.bottom = r.bottom;
         SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
         const auto label = !active ? L"Select a road" : lastInspector->properties.Mixed(property) ? L"Multiple values" :
-                           path.empty() ? (strip ? L"Drop a Transition material" : L"Mesh colors") : Wide(path.substr(path.rfind('/') + 1));
+                           path.empty() ? (strip ? L"Drop a Transition material" : L"Mesh colors") : Wide(browser->MaterialLabel(path));
         DrawTextW(draw.hDC, label.c_str(), -1, &line, flags);
     }
 
@@ -1469,13 +1503,18 @@ struct WindowsPanels::Impl
             return true;
         }
 
-        if (msg->message == WM_KEYDOWN && msg->wParam == 'D' && (GetKeyState(VK_CONTROL) & 0x8000) &&
+        const bool control = GetKeyState(VK_CONTROL) & 0x8000;
+        const bool materialKey = (msg->wParam == 'D' && control) ||
+                                 (!control && (msg->wParam == VK_F2 || msg->wParam == VK_DELETE));
+        if ((msg->message == WM_KEYDOWN || msg->message == WM_KEYUP) && materialKey &&
+            self.browser->ActiveTab() == ContentBrowser::Tab::Textures &&
             focus == GetDlgItem(self.models, IDC_TEXTURES) && !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
         {
-            if (!(msg->lParam & (1L << 30)) && self.pressedTexture.empty())
+            if (msg->message == WM_KEYDOWN && !(msg->lParam & (1L << 30)) && self.pressedTexture.empty())
             {
                 const auto path = self.MaterialAtRow(focus, SendMessageW(focus, LB_GETCURSEL, 0, 0));
-                if (!path.empty()) self.DuplicateMaterial(path);
+                if (!path.empty()) self.MaterialActionFor(msg->wParam == 'D' ? MaterialAction::Duplicate :
+                                                          msg->wParam == VK_F2 ? MaterialAction::Rename : MaterialAction::Delete, path);
             }
             return false;
         }

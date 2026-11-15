@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <string_view>
+#include <set>
 
 namespace
 {
@@ -66,9 +67,36 @@ bool Material::ValidAssetPath(const std::string& path)
 unsigned Material::Revision() { return materialRevision; }
 unsigned Material::ImageRevision() { return imageRevision; }
 void Material::RefreshAssets() { ++materialRevision; ++imageRevision; }
+void Material::RefreshDefinitions() { ++materialRevision; }
 
-bool Material::Load(const std::string& file)
+std::string Material::ResolveFile(const std::string& file)
 {
+    std::string current = file;
+    std::set<std::string> visited;
+    while (visited.insert(current).second)
+    {
+        SDL_PathInfo info{};
+        if (SDL_GetPathInfo(current.c_str(), &info) && info.type == SDL_PATHTYPE_FILE) return current;
+        size_t size = 0;
+        std::unique_ptr<char, decltype(&SDL_free)> bytes(
+            static_cast<char*>(SDL_LoadFile((current + ".redirect").c_str(), &size)), SDL_free);
+        if (!bytes) return current; // Let Load/Save report the missing definition.
+        const std::string target(bytes.get(), size);
+        if (size > 1024 || !ValidAssetPath(target) || target.find('/') != target.npos)
+        {
+            SDL_SetError("Invalid material rename link: %s", current.c_str());
+            return {};
+        }
+        current = current.substr(0, current.find_last_of("/\\") + 1) + target;
+    }
+    SDL_SetError("Circular material rename link: %s", file.c_str());
+    return {};
+}
+
+bool Material::Load(const std::string& requestedFile)
+{
+    const auto file = ResolveFile(requestedFile);
+    if (file.empty()) return false;
     auto json = ReadDocument(file);
     if (!json)
         return false;
@@ -109,8 +137,10 @@ bool Material::Load(const std::string& file)
     return true;
 }
 
-bool Material::Save(const std::string& file) const
+bool Material::Save(const std::string& requestedFile) const
 {
+    const auto file = ResolveFile(requestedFile);
+    if (file.empty()) return false;
     auto json = ReadDocument(file);
     if (!json)
         return false;

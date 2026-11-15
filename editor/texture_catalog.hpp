@@ -27,6 +27,8 @@ public:
     std::string NewMaterialName() const;
     bool CreateMaterial(const std::string& name, std::string& createdPath, std::string& error);
     bool DuplicateMaterial(const std::string& sourcePath, std::string& createdPath, std::string& error);
+    bool RenameMaterial(const std::string& sourcePath, std::string name, std::string& renamedPath, std::string& error);
+    bool DeleteMaterial(const std::string& sourcePath, std::string& error);
     const std::vector<Item>& Items() const { return items; }
     const std::string& Status() const { return status; }
     const std::string& Root() const { return root; }

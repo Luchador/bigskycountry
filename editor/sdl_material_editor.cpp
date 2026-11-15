@@ -98,6 +98,18 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
     return true;
 }
 
+void SdlMaterialEditor::AssetChanged(const std::string& before, const std::string& after)
+{
+    if (!window || editor.Path() != before) return;
+    if (after.empty()) Close();
+    else
+    {
+        FinishDrag();
+        editor.Retarget(after);
+        SDL_SetWindowTitle(window, ("Material Editor - " + after).c_str());
+    }
+}
+
 void SdlMaterialEditor::FinishDrag()
 {
     if (orbitPoint || activeSlider || !dragged.empty())

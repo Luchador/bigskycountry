@@ -19,6 +19,8 @@ public:
     Tab ActiveTab() const { return tab; }
     TextureCatalog& Textures() { return textures; }
     void Refresh();
+    static bool ConfirmMaterialDelete(SDL_Window* window, const std::string& path);
+    std::string MaterialLabel(const std::string& path);
     SDL_Surface* RoadMaterialThumbnail(const std::string& path, bool strip = false);
 #ifndef _WIN32
     SDL_Texture* RoadMaterialTexture(const std::string& path, SDL_Renderer* renderer, bool strip = false);
@@ -30,6 +32,7 @@ public:
     const SdlMaterialEditor& MaterialWindow() const { return materialWindow; }
     bool HandleMaterialPopup(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, SDL_Rect panel);
     bool MaterialPopupOpen() const { return popup != MaterialPopup::Closed; }
+    bool Focused() const { return browserFocused || MaterialPopupOpen(); }
     bool Draw(SDL_Renderer* renderer, int width, int height);
 #endif
 
@@ -59,6 +62,8 @@ private:
 #endif
     };
     std::array<MaterialThumbnail, 2> materialThumbnails; // Primary and transition inspector slots.
+    std::map<std::string, std::string> materialLabels;
+    unsigned materialLabelRevision = 0;
     Tab tab = Tab::Models;
     TextureCatalog textures;
     bool texturesScanned = false;
@@ -68,10 +73,15 @@ private:
     std::set<std::string> collapsedFolders;
     std::vector<std::size_t> folderRows;
     void DuplicateSelectedMaterial(SDL_Window* window);
+    void BeginMaterialName(SDL_Window* window, int width, bool rename);
+    void DeleteSelectedMaterial(SDL_Window* window);
     void RevealSelectedTexture();
     bool DrawMaterialPopup(SDL_Renderer* renderer) const;
-    enum class MaterialPopup { Closed, AddMenu, DuplicateMenu, Name };
+    enum class MaterialPopup { Closed, AddMenu, ActionsMenu, Name };
+    int materialMenuRow = 0;
+    bool renameMaterial = false;
     bool assetListFocused = false;
+    bool browserFocused = false;
     MaterialPopup popup = MaterialPopup::Closed;
     SDL_FRect popupBounds{};
     bool replaceName = false;

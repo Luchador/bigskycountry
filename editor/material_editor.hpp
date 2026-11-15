@@ -8,6 +8,8 @@ class MaterialEditor
 {
 public:
     bool Open(TextureCatalog& assets, const std::string& path);
+    const std::string& Path() const { return path; }
+    void Retarget(const std::string& renamedPath) { path = renamedPath; }
     bool SetType(MaterialType type);
     bool SetTexture(MaterialSlot slot, const std::string& path);
     bool SetTint(std::array<float, 3> color);

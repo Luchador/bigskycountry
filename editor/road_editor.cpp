@@ -1823,7 +1823,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                 if (!SDL_RenderTexture(renderer, thumbnail, nullptr, &icon)) return false;
         }
         const auto label = !properties.materialSlot ? "Select a road" : properties.Mixed(property) ? "Mixed" :
-                           path.empty() ? (strip ? "Drop material" : "Mesh colors") : path.substr(path.rfind('/') + 1);
+                           path.empty() ? (strip ? "Drop material" : "Mesh colors") : browser.MaterialLabel(path);
         if (!Text(renderer, slot.x + 55, slot.y + 29, label.c_str(), ink)) return false;
     }
     if (properties.page == PropertiesPage::Marker)

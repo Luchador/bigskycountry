@@ -12,6 +12,7 @@ public:
     void Hover(std::optional<MaterialSlot> slot);
     void Drop(MaterialSlot slot, const std::string& path);
     void RefreshImages();
+    void AssetChanged(const std::string& before, const std::string& after);
 
 private:
     static INT_PTR CALLBACK Dialog(HWND, UINT, WPARAM, LPARAM);

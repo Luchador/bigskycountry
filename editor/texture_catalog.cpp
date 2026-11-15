@@ -228,6 +228,132 @@ bool TextureCatalog::DuplicateMaterial(const std::string& sourcePath, std::strin
                             true, createdPath, error);
 }
 
+bool TextureCatalog::RenameMaterial(const std::string& sourcePath, std::string name,
+                                    std::string& renamedPath, std::string& error)
+{
+    const auto source = std::ranges::find(items, sourcePath, &Item::path);
+    if (source == items.end() || !source->material)
+    {
+        error = "Select a material in the current folder.";
+        return false;
+    }
+    if (name.size() > 5 && SDL_strcasecmp(name.c_str() + name.size() - 5, ".bmat") == 0) name.resize(name.size() - 5);
+    if (!ValidMaterialName(name))
+    {
+        error = "Enter a valid material filename.";
+        return false;
+    }
+    const auto base = FromUtf8(root);
+    const auto original = base / FromUtf8(sourcePath);
+    const auto destination = original.parent_path() / FromUtf8(name + ".bmat");
+    const auto relative = Utf8(destination.lexically_relative(base));
+    std::error_code ec;
+    if (fs::symlink_status(original, ec).type() != fs::file_type::regular || ec)
+    {
+        error = "The material is missing, inaccessible, or a symbolic link. Refresh the Content Browser.";
+        return false;
+    }
+    if (relative == sourcePath) { renamedPath = relative; return true; }
+    // Reject collisions even on case-sensitive hosts, matching Windows project names.
+    fs::directory_iterator it(original.parent_path(), ec), end;
+    for (; !ec && it != end; it.increment(ec))
+    {
+        const auto filename = Utf8(it->path().filename());
+        if (SDL_strcasecmp(filename.c_str(), (name + ".bmat").c_str()) == 0 && it->path() != original)
+        {
+            error = "That material name is already in use.";
+            return false;
+        }
+        if (SDL_strcasecmp(filename.c_str(), (name + ".bmat.redirect").c_str()) == 0)
+        {
+            const auto alias = Utf8(it->path()).substr(0, Utf8(it->path()).size() - 9);
+            // Renaming back to this material's previous name is allowed.
+            std::error_code sameError;
+            if (!fs::equivalent(FromUtf8(Material::ResolveFile(alias)), original, sameError) || sameError)
+            {
+                error = "That name is reserved by another renamed material.";
+                return false;
+            }
+        }
+    }
+    if (ec) { error = "Cannot read the material folder."; return false; }
+
+#ifdef _WIN32
+    const bool caseOnly = SDL_strcasecmp(sourcePath.c_str(), relative.c_str()) == 0;
+#else
+    const bool caseOnly = false; // Copy exclusively when these are distinct files.
+#endif
+    // Copy without replacement before touching the source: a concurrently-created
+    // destination must never be overwritten. Unknown material fields stay intact.
+    if (!caseOnly && !fs::copy_file(original, destination, fs::copy_options::none, ec))
+    {
+        error = "Cannot create the renamed material: " + ec.message();
+        return false;
+    }
+    const auto link = Utf8(original) + ".redirect";
+    SDL_Time time{};
+    SDL_GetCurrentTime(&time);
+    const auto temporary = link + "." + std::to_string(time) + ".tmp";
+    SDL_IOStream* output = SDL_IOFromFile(temporary.c_str(), "wbx");
+    const auto target = Utf8(destination.filename());
+    bool ready = output != nullptr;
+    if (output)
+    {
+        ready = SDL_WriteIO(output, target.data(), target.size()) == target.size();
+        ready = SDL_CloseIO(output) && ready;
+    }
+    if (ready) ready = SDL_RenamePath(temporary.c_str(), link.c_str());
+    if (!ready)
+    {
+        error = std::string("Cannot preserve material references: ") + SDL_GetError();
+        SDL_RemovePath(temporary.c_str());
+        if (!caseOnly) fs::remove(destination, ec);
+        return false;
+    }
+    if (caseOnly) fs::rename(original, destination, ec);
+    else if (!fs::remove(original, ec) && !ec) ec = std::make_error_code(std::errc::no_such_file_or_directory);
+    if (ec)
+    {
+        error = "Cannot rename the original material: " + ec.message();
+        // The original still exists, so its previous rename link is redundant.
+        SDL_RemovePath(link.c_str());
+        if (!caseOnly) fs::remove(destination, ec);
+        return false;
+    }
+    renamedPath = relative;
+    Material::RefreshDefinitions();
+    ReadFolder();
+    return true;
+}
+
+bool TextureCatalog::DeleteMaterial(const std::string& sourcePath, std::string& error)
+{
+    const auto source = std::ranges::find(items, sourcePath, &Item::path);
+    if (source == items.end() || !source->material)
+    {
+        error = "Select a material in the current folder.";
+        return false;
+    }
+    const auto file = FromUtf8(root + sourcePath);
+    std::error_code ec;
+    if (fs::symlink_status(file, ec).type() != fs::file_type::regular || ec)
+    {
+        error = "The material is missing, inaccessible, or a symbolic link. Refresh the Content Browser.";
+        return false;
+    }
+    // Remove a superseded link at this exact name first (rename-back/case changes).
+    // Other historical names still resolve to a missing material, never an older copy.
+    fs::remove(FromUtf8(root + sourcePath + ".redirect"), ec);
+    if (!ec && fs::remove(file, ec))
+    {
+        Material::RefreshDefinitions();
+        ReadFolder();
+        return true;
+    }
+    error = "Cannot delete the material: " + ec.message();
+    return false;
+}
+
 bool TextureCatalog::WriteNewMaterial(std::string name, std::string_view contents, bool numberCopy,
                                      std::string& createdPath, std::string& error)
 {
@@ -257,7 +383,7 @@ bool TextureCatalog::WriteNewMaterial(std::string name, std::string_view content
     {
         const auto filename = name + ".bmat";
         file = directory / FromUtf8(filename);
-        if (!filenames.contains(filename))
+        if (!filenames.contains(filename) && !filenames.contains(filename + ".redirect"))
         {
             // Exclusive creation protects a name claimed by another editor since the directory scan.
             output = SDL_IOFromFile(Utf8(file).c_str(), "wbx");

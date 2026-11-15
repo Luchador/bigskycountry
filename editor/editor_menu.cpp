@@ -421,14 +421,22 @@ std::optional<OutlineOp> EditorMenu::OpenFolderMenu(void* frame, int screenX, in
     }
 }
 
-bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial)
+std::optional<MaterialAction> EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial)
 {
     constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Add New Material"};
-    constexpr static MenuItem duplicate{BSC_DUPLICATE_MATERIAL, L"&Duplicate\tCtrl+D"};
-    const auto& item = onMaterial ? duplicate : add;
+    constexpr static MenuItem actions[] = {{BSC_DUPLICATE_MATERIAL, L"&Duplicate\tCtrl+D"},
+                                          {BSC_RENAME_MATERIAL, L"&Rename\tF2"},
+                                          {BSC_DELETE_MATERIAL, L"D&elete\tDelete"}};
     HWND owner = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
                                    SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
-    return TrackCommands(owner, screenX, screenY, {&item, 1}) == item.id;
+    switch (TrackCommands(owner, screenX, screenY, onMaterial ? std::span<const MenuItem>(actions) : std::span<const MenuItem>(&add, 1)))
+    {
+    case BSC_ADD_MATERIAL: return MaterialAction::Create;
+    case BSC_DUPLICATE_MATERIAL: return MaterialAction::Duplicate;
+    case BSC_RENAME_MATERIAL: return MaterialAction::Rename;
+    case BSC_DELETE_MATERIAL: return MaterialAction::Delete;
+    default: return {};
+    }
 }
 #endif
 
