@@ -157,6 +157,8 @@ Click an intersection anchor in the 3D or top-down view to edit its **Stop line*
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or imported terrain chunk in the list makes its transform available for editing.
 
+Folders display `assets/textures/editor/folder_icon.png` beside their names, including empty folders. Expanded and collapsed folders (and the world root) are remembered automatically in a small `.outliner` file beside the world file, for example `world.wld.outliner`. This view state does not change the world’s unsaved indicator or add undo steps. Selecting an item in the viewport still opens its parent folders to reveal it.
+
 Drag the horizontal bar beneath the Outliner to give more space to the Outliner or the properties panel.
 
 Use **New folder** to name a folder. Selecting a folder first creates a subfolder. **Rename** or **F2** changes a folder name. **Ctrl-click** toggles individual entries and **Shift-click** selects a range. Drag the selection onto a folder, or drop it on the world row to move it to the root. A label follows the cursor with the dragged row’s name and a green check for an allowed move or a red blocked icon. When dragging several rows, the label also shows how many others are selected. You can also move a folder with its descendants. Multi-selection is for organizing entries.

@@ -15,6 +15,7 @@ struct OutlineRow
 
 // The caller owns the BGRA32 surface. Both editor backends use the source PNG.
 SDL_Surface* LoadOutlineMoveIcon(bool allowed);
+SDL_Surface* LoadOutlineFolderIcon();
 
 enum class OutlineOp
 {
@@ -64,10 +65,14 @@ class SceneOutliner
     unsigned Version() const { return version; }
 
   private:
+    void LoadView(const WorldDocument& world);
+    void SaveView();
     const WorldDocument* document = nullptr; // The live world whose rows this view displays.
     std::vector<OutlineRow> rows;
     std::set<SceneKey> selection;
     std::set<int> collapsed;
+    std::set<int> savedCollapsed;
+    std::string viewPath; // Editor-only state beside the world; no full world save on expand/collapse.
     std::set<std::string> siblingNames;
     int parentForNew = 0;
     std::array<std::size_t, 5> counts{};

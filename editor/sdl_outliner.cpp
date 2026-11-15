@@ -40,16 +40,16 @@ namespace
 
 void SdlOutliner::LoadIcons(SDL_Renderer* renderer)
 {
-    const auto load = [&](bool allowed) -> SDL_Texture*
+    const auto load = [&](SDL_Surface* image) -> SDL_Texture*
     {
-        SDL_Surface* image = LoadOutlineMoveIcon(allowed);
         if (!image) return nullptr;
         SDL_Texture* result = SDL_CreateTextureFromSurface(renderer, image);
         SDL_DestroySurface(image);
         return result;
     };
-    checkIcon = load(true);
-    blockIcon = load(false);
+    checkIcon = load(LoadOutlineMoveIcon(true));
+    blockIcon = load(LoadOutlineMoveIcon(false));
+    folderIcon = load(LoadOutlineFolderIcon());
 }
 
 bool SdlOutliner::DrawDragBadge(SDL_Renderer* r, SDL_Rect panel) const
@@ -494,7 +494,14 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
         {
             return false;
         }
-        if (!Text(r, x + 13, y + 6, row.label.substr(0, std::max(0, (split - x - 15) / 8)), row.hidden ? muted : ink) ||
+        int labelX = x + 13;
+        if (row.key.kind == SceneKind::Folder && folderIcon)
+        {
+            const SDL_FRect icon{float(labelX), float(y + 2), 16, 16};
+            if (!SDL_RenderTexture(r, folderIcon, nullptr, &icon)) return false;
+            labelX += 20;
+        }
+        if (!Text(r, labelX, y + 6, row.label.substr(0, std::max(0, (split - labelX - 2) / 8)), row.hidden ? muted : ink) ||
             !Text(r, split + 4, y + 6, row.type, muted))
         {
             return false;

@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <sstream>
 
 namespace
 {
@@ -40,6 +41,16 @@ namespace
         const std::string path = instance.mesh ? instance.mesh->assetPath : "";
         return Stem(path) + " #" + std::to_string(i + 1);
     }
+
+    SDL_Surface* LoadIcon(const char* name)
+    {
+        const auto path = AssetPaths::Root(AssetRoot::Project) + "textures/editor/" + name;
+        SDL_Surface* image = SDL_LoadPNG(path.c_str());
+        if (!image) return nullptr;
+        SDL_Surface* icon = SDL_ConvertSurface(image, SDL_PIXELFORMAT_BGRA32);
+        SDL_DestroySurface(image);
+        return icon;
+    }
 } // namespace
 
 std::string OutlineRow::DragLabel(std::size_t count) const
@@ -49,13 +60,64 @@ std::string OutlineRow::DragLabel(std::size_t count) const
 
 SDL_Surface* LoadOutlineMoveIcon(bool allowed)
 {
-    const auto path = AssetPaths::Root(AssetRoot::Project) +
-                      (allowed ? "textures/editor/move_check.png" : "textures/editor/move_block.png");
-    SDL_Surface* image = SDL_LoadPNG(path.c_str());
-    if (!image) return nullptr;
-    SDL_Surface* icon = SDL_ConvertSurface(image, SDL_PIXELFORMAT_BGRA32);
-    SDL_DestroySurface(image);
-    return icon;
+    return LoadIcon(allowed ? "move_check.png" : "move_block.png");
+}
+
+SDL_Surface* LoadOutlineFolderIcon()
+{
+    return LoadIcon("folder_icon.png");
+}
+
+void SceneOutliner::LoadView(const WorldDocument& world)
+{
+    collapsed.clear();
+    savedCollapsed.clear();
+    if (viewPath.empty()) return;
+    SDL_PathInfo info{};
+    if (!SDL_GetPathInfo(viewPath.c_str(), &info)) return; // First session: all folders open.
+    if (info.type != SDL_PATHTYPE_FILE || info.size > 1024 * 1024)
+    {
+        SDL_Log("Ignoring invalid outliner state: %s", viewPath.c_str());
+        return;
+    }
+    std::size_t size = 0;
+    std::unique_ptr<void, decltype(&SDL_free)> data(SDL_LoadFile(viewPath.c_str(), &size), SDL_free);
+    if (!data) { SDL_Log("Cannot load outliner state: %s", SDL_GetError()); return; }
+    std::istringstream input(std::string(static_cast<const char*>(data.get()), size));
+    std::string magic;
+    unsigned version = 0;
+    bool valid = bool(input >> magic >> version) && magic == "BSC_OUTLINER" && version == 1;
+    std::set<int> parsed;
+    while (valid && (input >> std::ws) && !input.eof())
+    {
+        int id = -1;
+        valid = bool(input >> id) && id >= 0 && parsed.insert(id).second;
+    }
+    if (!valid) { SDL_Log("Ignoring invalid outliner state: %s", viewPath.c_str()); return; }
+    savedCollapsed = parsed;
+    std::erase_if(parsed, [&](int id) { return id != 0 && !world.hierarchy.Folders().contains(id); });
+    collapsed = std::move(parsed);
+}
+
+void SceneOutliner::SaveView()
+{
+    if (collapsed == savedCollapsed || viewPath.empty()) return;
+    // Only retry after another view change, not on every frame if the directory is read-only.
+    savedCollapsed = collapsed;
+    std::ostringstream output;
+    output << "BSC_OUTLINER 1\n";
+    for (int id : collapsed) output << id << '\n';
+    const auto data = output.str();
+    SDL_Time now = 0;
+    if (!SDL_GetCurrentTime(&now)) { SDL_Log("Cannot save outliner state: %s", SDL_GetError()); return; }
+    const auto temporary = viewPath + "." + std::to_string(now) + ".tmp";
+    SDL_IOStream* file = SDL_IOFromFile(temporary.c_str(), "wbx");
+    if (!file) { SDL_Log("Cannot save outliner state: %s", SDL_GetError()); return; }
+    const bool written = SDL_SaveFile_IO(file, data.data(), data.size(), false);
+    if (SDL_CloseIO(file) && written && SDL_RenamePath(temporary.c_str(), viewPath.c_str())) return;
+    const std::string error = SDL_GetError();
+    SDL_RemovePath(temporary.c_str());
+    SDL_Log("Cannot save outliner state %s: %s", viewPath.c_str(), error.c_str());
 }
 
 bool SceneOutliner::CanDrop(const std::set<SceneKey>& items, SceneKey target, FolderPlacement placement) const
@@ -108,7 +170,15 @@ std::optional<OutlineDrop> SceneOutliner::DropAt(const std::set<SceneKey>& items
 
 void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& state)
 {
-    document = &world;
+    const auto path = world.Path().empty() ? std::string{} : world.Path() + ".outliner";
+    if (document != &world || viewPath != path)
+    {
+        document = &world;
+        viewPath = path;
+        LoadView(world);
+        selection.clear();
+        dirty = true;
+    }
     const auto primary = state.outlineSelection.empty() ? state.SelectedRows() : std::set<SceneKey>{};
     const auto& selected = state.outlineSelection.empty() ? primary : state.outlineSelection;
     const std::array sizes{world.roads.size(), world.Terrain().size(), world.Objects().size(), world.meshes.size(), world.intersections.size()};
@@ -154,6 +224,8 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     }
     counts = sizes;
     dirty = false;
+    std::erase_if(collapsed, [&](int id) { return id != 0 && !world.hierarchy.Folders().contains(id); });
+    SaveView();
     ++version;
 
     std::map<int, std::vector<OutlineRow>> children;

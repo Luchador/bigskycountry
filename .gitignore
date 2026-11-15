@@ -1,4 +1,6 @@
 /build/
+*.outliner
+*.outliner.*.tmp
 # Track built-in assets needed by the editor and game.
 /assets/*
 !/assets/project-settings.json

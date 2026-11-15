@@ -32,5 +32,6 @@ class SdlOutliner
     std::string dragLabel;
     SDL_Texture* checkIcon = nullptr;
     SDL_Texture* blockIcon = nullptr; // Both textures are owned by the main renderer.
+    SDL_Texture* folderIcon = nullptr; // Also owned by the renderer.
     std::optional<SceneKey> lastSingle;
 };

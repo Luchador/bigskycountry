@@ -9,6 +9,16 @@
 
 using WindowsNameDialog::Wide;
 
+namespace
+{
+    std::wstring LabelPrefix(const OutlineRow& row)
+    {
+        std::wstring prefix(std::min(row.depth, 32) * 3, L' ');
+        prefix += row.branch ? (row.expanded ? L"\u25BE " : L"\u25B8 ") : L"   ";
+        return prefix;
+    }
+}
+
 HWND WindowsOutliner::Create(HWND frame, HINSTANCE module)
 {
     eventType = SDL_RegisterEvents(1);
@@ -34,6 +44,21 @@ HWND WindowsOutliner::Create(HWND frame, HINSTANCE module)
     ListView_InsertColumn(list, 1, &col);
     checkIcon.reset(LoadOutlineMoveIcon(true));
     blockIcon.reset(LoadOutlineMoveIcon(false));
+    Surface folder(LoadOutlineFolderIcon(), SDL_DestroySurface);
+    if (folder && SDL_SetSurfaceBlendMode(folder.get(), SDL_BLENDMODE_BLEND))
+    {
+        for (const auto background : {EditorTheme::list, EditorTheme::alternateRow, EditorTheme::selected})
+        {
+            Surface image(SDL_CreateSurface(folder->w, folder->h, SDL_PIXELFORMAT_BGRA32), SDL_DestroySurface);
+            if (!image || !SDL_FillSurfaceRect(image.get(), nullptr, SDL_MapSurfaceRGB(image.get(), background.r, background.g, background.b)) ||
+                !SDL_BlitSurface(folder.get(), nullptr, image.get(), nullptr))
+            {
+                folderIcons.clear();
+                break;
+            }
+            folderIcons.push_back(std::move(image));
+        }
+    }
     badge = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, L"STATIC", L"",
                             WS_POPUP | WS_DISABLED, 0, 0, 0, 0, frame, nullptr, module, nullptr);
     if (badge && !SetWindowSubclass(badge, BadgeProc, 1, reinterpret_cast<DWORD_PTR>(this)))
@@ -71,7 +96,8 @@ std::set<SceneKey> WindowsOutliner::Selected() const
 void WindowsOutliner::Sync(const SceneOutliner& data)
 {
     model = &data;
-    const bool rebuild = version != data.Version();
+    const UINT dpi = GetDpiForWindow(list);
+    const bool rebuild = version != data.Version() || displayDpi != dpi;
     if (!rebuild && displayed == data.Selection())
     {
         return;
@@ -85,13 +111,22 @@ void WindowsOutliner::Sync(const SceneOutliner& data)
             ReleaseCapture();
         }
         version = data.Version();
+        displayDpi = dpi;
         rows = data.Rows();
         ListView_DeleteAllItems(list);
+        HDC dc = GetDC(list);
+        auto font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(list, WM_GETFONT, 0, 0)));
+        SIZE space{};
+        GetTextExtentPoint32W(dc, L" ", 1, &space);
+        SelectObject(dc, font);
+        ReleaseDC(list, dc);
+        const int reserve = MulDiv(20, GetDpiForWindow(list), 96);
+        const int spaces = (reserve + std::max<LONG>(1, space.cx) - 1) / std::max<LONG>(1, space.cx);
         for (int i = 0; i < static_cast<int>(rows.size()); ++i)
         {
             const auto& row = rows[i];
-            std::wstring label(std::min(row.depth, 32) * 3, L' ');
-            label += row.branch ? (row.expanded ? L"\u25BE " : L"\u25B8 ") : L"   ";
+            auto label = LabelPrefix(row);
+            if (row.key.kind == SceneKind::Folder && !folderIcons.empty()) label.append(spaces, L' ');
             label += Wide(row.label);
             LVITEMW item{};
             item.mask = LVIF_TEXT;
@@ -281,6 +316,26 @@ void WindowsOutliner::EndDrag()
     if (GetCapture() == panel) ReleaseCapture();
 }
 
+void WindowsOutliner::DrawFolderIcon(HDC dc, int row) const
+{
+    RECT label{};
+    if (!ListView_GetItemRect(list, row, &label, LVIR_LABEL)) return;
+    const auto prefix = LabelPrefix(rows[row]);
+    auto font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(list, WM_GETFONT, 0, 0)));
+    SIZE extent{};
+    GetTextExtentPoint32W(dc, prefix.c_str(), static_cast<int>(prefix.size()), &extent);
+    SelectObject(dc, font);
+    const int size = std::min<int>(MulDiv(16, GetDpiForWindow(list), 96), label.bottom - label.top);
+    const int left = label.left + 2 + extent.cx, top = label.top + (label.bottom - label.top - size) / 2;
+    const RECT icon{left, top, left + size, top + size};
+    const bool selected = ListView_GetItemState(list, row, LVIS_SELECTED | LVIS_DROPHILITED) != 0;
+    const int background = selected ? 2 : row % 2;
+    const int saved = SaveDC(dc);
+    IntersectClipRect(dc, label.left, label.top, label.right, label.bottom);
+    WindowsTheme::DrawPreview(dc, icon, folderIcons[background].get());
+    RestoreDC(dc, saved);
+}
+
 LRESULT CALLBACK WindowsOutliner::DrawInsertion(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR data)
 {
     if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, DrawInsertion, id);
@@ -290,8 +345,18 @@ LRESULT CALLBACK WindowsOutliner::DrawInsertion(HWND hwnd, UINT msg, WPARAM w, L
     const auto* notification = reinterpret_cast<const NMHDR*>(l);
     if (notification->hwndFrom != s.list || notification->code != NM_CUSTOMDRAW) return result;
     const auto* draw = reinterpret_cast<const NMCUSTOMDRAW*>(l);
-    if (draw->dwDrawStage == CDDS_ITEMPREPAINT && draw->dwItemSpec < s.rows.size() && s.rows[draw->dwItemSpec].hidden)
-        reinterpret_cast<NMLVCUSTOMDRAW*>(l)->clrText = WindowsTheme::Color(EditorTheme::secondary);
+    if (draw->dwItemSpec < s.rows.size())
+    {
+        const auto& row = s.rows[draw->dwItemSpec];
+        const bool folder = row.key.kind == SceneKind::Folder && !s.folderIcons.empty();
+        if (draw->dwDrawStage == CDDS_ITEMPREPAINT)
+        {
+            if (row.hidden) reinterpret_cast<NMLVCUSTOMDRAW*>(l)->clrText = WindowsTheme::Color(EditorTheme::secondary);
+            if (folder) return result | CDRF_NOTIFYPOSTPAINT;
+        }
+        if (draw->dwDrawStage == CDDS_ITEMPOSTPAINT && folder)
+            s.DrawFolderIcon(draw->hdc, static_cast<int>(draw->dwItemSpec));
+    }
     if (!s.drop || !s.drop->IsInsertion()) return result;
     if (draw->dwDrawStage == CDDS_PREPAINT) return result | CDRF_NOTIFYPOSTPAINT;
     if (draw->dwDrawStage == CDDS_POSTPAINT)
