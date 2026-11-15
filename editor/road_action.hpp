@@ -32,6 +32,7 @@ enum class RoadAction
     SmallerRadius,
     LargerRadius,
     ToggleStopLine,
+    ToggleIntersectionIsland,
     ChooseIntersectionPaint,
     StandardIntersectionPaint,
     NorthSouthIntersectionPaint,

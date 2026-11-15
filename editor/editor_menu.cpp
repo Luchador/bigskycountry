@@ -36,7 +36,7 @@ namespace
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
                                       {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
-    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
+    constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_Y_INTERSECTION, L"Create &Y-Intersection"},
                                         {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
     constexpr MenuItem removeCrossing{BSC_RAILROAD_CROSSING,L"Remove Railroad &Crossing"};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
@@ -379,6 +379,7 @@ namespace
     constexpr BarAction createItems[] = {{"Create Road", EditorCommand::CreateRoad},
                                          {"Create Railroad", EditorCommand::CreateRailroad},
                                          {"Create Intersection", EditorCommand::CreateIntersection},
+                                         {"Create Y-Intersection", EditorCommand::CreateYIntersection},
                                          {"Marker", EditorCommand::CreateMarker},
                                          {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing},
                                          {"Overpass", EditorCommand::ToggleOverpass},
@@ -521,6 +522,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     if (choice == BSC_CREATE_RAILROAD) return EditorCommand::CreateRailroad;
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
+    if (choice == BSC_CREATE_Y_INTERSECTION) return EditorCommand::CreateYIntersection;
     if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;
     if (choice == BSC_CREATE_MARKER)
     {

@@ -30,7 +30,8 @@ namespace
         std::vector<Vector3> positions;
         std::map<std::pair<double, double>, Index> lookup;
         std::map<Edge, Segment> segments;
-        std::vector<std::vector<Index>> polygons;
+        struct Footprint { std::vector<Index> rim; std::vector<std::vector<Index>> holes; };
+        std::vector<Footprint> polygons;
         std::set<Index> verticalSteps;
         std::vector<std::array<Vector3, 4>> solidWalls;
 
@@ -73,19 +74,21 @@ namespace
 
         bool OnRoad(Point p) const
         {
-            for (const auto& polygon : polygons)
+            const auto inside = [&](const std::vector<Index>& polygon)
             {
-                bool inside = false;
+                bool result = false;
                 Index last = polygon.back();
                 for (Index index : polygon)
                 {
                     const Point a = points[last], b = points[index];
                     if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
-                        inside = !inside;
+                        result = !result;
                     last = index;
                 }
-                if (inside) return true;
-            }
+                return result;
+            };
+            for (const auto& polygon : polygons)
+                if (inside(polygon.rim) && std::ranges::none_of(polygon.holes, inside)) return true;
             return false;
         }
 
@@ -355,7 +358,7 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
     const auto addRim = [&](const std::vector<Vector3>& rim)
     {
         if (rim.size() < 3) return;
-        auto& polygon = outline.polygons.emplace_back();
+        auto& polygon = outline.polygons.emplace_back().rim;
         Vector3 previous = rim.back();
         for (Vector3 p : rim)
         {
@@ -380,7 +383,23 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
     };
     for (const RoadGeometry* footprint : footprints)
     {
-        if (footprint->groundFootprints.empty()) addRim(footprint->outline);
+        if (footprint->groundFootprints.empty())
+        {
+            addRim(footprint->outline);
+            if (footprint->outline.size() >= 3)
+                for (const auto& hole : footprint->holes)
+                {
+                    if (hole.size() < 3) continue;
+                    auto& indices = outline.polygons.back().holes.emplace_back();
+                    auto previous = hole.back();
+                    for (auto point : hole)
+                    {
+                        indices.push_back(outline.AddPoint(point));
+                        outline.AddEdge(previous, point);
+                        previous = point;
+                    }
+                }
+        }
         else for (const auto& contact : footprint->groundFootprints)
         {
             addRim(contact.outline);

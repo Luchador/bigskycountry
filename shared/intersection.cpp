@@ -173,7 +173,7 @@ namespace
     // The skewed mouths can put the junction center outside a corner's
     // visibility region. Triangulate the entire inner curb boundary in XZ.
     void FillPavement(IntersectionSurface& surface, const std::vector<Vector3>& rim,
-                      const std::array<Vector3, sides>& axes)
+                      const std::array<Vector3, sides>& axes, const std::vector<Vector3>& hole = {})
     {
         std::vector<CDT::V2d<double>> vertices;
         std::vector<CDT::Edge> edges;
@@ -192,6 +192,14 @@ namespace
             const auto local = positions[i] - surface.layout.center;
             vertices.push_back({local.x, local.z});
             edges.emplace_back(i, (i + 1) % vertexCount);
+        }
+        const auto offset = static_cast<CDT::VertInd>(vertices.size());
+        const auto holeCount = static_cast<CDT::VertInd>(hole.size());
+        for (CDT::VertInd i = 0; i < holeCount; ++i)
+        {
+            const auto local = hole[i] - surface.layout.center;
+            vertices.push_back({local.x, local.z});
+            edges.emplace_back(offset + i, offset + (i + 1) % holeCount);
         }
         CDT::RemoveDuplicatesAndRemapEdges(vertices, edges);
         CDT::Triangulation<double> mesh(CDT::VertexInsertionOrder::Auto, CDT::IntersectingConstraintEdges::TryResolve, 0.0);
@@ -216,9 +224,9 @@ namespace
 
     ApproachFrame Frame(const IntersectionLayout& layout, int side)
     {
-        const Vector3 nominal = Intersection::Directions(layout.yaw)[side];
-        const Vector3 forward = Intersection::Directions(layout.yaw + layout.skew[side])[side];
-        return {layout.center + nominal * Intersection::anchorDistance, forward, Math::Cross(forward, up)};
+        const Vector3 nominal = Intersection::Directions(layout.yaw, layout.shape)[side];
+        const Vector3 forward = Intersection::Directions(layout.yaw + layout.skew[side], layout.shape)[side];
+        return {layout.center + nominal * layout.AnchorDistance(), forward, Math::Cross(forward, up)};
     }
 
     struct Corner
@@ -263,10 +271,124 @@ namespace
         do { side = (side + 1) % sides; } while (!layout.arms[side]);
         return side;
     }
+
+    // Fit a triangular island inside the junction, reserving a full approach
+    // width around it. Test finite boundary segments: extending the tangent
+    // lines of a concave Y would incorrectly eliminate the center of the island.
+    std::vector<Vector3> BuildIsland(IntersectionSurface& surface, const std::vector<Vector3>& pavement,
+                                     const std::array<Vector3, sides>& axes)
+    {
+        const auto& layout = surface.layout;
+        if (layout.shape != IntersectionShape::Y || !layout.island || pavement.size() < 3) return {};
+        double clearance = RoadStyle::laneWidth;
+        const IntersectionApproach* approach = nullptr;
+        for (const auto& arm : layout.arms)
+        {
+            if (!arm) continue;
+            clearance = std::max(clearance, arm->left + arm->right);
+            if (!approach || arm->edge == RoadEdge::Curb || (approach->edge == RoadEdge::None && arm->edge != RoadEdge::None))
+                approach = &*arm;
+        }
+        if (!approach) return {};
+        const auto profile = Profile(approach->edge);
+        const double distance = clearance + profile.Width();
+        const Vector3 center = layout.center;
+        std::vector<Vector3> boundary;
+        for (auto p : pavement) boundary.push_back(p - center);
+        const auto inside = [&](Vector3 p)
+        {
+            bool result = false;
+            auto a = boundary.back();
+            for (auto b : boundary)
+            {
+                if ((a.z > p.z) != (b.z > p.z) && p.x < (b.x - a.x) * (p.z - a.z) / (b.z - a.z) + a.x) result = !result;
+                a = b;
+            }
+            return result;
+        };
+        const auto pointDistance = [](Vector3 p, Vector3 a, Vector3 b)
+        {
+            const auto d = b - a;
+            const double length = Math::Dot(d, d);
+            return Math::Length(p - (a + d * (length > 1e-16 ? std::clamp(Math::Dot(p - a, d) / length, 0.0, 1.0) : 0)));
+        };
+        const auto segmentDistance = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            const auto turn = [](Vector3 p, Vector3 q, Vector3 r) { return Math::Cross(q - p, r - p).y; };
+            if (turn(a,b,c) * turn(a,b,d) < 0 && turn(c,d,a) * turn(c,d,b) < 0) return 0.0;
+            return std::min({pointDistance(a,c,d), pointDistance(b,c,d), pointDistance(c,a,b), pointDistance(d,a,b)});
+        };
+        const auto nominal = Intersection::Directions(layout.yaw, layout.shape);
+        std::vector<Vector3> polygon{nominal[0] * layout.size, nominal[2] * layout.size, nominal[3] * layout.size};
+        const auto fits = [&](double scale)
+        {
+            for (std::size_t i = 0; i < polygon.size(); ++i)
+            {
+                const auto a = polygon[i] * scale, b = polygon[(i + 1) % polygon.size()] * scale;
+                if (!inside(a)) return false;
+                for (std::size_t j = 0; j < boundary.size(); ++j)
+                    if (segmentDistance(a,b,boundary[j],boundary[(j + 1) % boundary.size()]) < distance) return false;
+            }
+            return true;
+        };
+        if (!fits(0)) return {};
+        double low = 0, high = 1;
+        for (int i = 0; i < 32; ++i)
+        {
+            const double middle = (low + high) * .5;
+            if (fits(middle)) low = middle;
+            else high = middle;
+        }
+        if (low * layout.size < 1.0) return {};
+        for (auto& point : polygon) point = point * low;
+
+        // Round the convex land boundary, then reverse it to keep pavement on
+        // the left, matching the winding of the outer curb/transition strips.
+        std::vector<Vector3> rounded;
+        for (std::size_t i = 0; i < polygon.size(); ++i)
+        {
+            const auto a = polygon[(i + polygon.size() - 1) % polygon.size()], b = polygon[i], c = polygon[(i + 1) % polygon.size()];
+            const double ab = Math::Length(a - b), cb = Math::Length(c - b);
+            if (ab < 1e-6 || cb < 1e-6) continue;
+            const double cut = std::min({layout.radius, ab * .25, cb * .25});
+            const auto start = b + (a - b) * (cut / ab), end = b + (c - b) * (cut / cb);
+            const int intervals = cut > 1e-4 ? 6 : 1;
+            for (int k = 0; k <= intervals; ++k)
+            {
+                const double t = double(k) / intervals, u = 1 - t;
+                const auto point = center + start * (u * u) + b * (2 * u * t) + end * (t * t);
+                if (rounded.empty() || Math::Length(point - rounded.back()) > 1e-7) rounded.push_back(point);
+            }
+        }
+        if (rounded.size() < 3) return {};
+        std::reverse(rounded.begin(), rounded.end());
+        std::vector<Rim> rims;
+        std::vector<Vector3> hole, land;
+        for (std::size_t i = 0; i < rounded.size(); ++i)
+        {
+            const auto previous = rounded[(i + rounded.size() - 1) % rounded.size()], next = rounded[(i + 1) % rounded.size()];
+            const auto normal = Math::Normalize(Math::Cross(up, next - previous));
+            rims.push_back(Section(rounded[i], normal, profile, profile, 0));
+            hole.push_back(rims.back().p[0]);
+            land.push_back(rims.back().p.back());
+        }
+        for (std::size_t i = 0; i < rims.size(); ++i)
+            Join(surface, rims[i], rims[(i + 1) % rims.size()], *approach, axes);
+        surface.geometry.holes.push_back(std::move(land));
+        return hole;
+    }
 }
 
-std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(double yaw)
+std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(double yaw, IntersectionShape shape)
 {
+    if (shape == IntersectionShape::Y)
+    {
+        auto axes = Directions(yaw);
+        axes[0] = Directions(yaw - std::numbers::pi / 6)[0];
+        axes[2] = Directions(yaw + std::numbers::pi / 6)[2];
+        axes[1] = {}; // The fourth socket is deliberately unavailable.
+        return axes;
+    }
     if (yaw == 0) return IntersectionAnchor::directions;
     const double c = std::cos(yaw), s = std::sin(yaw);
     return {{{c, 0, -s}, {s, 0, c}, {-c, 0, s}, {-s, 0, -c}}};
@@ -274,8 +396,8 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(doub
 
 std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions() const
 {
-    auto anchors = Directions(yaw);
-    for (auto& anchor : anchors) anchor = position + anchor * anchorDistance;
+    auto anchors = Directions(yaw, shape);
+    for (auto& anchor : anchors) anchor = position + anchor * AnchorDistance();
     return anchors;
 }
 
@@ -310,7 +432,7 @@ IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first
 RoadMouth IntersectionSurface::Mouth(int side) const
 {
     const auto frame = Frame(layout, side);
-    return {frame.anchor, frame.anchor + frame.forward * (setbacks[side] - Intersection::anchorDistance), frame.forward};
+    return {frame.anchor, frame.anchor + frame.forward * (setbacks[side] - layout.AnchorDistance()), frame.forward};
 }
 
 void IntersectionSurface::Build(const IntersectionLayout& input)
@@ -319,7 +441,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     const auto directions = Intersection::Directions(layout.yaw);
     geometry = {};
     geometry.MarkRebuilt();
-    setbacks.fill(Intersection::anchorDistance);
+    setbacks.fill(layout.AnchorDistance());
+    if (layout.shape == IntersectionShape::Y) layout.arms[1].reset();
     std::array<ApproachFrame, sides> frames;
     std::array<std::optional<Corner>, sides> corners;
     for (int i = 0; i < sides; ++i) frames[i] = Frame(layout, i);
@@ -329,7 +452,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     // Authoring anchors stay fixed; rendered cuts are normal to the approach.
     for (int i = 0; i < sides; ++i)
     {
-        if (!layout.arms[i]) continue;
+        if (!layout.arms[i] || layout.shape == IntersectionShape::Y) continue;
         const int j = NextArm(layout, i);
         if (j == i) continue;
         const auto& a = *layout.arms[i];
@@ -405,8 +528,10 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
             const Vector3 p = start - frameA.forward * handle, q = end - frameB.forward * handle;
             const bool straight = Math::Dot(frameA.forward, frameB.forward) < -1 + 1e-12 &&
                                   std::abs(Math::Dot(end - start, frameA.left)) < 1e-8;
+            const int curveIntervals = layout.shape == IntersectionShape::Y ?
+                std::clamp(static_cast<int>(std::ceil(Math::Length(end - start) / 3)), cornerIntervals, 256) : cornerIntervals;
             const int intervals = straight && a.edge == b.edge ?
-                (a.transitionMaterial == b.transitionMaterial ? 1 : 2) : cornerIntervals;
+                (a.transitionMaterial == b.transitionMaterial ? 1 : 2) : curveIntervals;
             for (int k = 1; k <= intervals; ++k)
             {
                 const double t = static_cast<double>(k) / intervals, u = 1 - t;
@@ -419,7 +544,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         }
     }
 
-    FillPavement(*this, pavementRim, directions);
+    const auto hole = BuildIsland(*this, pavementRim, directions);
+    FillPavement(*this, pavementRim, directions, hole);
     ContinuePaint(*this);
     for (int i = 0; i < sides; ++i)
     {

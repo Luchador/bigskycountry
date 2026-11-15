@@ -55,6 +55,9 @@ struct PropertiesInspector
     bool materialSlot = false, invincible = false;
     bool stopLine = false;
     double radius = 0;
+    bool yIntersection = false, island = false;
+    double intersectionSize = 60;
+    std::string IntersectionSizeText() const;
     IntersectionPaint intersectionPaint = IntersectionPaint::Standard;
     bool operator==(const PropertiesInspector&) const = default;
 };

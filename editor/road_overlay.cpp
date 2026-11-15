@@ -375,17 +375,19 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
         const bool selected = selection.GeometrySelected({SceneKind::Intersection, id});
         if (group && selected && !world.IntersectionSurfaces().contains(id))
         {
-            // Until the junction has pavement, outline its four authoring anchors.
+            // Until the junction has pavement, outline its active authoring anchors.
             auto previous = camera.WorldToView(anchors.back());
-            for (Vector3 anchor : anchors)
+            for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
             {
-                const auto next = camera.WorldToView(anchor);
+                if (!item.HasAnchor(side)) continue;
+                const auto next = camera.WorldToView(anchors[side]);
                 stroke.Draw(renderer, previous, next, EditorColors::orange);
                 previous = next;
             }
         }
         for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
         {
+            if (!item.HasAnchor(side)) continue;
             if (const auto anchor = PointPlacement(anchors[side], camera, scene))
             {
                 const bool active = selection.AnchorHighlighted({id, side});
@@ -474,6 +476,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
             if (world.hierarchy.EditorHidden({SceneKind::Intersection, id})) continue;
             for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
             {
+                if (!item.HasAnchor(side)) continue;
                 const auto placement = PointPlacement(item.AnchorPosition(side), camera, scene);
                 if (placement && picker.TestMesh(Marker(*placement))) hit = {RoadPickKind::Intersection, id, side};
             }

@@ -302,6 +302,10 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.page = PropertiesPage::Intersection;
         result.title = "Intersection " + std::to_string(target.index);
         result.radius = item.cornerRadius;
+        result.yIntersection = item.shape == IntersectionShape::Y;
+        result.island = item.island;
+        result.intersectionSize = item.size;
+        if (result.yIntersection) result.title = "Y-intersection " + std::to_string(target.index);
         result.intersectionPaint = item.paint;
         result.material = item.material;
         result.materialSlot = true;
@@ -311,7 +315,8 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         static constexpr std::array names{"Local +X anchor", "Local +Z anchor", "Local -X anchor", "Local -Z anchor"};
         result.page = PropertiesPage::Anchor;
         result.title = "Intersection " + std::to_string(target.index);
-        result.detail = names.at(target.point);
+        result.detail = world.intersections.at(target.index).shape == IntersectionShape::Y ?
+            (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : names.at(target.point);
         result.stopLine = world.intersections.at(target.index).stopLines.test(target.point);
     }
     else if (target.kind == SelectionKind::Terrain)
@@ -348,4 +353,11 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Properties";
     }
     return result;
+}
+
+std::string PropertiesInspector::IntersectionSizeText() const
+{
+    char text[48];
+    SDL_snprintf(text, sizeof(text), "%.2f", intersectionSize);
+    return text;
 }

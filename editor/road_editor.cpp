@@ -341,6 +341,12 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
             {Action::LargerRadius, {174, 73, 32, 28}, "+"},
             {Action::ChooseIntersectionPaint, {12, 210, 194, 28}, labels.at(static_cast<int>(properties.intersectionPaint))}};
 #ifndef _WIN32
+        if (properties.yIntersection)
+        {
+            buttons.pop_back();
+            buttons.push_back({Action::ToggleIntersectionIsland, {12, 250, 194, 28}, "Central island", properties.island});
+            return buttons;
+        }
         if (intersectionPaintOpen)
         {
             buttons.push_back({Action::StandardIntersectionPaint, {12, 240, 194, 28}, "Standard", properties.intersectionPaint == IntersectionPaint::Standard});
@@ -636,9 +642,10 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         }
         return;
     }
-    if (command == EditorCommand::CreateIntersection)
+    if (command == EditorCommand::CreateIntersection || command == EditorCommand::CreateYIntersection)
     {
-        if (roadMenuTarget)
+        const bool yJunction = command == EditorCommand::CreateYIntersection;
+        if (roadMenuTarget && !yJunction)
         {
             auto target = std::move(*roadMenuTarget);
             roadMenuTarget.reset();
@@ -656,6 +663,8 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         EditSnapshot before(state);
         const int id = world.CreateIntersection(creationPoint);
         if (!id) { status = SDL_GetError(); return; }
+        roadMenuTarget.reset();
+        if (yJunction) world.intersections.at(id).shape = IntersectionShape::Y;
         before.junction = EditSnapshot::Junction{id, {}};
         state.SelectRows({{SceneKind::Intersection, id}});
         EditSnapshot after(state);
@@ -955,6 +964,7 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
     case Action::StandardIntersectionPaint:
     case Action::NorthSouthIntersectionPaint:
     case Action::EastWestIntersectionPaint:
+    case Action::ToggleIntersectionIsland:
     case Action::ToggleStopLine:
     case Action::SmallerRadius:
     case Action::LargerRadius:
@@ -969,6 +979,7 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         intersectionPaintOpen = false;
 #endif
         if (editAnchor) item.stopLines.flip(target.point);
+        else if (action == Action::ToggleIntersectionIsland) item.island = !item.island;
         else if (action == Action::StandardIntersectionPaint) item.paint = IntersectionPaint::Standard;
         else if (action == Action::NorthSouthIntersectionPaint) item.paint = IntersectionPaint::NorthSouth;
         else if (action == Action::EastWestIntersectionPaint) item.paint = IntersectionPaint::EastWest;
@@ -1184,6 +1195,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         }
         for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
         {
+            if (!item.HasAnchor(side)) continue;
             const auto p = ToScreen(item.AnchorPosition(side));
             const float distance = std::hypot(p.x - x, p.y - y);
             if (distance < best)
@@ -1699,14 +1711,16 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
         const bool selected = GeometrySelected({SceneKind::Intersection, id});
         if (group && selected && !world.IntersectionSurfaces().contains(id))
         {
-            std::array<SDL_FPoint, IntersectionAnchor::sideCount + 1> perimeter;
-            std::transform(anchors.begin(), anchors.end(), perimeter.begin(), [&](Vector3 p) { return ToScreen(p); });
-            perimeter.back() = perimeter.front();
+            std::vector<SDL_FPoint> perimeter;
+            for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+                if (item.HasAnchor(side)) perimeter.push_back(ToScreen(anchors[side]));
+            perimeter.push_back(perimeter.front());
             if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange)) ||
                 !SDL_RenderLines(renderer, perimeter.data(), static_cast<int>(perimeter.size()))) return false;
         }
         for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
         {
+            if (!item.HasAnchor(side)) continue;
             const bool active = state.AnchorHighlighted({id, side});
             if (!drawPoint(ToScreen(anchors[side]), 5.0f, active ? amber : blue)) return false;
         }
@@ -1877,9 +1891,14 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                SDL_RenderDebugTextFormat(renderer, 77, 121, "%.2f", bed.height);
     }
     if (properties.page == PropertiesPage::Intersection)
-        return Text(renderer, 12, 48, "Corner radius (m)", muted) &&
-               Text(renderer, 12, 192, "Continue paint markings", muted) &&
-               SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius);
+    {
+        if (!Text(renderer, 12, 48, properties.yIntersection ? "Island corner radius (m)" : "Corner radius (m)", muted) ||
+            !SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius)) return false;
+        if (!properties.yIntersection) return Text(renderer, 12, 192, "Continue paint markings", muted);
+        return Text(renderer, 12, 192, "Size: center to anchor (m)", muted) &&
+               transformPanel.DrawField(renderer, {12, 210, 194, 28}, state.Target(), InspectorEdit::intersectionSize, properties.IntersectionSizeText(), true) &&
+               Text(renderer, 12, 290, "F: fill central island", muted);
+    }
     if (properties.page != PropertiesPage::Road)
         return Text(renderer, 12, 48, properties.detail.c_str(), muted);
     if (!Text(renderer, 12, roadNamesBox.y - 15, "Road names", muted) ||
@@ -2022,7 +2041,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     if (properties.page != PropertiesPage::Intersection || intersectionPaintOwner != state.Target().index)
         intersectionPaintOpen = false;
     intersectionPaintOwner = properties.page == PropertiesPage::Intersection ? state.Target().index : -1;
-    const int contentHeight = properties.page == PropertiesPage::Intersection ? (intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
+    const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
         properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
@@ -2209,10 +2228,10 @@ void RoadEditor::FinishAnchorRoad(WorldDocument& world)
 void RoadEditor::FillSelection(WorldDocument& world)
 {
     TerrainBoundary boundary;
-    for (SceneKey key : state.outlineSelection)
+    for (SceneKey key : state.SelectedRows())
     {
         if (key.kind == SceneKind::Road) boundary.roads.insert(world.roads.at(key.index).id);
-        else boundary.intersections.insert(key.index);
+        else if (key.kind == SceneKind::Intersection) boundary.intersections.insert(key.index);
     }
     for (std::size_t i = 0; i < world.Terrain().size(); ++i)
     {
@@ -2728,7 +2747,7 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
     Release(world);
     if (cmd.op == OutlineOp::FillTerrain)
     {
-        if (state.RoadGroupSelected() && state.outlineSelection == cmd.items) FillSelection(world);
+        if ((state.RoadGroupSelected() || state.Target().kind == SelectionKind::Intersection) && state.SelectedRows() == cmd.items) FillSelection(world);
     }
     else if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object ||
              cmd.target.kind == SceneKind::Intersection || cmd.target.kind == SceneKind::Terrain))
@@ -2754,6 +2773,44 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
+    if (edit.field == InspectorEdit::intersectionSize)
+    {
+        if (edit.target.kind != SelectionKind::Intersection) return;
+        const auto value = ParseTransformValue(edit.text);
+        auto& junction = world.intersections.at(edit.target.index);
+        if (junction.shape != IntersectionShape::Y) return;
+        if (!value || *value < Intersection::minSize || *value > Intersection::maxSize)
+        {
+            status = "Y-intersection size must be between 10 and 2000 meters";
+            return;
+        }
+        if (*value == junction.size) return;
+        EditSnapshot before(state);
+        before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
+        auto next = *before.roadGroup;
+        next.junctions.at(edit.target.index).size = *value;
+        for (const auto& end : world.ConnectedEnds(edit.target.index))
+        {
+            auto& points = next.roads.at(static_cast<int>(end.road)).points;
+            auto& point = end.first ? points.front() : points.back();
+            const auto& item = next.junctions.at(edit.target.index);
+            point.position = item.AnchorPosition(end.anchor.side);
+        }
+        for (const auto& end : world.ConnectedEnds(edit.target.index))
+        {
+            const auto& points = next.roads.at(static_cast<int>(end.road)).points;
+            const auto a = (end.first ? points.front() : points.back()).position;
+            const auto b = points[end.first ? 1 : points.size() - 2].position;
+            if (!ValidRoadSpan(world.roads[end.road], a, b) || Math::Dot(b - a, junction.ApproachDirection(end.anchor.side)) < Road::minPointSpacing)
+            {
+                status = "Move the adjoining road control points farther out before increasing the intersection size";
+                return;
+            }
+        }
+        next.Restore(world);
+        CommitTransform(world, std::move(before));
+        return;
+    }
     if (edit.field == InspectorEdit::bridgeDepth)
     {
         if (EditingDraft() || state.selected < 0 || state.segments.empty()) return;
@@ -3279,7 +3336,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (!event.key.repeat && drag == Drag::None)
         {
             if (!state.groupEndpoints.empty()) ConnectRoads(world);
-            else if (state.RoadGroupSelected()) FillSelection(world);
+            else if (state.RoadGroupSelected() || state.Target().kind == SelectionKind::Intersection) FillSelection(world);
             else ConnectEndpoint(world);
         }
         return EditorEvent::Handled;
@@ -3526,6 +3583,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 }
                 const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
+                const SDL_FRect intersectionSizeBox{12, 210, 194, 28};
+                if (properties.page == PropertiesPage::Intersection && properties.yIntersection && SDL_PointInRectFloat(&local, &intersectionSizeBox))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::intersectionSize, properties.IntersectionSizeText());
+                    return EditorEvent::Handled;
+                }
                 const auto deadEndBox = DeadEndBox(properties);
                 if (properties.HasRoadDetail() && SDL_PointInRectFloat(&local, &deadEndBox))
                 {

@@ -5,6 +5,7 @@
 #include <bitset>
 
 enum class IntersectionPaint { Standard, NorthSouth, EastWest };
+enum class IntersectionShape { Standard, Y };
 
 // Authoring data for a flat junction. Its center is at world elevation position.y.
 struct Intersection
@@ -20,9 +21,15 @@ struct Intersection
     bool pavedThrough = false; // Keep pavement between opposite arms of an intersection inserted in a road.
     static constexpr double maxSkew = Math::DegreesToRadians(45.0);
     std::array<double, IntersectionAnchor::sideCount> skew{}; // Per-anchor yaw relative to its nominal outward axis.
-    Vector3 ApproachDirection(int side) const { return Directions(yaw + skew.at(side)).at(side); }
-    static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw);
-    Vector3 AnchorPosition(int side) const { return position + Directions(yaw).at(side) * anchorDistance; }
+    IntersectionShape shape = IntersectionShape::Standard;
+    double size = 60.0; // Y: center to each anchor, in meters; lane widths are not scaled.
+    bool island = true;
+    static constexpr double minSize = 10.0, maxSize = 2000.0;
+    bool HasAnchor(int side) const { return side >= 0 && side < IntersectionAnchor::sideCount && (shape != IntersectionShape::Y || side != 1); }
+    double AnchorDistance() const { return shape == IntersectionShape::Y ? size : anchorDistance; }
+    Vector3 ApproachDirection(int side) const { return Directions(yaw + skew.at(side), shape).at(side); }
+    static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw, IntersectionShape shape = IntersectionShape::Standard);
+    Vector3 AnchorPosition(int side) const { return position + Directions(yaw, shape).at(side) * AnchorDistance(); }
     std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;
 
     bool operator==(const Intersection&) const = default;
@@ -53,6 +60,10 @@ struct IntersectionLayout
     IntersectionPaint paint = IntersectionPaint::Standard;
     double yaw = 0;
     std::array<double, IntersectionAnchor::sideCount> skew{};
+    IntersectionShape shape = IntersectionShape::Standard;
+    double size = 60.0;
+    bool island = true;
+    double AnchorDistance() const { return shape == IntersectionShape::Y ? size : Intersection::anchorDistance; }
     bool operator==(const IntersectionLayout&) const = default;
 };
 

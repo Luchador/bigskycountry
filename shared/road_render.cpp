@@ -26,22 +26,28 @@ namespace
             return;
         }
         const auto sides = SidePlanes(focal, viewport);
-        Vector3 previous = transform(road.outline.back());
-        for (Vector3 point : road.outline)
+        const auto draw = [&](const auto& rim)
         {
-            Vector3 a = previous;
-            previous = transform(point);
-            Vector3 b = previous;
-            const auto stroke = ViewGeometry::ProjectStroke(a, b, sides, focal, viewport, worldNearDepth, 1.5f);
-            if (!stroke)
+            if (rim.empty()) return;
+            Vector3 previous = transform(rim.back());
+            for (Vector3 point : rim)
             {
-                continue;
+                Vector3 a = previous;
+                previous = transform(point);
+                Vector3 b = previous;
+                const auto stroke = ViewGeometry::ProjectStroke(a, b, sides, focal, viewport, worldNearDepth, 1.5f);
+                if (!stroke)
+                {
+                    continue;
+                }
+                for (int i : {0, 1, 2, 0, 2, 3})
+                {
+                    emit(stroke->corners[i], i < 2 ? stroke->startDepth : stroke->endDepth);
+                }
             }
-            for (int i : {0, 1, 2, 0, 2, 3})
-            {
-                emit(stroke->corners[i], i < 2 ? stroke->startDepth : stroke->endDepth);
-            }
-        }
+        };
+        draw(road.outline);
+        for (const auto& hole : road.holes) draw(hole);
     }
 
     template<typename Vertex, typename Transform, typename ClipPlane, typename Emit>

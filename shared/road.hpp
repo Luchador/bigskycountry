@@ -170,6 +170,7 @@ struct RoadGeometry
     ColoredSurface edgeTriangles; // Vertex-colored outer edges and median surfaces.
     ColoredSurface bridgeTriangles; // Underside, abutments and ground under a span; excluded from the 2D overlay.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
+    std::vector<std::vector<Vector3>> holes; // Interior terrain boundaries (e.g. a Y-intersection island).
     struct CrossingSlab
     {
         std::vector<Vector3> outline; // Additional footprint, wider than the road at the crossing.

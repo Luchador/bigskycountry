@@ -79,7 +79,7 @@ void WorldDocument::RefreshTerrainFills()
 
 TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool allowOpen)
 {
-    if (boundary.roads.empty() || *boundary.roads.begin() <= 0 ||
+    if ((boundary.roads.empty() && boundary.intersections.empty()) || (!boundary.roads.empty() && *boundary.roads.begin() <= 0) ||
         (!boundary.intersections.empty() && *boundary.intersections.begin() <= 0))
     {
         SDL_SetError("Select the roads and intersections around the area to fill");
@@ -106,7 +106,10 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
             return nullptr;
         }
     }
-    lastRoadId = std::max(lastRoadId, *chunk->boundary->roads.rbegin());
+    if (!folder)
+        for (int id : chunk->boundary->intersections)
+            if ((folder = hierarchy.Parent({SceneKind::Intersection, id}))) break;
+    if (!chunk->boundary->roads.empty()) lastRoadId = std::max(lastRoadId, *chunk->boundary->roads.rbegin());
     terrainRevision = 0;
     const SceneKey key{SceneKind::Terrain, static_cast<int>(terrain.size())};
     auto& placed = terrain.emplace_back(std::move(chunk));

@@ -171,7 +171,7 @@ void WindowsOutliner::Sync(const SceneOutliner& data)
 bool WindowsOutliner::QueueTerrainFill(bool repeat)
 {
     auto keys = Selected();
-    if (!IsRoadGroup(keys)) return false;
+    if (!IsRoadGroup(keys) && !(keys.size() == 1 && keys.begin()->kind == SceneKind::Intersection)) return false;
     if (!repeat) Queue({OutlineOp::FillTerrain, {}, std::move(keys)});
     return true;
 }
