@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <limits>
 #include <utility>
 
 namespace
@@ -272,9 +273,118 @@ namespace
         return side;
     }
 
-    // Fit a triangular island inside the junction, reserving a full approach
-    // width around it. Test finite boundary segments: extending the tangent
-    // lines of a concave Y would incorrectly eliminate the center of the island.
+    struct IslandEdge
+    {
+        Vector3 a, b, tangent, normal;
+        double length;
+        IslandEdge(Vector3 start, Vector3 end) : a(start), b(end), length(Math::Length(end - start))
+        {
+            tangent = length > 1e-10 ? (b - a) * (1 / length) : Vector3{1, 0, 0};
+            normal = Math::Cross(tangent, up);
+        }
+
+        double DistanceSquared(Vector3 p) const
+        {
+            const auto d = p - (a + tangent * std::clamp(Math::Dot(p - a, tangent), 0.0, length));
+            return Math::Dot(d, d);
+        }
+
+        double DistanceSquared(const IslandEdge& other) const
+        {
+            const auto turn = [](Vector3 p, Vector3 q, Vector3 r) { return Math::Cross(q - p, r - p).y; };
+            if (turn(a,b,other.a) * turn(a,b,other.b) < 0 && turn(other.a,other.b,a) * turn(other.a,other.b,b) < 0) return 0;
+            return std::min({DistanceSquared(other.a), DistanceSquared(other.b), other.DistanceSquared(a), other.DistanceSquared(b)});
+        }
+
+        // Intersection of a positive ray from the origin with the capsule
+        // around this finite edge. The rectangle and two end discs cover it.
+        std::array<double, 2> Ray(Vector3 direction, double radius) const
+        {
+            const double infinity = std::numeric_limits<double>::infinity();
+            std::array result{infinity, -infinity};
+            const auto include = [&](double first, double last)
+            {
+                if (last < 0 || first > last) return;
+                result[0] = std::min(result[0], std::max(0.0, first));
+                result[1] = std::max(result[1], last);
+            };
+            double first = 0, last = infinity;
+            const auto clip = [&](Vector3 axis, double low, double high)
+            {
+                const double slope = Math::Dot(direction, axis);
+                if (std::abs(slope) < 1e-12) return low <= 0 && high >= 0;
+                double x = low / slope, y = high / slope;
+                if (x > y) std::swap(x, y);
+                first = std::max(first, x);
+                last = std::min(last, y);
+                return first <= last;
+            };
+            const double along = Math::Dot(a, tangent), across = Math::Dot(a, normal);
+            if (clip(tangent, along, along + length) && clip(normal, across - radius, across + radius)) include(first, last);
+            for (Vector3 end : {a, b})
+            {
+                const double projection = Math::Dot(end, direction);
+                const double discriminant = radius * radius - (Math::Dot(end, end) - projection * projection);
+                if (discriminant < 0) continue;
+                const double root = std::sqrt(discriminant);
+                include(projection - root, projection + root);
+            }
+            return result;
+        }
+    };
+
+    std::vector<IslandEdge> IslandEdges(const std::vector<Vector3>& polygon)
+    {
+        std::vector<IslandEdge> edges;
+        for (std::size_t i = 0; i < polygon.size(); ++i)
+            if (Math::Length(polygon[i] - polygon[(i + 1) % polygon.size()]) > 1e-7)
+                edges.emplace_back(polygon[i], polygon[(i + 1) % polygon.size()]);
+        return edges;
+    }
+
+    template<typename Radius>
+    std::vector<Vector3> IslandContour(const std::vector<IslandEdge>& boundary, double clearance, Radius radius)
+    {
+        // Refine only curved portions and noses, rather than adding hundreds
+        // of points to long straight sides. Check every chord, not just samples,
+        // so tessellation cannot narrow the pavement along a concave side.
+        constexpr double chordError = .03;
+        const double minimumSquared = clearance * clearance;
+        const auto at = [&](double angle)
+        {
+            const Vector3 direction{std::cos(angle), 0, std::sin(angle)};
+            return direction * radius(direction);
+        };
+        const auto safe = [&](const IslandEdge& chord)
+        {
+            return std::ranges::all_of(boundary, [&](const auto& edge) { return chord.DistanceSquared(edge) >= minimumSquared; });
+        };
+        std::vector<Vector3> result;
+        const auto trace = [&](auto&& self, double start, Vector3 a, double end, Vector3 b, int depth) -> bool
+        {
+            const double middle = (start + end) * .5;
+            const auto m = at(middle);
+            if (!std::isfinite(Math::Length(m)) || result.size() > 4096) return false;
+            const IslandEdge chord(a, b);
+            if (chord.DistanceSquared(m) > chordError * chordError || !safe(chord))
+            {
+                if (depth == 20) return false;
+                return self(self, start, a, middle, m, depth + 1) && self(self, middle, m, end, b, depth + 1);
+            }
+            if (result.empty() || Math::Length(a - result.back()) > 1e-7) result.push_back(a);
+            return true;
+        };
+        constexpr int intervals = 36;
+        for (int i = 0; i < intervals; ++i)
+        {
+            const double a = i * (2 * std::numbers::pi / intervals), b = (i + 1) * (2 * std::numbers::pi / intervals);
+            if (!trace(trace, a, at(a), b, at(b), 0)) return {};
+        }
+        return result;
+    }
+
+    // Inset the actual pavement boundary instead of shrinking a fixed triangle.
+    // Each side can expand independently, following skewed approach curves.
     std::vector<Vector3> BuildIsland(IntersectionSurface& surface, const std::vector<Vector3>& pavement,
                                      const std::array<Vector3, sides>& axes)
     {
@@ -306,60 +416,39 @@ namespace
             }
             return result;
         };
-        const auto pointDistance = [](Vector3 p, Vector3 a, Vector3 b)
+        if (!inside({})) return {};
+        const auto edges = IslandEdges(boundary);
+        if (edges.empty()) return {};
+        double available = std::numeric_limits<double>::infinity();
+        for (const auto& edge : edges) available = std::min(available, std::sqrt(edge.DistanceSquared({})));
+        constexpr double guard = .02; // Reserve numerical/tessellation clearance in meters.
+        if (available <= distance + guard) return {};
+        const double rounding = std::min(layout.radius, std::max(0.0, available - distance - guard - 1.0));
+        const auto inset = [&](Vector3 direction)
         {
-            const auto d = b - a;
-            const double length = Math::Dot(d, d);
-            return Math::Length(p - (a + d * (length > 1e-16 ? std::clamp(Math::Dot(p - a, d) / length, 0.0, 1.0) : 0)));
+            double result = std::numeric_limits<double>::infinity();
+            for (const auto& edge : edges) result = std::min(result, edge.Ray(direction, distance + rounding + guard)[0]);
+            return result;
         };
-        const auto segmentDistance = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        auto rounded = IslandContour(edges, distance + rounding + guard * .5, inset);
+        if (rounding > 1e-6 && rounded.size() >= 3)
         {
-            const auto turn = [](Vector3 p, Vector3 q, Vector3 r) { return Math::Cross(q - p, r - p).y; };
-            if (turn(a,b,c) * turn(a,b,d) < 0 && turn(c,d,a) * turn(c,d,b) < 0) return 0.0;
-            return std::min({pointDistance(a,c,d), pointDistance(b,c,d), pointDistance(c,a,b), pointDistance(d,a,b)});
-        };
-        const auto nominal = Intersection::Directions(layout.yaw, layout.shape);
-        std::vector<Vector3> polygon{nominal[0] * layout.size, nominal[2] * layout.size, nominal[3] * layout.size};
-        const auto fits = [&](double scale)
-        {
-            for (std::size_t i = 0; i < polygon.size(); ++i)
+            // Inset by the corner radius, then expand by that radius. This
+            // rounds the noses while keeping the island inside the safe inset.
+            const auto core = IslandEdges(rounded);
+            const auto expand = [&](Vector3 direction)
             {
-                const auto a = polygon[i] * scale, b = polygon[(i + 1) % polygon.size()] * scale;
-                if (!inside(a)) return false;
-                for (std::size_t j = 0; j < boundary.size(); ++j)
-                    if (segmentDistance(a,b,boundary[j],boundary[(j + 1) % boundary.size()]) < distance) return false;
-            }
-            return true;
-        };
-        if (!fits(0)) return {};
-        double low = 0, high = 1;
-        for (int i = 0; i < 32; ++i)
-        {
-            const double middle = (low + high) * .5;
-            if (fits(middle)) low = middle;
-            else high = middle;
+                double result = 0;
+                for (const auto& edge : core) result = std::max(result, edge.Ray(direction, rounding)[1]);
+                return result;
+            };
+            rounded = IslandContour(edges, distance + guard * .25, expand);
         }
-        if (low * layout.size < 1.0) return {};
-        for (auto& point : polygon) point = point * low;
-
-        // Round the convex land boundary, then reverse it to keep pavement on
-        // the left, matching the winding of the outer curb/transition strips.
-        std::vector<Vector3> rounded;
-        for (std::size_t i = 0; i < polygon.size(); ++i)
-        {
-            const auto a = polygon[(i + polygon.size() - 1) % polygon.size()], b = polygon[i], c = polygon[(i + 1) % polygon.size()];
-            const double ab = Math::Length(a - b), cb = Math::Length(c - b);
-            if (ab < 1e-6 || cb < 1e-6) continue;
-            const double cut = std::min({layout.radius, ab * .25, cb * .25});
-            const auto start = b + (a - b) * (cut / ab), end = b + (c - b) * (cut / cb);
-            const int intervals = cut > 1e-4 ? 6 : 1;
-            for (int k = 0; k <= intervals; ++k)
-            {
-                const double t = double(k) / intervals, u = 1 - t;
-                const auto point = center + start * (u * u) + b * (2 * u * t) + end * (t * t);
-                if (rounded.empty() || Math::Length(point - rounded.back()) > 1e-7) rounded.push_back(point);
-            }
-        }
+        double area = 0;
+        for (std::size_t i = 0; i < rounded.size(); ++i)
+            area -= Math::Cross(rounded[i], rounded[(i + 1) % rounded.size()]).y;
+        if (area < 2.0) return {}; // No slivers smaller than a square meter.
+        for (auto& point : rounded) point = point + center;
         if (rounded.size() < 3) return {};
         std::reverse(rounded.begin(), rounded.end());
         std::vector<Rim> rims;
