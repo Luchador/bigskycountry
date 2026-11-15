@@ -51,25 +51,62 @@ namespace
             Face(out, q[3], q[2], q[0], concrete);
         }
     }
+    void SampleGroundRim(Vector3 p, std::span<const Vector3> rim, double& best, double& height)
+    {
+        for (std::size_t i = 0; i < rim.size(); ++i)
+        {
+            const auto a = rim[i], b = rim[(i + 1) % rim.size()], d = b - a;
+            const double length = d.x * d.x + d.z * d.z;
+            const double t =
+                length > 1e-16 ? std::clamp(((p.x - a.x) * d.x + (p.z - a.z) * d.z) / length, 0.0, 1.0) : 0;
+            const auto q = a + d * t;
+            const double distance = std::hypot(p.x - q.x, p.z - q.z);
+            if (distance < best)
+            {
+                best = distance;
+                height = q.y;
+            }
+        }
+    }
     double GroundHeight(Vector3 p, const std::map<int, Rim>& sources, double fallback)
     {
         double best = std::numeric_limits<double>::infinity(), height = fallback;
         for (const auto& [id, rim] : sources)
-            for (std::size_t i = 0; i < rim.size(); ++i)
-            {
-                const auto a = rim[i], b = rim[(i + 1) % rim.size()], d = b - a;
-                const double length = d.x * d.x + d.z * d.z;
-                const double t =
-                    length > 1e-16 ? std::clamp(((p.x - a.x) * d.x + (p.z - a.z) * d.z) / length, 0.0, 1.0) : 0;
-                const auto q = a + d * t;
-                const double distance = std::hypot(p.x - q.x, p.z - q.z);
-                if (distance < best)
-                {
-                    best = distance;
-                    height = q.y;
-                }
-            }
+            SampleGroundRim(p, rim, best, height);
         return height;
+    }
+    double GroundHeight(Vector3 p, std::span<const Vector3> rim, double fallback)
+    {
+        double best = std::numeric_limits<double>::infinity(), height = fallback;
+        SampleGroundRim(p, rim, best, height);
+        return height;
+    }
+    std::vector<Rim> ClearancePaths(const Road& lower)
+    {
+        if (lower.style.railroad)
+        {
+            // Use the generated rail-head sweep rather than the authored spline
+            // at the embankment toe. Both edges of both heads account for banking,
+            // and the center guide also detects a crossing near a track endpoint.
+            constexpr double inner = RailroadSettings::gauge / 2;
+            constexpr double outer = inner + RailroadSettings::headWidth;
+            std::vector<Rim> paths;
+            for (double offset : {0.0, -inner, inner, -outer, outer})
+            {
+                auto& path = paths.emplace_back();
+                path.reserve(lower.trackSections.size());
+                for (const auto& section : lower.trackSections)
+                    path.push_back(section.top + section.side * offset);
+            }
+            return paths;
+        }
+        std::vector<Rim> paths(1);
+        for (std::size_t i = 0; i + 1 < lower.points.size(); ++i)
+        {
+            const auto samples = lower.SegmentSamples(i);
+            paths.front().insert(paths.front().end(), samples.begin(), samples.end());
+        }
+        return paths;
     }
     Rim GroundRim(const Rim& top, const std::map<int, Rim>& sources, double fallback)
     {
@@ -134,32 +171,30 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
     int hits = 0;
     for (const auto& lower : roads)
     {
-        if (lower.id == upper.id || lower.id <= 0 || lower.style.railroad || lower.HasOverpasses() ||
-            lower.outline.size() < 3)
-            continue;
-        std::vector<Vector3> lowerPath;
-        for (std::size_t i = 0; i + 1 < lower.points.size(); ++i)
-        {
-            const auto samples = lower.SegmentSamples(i);
-            lowerPath.insert(lowerPath.end(), samples.begin(), samples.end());
-        }
+        if (lower.id == upper.id || lower.id <= 0 || lower.HasOverpasses() || lower.outline.size() < 3) continue;
+        const auto lowerPaths = ClearancePaths(lower);
         bool crosses = false;
         for (int segment : segments)
         {
             const auto path = upper.SegmentSamples(segment);
-            for (std::size_t i = 1; i < path.size(); ++i)
-                for (std::size_t j = 1; j < lowerPath.size(); ++j)
-                    if (auto at = Crossing(path[i - 1], path[i], lowerPath[j - 1], lowerPath[j]))
-                    {
-                        const double top = std::lerp(path[i - 1].y, path[i].y, at->first),
-                                     bottom = std::lerp(lowerPath[j - 1].y, lowerPath[j].y, at->second);
-                        if (top - bottom < settings.depth + 1)
-                            return fail("Raise the upper road before creating an overpass (deck plus at least 1 m of "
-                                        "clear space)");
-                        ground += bottom;
-                        ++hits;
-                        crosses = true;
-                    }
+            for (const auto& lowerPath : lowerPaths)
+                for (std::size_t i = 1; i < path.size(); ++i)
+                    for (std::size_t j = 1; j < lowerPath.size(); ++j)
+                        if (auto at = Crossing(path[i - 1], path[i], lowerPath[j - 1], lowerPath[j]))
+                        {
+                            const auto position = path[i - 1] + (path[i] - path[i - 1]) * at->first;
+                            const double bottom = std::lerp(lowerPath[j - 1].y, lowerPath[j].y, at->second);
+                            if (position.y - bottom < settings.depth + 1)
+                                return fail(lower.style.railroad ? "Raise the upper road before creating an overpass "
+                                                                   "(deck plus at least 1 m above the rail heads)"
+                                                                 : "Raise the upper road before creating an overpass "
+                                                                   "(deck plus at least 1 m of clear space)");
+                            // Clearance is above the rails; terrain must still meet
+                            // the embankment's unchanged toe/transition-strip rim.
+                            ground += lower.style.railroad ? GroundHeight(position, lower.outline, bottom) : bottom;
+                            ++hits;
+                            crosses = true;
+                        }
         }
         if (!crosses) continue;
         for (std::size_t p : {std::size_t(*segments.begin()), std::size_t(*segments.rbegin() + 1)})
@@ -171,14 +206,15 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
                                  upper.style.EdgeWidth() + 1;
             const auto a = upper.points[p].position - left * width, b = upper.points[p].position + left * width;
             if (Inside(a, lower.outline) || Inside(b, lower.outline) || Inside((a + b) * .5, lower.outline))
-                return fail("Extend the overpass span so its abutments clear the lower road");
+                return fail("Extend the overpass span so its abutments clear the lower road or railroad embankment");
             for (std::size_t j = 0; j < lower.outline.size(); ++j)
                 if (Crossing(a, b, lower.outline[j], lower.outline[(j + 1) % lower.outline.size()]))
-                    return fail("Extend the overpass span so its abutments clear the lower road");
+                    return fail(
+                        "Extend the overpass span so its abutments clear the lower road or railroad embankment");
         }
         settings.lowerRoads.insert(lower.id);
     }
-    if (!hits) return fail("The selected span must cross above a ground-level road");
+    if (!hits) return fail("The selected span must cross above a road or railroad");
     settings.groundHeight = ground / hits;
     return settings;
 }

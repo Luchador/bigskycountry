@@ -292,8 +292,9 @@ To extend either end of a road, select its endpoint alone, hold **Shift**, and d
 Raise the upper road to the desired height, then select the adjoining **segments** that
 will form the span. Right-click their cyan center spline (or pavement), then choose
 **Create → Overpass**. Its end control points define the abutments; keep those points
-beyond the full width of the lower road. Use Ctrl+Q to add control points if necessary.
-A span must cross a ground-level road and have room beneath its 0.6 m default deck.
+beyond the full width of the lower road or railroad embankment, including transition
+strips. Use Ctrl+Q to add control points if necessary.
+A span must cross a road or railroad and have room beneath its 0.6 m default deck.
 The command never raises either road automatically.
 
 The road keeps its spline, lane/shoulder profiles, paint and pavement material. With
@@ -312,9 +313,21 @@ roads, bridge shape, lanes or shoulders rebuild the affected geometry. Splits an
 subdivision preserve the span and its lower-road dependencies. Matching split bridge
 ends omit internal abutments; moving them apart restores the exposed end walls.
 
-This milestone supports road-over-road spans. Separate a proposed span from ramps,
-intersections, railroad crossings and dead ends before converting it. Rails/stacked
-bridges, piers, barriers, decorative details and material controls for the concrete
+This milestone supports road-over-road and road-over-railroad spans. Separate a
+proposed span from ramps, intersections, at-grade railroad crossings and dead ends
+before converting it. Railroad bridges, stacked bridges, piers, barriers, decorative
+details and material controls for the concrete
 and automatic ground patch are future work. That patch currently uses the default
 ground color; surrounding terrain retains its own material. Saved worlds store span
 settings and road IDs, never generated bridge meshes. Older worlds remain readable.
+
+For road-over-railroad spans, the creation check measures clearance from the generated
+rail heads, including embankment height, ties, rails and banking, rather than from the
+spline at the toe. It retains the existing 1 m minimum-clear-space check; choose the
+actual deck elevation to leave room for the trains you intend to use. The tracks,
+ties, embankment and transition strips retain their existing geometry and materials.
+Ground beneath the bridge meets the outer embankment rim and excludes the railway
+footprint. Spline and embankment edits, railroad splits, saving and undo/redo use the
+same dependencies as road-over-road spans. A single span can cross both roads and
+railroads. The upper span remains an ordinary road; creating a railway bridge is
+not part of this feature.
