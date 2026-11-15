@@ -158,6 +158,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/properties_inspector.cpp
     editor/transform_inspector.cpp
     editor/road_overlay.cpp
+    editor/road_names.cpp
     editor/transform_gizmo.cpp
     editor/transform_settings.cpp
     editor/viewport_picker.cpp
@@ -189,6 +190,7 @@ if(WIN32)
 else()
     target_sources(BigSkyCountryEditor PRIVATE editor/sdl_material_editor.cpp editor/sdl_project_settings.cpp editor/camera_toolbar.cpp editor/sdl_transform_panel.cpp editor/sdl_outliner.cpp)
 endif()
+target_include_directories(BigSkyCountryEditor PRIVATE "${ttf2mesh_SOURCE_DIR}")
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
 
 # Migrate the previous layout before globbing, including assets authored only in a build.

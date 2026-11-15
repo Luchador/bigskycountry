@@ -33,7 +33,8 @@ namespace
     constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
-    constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"}};
+    constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
+                                      {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"},
                                         {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
@@ -122,7 +123,7 @@ namespace
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, WindowsTheme::Color(fg));
             if (!item.bar) { r.left += pad; r.right -= pad; }
-            if (item.id == BSC_VIEW_WIREFRAME)
+            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES)
             {
                 if (draw->itemState & ODS_CHECKED)
                 {
@@ -218,7 +219,7 @@ namespace
         {
             const int id = LOWORD(wParam);
             if (id == BSC_FILE_SAVE || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
-                id == BSC_PROJECT_SETTINGS)
+                id == BSC_VIEW_ROAD_NAMES || id == BSC_PROJECT_SETTINGS)
             {
                 SDL_Event event{};
                 event.type = static_cast<Uint32>(eventType);
@@ -291,6 +292,14 @@ void EditorMenu::ToggleWireframe()
 #endif
 }
 
+void EditorMenu::ToggleRoadNames()
+{
+    roadNames = !roadNames;
+#ifdef _WIN32
+    CheckMenuItem(static_cast<HMENU>(viewMenu), BSC_VIEW_ROAD_NAMES, MF_BYCOMMAND | (roadNames ? MF_CHECKED : MF_UNCHECKED));
+#endif
+}
+
 void EditorMenu::SetHistoryEnabled(bool canUndo, bool canRedo)
 {
 #ifdef _WIN32
@@ -318,6 +327,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         switch (event.user.code)
         {
         case BSC_VIEW_WIREFRAME: return EditorCommand::ToggleWireframe;
+        case BSC_VIEW_ROAD_NAMES: return EditorCommand::ToggleRoadNames;
         case BSC_PROJECT_SETTINGS: return EditorCommand::ProjectSettings;
         case BSC_FILE_SAVE: return EditorCommand::Save;
         case BSC_EDIT_UNDO: return EditorCommand::Undo;
@@ -345,7 +355,8 @@ namespace
     struct BarAction { const char* label; EditorCommand command; };
     constexpr BarAction save[] = {{"Save", EditorCommand::Save}};
     constexpr BarAction history[] = {{"Undo", EditorCommand::Undo}, {"Redo", EditorCommand::Redo}};
-    constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe}};
+    constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe},
+                                     {"Road Names", EditorCommand::ToggleRoadNames}};
     constexpr BarAction settings[] = {{"Project Settings", EditorCommand::ProjectSettings}};
     struct BarMenu { const char* label; std::span<const BarAction> items; };
     constexpr BarMenu menus[] = {{"File", save}, {"Edit", history}, {"View", display}, {"Settings", settings}};
@@ -595,7 +606,8 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
             !SDL_RenderFillRect(renderer, &row) ||
             !EditorTheme::SetColor(renderer, enabled ? EditorTheme::text : EditorTheme::disabled) ||
             !SDL_RenderDebugText(renderer, row.x + 24, row.y + 9, items[i].label)) return false;
-        if (items[i].command == EditorCommand::ToggleWireframe && wireframe)
+        if ((items[i].command == EditorCommand::ToggleWireframe && wireframe) ||
+            (items[i].command == EditorCommand::ToggleRoadNames && roadNames))
         {
             const SDL_FPoint check[] = {{row.x + 6, row.y + 13}, {row.x + 9, row.y + 16}, {row.x + 16, row.y + 8}};
             if (!SDL_RenderLines(renderer, check, 3)) return false;

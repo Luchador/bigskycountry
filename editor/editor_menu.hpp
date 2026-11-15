@@ -3,7 +3,7 @@
 #include <SDL3/SDL.h>
 #include <optional>
 
-enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
+enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ToggleRoadNames, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection,
                            CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
 struct RampMenuOptions { bool exit, entrance; };
 struct SplitMenuOptions { bool enabled, railroad; };
@@ -29,10 +29,13 @@ public:
 #endif
     bool WireframeEnabled() const { return wireframe; }
     void ToggleWireframe();
+    bool RoadNamesEnabled() const { return roadNames; }
+    void ToggleRoadNames();
     void SetHistoryEnabled(bool canUndo, bool canRedo);
     std::optional<EditorCommand> Command(const SDL_Event& event) const;
 
 private:
+    bool roadNames = true;
     bool wireframe = false, undoEnabled = false, redoEnabled = false;
     SDL_WindowID windowID = 0;
 #ifdef _WIN32

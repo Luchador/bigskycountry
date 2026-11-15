@@ -17,6 +17,7 @@
 #include "content_browser.hpp"
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
+#include "road_names.hpp"
 #include "road_intersection.hpp"
 #include "highway_ramp_tool.hpp"
 #include "viewport_picker.hpp"
@@ -203,6 +204,7 @@ private:
     SceneOutliner outliner;
     EditorMenu menu;
     RoadOverlay overlay;
+    RoadNames roadNames;
     TransformGizmo gizmo;
     std::optional<GizmoDrag> gizmoDrag;
     std::optional<int> hoveredAxis;

@@ -209,6 +209,8 @@ Use **Tab** or **Shift+Tab** to move between the viewport and controls. In the 3
 
 Press **Z** in the viewport or Scene Outliner to focus the camera on the current selection. Multiple selected items are framed together, and a selected folder frames its visible contents. The 3D view keeps its viewing direction and fits the selection with a little padding; the top-down view centers and zooms to fit. Selected control points or road segments focus just those elements. **Ctrl+Z** still undoes edits, and typing in a text field does not move the camera.
 
+Road names appear above named roads in both the 3D viewport and top-down view. Enter names in the road inspector (including comma-separated aliases); the labels follow the road direction, stay readable as you zoom, and repeat along long visible roads. Hidden roads and unnamed roads have no labels. Overlapping labels are suppressed, so zoom in to identify roads in dense areas. **View → Road Names** toggles this editor-only overlay; it starts enabled each session and does not change the world or game rendering.
+
 Choose **View → Wireframe** to see the visible triangle edges of roads, terrain chunks, and placed objects in the 3D viewport. Choose it again to restore shaded surfaces.
 
 Right-click the 3D viewport and choose **Create → Create Road**. The first control point lands on the nearest road triangle under the original click, including elevated roads and curbs. On empty space it lands on the ground plane (Y = 0), or 20 m along the ray if the ground is out of reach. The new road starts with a level 10 m segment along world +X. Its far endpoint is selected for Shift-drag extension. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.

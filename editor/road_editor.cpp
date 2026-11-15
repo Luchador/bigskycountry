@@ -487,6 +487,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleWireframe();
         return;
     }
+    if (command == EditorCommand::ToggleRoadNames)
+    {
+        menu.ToggleRoadNames();
+        return;
+    }
     const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
     Release(world);
     if (undoPreview) return;
@@ -1967,6 +1972,8 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
             return false;
         }
     }
+
+    if (menu.RoadNamesEnabled() && !roadNames.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
 
     const char* message = StatusText();
     if (*message && !Text(renderer, 12, 28, message, ink)) return false;
