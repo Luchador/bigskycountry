@@ -441,7 +441,7 @@ std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& ra
 
 std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road& railway, const CrossingSite& site)
 {
-    if (railway.trackSections.size() < 2)
+    if (road.HasOverpasses() || railway.trackSections.size() < 2)
         return {};
     const auto path = Path(road), rail = Path(railway);
     const auto s = Stations(path), rs = Stations(rail);
@@ -468,7 +468,7 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
                        (railway.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
     const double level = toe + 0.5;
     const double width = road.MaximumHalfTravelWidth() + road.style.HalfSeparation() + road.style.EdgeWidth() +
-                        (road.style.leftShoulder || road.style.rightShoulder ? RoadStyle::shoulderWidth : 0.0);
+                        std::max(road.MaximumShoulderWidth(true), road.MaximumShoulderWidth(false));
     const double skew = std::abs(Math::Dot(direction, forward));
     const double deckRun = (level + width * skew) / sine;
     const double available = std::min(station, s.back() - station) - deckRun;

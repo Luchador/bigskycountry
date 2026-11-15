@@ -4,10 +4,11 @@
 #include <algorithm>
 #include <charconv>
 
-std::string PropertiesInspector::DeadEndText() const
+std::string PropertiesInspector::RoadDetailText() const
 {
+    if (mixedBridgeDepth) return "Mixed";
     char text[48];
-    SDL_snprintf(text, sizeof(text), "%.2f", deadEndLength.value_or(0.0));
+    SDL_snprintf(text, sizeof(text), "%.2f", bridgeDepth.value_or(deadEndLength.value_or(0.0)));
     return text;
 }
 
@@ -187,6 +188,16 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.roadNames = road->NameList();
             result.paintMarkings = road->paintMarkings;
             result.hasDeadEnd = road->HasDeadEnd();
+            if (result.segmentSelection)
+            {
+                for (int segment : state.segments)
+                {
+                    const auto& span = road->points[segment].bridge;
+                    if (!span) { result.bridgeDepth.reset(); result.mixedBridgeDepth = false; break; }
+                    if (result.bridgeDepth) result.mixedBridgeDepth |= *result.bridgeDepth != span->depth;
+                    else result.bridgeDepth = span->depth;
+                }
+            }
             if (!editingDraft && !group && target.kind == SelectionKind::Point && road->CanDeadEnd(target.point))
                 result.deadEndLength = road->points[target.point].deadEndLength;
         }
@@ -236,6 +247,8 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         if (road && !editingDraft)
         {
             bool firstCount = true;
+            result.mixed.reset(static_cast<std::size_t>(RoadProperty::Left));
+            result.mixed.reset(static_cast<std::size_t>(RoadProperty::Right));
             const auto counts = [&](const Road& item, bool selectedSegments)
             {
                 result.canDivide &= item.CanDivideAllSegments();
@@ -243,7 +256,15 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
                 {
                     if (selectedSegments && !state.segments.contains(static_cast<int>(i))) continue;
                     const int count = item.SegmentLaneCount(i);
-                    if (firstCount) result.minLanes = result.maxLanes = count;
+                    const bool left = item.SegmentShoulder(i, true), right = item.SegmentShoulder(i, false);
+                    if (firstCount)
+                    {
+                        result.minLanes = result.maxLanes = count;
+                        result.style.leftShoulder = left;
+                        result.style.rightShoulder = right;
+                    }
+                    if (left != result.style.leftShoulder) result.mixed.set(static_cast<std::size_t>(RoadProperty::Left));
+                    if (right != result.style.rightShoulder) result.mixed.set(static_cast<std::size_t>(RoadProperty::Right));
                     firstCount = false;
                     result.minLanes = std::min(result.minLanes, count);
                     result.maxLanes = std::max(result.maxLanes, count);
@@ -254,6 +275,8 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             else counts(*road, result.segmentSelection);
             if (result.minLanes != result.maxLanes) result.mixed.set(static_cast<std::size_t>(RoadProperty::Width));
             else result.style.SetLaneCount(result.minLanes);
+            if (result.Mixed(RoadProperty::Left) || result.Mixed(RoadProperty::Right))
+                result.mixed.set(static_cast<std::size_t>(RoadProperty::Width));
             if (result.segmentSelection)
             {
                 meters = 0;

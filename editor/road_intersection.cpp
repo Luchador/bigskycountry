@@ -107,8 +107,8 @@ namespace
                 const Vector3 offset = neighbor.position - junction.position;
                 const double lateral = Math::Cross(axis, offset).y * step;
                 const double half = road.MaximumHalfTravelWidth() + road.style.HalfSeparation();
-                if (run < -Road::minPointSpacing || lateral > half + (road.style.rightShoulder ? RoadStyle::shoulderWidth : 0.0) ||
-                    -lateral > half + (road.style.leftShoulder ? RoadStyle::shoulderWidth : 0.0)) return false;
+                if (run < -Road::minPointSpacing || lateral > half + road.MaximumShoulderWidth(false) ||
+                    -lateral > half + road.MaximumShoulderWidth(true)) return false;
                 continue;
             }
 
@@ -119,6 +119,7 @@ namespace
             const auto kept = Split(outward, *cut).second;
             RoadPoint anchor{anchorPosition, -junction.yaw};
             anchor.segmentLanes = road.points[i].segmentLanes;
+            anchor.segmentShoulders = road.points[i].segmentShoulders;
             RoadPoint join = anchor;
             if (blend)
             {
@@ -186,6 +187,9 @@ std::optional<RoadSplineLocation> LocateRoadHit(const Road& road, RoadPick hit, 
 
 std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, RoadSplineLocation at)
 {
+    // A bridge needs its abutments and ground seams; inserting a flat junction
+    // through it would remove those connections. Convert the span back first.
+    if (road.HasOverpasses()) return {};
     const int last = static_cast<int>(road.points.size()) - 1;
     const auto [left, right] = Split(Curve(road, at.segment), at.t);
     const bool atStart = at.segment == 0 && at.t == 0;

@@ -9,6 +9,12 @@
 
 namespace
 {
+    bool ValidShoulders(const std::array<int, 2>& values, bool railroad)
+    {
+        for (int value : values) if (value < 0 || value > 2 || (railroad && value)) return false;
+        return true;
+    }
+
     bool ValidStyle(int lanes, int layout, double dividedGap, int edge, int median)
     {
         return lanes >= 1 && lanes <= RoadStyle::maxLanes &&
@@ -127,8 +133,12 @@ namespace RoadIO
         for (int count : road.laneNeighbors)
             if (count < 0 || count > RoadStyle::maxLanes || (count && (road.style.railroad || (road.style.IsDivided() && count % 2))))
             { out.setstate(std::ios::failbit); return; }
+        for (const auto& end : road.shoulderNeighbors)
+            if (!ValidShoulders(end, road.style.railroad.has_value())) { out.setstate(std::ios::failbit); return; }
         out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z
-            << ' ' << road.laneNeighbors[0] << ' ' << road.laneNeighbors[1] << '\n';
+            << ' ' << road.laneNeighbors[0] << ' ' << road.laneNeighbors[1];
+        for (const auto& end : road.shoulderNeighbors) out << ' ' << end[0] << ' ' << end[1];
+        out << '\n';
         out << road.id << ' ' << road.paintMarkings << ' ' << std::quoted(road.NameList()) << '\n';
         out << road.crossings.size() << '\n';
         for (const auto& crossing : road.crossings)
@@ -140,6 +150,8 @@ namespace RoadIO
         for (const RoadPoint& p : road.points)
         {
             if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp) ||
+                !ValidShoulders(p.segmentShoulders, road.style.railroad.has_value()) ||
+                (p.bridge && (!p.bridge->Valid() || road.style.railroad || p.bridge->lowerRoads.contains(road.id))) ||
                 p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
                 (p.segmentLanes && (road.style.railroad || (road.style.IsDivided() && p.segmentLanes % 2))) ||
                 !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
@@ -163,7 +175,13 @@ namespace RoadIO
             out << ' ' << p.incomingHandle << ' ' << p.outgoingHandle << ' ' << p.rampStation << ' ' << (p.ramp ? p.ramp->station : 0);
             if (p.ramp) out << ' ' << p.ramp->side << ' ' << p.ramp->length << ' ' << p.ramp->offset;
             out << ' ' << p.connectorSocket << ' ' << p.connectorTarget
-                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z << ' ' << p.deadEndLength << ' ' << p.segmentLanes;
+                << ' ' << p.surfaceUp.x << ' ' << p.surfaceUp.y << ' ' << p.surfaceUp.z << ' ' << p.deadEndLength << ' ' << p.segmentLanes
+                << ' ' << p.segmentShoulders[0] << ' ' << p.segmentShoulders[1] << ' ' << p.bridge.has_value();
+            if (p.bridge)
+            {
+                out << ' ' << p.bridge->depth << ' ' << p.bridge->groundHeight << ' ' << p.bridge->lowerRoads.size();
+                for (int id : p.bridge->lowerRoads) out << ' ' << id;
+            }
             out << '\n';
         }
     }
@@ -184,6 +202,14 @@ namespace RoadIO
             for (int count : road.laneNeighbors)
                 if (count < 0 || count > RoadStyle::maxLanes || (count && (road.style.railroad || (road.style.IsDivided() && count % 2))))
                     in.setstate(std::ios::failbit);
+        }
+        if (version >= 21)
+        {
+            for (auto& end : road.shoulderNeighbors)
+            {
+                in >> end[0] >> end[1];
+                if (!ValidShoulders(end, road.style.railroad.has_value())) in.setstate(std::ios::failbit);
+            }
         }
         if (version >= 8 && (!(in >> road.id) || road.id < 0))
         {
@@ -269,6 +295,27 @@ namespace RoadIO
             if (version >= 17) in >> p.surfaceUp.x >> p.surfaceUp.y >> p.surfaceUp.z;
             if (version >= 19) in >> p.deadEndLength;
             if (version >= 20) in >> p.segmentLanes;
+            if (version >= 21) in >> p.segmentShoulders[0] >> p.segmentShoulders[1];
+            if (version >= 22)
+            {
+                bool bridge = false;
+                if (!(in >> bridge)) return road;
+                if (bridge)
+                {
+                    auto& span = p.bridge.emplace();
+                    std::int64_t sources = 0;
+                    if (!(in >> span.depth >> span.groundHeight >> sources) || sources < 0 || sources > 10000 || road.style.railroad)
+                    { in.setstate(std::ios::failbit); return road; }
+                    for (std::int64_t j = 0; j < sources; ++j)
+                    {
+                        int id = 0;
+                        if (!(in >> id) || id <= 0 || id == road.id || !span.lowerRoads.insert(id).second)
+                        { in.setstate(std::ios::failbit); return road; }
+                    }
+                    if (!span.Valid()) { in.setstate(std::ios::failbit); return road; }
+                }
+            }
+            if (!ValidShoulders(p.segmentShoulders, road.style.railroad.has_value())) in.setstate(std::ios::failbit);
             if (p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
                 (p.segmentLanes && (road.style.railroad || (road.style.IsDivided() && p.segmentLanes % 2)))) in.setstate(std::ios::failbit);
             if (!std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||

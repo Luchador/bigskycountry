@@ -53,7 +53,7 @@ namespace
     float RoadStyleBottom(const PropertiesInspector& properties)
     {
         const auto slot = MaterialSlotRect(properties, properties.HasTransitionSlot());
-        return slot.y + slot.h + 8 + (properties.deadEndLength ? 70 : 0);
+        return slot.y + slot.h + 8 + (properties.HasRoadDetail() ? 70 : 0);
     }
 #endif
     constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
@@ -540,6 +540,38 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, target.road, std::move(before), &road);
         return;
     }
+    if (command == EditorCommand::ToggleOverpass)
+    {
+        if (!roadMenuTarget) return;
+        const auto target = *roadMenuTarget;
+        roadMenuTarget.reset();
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return;
+        auto& road = world.roads[target.index];
+        if (road.revision != target.revision || target.segment < 0 || target.segment + 1 >= static_cast<int>(road.points.size()) || road.style.railroad) return;
+        auto segments = state.selected == target.index && state.segments.contains(target.segment) ? state.segments : std::set<int>{target.segment};
+        const bool remove = road.points[target.segment].bridge.has_value();
+        // Removing a single clicked span removes its whole contiguous bridge.
+        if (remove && segments.size() == 1)
+        {
+            for (int i = target.segment - 1; i >= 0 && road.points[i].bridge; --i) segments.insert(i);
+            for (int i = target.segment + 1; i + 1 < static_cast<int>(road.points.size()) && road.points[i].bridge; ++i) segments.insert(i);
+        }
+        auto settings = remove ? std::optional<BridgeSettings>{} : PlanOverpass(road, segments, world.roads);
+        if (!remove && !settings)
+        {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Create Overpass", SDL_GetError(), frame);
+            return;
+        }
+        EditSnapshot before(state, &road);
+        for (int i : segments) road.points[i].bridge = settings;
+        if (segments.contains(0)) road.bridgeNeighbors[0] = false;
+        if (segments.contains(static_cast<int>(road.points.size()) - 2)) road.bridgeNeighbors[1] = false;
+        road.Rebuild();
+        state.SelectPoint(target.index, -1);
+        state.segments = std::move(segments);
+        Commit(world, target.index, std::move(before), &road);
+        return;
+    }
     if (command == EditorCommand::CreateDeadEnd)
     {
         if (!roadMenuTarget) return;
@@ -711,7 +743,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     std::optional<RampMenuOptions> ramps;
     std::optional<bool> flattenEnabled;
     std::optional<SplitMenuOptions> split;
-    std::optional<bool> deadEnd;
+    std::optional<bool> deadEnd, overpass;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
     if (lane && !crossingMenuTarget && hit.kind != RoadPickKind::Point)
     {
@@ -749,12 +781,13 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
             {
                 roadMenuTarget->segment = at->segment;
                 flattenEnabled = FlattenElevation(road, at->segment).has_value();
+                if (!road.style.railroad) overpass = road.points[at->segment].bridge.has_value();
             }
         }
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass))
     {
         RunCommand(*command, world, camera);
     }
@@ -1000,11 +1033,16 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     const auto p = InspectProperties(world, state, EditingDraft());
     if (p.page != PropertiesPage::Road && p.page != PropertiesPage::Railroad) return;
     const bool lanes = !p.style.railroad && (action == Action::More || action == Action::Fewer);
-    if (lanes && p.segmentSelection)
+    const bool shoulder = !p.style.railroad && (action == Action::Left || action == Action::Right);
+    const bool left = action == Action::Left;
+    const bool enabled = p.Mixed(left ? RoadProperty::Left : RoadProperty::Right) || !(left ? p.style.leftShoulder : p.style.rightShoulder);
+    if ((lanes || shoulder) && p.segmentSelection)
     {
         auto& road = world.roads[state.selected];
         EditSnapshot before(state, &road);
-        if (!road.SetSegmentLaneCounts(state.segments, p.StepLanes(action == Action::More))) return;
+        const bool changed = lanes ? road.SetSegmentLaneCounts(state.segments, p.StepLanes(action == Action::More)) :
+                                     road.SetSegmentShoulders(state.segments, left, enabled);
+        if (!changed) return;
         road.Rebuild();
         Commit(world, state.selected, std::move(before), &road);
         return;
@@ -1019,13 +1057,20 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
                 std::fill(road.segmentLanes.begin(), road.segmentLanes.end(), 0);
                 road.laneNeighbors = {};
             }
+            if (shoulder)
+            {
+                for (auto& point : road.segmentShoulders) point[left ? 0 : 1] = 0;
+                for (auto& end : road.shoulderNeighbors) end[left ? 0 : 1] = 0;
+            }
         });
         return;
     }
     RoadStyle& current = Style(world);
     RoadStyle style = current;
     p.ApplyRoadStyle(style, action);
-    if (style == current && !(lanes && state.selected >= 0 && world.roads[state.selected].HasLaneOverrides()))
+    const bool clearOverrides = !EditingDraft() && state.selected >= 0 &&
+        ((lanes && world.roads[state.selected].HasLaneOverrides()) || (shoulder && world.roads[state.selected].HasShoulderOverrides()));
+    if (style == current && !clearOverrides)
     {
         return;
     }
@@ -1037,6 +1082,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     if (road)
     {
         if (lanes) road->SetLaneCount(style.GetLaneCount());
+        if (shoulder) road->SetShoulder(left, enabled);
         road->Rebuild();
     }
     Commit(world, index, std::move(before), road);
@@ -1215,7 +1261,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
     };
     const auto hitRoad = [&](const RoadGeometry& geometry)
     {
-        return hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles) ||
+        return hitSurface(geometry.pavementTriangles) || hitSurface(geometry.edgeTriangles) || hitSurface(geometry.bridgeTriangles) ||
                std::ranges::any_of(geometry.transitionStrips, [&](const auto& entry) { return hitSurface(entry.second); });
     };
     for (auto it = world.IntersectionSurfaces().rbegin(); it != world.IntersectionSurfaces().rend(); ++it)
@@ -1309,8 +1355,16 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
         RoadPoint end{position, {}};
         end.deadEndLength = originalPoints[*extensionSource].deadEndLength;
-        if (state.point == 0) end.segmentLanes = road.points.front().segmentLanes;
-        else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+        if (state.point == 0)
+        {
+            end.segmentLanes = road.points.front().segmentLanes;
+            end.segmentShoulders = road.points.front().segmentShoulders;
+        }
+        else
+        {
+            road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+            road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+        }
         road.points.insert(road.points.begin() + state.point, end);
     }
 
@@ -1779,12 +1833,12 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
             !transformPanel.DrawField(renderer, markerColorBox, state.Target(), InspectorEdit::markerTextColor, FormatTextColor(rgb), true))
             return false;
     }
-    if (properties.deadEndLength)
+    if (properties.HasRoadDetail())
     {
         const auto box = DeadEndBox(properties);
-        if (!Text(renderer, 12, box.y - 16, "End transition (m)", muted) ||
-            !transformPanel.DrawField(renderer, box, state.Target(), InspectorEdit::deadEndLength, properties.DeadEndText(), true) ||
-            !Text(renderer, 12, box.y + 29, "0 = no dead end", muted)) return false;
+        if (!Text(renderer, 12, box.y - 16, properties.RoadDetailLabel(), muted) ||
+            !transformPanel.DrawField(renderer, box, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength, properties.RoadDetailText(), true) ||
+            !Text(renderer, 12, box.y + 29, properties.RoadDetailHint(), muted)) return false;
     }
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
     if (properties.page == PropertiesPage::Railroad)
@@ -1827,7 +1881,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
          !SDL_RenderDebugTextFormat(renderer, 80, 432 + offset, properties.minGap == properties.maxGap ? "%.2f" : "Mixed", style.DividedGap()) ||
          !Text(renderer, 12, 460 + offset, properties.Mixed(RoadProperty::Median) ? "Median (mixed)" : "Median", muted))) return false;
     if (!Text(renderer, 12, 132, properties.Mixed(RoadProperty::Alignment) ? "Alignment (mixed)" : "Alignment", muted) || !Text(renderer, 12, 194, properties.segmentSelection ? "Segment lanes" : "Lanes (total)", muted) ||
-        !Text(renderer, 12, 258 + offset, "Shoulders (5 m each)", muted) ||
+        !Text(renderer, 12, 258 + offset, properties.segmentSelection ? "Segment shoulders (5 m)" : "Shoulders (5 m each)", muted) ||
         !Text(renderer, 12, 312 + offset, properties.Mixed(RoadProperty::Edge) ? "Road edges (mixed)" : "Road edges", muted) ||
         !SDL_RenderDebugTextFormat(renderer, 89, 220, properties.minLanes == properties.maxLanes ? "%d" : "Mixed", laneCount) ||
         !SDL_RenderDebugTextFormat(renderer, 12, styleBottom, properties.Mixed(RoadProperty::Width) ? "Width: Mixed" : "Width: %.2f m",
@@ -2219,8 +2273,16 @@ void RoadEditor::ConnectRoads(WorldDocument& world)
         }
         RoadPoint end{destination};
         end.connectorTarget = join;
-        if (first) end.segmentLanes = road.points.front().segmentLanes;
-        else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+        if (first)
+        {
+            end.segmentLanes = road.points.front().segmentLanes;
+            end.segmentShoulders = road.points.front().segmentShoulders;
+        }
+        else
+        {
+            road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+            road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+        }
         road.points.insert(first ? road.points.begin() : road.points.end(), end);
     }
     else road.points[point].connectorTarget = join;
@@ -2334,8 +2396,16 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
         previous.pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
     }
     const int index = first ? 0 : static_cast<int>(road.points.size());
-    if (first) point.segmentLanes = road.points.front().segmentLanes;
-    else road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+    if (first)
+    {
+        point.segmentLanes = road.points.front().segmentLanes;
+        point.segmentShoulders = road.points.front().segmentShoulders;
+    }
+    else
+    {
+        road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
+        road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+    }
     road.points.insert(road.points.begin() + index, point);
     road.Rebuild();
     state.SelectPoint(state.selected, index);
@@ -2646,6 +2716,20 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
+    if (edit.field == InspectorEdit::bridgeDepth)
+    {
+        if (EditingDraft() || state.selected < 0 || state.segments.empty()) return;
+        const auto properties = InspectProperties(world, state, false);
+        const auto value = ParseTransformValue(edit.text);
+        if (!properties.bridgeDepth || !value || *value < .1 || *value > 10) return;
+        auto& road = world.roads.at(state.selected);
+        if (!properties.mixedBridgeDepth && *value == *properties.bridgeDepth) return;
+        EditSnapshot before(state, &road);
+        for (int i : state.segments) road.points[i].bridge->depth = *value;
+        road.Rebuild();
+        Commit(world, state.selected, std::move(before), &road);
+        return;
+    }
     if (edit.field == InspectorEdit::deadEndLength)
     {
         if (edit.target.kind != SelectionKind::Point || EditingDraft()) return;
@@ -3405,9 +3489,9 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
                 const auto deadEndBox = DeadEndBox(properties);
-                if (properties.deadEndLength && SDL_PointInRectFloat(&local, &deadEndBox))
+                if (properties.HasRoadDetail() && SDL_PointInRectFloat(&local, &deadEndBox))
                 {
-                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::deadEndLength, properties.DeadEndText());
+                    transformPanel.StartEdit(window, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength, properties.RoadDetailText());
                     return EditorEvent::Handled;
                 }
                 if (properties.roadNames && SDL_PointInRectFloat(&local, &roadNamesBox))

@@ -224,7 +224,7 @@ namespace
         for (const auto& seam : out.seams)
         {
             // A curb step or an actual concrete slab wall must close the full
-            // elevation difference. An ordinary overpass still cannot seal a pocket.
+            // elevation difference. An elevated rim alone cannot seal a pocket.
             const auto fits = [&](Index i, double y)
             {
                 const double height = steps.contains(i) ? RoadStyle::curbHeight : 0.0;
@@ -350,8 +350,8 @@ namespace
 std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
-    if (first == footprints.end()) return {};
-    Outline outline{(*first)->outline.front()};
+    if (first == footprints.end() && links.empty()) return {};
+    Outline outline{first == footprints.end() ? links.front()[0] : (*first)->outline.front()};
     const auto addRim = [&](const std::vector<Vector3>& rim)
     {
         if (rim.size() < 3) return;
@@ -380,7 +380,12 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
     };
     for (const RoadGeometry* footprint : footprints)
     {
-        addRim(footprint->outline);
+        if (footprint->groundFootprints.empty()) addRim(footprint->outline);
+        else for (const auto& contact : footprint->groundFootprints)
+        {
+            addRim(contact.outline);
+            outline.solidWalls.insert(outline.solidWalls.end(), contact.walls.begin(), contact.walls.end());
+        }
         for (const auto& slab : footprint->crossingSlabs)
         {
             addRim(slab.outline);

@@ -61,18 +61,37 @@ namespace
         }
     }
 
-    struct LaneProfile
+    struct RoadProfile
     {
         const Road* road = nullptr;
         std::vector<double> knots;
         std::array<RoadStyle, RoadStyle::maxLanes + 1> styles;
 
-        Road::LaneBlend At(double distance) const
+        std::pair<std::size_t, double> Location(double distance) const
         {
             const auto next = std::upper_bound(knots.begin(), knots.end(), distance);
             const auto segment = std::clamp<std::size_t>(next - knots.begin(), 1, knots.size() - 1) - 1;
             const double length = knots[segment + 1] - knots[segment];
-            return road->SegmentLaneBlend(segment, length > 0 ? (distance - knots[segment]) / length : 0);
+            return {segment, length > 0 ? (distance - knots[segment]) / length : 0};
+        }
+
+        Road::LaneBlend At(double distance) const
+        {
+            const auto [segment, fraction] = Location(distance);
+            return road->SegmentLaneBlend(segment, fraction);
+        }
+
+        double Shoulder(double distance, bool left) const
+        {
+            const auto [segment, fraction] = Location(distance);
+            const auto blend = road->SegmentShoulderBlend(segment, fraction, left);
+            return std::lerp(double(blend.from), double(blend.to), blend.mix) * RoadStyle::shoulderWidth;
+        }
+
+        double PavementWidth(double distance, bool left) const
+        {
+            return Mix(distance, [](const RoadStyle& s) { return s.HalfSeparation() + s.GetLaneCount() * s.TravelLaneWidth() * 0.5; }) +
+                   Shoulder(distance, left);
         }
 
         template<typename Value> double Mix(double distance, Value value) const
@@ -89,7 +108,7 @@ namespace
         std::vector<double> distances{0.0}; // Cumulative 3D centerline length at each station.
         std::vector<Vector3> curveLeft; // One cross-section axis per Bézier station.
         std::vector<Vector3> curveUp;   // Per-station up for a bank override or an attached ramp.
-        std::optional<LaneProfile> lanes;
+        std::optional<RoadProfile> profile;
     };
 
     Vector3 CurveLeft(Vector3 tangent, Vector3 fallback, Vector3 up = {0, 1, 0})
@@ -299,14 +318,12 @@ namespace
         size_t firstGuide = 0;
         double Fraction(double d) const { return std::clamp((d - tip) / (gore - tip), 0.0, 1.0); }
 
-        TaperProfile profile{};
-
-        void SetProfile(double shoulder, double clearance)
+        TaperProfile Profile(double shoulder, double clearance) const
         {
             const double inner = shoulder + clearance + lane.innerPavement - lane.halfTravel;
             const double width = 2.0 * lane.halfTravel;
             // A monotone outward shift keeps both edges advancing after the lane has opened.
-            profile = {inner, width, std::min(inner + width, 2.0 * inner)};
+            return {inner, width, std::min(inner + width, 2.0 * inner)};
         }
     };
 
@@ -374,7 +391,7 @@ namespace
 
     void VariableLaneMarkings(Road& road, const RoadPath& path, int side, const std::vector<CrossSection>& stations)
     {
-        const auto& profile = *path.lanes;
+        const auto& profile = *path.profile;
         const int maximum = road.MaximumLaneCount();
         const auto halfTravel = [](const RoadStyle& s) { return s.GetLaneCount() * s.TravelLaneWidth() * 0.5; };
         const auto inside = [&](const RoadStyle& s)
@@ -488,7 +505,7 @@ namespace
         const auto side = [&](int sign)
         {
             const auto widthOf = [&](const RoadStyle& s) { return sign < 0 ? s.RightWidth() : s.LeftWidth(); };
-            const double width = path.lanes ? path.lanes->Mix(section.distance, widthOf) : widthOf(style);
+            const double width = path.profile ? path.profile->PavementWidth(section.distance, sign > 0) : widthOf(style);
             std::vector<Rim> rim{{0, 0, 1}};
             if (style.HalfMedianWidth() > 0) rim.push_back({sign * style.HalfMedianWidth(), 0, 1});
             if (style.IsDivided()) rim.push_back({sign * style.HalfSeparation(), 0, 1});
@@ -513,10 +530,10 @@ namespace
                             + section.up * (at.height * remaining);
             const bool positive = at.offset >= 0;
             const double gap = style.HalfSeparation();
-            const double travelTile = path.lanes ? path.lanes->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : style.TravelLaneWidth();
+            const double travelTile = path.profile ? path.profile->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : style.TravelLaneWidth();
             const double tileWidth = std::abs(at.offset) < gap ? 2 * RoadStyle::innerShoulderWidth : travelTile;
             const auto originU = [&](const RoadStyle& s) { return s.GetLaneCount() * 0.5 + (s.IsDivided() && !positive ? 1 : 0); };
-            const double centerU = path.lanes ? path.lanes->Mix(section.distance, originU) : originU(style);
+            const double centerU = path.profile ? path.profile->Mix(section.distance, originU) : originU(style);
             const double u = centerU - (positive ? 1 : -1) * (std::abs(at.offset) - gap) / tileWidth;
             const double v = (section.distance + (end ? 1 : -1) * point.deadEndLength * fraction) / RoadStyle::laneWidth;
             return Road::TransitionVertex{p, {static_cast<float>(at.red * remaining), 0, 0, 1},
@@ -549,22 +566,23 @@ namespace
     {
         const RoadEdge edge = road.style.edge;
         const int faces = edge == RoadEdge::Curb ? 3 : (edge == RoadEdge::Transition ? 1 : 0);
-        const bool variable = path.lanes.has_value();
+        const bool variable = path.profile.has_value();
+        const bool bridge = road.HasOverpasses();
         const auto pavementAt = [&](const CrossSection& section)
         {
             const auto width = [&](const RoadStyle& s) { return side < 0 ? s.RightWidth() : s.LeftWidth(); };
-            return variable ? path.lanes->Mix(section.distance, width) : width(road.style);
+            return variable ? path.profile->PavementWidth(section.distance, side > 0) : width(road.style);
         };
         const auto travelAt = [&](const CrossSection& section)
         {
             const auto width = [](const RoadStyle& s) { return s.HalfSeparation() + s.GetLaneCount() * s.TravelLaneWidth() * 0.5; };
-            return variable ? path.lanes->Mix(section.distance, width) : width(road.style);
+            return variable ? path.profile->Mix(section.distance, width) : width(road.style);
         };
         const int lanes = variable ? road.MaximumLaneCount() : road.style.GetLaneCount();
         auto widest = road.style;
         widest.SetLaneCount(lanes);
         const double pavement = road.style.HalfSeparation() + road.MaximumHalfTravelWidth() +
-            ((side < 0 ? road.style.rightShoulder : road.style.leftShoulder) ? RoadStyle::shoulderWidth : 0.0);
+            road.MaximumShoulderWidth(side > 0);
         const double halfGap = road.style.HalfSeparation();
         const double halfMedian = road.style.HalfMedianWidth();
         const double laneWidth = widest.TravelLaneWidth();
@@ -589,8 +607,8 @@ namespace
         const auto pavementVertex = [&](const CrossSection& section, double offset)
         {
             const double tileWidth = offset < halfGap ? 2.0 * RoadStyle::innerShoulderWidth :
-                variable ? path.lanes->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : laneWidth;
-            const double uOrigin = variable ? path.lanes->Mix(section.distance, [&](const RoadStyle& s)
+                variable ? path.profile->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : laneWidth;
+            const double uOrigin = variable ? path.profile->Mix(section.distance, [&](const RoadStyle& s)
                 { return s.GetLaneCount() * 0.5 + (s.IsDivided() && side < 0 ? 1.0 : 0.0); }) : centerU;
             const double u = uOrigin - side * (offset - halfGap) / tileWidth;
             const double v = (section.distance + offset * section.bevelSlope) / RoadStyle::laneWidth;
@@ -648,20 +666,20 @@ namespace
             const double fb = taper ? taper->Fraction(b.distance) : 0;
             // Leave a painted nose between the two edge lines even on highways without shoulders.
             const double clearance = taper ? goreWidth + road.style.EdgeWidth() + taper->lane.edgeWidth : 0;
-            const double shoulder = (side < 0 ? road.style.rightShoulder : road.style.leftShoulder) ? RoadStyle::shoulderWidth : 0.0;
-            const TaperProfile shape = taper ? taper->profile : TaperProfile{};
             const double pa = pavementAt(a), pb = pavementAt(b);
             const double ta = travelAt(a), tb = travelAt(b);
-            const double outerA = ta + shape.Outer(fa), outerB = tb + shape.Outer(fb);
-            const double innerA = ta + shape.Inner(fa, laneWidth), innerB = tb + shape.Inner(fb, laneWidth);
-            const auto edgeWidthAt = [&](double f, double outer)
+            const TaperProfile shapeA = taper ? taper->Profile(pa - ta, clearance) : TaperProfile{};
+            const TaperProfile shapeB = taper ? taper->Profile(pb - tb, clearance) : TaperProfile{};
+            const double outerA = ta + shapeA.Outer(fa), outerB = tb + shapeB.Outer(fb);
+            const double innerA = ta + shapeA.Inner(fa, laneWidth), innerB = tb + shapeB.Inner(fb, laneWidth);
+            const auto edgeWidthAt = [&](double f, double outer, double shoulder)
             {
                 const double blend = f * f * (3.0 - 2.0 * f);
                 const double rampShoulder = taper ? taper->lane.outerPavement - taper->lane.halfTravel : shoulder;
                 return outer + std::lerp(shoulder, rampShoulder, blend);
             };
-            const double wa = taper ? edgeWidthAt(fa, outerA) : pa;
-            const double wb = taper ? edgeWidthAt(fb, outerB) : pb;
+            const double wa = taper ? edgeWidthAt(fa, outerA, pa - ta) : pa;
+            const double wb = taper ? edgeWidthAt(fb, outerB, pb - tb) : pb;
             if (taper)
             {
                 for (int lane = 0; lane < taper->lane.laneCount; ++lane)
@@ -682,7 +700,7 @@ namespace
                 // the turn of the highway's cross section, and the taper's lateral slope.
                 const double spanLength = spanEnd.distance - spanStart.distance;
                 const Vector3 along = (spanEnd.At(pavementAt(spanEnd) + extra) - spanStart.At(pavementAt(spanStart) + extra)) * (1.0 / spanLength)
-                                    + end.lateral * (shape.endSlope / (taper->gore - taper->tip));
+                                    + end.lateral * ((fa == 1 ? shapeA : shapeB).endSlope / (taper->gore - taper->tip));
                 const int direction = road.style.TravelDirection(side);
                 const double speed = Math::Length(along);
                 const double perMeter = speed > 0.0 ? 1.0 / (spanLength * speed) : 0.0;
@@ -694,6 +712,13 @@ namespace
                      taper->gore, taper->tip, taper->stationDistance, side * direction, lane.rampIndex};
             }
             const auto ra = profile(a, wa), rb = profile(b, wb);
+            if (bridge)
+            {
+                auto& rim = road.bridgeRims[side > 0];
+                if (rim.empty()) for (int i = 0; i < faces; ++i) rim.push_back({a.distance, ra[i]});
+                if (rim.empty() || rim.back().position != ra[faces]) rim.push_back({a.distance, ra[faces]});
+                rim.push_back({b.distance, rb[faces]});
+            }
             if (boundary.empty() && road.points.front().deadEndLength == 0)
                 boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);
             if (boundary.empty() || boundary.back() != ra[faces]) boundary.push_back(ra[faces]);
@@ -796,6 +821,8 @@ namespace
         if (road.points.back().deadEndLength == 0)
             for (int i = faces - 1; i >= 0; --i) boundary.push_back(lastRim[i]);
 
+        if (bridge && !stations.empty())
+            for (int i = faces - 1; i >= 0; --i) road.bridgeRims[side > 0].push_back({stations.back().distance, lastRim[i]});
         AppendBoundary(road, side, boundary);
         if (variable)
         {
@@ -803,7 +830,7 @@ namespace
             auto& distances = road.outerLaneDistances[side > 0];
             for (const auto& station : stations)
             {
-                const double offset = path.lanes->Mix(station.distance, [](const RoadStyle& s)
+                const double offset = path.profile->Mix(station.distance, [](const RoadStyle& s)
                 { return s.HalfSeparation() + (s.GetLaneCount() - 1) * s.TravelLaneWidth() * 0.5; });
                 const auto point = station.At(offset);
                 if (!outer.empty() && outer.back() == point) continue;
@@ -1042,10 +1069,13 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
         return;
     }
 
-    const bool variable = HasLaneOverrides();
+    if (HasOverpasses())
+        for (auto sample : pointSamples)
+            bridgeKnots.push_back(path.distances[std::min(sample > firstSample ? sample - firstSample : 0, path.distances.size() - 1)]);
+    const bool variable = HasProfileOverrides();
     if (variable)
     {
-        auto& profile = path.lanes.emplace();
+        auto& profile = path.profile.emplace();
         profile.road = this;
         for (int i = 1; i <= RoadStyle::maxLanes; ++i)
         {
@@ -1098,9 +1128,6 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
         }
         for (auto& taper : tapers)
         {
-            const double shoulder = (side < 0 ? style.rightShoulder : style.leftShoulder) ? RoadStyle::shoulderWidth : 0.0;
-            taper.SetProfile(shoulder,
-                             goreWidth + style.EdgeWidth() + taper.lane.edgeWidth);
             taper.firstGuide = laneCenterlines.size();
             laneCenterlines.resize(taper.firstGuide + taper.lane.laneCount);
         }

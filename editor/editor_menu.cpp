@@ -28,6 +28,7 @@ namespace
     // Owner-draw data must live as long as the menu, including while Windows tracks a popup.
     constexpr MenuItem file{0, L"&File", 0, true}, edit{0, L"&Edit", 0, true}, view{0, L"&View", 0, true},
                        settings{0, L"&Settings", 0, true}, create{0, L"&Create"};
+    constexpr MenuItem overpassItem{BSC_OVERPASS, L"&Overpass"}, removeOverpass{BSC_OVERPASS, L"Remove &Overpass"};
     constexpr MenuItem deadEndItem{BSC_CREATE_DEAD_END, L"&Dead End"};
     constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
@@ -369,6 +370,7 @@ namespace
                                          {"Create Intersection", EditorCommand::CreateIntersection},
                                          {"Marker", EditorCommand::CreateMarker},
                                          {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing},
+                                         {"Overpass", EditorCommand::ToggleOverpass},
                                          {"Dead End", EditorCommand::CreateDeadEnd}};
     constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
                                        {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp}};
@@ -420,7 +422,7 @@ bool EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, 
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -451,6 +453,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     else
     {
         ready = AddSubmenu(root, create, createItems);
+        if (ready && overpass) ready = Insert(GetSubMenu(root, 0), *overpass ? removeOverpass : overpassItem);
         if (ready && deadEnd)
         {
             ready = Insert(GetSubMenu(root, 0), deadEndItem);
@@ -491,6 +494,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_OVERPASS) return EditorCommand::ToggleOverpass;
     if (choice == BSC_CREATE_DEAD_END) return EditorCommand::CreateDeadEnd;
     if (choice == BSC_SPLIT_ROAD) return EditorCommand::SplitRoad;
     if (choice == BSC_FLATTEN_SEGMENT) return EditorCommand::FlattenSegment;
@@ -520,6 +524,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     }
     intersectionEnabled = canCreateIntersection;
     deadEndEnabled = deadEnd;
+    overpassState = overpass;
     this->crossingAvailable = crossingAvailable;
     this->crossingExists = crossingExists;
     roadActionEnabled = split ? std::optional{split->enabled} : canFlatten;
@@ -557,6 +562,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
 #ifndef _WIN32
 bool EditorMenu::Enabled(EditorCommand command) const
 {
+    if (command == EditorCommand::ToggleOverpass) return overpassState.has_value();
     if (command == EditorCommand::CreateDeadEnd) return deadEndEnabled.value_or(false);
     if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
     if (command == EditorCommand::CreateEntranceRamp) return rampOptions.entrance;
@@ -795,7 +801,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {
-            if (!item(row, (items[i].command == EditorCommand::ToggleRailroadCrossing && crossingExists ? "Remove Railroad Crossing" : items[i].label), i == activeItem, Enabled(items[i].command)))
+            if (!item(row, (items[i].command == EditorCommand::ToggleOverpass && overpassState.value_or(false) ? "Remove Overpass" : items[i].command == EditorCommand::ToggleRailroadCrossing && crossingExists ? "Remove Railroad Crossing" : items[i].label), i == activeItem, Enabled(items[i].command)))
             {
                 return false;
             }

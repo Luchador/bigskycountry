@@ -52,6 +52,8 @@ All framing integers are unsigned and little-endian. The file begins with the fo
 
 `ROAD` version 20 appends an outgoing segment lane count to each point. Zero inherits the road-wide count; 1–10 explicitly sets that segment's count. The last point's value is unused. Two lane counts after the whole-road rotation preserve neighboring lane configurations at free endpoints created by a split; zero means no external neighbor. Older worlds default these values to zero. Divided roads require even counts, and railroads cannot have lane overrides.
 
+`ROAD` version 21 appends left and right shoulder overrides to each point after its segment lane count. Values are 0 for inherited, 1 for off, and 2 for on. Four values after the lane-neighbor counts preserve first-end left/right and last-end left/right shoulder context at splits. Older worlds default to inherited shoulders, retaining their road-wide settings. Railroad shoulder overrides must be zero.
+
 Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 
 ### Static mesh assets
@@ -251,7 +253,7 @@ With that endpoint selected, edit **End transition (m)** in the inspector and pr
 
 Both ends can have independent lengths. Changes save with the world and support undo/redo. Moving or rotating the road keeps its ends attached; Shift-dragging an endpoint carries its dead end to the new endpoint. Splitting retains caps only at the original outer ends. Connecting a capped endpoint to another road or intersection removes its cap. Railroads, interior control points, and connected endpoints cannot receive dead ends.
 
-### Per-segment lane counts
+### Per-segment lanes and shoulders
 
 Select a road's cyan control spline segment, then use **Segment lanes** in the inspector to change that segment's lane count. **Shift+click** adds other segments on the same road. A mixed selection displays **Mixed**; the plus/minus buttons set all selected segments to the same count. Divided roads change in steps of two.
 
@@ -259,7 +261,9 @@ The adjacent segments provide smooth transitions between the edited configuratio
 
 Dashed white lane dividers are omitted wherever the lane count transitions. They resume on constant-width sections with their dash spacing preserved. Solid edge lines, yellow markings, and the editor's green lane guides remain visible through the transitions.
 
-Select the whole road and change its lane count to restore a uniform configuration, clearing its segment overrides. Other inspector properties still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
+Select the whole road and change its lane count to restore a uniform configuration, clearing its segment overrides. Other inspector properties, except shoulders, still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
+
+With segments selected, the **Segment shoulders (5 m each)** checkboxes toggle the left and right shoulders independently for those segments. Neighboring segments provide smooth tapers between no shoulder and the full 5 m width. Differently edited segments share the transition across their adjoining halves, just like lane counts. Lane edge lines stay at the travel-lane boundary, and curbs, transition strips, and terrain fills follow the changing outside edge. Changing a shoulder with the whole road selected clears segment overrides for that side only. Mixed selections show an indeterminate checkbox; clicking it enables that shoulder for the selection. Shoulder settings save with the world and support undo/redo, splitting, subdivision, and extension.
 
 ### Editing road control points
 
@@ -282,3 +286,35 @@ The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.
 In the top-down road view, hold the **middle mouse button** and drag to measure straight-line distance in the XZ plane. The ruler shows meters and disappears when you release the button. You can measure while laying out a draft.
 
 To extend either end of a road, select its endpoint alone, hold **Shift**, and drag a translation arrow. In the top-down road view, hold **Shift** and drag the endpoint itself. The original point stays in place and the new endpoint stays selected, ready for the next segment. Top-down extensions keep the endpoint's elevation. Release to save, or press **Esc** during the drag to cancel.
+
+### Overpasses (first milestone)
+
+Raise the upper road to the desired height, then select the adjoining **segments** that
+will form the span. Right-click their cyan center spline (or pavement), then choose
+**Create → Overpass**. Its end control points define the abutments; keep those points
+beyond the full width of the lower road. Use Ctrl+Q to add control points if necessary.
+A span must cross a ground-level road and have room beneath its 0.6 m default deck.
+The command never raises either road automatically.
+
+The road keeps its spline, lane/shoulder profiles, paint and pavement material. With
+bridge segments selected, the inspector's **Deck thickness (m)** field accepts 0.1–10 m.
+Leave enough clearance for vehicles when changing thickness or road elevations.
+**Create → Remove Overpass** restores ordinary road segments. A single clicked bridge
+segment removes its contiguous span; a multi-segment selection limits the change to
+those segments. Creation, removal and thickness edits support undo/redo.
+
+Concrete sides, an underside and end abutments are generated from the road geometry.
+Terrain fill uses the approach rims and ground seams beneath the span, instead of
+connecting ground to its elevated deck. The bridge owns a subdivided ground patch
+underneath, excluding lower-road footprints; adjoining F-created terrain chunks share
+that boundary without overlapping the underpass patch. Changes to connected lower
+roads, bridge shape, lanes or shoulders rebuild the affected geometry. Splits and
+subdivision preserve the span and its lower-road dependencies. Matching split bridge
+ends omit internal abutments; moving them apart restores the exposed end walls.
+
+This milestone supports road-over-road spans. Separate a proposed span from ramps,
+intersections, railroad crossings and dead ends before converting it. Rails/stacked
+bridges, piers, barriers, decorative details and material controls for the concrete
+and automatic ground patch are future work. That patch currently uses the default
+ground color; surrounding terrain retains its own material. Saved worlds store span
+settings and road IDs, never generated bridge meshes. Older worlds remain readable.

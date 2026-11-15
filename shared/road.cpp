@@ -43,7 +43,7 @@ namespace
 
 std::span<const Vector3> Road::OuterLane(int side) const
 {
-    if (HasLaneOverrides()) return outerLaneCenterlines[side > 0];
+    if (HasProfileOverrides()) return outerLaneCenterlines[side > 0];
     if (laneCenterlines.empty()) return {};
     return laneCenterlines[side < 0 ? 0 : style.GetLaneCount() - 1];
 }
@@ -91,7 +91,13 @@ bool Road::CanDivideAllSegments() const
 RoadStyle Road::EndpointStyle(bool first) const
 {
     auto result = style;
-    if (points.size() >= 2) result.SetLaneCount(SegmentLaneCount(first ? 0 : points.size() - 2));
+    if (points.size() >= 2)
+    {
+        const auto segment = first ? 0 : points.size() - 2;
+        result.SetLaneCount(SegmentLaneCount(segment));
+        result.leftShoulder = SegmentShoulder(segment, true);
+        result.rightShoulder = SegmentShoulder(segment, false);
+    }
     return result;
 }
 
@@ -115,22 +121,91 @@ void Road::SetLaneCount(int count)
     laneNeighbors = {};
 }
 
+namespace
+{
+    // Lane and shoulder edits share the same neighboring-segment taper rules.
+    template<typename Override>
+    Road::ProfileBlend BlendSegment(const Road& road, std::size_t segment, double fraction,
+                                    int fallback, const std::array<int, 2>& neighbors, Override value)
+    {
+        const auto& points = road.points;
+        const int own = segment + 1 < points.size() && value(points[segment]) ? value(points[segment]) : fallback;
+        if (segment + 1 >= points.size()) return {own, own, 0};
+        const double t = std::clamp(fraction, 0.0, 1.0);
+        const auto ease = [](double u) { return u * u * u * (u * (u * 6 - 15) + 10); };
+        const int before = segment > 0 && value(points[segment - 1]) ? value(points[segment - 1]) :
+                           segment == 0 && neighbors[0] && !points.front().Joined() ? neighbors[0] : own;
+        const int after = segment + 2 < points.size() && value(points[segment + 1]) ? value(points[segment + 1]) :
+                          segment + 2 == points.size() && neighbors[1] && !points.back().Joined() ? neighbors[1] : own;
+        if (!value(points[segment])) return {before, after, ease(t)};
+        // Different edited segments share a taper across their adjoining halves.
+        if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
+        if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
+        return {own, own, 0};
+    }
+}
+
 Road::LaneBlend Road::SegmentLaneBlend(std::size_t segment, double fraction) const
 {
-    const int own = SegmentLaneCount(segment);
-    if (segment + 1 >= points.size()) return {own, own, 0};
-    const double t = std::clamp(fraction, 0.0, 1.0);
-    const auto ease = [](double u) { return u * u * u * (u * (u * 6 - 15) + 10); };
-    const int before = segment > 0 && points[segment - 1].segmentLanes ? SegmentLaneCount(segment - 1) :
-                       segment == 0 && laneNeighbors[0] && !points.front().Joined() ? laneNeighbors[0] : own;
-    const int after = segment + 2 < points.size() && points[segment + 1].segmentLanes ? SegmentLaneCount(segment + 1) :
-                      segment + 2 == points.size() && laneNeighbors[1] && !points.back().Joined() ? laneNeighbors[1] : own;
-    if (!points[segment].segmentLanes) return {before, after, ease(t)};
-    // Different edited segments can touch without a spare transition segment.
-    // Share that taper across their adjoining halves; their midpoint counts stay exact.
-    if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
-    if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
-    return {own, own, 0};
+    return BlendSegment(*this, segment, fraction, style.GetLaneCount(), laneNeighbors,
+                        [](const RoadPoint& p) { return p.segmentLanes; });
+}
+
+bool Road::SegmentShoulder(std::size_t segment, bool left) const
+{
+    const int value = segment + 1 < points.size() ? points[segment].segmentShoulders[left ? 0 : 1] : 0;
+    return value ? value == 2 : left ? style.leftShoulder : style.rightShoulder;
+}
+
+Road::ProfileBlend Road::SegmentShoulderBlend(std::size_t segment, double fraction, bool left) const
+{
+    const int side = left ? 0 : 1;
+    auto blend = BlendSegment(*this, segment, fraction, (left ? style.leftShoulder : style.rightShoulder) ? 2 : 1,
+        {shoulderNeighbors[0][side], shoulderNeighbors[1][side]},
+        [&](const RoadPoint& p) { return p.segmentShoulders[side]; });
+    --blend.from;
+    --blend.to;
+    return blend;
+}
+
+bool Road::HasShoulderOverrides() const
+{
+    for (const auto& end : shoulderNeighbors) if (end[0] || end[1]) return true;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i)
+        if (points[i].segmentShoulders[0] || points[i].segmentShoulders[1]) return true;
+    return false;
+}
+
+double Road::MaximumShoulderWidth(bool left) const
+{
+    const int side = left ? 0 : 1;
+    if ((left ? style.leftShoulder : style.rightShoulder) || shoulderNeighbors[0][side] == 2 || shoulderNeighbors[1][side] == 2)
+        return RoadStyle::shoulderWidth;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i)
+        if (points[i].segmentShoulders[side] == 2) return RoadStyle::shoulderWidth;
+    return 0;
+}
+
+bool Road::SetSegmentShoulders(const std::set<int>& segments, bool left, bool enabled)
+{
+    if (style.railroad || segments.empty() || *segments.begin() < 0 ||
+        static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size()) return false;
+    bool changed = false;
+    for (int i : segments)
+    {
+        auto& value = points[i].segmentShoulders[left ? 0 : 1];
+        changed |= value != (enabled ? 2 : 1);
+        value = enabled ? 2 : 1;
+    }
+    return changed;
+}
+
+void Road::SetShoulder(bool left, bool enabled)
+{
+    (left ? style.leftShoulder : style.rightShoulder) = enabled;
+    const int side = left ? 0 : 1;
+    for (auto& point : points) point.segmentShoulders[side] = 0;
+    for (auto& end : shoulderNeighbors) end[side] = 0;
 }
 
 Vector3 Road::OuterLanePosition(int side, double distance) const
@@ -395,6 +470,9 @@ Road Road::NewSection() const
     result.paintMarkings = paintMarkings;
     result.style = style;
     result.laneNeighbors = laneNeighbors;
+    result.shoulderNeighbors = shoulderNeighbors;
+    result.bridgeNeighbors = bridgeNeighbors;
+    result.bridgeGroundSources = bridgeGroundSources;
     result.rotation = rotation;
     return result;
 }
@@ -405,6 +483,10 @@ Road Road::Section(std::size_t first, std::size_t last) const
     result.points.assign(points.begin() + first, points.begin() + last + 1);
     result.laneNeighbors = {first > 0 ? points[first - 1].segmentLanes : laneNeighbors[0],
                             last + 1 < points.size() ? points[last].segmentLanes : laneNeighbors[1]};
+    result.shoulderNeighbors = {first > 0 ? points[first - 1].segmentShoulders : shoulderNeighbors[0],
+                                last + 1 < points.size() ? points[last].segmentShoulders : shoulderNeighbors[1]};
+    result.bridgeNeighbors = {first > 0 ? points[first - 1].bridge.has_value() : bridgeNeighbors[0],
+                              last + 1 < points.size() ? points[last].bridge.has_value() : bridgeNeighbors[1]};
     // An automatic tangent at a cut may depend on the neighbor we just removed.
     // Keep the surviving Bézier span's original shape at that new endpoint.
     const auto preserveTangent = [&](std::size_t source, std::size_t endpoint)
@@ -464,6 +546,8 @@ bool Road::InsertStation(int segment, double t, int stationId)
         auto& b = points[segment + 1];
         RoadPoint knot{};
         knot.segmentLanes = a.segmentLanes;
+        knot.segmentShoulders = a.segmentShoulders;
+        knot.bridge = a.bridge;
         knot.surfaceUp = SurfaceUp(segment, t);
         knot.rampStation = stationId;
         knot.position = a.position + (b.position - a.position) * t;
@@ -510,6 +594,8 @@ bool Road::SubdivideSegments(const std::set<int>& segments)
         RoadPoint& start = result.back();
         RoadPoint middle{};
         middle.segmentLanes = start.segmentLanes;
+        middle.segmentShoulders = start.segmentShoulders;
+        middle.bridge = start.bridge;
         middle.position = start.position + (end.position - start.position) * 0.5;
         middle.roll = start.roll + 0.5 * std::remainder(end.roll - start.roll, 2 * std::numbers::pi);
         if (style.curved)
@@ -633,6 +719,7 @@ void RoadGeometry::UpdateBounds()
     };
     includeSurface(pavementTriangles);
     includeSurface(edgeTriangles);
+    includeSurface(bridgeTriangles);
     for (const auto& [material, strip] : transitionStrips) includeSurface(strip);
     for (const auto* stripes : {&whiteStripes, &yellowStripes})
         for (const auto& triangle : *stripes)
@@ -656,7 +743,7 @@ void RoadGeometry::UpdateBounds()
 
 bool Road::CanDeadEnd(int point) const
 {
-    return !style.railroad && points.size() >= 2 && point >= 0 &&
+    return !style.railroad && !HasOverpasses() && points.size() >= 2 && point >= 0 &&
         (point == 0 || point + 1 == static_cast<int>(points.size())) &&
         !points[point].Joined() && points[point].rampStation == 0;
 }
@@ -685,6 +772,10 @@ void Road::Rebuild()
     railroadSegments.clear();
     trackSections.clear();
     crossingSlabs.clear();
+    groundFootprints.clear();
+    bridgeTriangles.clear();
+    for (auto& rim : bridgeRims) rim.clear();
+    bridgeKnots.clear();
     edgeTriangles.clear();
     transitionStrips.clear();
     outline.clear();
@@ -718,7 +809,12 @@ void Road::Rebuild()
     {
         const Vector3 b = points[i].position;
         const auto early = SegmentLaneBlend(i - 1, 0.25), late = SegmentLaneBlend(i - 1, 0.75);
-        const bool laneTransition = !style.railroad && (early.from != early.to || late.from != late.to);
+        bool profileTransition = !style.railroad && (early.from != early.to || late.from != late.to);
+        for (bool left : {false, true})
+        {
+            const auto a = SegmentShoulderBlend(i - 1, 0.25, left), b = SegmentShoulderBlend(i - 1, 0.75, left);
+            profileTransition |= !style.railroad && (a.from != a.to || b.from != b.to);
+        }
 
         if (style.curved)
         {
@@ -727,7 +823,7 @@ void Road::Rebuild()
             // Resolve the oblique cross sections near a ramp join even on a nearly straight branch.
             EndSampling ends{i == 1 && rampCaps.front() ? RampFrameBlendLength() : 0.0,
                                    i + 1 == points.size() && rampCaps.back() ? RampFrameBlendLength() : 0.0};
-            if (laneTransition)
+            if (profileTransition)
             {
                 ends.start = std::numeric_limits<double>::infinity();
                 ends.spacing = std::max(0.25, Math::Length(b - points[i - 1].position) / 64.0);
@@ -746,7 +842,7 @@ void Road::Rebuild()
         {
             const Vector3 chord = Math::Normalize(b - points[i - 1].position);
             const auto start = approachTangent(i - 1, chord), end = approachTangent(i, chord);
-            if (start == chord && end == chord && !laneTransition)
+            if (start == chord && end == chord && !profileTransition)
             {
                 centerline.push_back(b);
                 if (customUp) surfaceUps.push_back(points[i].surfaceUp);
@@ -754,7 +850,7 @@ void Road::Rebuild()
             else
             {
                 const auto curve = SegmentCurve(points[i - 1], points[i], start, end);
-                const EndSampling sampling{laneTransition ? std::numeric_limits<double>::infinity() : 0.0, 0.0,
+                const EndSampling sampling{profileTransition ? std::numeric_limits<double>::infinity() : 0.0, 0.0,
                     std::max(0.25, Math::Length(b - points[i - 1].position) / 64.0)};
                 SampleCubic(curve, 0.05, 0, 0, 1, [&](Vector3 p, Vector3, double t)
                 {
@@ -925,6 +1021,7 @@ void Road::Rebuild()
             cap = {frame.Direction(cap.left), frame.Direction(cap.up),
                    frame.Direction(cap.leftPerMeter), frame.Direction(cap.upPerMeter)};
         }
+        for (auto& rim : bridgeRims) for (auto& p : rim) p.position = frame.Point(p.position);
         moveSurface(pavementTriangles);
         moveSurface(edgeTriangles);
         for (auto& lane : laneCenterlines)
@@ -938,5 +1035,6 @@ void Road::Rebuild()
         }
     }
     ApplyRailroadCrossings(*this, crossingProfiles);
+    BuildOverpasses();
     UpdateBounds();
 }

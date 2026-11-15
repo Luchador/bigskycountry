@@ -73,7 +73,7 @@ Bounds3 SelectionBounds(const WorldDocument& world, const RoadEditorState& state
         {
             // Frame just the selected spans, including their pavement width.
             const double width = road.MaximumHalfTravelWidth() + road.style.HalfSeparation() + road.style.EdgeWidth() +
-                (road.style.leftShoulder || road.style.rightShoulder ? RoadStyle::shoulderWidth : 0.0);
+                std::max(road.MaximumShoulderWidth(true), road.MaximumShoulderWidth(false));
             for (int segment : state.segments)
             {
                 if (segment < 0 || segment + 1 >= static_cast<int>(road.points.size())) continue;

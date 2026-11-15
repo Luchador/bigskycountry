@@ -137,6 +137,7 @@ bool ViewportPicker::TestRoad(const RoadGeometry& road)
     };
     testSurface(road.pavementTriangles);
     testSurface(road.edgeTriangles);
+    testSurface(road.bridgeTriangles);
     for (const auto& detail : road.railroadSegments)
     {
         if (!detail.WithinDistance(eye, g_ProjectSettings.RailroadDetailDistance())) continue;

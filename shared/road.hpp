@@ -1,6 +1,7 @@
 #pragma once
 
 #include "railroad.hpp"
+#include "road_bridge.hpp"
 #include "railroad_crossing.hpp"
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_rect.h>
@@ -130,6 +131,8 @@ struct RoadPoint
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
     double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
     int segmentLanes = 0; // Outgoing segment override. Zero inherits the road and can taper to edited neighbors.
+    std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
+    std::optional<BridgeSettings> bridge; // Outgoing segment, independent of pavement/lane settings.
     bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
 
@@ -165,6 +168,7 @@ struct RoadGeometry
     std::vector<std::array<PavementVertex, 3>> pavementTriangles;
     using ColoredSurface = std::vector<std::array<EdgeVertex, 3>>;
     ColoredSurface edgeTriangles; // Vertex-colored outer edges and median surfaces.
+    ColoredSurface bridgeTriangles; // Underside, abutments and ground under a span; excluded from the 2D overlay.
     std::vector<Vector3> outline; // Closed perimeter including shoulders, edge treatment and road ends.
     struct CrossingSlab
     {
@@ -174,6 +178,8 @@ struct RoadGeometry
         std::vector<std::array<Vector3, 4>> walls;
     };
     std::vector<CrossingSlab> crossingSlabs;
+    // Explicit ground contact replaces the elevated road outline when overpasses are present.
+    std::vector<CrossingSlab> groundFootprints;
     struct RailroadSegment
     {
         ColoredSurface rails;
@@ -236,16 +242,33 @@ struct Road : RoadGeometry
     bool paintMarkings = true;
     RoadStyle style;
     std::array<int, 2> laneNeighbors{}; // Lane context retained at free ends when a taper is split into separate roads.
+    std::array<std::array<int, 2>, 2> shoulderNeighbors{}; // First/last end, then left/right, using the same override codes.
     int SegmentLaneCount(std::size_t segment) const;
     int MaximumLaneCount() const;
     double MaximumHalfTravelWidth() const;
     bool HasLaneOverrides() const;
+    bool SegmentShoulder(std::size_t segment, bool left) const;
+    bool HasShoulderOverrides() const;
+    bool HasOverpasses() const;
+    void BuildOverpasses();
+    std::array<bool, 2> bridgeNeighbors{}; // Derived continuation at a matching bridge endpoint; never saved.
+    struct RimPoint { double distance; Vector3 position; };
+    std::array<std::vector<RimPoint>, 2> bridgeRims;
+    std::vector<double> bridgeKnots;
+    std::map<int, std::vector<Vector3>> bridgeGroundSources; // Derived lower-road rims, never saved.
+    std::map<int, std::uint64_t> bridgeSourceRevisions;
+    bool HasProfileOverrides() const { return HasLaneOverrides() || HasShoulderOverrides(); }
+    double MaximumShoulderWidth(bool left) const;
+    bool SetSegmentShoulders(const std::set<int>& segments, bool left, bool enabled);
+    void SetShoulder(bool left, bool enabled); // Whole road: clear overrides for this side only.
     bool CanDivideAllSegments() const;
     RoadStyle EndpointStyle(bool first) const;
     bool SetSegmentLaneCounts(const std::set<int>& segments, int count);
     void SetLaneCount(int count); // Whole road: replace the default and clear segment overrides.
-    struct LaneBlend { int from, to; double mix; };
+    struct ProfileBlend { int from, to; double mix; };
+    using LaneBlend = ProfileBlend;
     LaneBlend SegmentLaneBlend(std::size_t segment, double fraction) const;
+    ProfileBlend SegmentShoulderBlend(std::size_t segment, double fraction, bool left) const;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     std::vector<RailroadCrossingLink> crossings;

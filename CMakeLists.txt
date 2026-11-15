@@ -72,6 +72,7 @@ add_library(BigSkyApplication STATIC
     shared/railroad_crossing.cpp
     shared/railroad.cpp
     shared/road.cpp
+    shared/road_bridge.cpp
     shared/road_stripes.cpp
     shared/road_io.cpp
     shared/scene_hierarchy.cpp

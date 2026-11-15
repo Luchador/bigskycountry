@@ -92,6 +92,7 @@ void WorldCollision::Build(const WorldDocument& world)
         };
         surface(geometry.pavementTriangles);
         surface(geometry.edgeTriangles);
+        surface(geometry.bridgeTriangles);
         for (const auto& [path, faces] : geometry.transitionStrips) surface(faces);
         for (const auto& segment : geometry.railroadSegments)
         {

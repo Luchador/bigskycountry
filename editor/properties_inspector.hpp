@@ -22,12 +22,17 @@ struct PropertiesInspector
     bool paintMarkings = true;
     bool hasDeadEnd = false;
     std::optional<double> deadEndLength; // Editable only for the selected free endpoint.
-    std::string DeadEndText() const;
+    std::optional<double> bridgeDepth; // All selected segments must belong to a bridge.
+    bool mixedBridgeDepth = false;
+    bool HasRoadDetail() const { return deadEndLength.has_value() || bridgeDepth.has_value(); }
+    const char* RoadDetailLabel() const { return bridgeDepth ? "Deck thickness (m)" : "End transition (m)"; }
+    const char* RoadDetailHint() const { return bridgeDepth ? "Overpass" : "0 = no dead end"; }
+    std::string RoadDetailText() const;
     RoadStyle style;
     std::bitset<static_cast<size_t>(RoadProperty::Count)> mixed;
     bool Mixed(RoadProperty property) const { return mixed.test(static_cast<size_t>(property)); }
     int minLanes = 2, maxLanes = 2;
-    bool segmentSelection = false; // Only the lane-count controls use this scope.
+    bool segmentSelection = false; // Lane-count and shoulder controls use this scope.
     double minExtraWidth = 0.0, maxExtraWidth = 0.0;
     double minGap = 4, maxGap = 4;
     bool canDivide = true, anyDivided = false;

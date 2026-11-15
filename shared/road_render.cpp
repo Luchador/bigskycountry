@@ -207,6 +207,7 @@ void WorldRenderer::EmitRoadSurface(const RoadGeometry& road, const std::string&
         if (!material.empty()) materialRanges.push_back({start, vertices.size(), material});
     }
     SubmitColoredSurface(*this, road.edgeTriangles);
+    SubmitColoredSurface(*this, road.bridgeTriangles);
     for (const auto& [path, strip] : road.transitionStrips)
     {
         const auto first = vertices.size();

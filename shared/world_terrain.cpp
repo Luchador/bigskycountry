@@ -20,7 +20,12 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     std::vector<std::uint64_t> revisions;
     std::vector<std::array<Vector3, 2>> links;
     const auto& boundary = *chunk.boundary;
+    auto groundRoads = boundary.roads;
     for (int id : boundary.roads)
+        if (auto it = byId.find(id); it != byId.end())
+            for (const auto& p : it->second->points) if (p.bridge)
+                groundRoads.insert(p.bridge->lowerRoads.begin(), p.bridge->lowerRoads.end());
+    for (int id : groundRoads)
     {
         const auto it = byId.find(id);
         if (it == byId.end())
@@ -55,6 +60,7 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
 
 void WorldDocument::RefreshTerrainFills()
 {
+    RefreshOverpasses();
     if (terrainRevision == RoadGeometry::latestRevision) return;
     terrainRevision = RoadGeometry::latestRevision;
     std::map<int, const Road*> byId;
@@ -79,6 +85,7 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
         SDL_SetError("Select the roads and intersections around the area to fill");
         return nullptr;
     }
+    RefreshOverpasses();
     auto chunk = std::make_unique<TerrainChunk>();
     chunk->boundary = std::move(boundary);
     int folder = 0;

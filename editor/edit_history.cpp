@@ -171,14 +171,20 @@ void RoadProperties::Apply(Road& road) const
 {
     if (road.NameList() != names) road.SetNameList(names);
     road.style.material = style.material;
-    bool lanesChanged = road.laneNeighbors != laneNeighbors;
+    bool profileChanged = road.laneNeighbors != laneNeighbors || road.shoulderNeighbors != shoulderNeighbors;
     road.laneNeighbors = laneNeighbors;
+    road.shoulderNeighbors = shoulderNeighbors;
     for (std::size_t i = 0; i < std::min(road.points.size(), segmentLanes.size()); ++i)
     {
-        lanesChanged |= road.points[i].segmentLanes != segmentLanes[i];
+        profileChanged |= road.points[i].segmentLanes != segmentLanes[i];
         road.points[i].segmentLanes = segmentLanes[i];
     }
-    if (lanesChanged || road.style != style || road.paintMarkings != paintMarkings)
+    for (std::size_t i = 0; i < std::min(road.points.size(), segmentShoulders.size()); ++i)
+    {
+        profileChanged |= road.points[i].segmentShoulders != segmentShoulders[i];
+        road.points[i].segmentShoulders = segmentShoulders[i];
+    }
+    if (profileChanged || road.style != style || road.paintMarkings != paintMarkings)
     {
         road.style = style;
         road.paintMarkings = paintMarkings;
@@ -337,6 +343,21 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
     for (const auto& piece : replacements)
         for (const auto& p : piece.points) removedStations.erase(p.rampStation);
     std::map<int, std::vector<RoadPoint>> disconnected;
+    // A bridge tracks stable lower-road IDs, including every piece of a split.
+    const int replacedId = world.roads[index].id;
+    for (auto& road : world.roads)
+    {
+        if (road.id == replacedId) continue;
+        for (auto& point : road.points)
+        {
+            if (!point.bridge || !point.bridge->lowerRoads.contains(replacedId)) continue;
+            before.connectedRoadPoints.try_emplace(road.id, road.points);
+            point.bridge->lowerRoads.erase(replacedId);
+            for (const auto& piece : replacements) point.bridge->lowerRoads.insert(piece.id);
+            disconnected[road.id] = road.points;
+        }
+        if (disconnected.contains(road.id)) road.Rebuild();
+    }
     if (!removedStations.empty() || !removedJoins.empty())
     {
         for (Road& ramp : world.roads)

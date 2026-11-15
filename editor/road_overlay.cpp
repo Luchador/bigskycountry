@@ -202,7 +202,7 @@ void RoadOverlay::Draw(WorldRenderer& renderer, const Road& road, const RoadEdit
     if (focal <= 0) return;
     const OverlayStroke stroke(camera, scene, focal);
     const int laneCount = road.style.GetLaneCount();
-    const bool variable = road.HasLaneOverrides();
+    const bool variable = road.HasProfileOverrides();
     for (size_t lane = 0; lane < road.laneCenterlines.size(); ++lane)
     {
         // An odd road's middle lane shares the editing spline. Leave a green rim around it.
