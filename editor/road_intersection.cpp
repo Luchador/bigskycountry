@@ -172,7 +172,7 @@ namespace
 std::optional<RoadSplineLocation> LocateRoadHit(const Road& road, RoadPick hit, Vector3 position)
 {
     const int last = static_cast<int>(road.points.size()) - 1;
-    if (last < 1 || road.style.railroad) return {};
+    if (last < 1) return {};
     if (hit.kind == RoadPickKind::Point)
     {
         if (hit.index < 0 || hit.index > last) return {};
@@ -189,7 +189,7 @@ std::optional<RoadIntersectionInsertion> PlanRoadIntersection(const Road& road, 
 {
     // A bridge needs its abutments and ground seams; inserting a flat junction
     // through it would remove those connections. Convert the span back first.
-    if (road.HasOverpasses()) return {};
+    if (road.style.railroad || road.HasOverpasses()) return {};
     const int last = static_cast<int>(road.points.size()) - 1;
     const auto [left, right] = Split(Curve(road, at.segment), at.t);
     const bool atStart = at.segment == 0 && at.t == 0;

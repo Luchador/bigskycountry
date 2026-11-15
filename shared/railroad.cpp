@@ -172,7 +172,7 @@ const std::shared_ptr<const Mesh>& RailroadTieMesh()
     return tie;
 }
 
-void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::span<const Vector3> samples,
+void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const Vector3> samples,
                    std::span<const Vector3> tangents, std::span<const std::size_t> controlSamples,
                    const MeshTransform& frame, bool transition,
                    const std::string& material)
@@ -196,7 +196,7 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
     if (sections.size() < 2) return;
 
     const double crown = settings.width / 2, height = settings.height, run = height * 2;
-    const double toe = crown + run, toeHeight = transition ? std::min(0.035, height * 0.1) : 0;
+    const double toe = settings.ToeHalfWidth(), toeHeight = transition ? std::min(0.035, height * 0.1) : 0;
     std::vector<ProfilePoint> bed;
     // A smoothstep slope meets the crest and the toe with level tangents.
     constexpr int intervals = 6;
@@ -215,6 +215,20 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
     const double railBase = height + RailroadSettings::tieHeight;
     const double railCenter = (RailroadSettings::gauge + headWidth) / 2;
     const double outerWidth = toe + (transition ? RoadStyle::stripWidth : 0);
+    if (mesh.HasOverpasses())
+    {
+        // Reuse the road bridge builder with the railway's actual toe/transition
+        // rim. Track geometry and sleeper stationing are independent of bridges.
+        std::size_t section = 0;
+        for (const auto sample : controlSamples)
+        {
+            while (section + 1 < sections.size() && sections[section + 1].sampleIndex <= sample) ++section;
+            mesh.bridgeKnots.push_back(sections[section].distance);
+        }
+        for (const auto& s : sections)
+            for (int side : {-1, 1})
+                mesh.bridgeRims[side > 0].push_back({s.distance, s.Point(side * outerWidth, 0)});
+    }
     for (const auto& s : sections)
         mesh.trackSections.push_back({s.Point(0, railBase + RailroadSettings::railHeight), s.axes.z});
     for (const auto& s : sections) mesh.outline.push_back(s.Point(-outerWidth, 0));
@@ -223,7 +237,10 @@ void BuildRailroad(RoadGeometry& mesh, const RailroadSettings& settings, std::sp
     for (bool first : {true, false})
     {
         const auto& end = first ? sections.front() : sections.back();
-        if (height > 0)
+        // The bridge builder closes these ends against the complete bed profile
+        // and ground seam. Do not leave a coincident ballast cap over its abutment.
+        const bool bridgeEnd = mesh.points[first ? 0 : mesh.points.size() - 2].bridge.has_value();
+        if (height > 0 && !bridgeEnd)
         {
             for (std::size_t i = 1; i < bed.size(); ++i) EndFace(mesh.edgeTriangles, end, bed[i - 1], bed[i], 0, ballast, first);
             if (transition)

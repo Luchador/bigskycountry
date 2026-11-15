@@ -12,6 +12,35 @@
 namespace
 {
     using Rim = std::vector<Vector3>;
+    double ProfileRadius(const Road& road)
+    {
+        if (road.style.railroad)
+        {
+            const auto& bed = *road.style.railroad;
+            const double outer = bed.ToeHalfWidth() +
+                (road.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
+            // End-cap tests must reach the raised crest as well as wide/banked toes.
+            return std::hypot(outer, bed.height) + 1;
+        }
+        return road.MaximumHalfTravelWidth() + road.style.HalfSeparation() +
+               std::max(road.MaximumShoulderWidth(true), road.MaximumShoulderWidth(false)) + road.style.EdgeWidth() + 1;
+    }
+    double DeckBaseHeight(const Road& road, Vector3 position, Vector3 direction)
+    {
+        if (!road.style.railroad) return position.y;
+        const auto& bed = *road.style.railroad;
+        const auto frame = ObjectTransform{road.points.front().position, road.rotation}.ToMeshTransform();
+        const auto forward = Math::Normalize(direction);
+        auto side = Math::Cross(forward, frame.y);
+        if (Math::Length(side) < 1e-8) side = frame.z - forward * Math::Dot(frame.z, forward);
+        side = Math::Normalize(side);
+        const auto up = Math::Cross(side, forward);
+        const double width = bed.ToeHalfWidth() +
+            (road.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
+        // A banked railway's lower toe can be below its center spline. Use a
+        // conservative envelope of the full bed, never the higher rail heads.
+        return position.y - width * std::abs(side.y) + std::min(0.0, bed.height * up.y);
+    }
     double Cross(Vector3 a, Vector3 b)
     {
         return a.x * b.z - a.z * b.x;
@@ -157,12 +186,17 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
         SDL_SetError("%s", message);
         return {};
     };
-    if (upper.style.railroad || segments.empty() || *segments.begin() < 0 ||
+    if (segments.empty() || *segments.begin() < 0 ||
         std::size_t(*segments.rbegin() + 1) >= upper.points.size() ||
         int(segments.size()) != *segments.rbegin() - *segments.begin() + 1)
-        return fail("Select adjoining road segments for the overpass");
+        return fail("Select adjoining road or railroad segments for the overpass");
     if (!upper.rampLanes.empty() || !upper.crossings.empty() || upper.HasDeadEnd())
         return fail("Split the overpass section from ramps, grade crossings, or dead ends first");
+    if (upper.style.railroad)
+        for (const auto& road : roads)
+            for (const auto& crossing : road.crossings)
+                if (crossing.railroadId == upper.id)
+                    return fail("Split the railroad overpass section from at-grade crossings first");
     for (int i : segments)
         if (upper.points[i].Joined() || upper.points[i + 1].Joined())
             return fail("Place the overpass ends away from road and intersection connections");
@@ -184,10 +218,10 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
                         {
                             const auto position = path[i - 1] + (path[i] - path[i - 1]) * at->first;
                             const double bottom = std::lerp(lowerPath[j - 1].y, lowerPath[j].y, at->second);
-                            if (position.y - bottom < settings.depth + 1)
-                                return fail(lower.style.railroad ? "Raise the upper road before creating an overpass "
+                            if (DeckBaseHeight(upper, position, path[i] - path[i - 1]) - bottom < settings.depth + 1)
+                                return fail(lower.style.railroad ? "Raise the upper road or railroad before creating an overpass "
                                                                    "(deck plus at least 1 m above the rail heads)"
-                                                                 : "Raise the upper road before creating an overpass "
+                                                                 : "Raise the upper road or railroad before creating an overpass "
                                                                    "(deck plus at least 1 m of clear space)");
                             // Clearance is above the rails; terrain must still meet
                             // the embankment's unchanged toe/transition-strip rim.
@@ -201,9 +235,7 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
         {
             const auto axis = upper.PointAxes(p)[0];
             const auto left = Math::Normalize(Vector3{-axis.z, 0, axis.x});
-            const double width = upper.MaximumHalfTravelWidth() + upper.style.HalfSeparation() +
-                                 std::max(upper.MaximumShoulderWidth(true), upper.MaximumShoulderWidth(false)) +
-                                 upper.style.EdgeWidth() + 1;
+            const double width = ProfileRadius(upper);
             const auto a = upper.points[p].position - left * width, b = upper.points[p].position + left * width;
             if (Inside(a, lower.outline) || Inside(b, lower.outline) || Inside((a + b) * .5, lower.outline))
                 return fail("Extend the overpass span so its abutments clear the lower road or railroad embankment");
@@ -276,9 +308,7 @@ void Road::BuildOverpasses()
         for (const auto& [material, strip] : transitionStrips)
             bottom(strip);
         const std::array<std::size_t, 2> ends{first, last};
-        const double capRadius = MaximumHalfTravelWidth() + style.HalfSeparation() +
-                                 std::max(MaximumShoulderWidth(true), MaximumShoulderWidth(false)) + style.EdgeWidth() +
-                                 1;
+        const double capRadius = ProfileRadius(*this);
         const auto onCap = [&](Vector3 p, std::size_t knot) {
             const auto delta = p - points[knot].position;
             return Math::Length(delta) <= capRadius && std::abs(Math::Dot(delta, Tangent(knot))) < 1e-6;

@@ -4,6 +4,7 @@
 #include <span>
 
 struct RoadGeometry;
+struct Road;
 
 struct RailroadSettings
 {
@@ -18,6 +19,7 @@ struct RailroadSettings
     static constexpr double railHeight = 0.17;
     double width = 4.0;   // Flat top of the embankment, in meters.
     double height = 0.75; // Above the authored spline at the toe.
+    double ToeHalfWidth() const { return width * 0.5 + height * 2; }
     bool Valid() const;
     bool operator==(const RailroadSettings&) const = default;
 };
@@ -33,7 +35,7 @@ struct RailroadTieRun
     MeshTransform At(int index) const;
 };
 
-void BuildRailroad(RoadGeometry& geometry, const RailroadSettings& settings, std::span<const Vector3> samples,
+void BuildRailroad(Road& geometry, const RailroadSettings& settings, std::span<const Vector3> samples,
                    std::span<const Vector3> tangents, std::span<const std::size_t> controlSamples,
                    const MeshTransform& frame, bool transition,
                    const std::string& transitionMaterial);

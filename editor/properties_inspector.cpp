@@ -162,7 +162,18 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             }
         }
         auto first = road ? road->style : state.defaults;
-        result.segmentSelection = road && !editingDraft && !group && state.point < 0 && !state.segments.empty() && !first.railroad;
+        const bool selectedSegments = road && !editingDraft && !group && state.point < 0 && !state.segments.empty();
+        result.segmentSelection = selectedSegments && !first.railroad;
+        if (selectedSegments)
+        {
+            for (int segment : state.segments)
+            {
+                const auto& span = road->points[segment].bridge;
+                if (!span) { result.bridgeDepth.reset(); result.mixedBridgeDepth = false; break; }
+                if (result.bridgeDepth) result.mixedBridgeDepth |= *result.bridgeDepth != span->depth;
+                else result.bridgeDepth = span->depth;
+            }
+        }
         if (result.segmentSelection) first.SetLaneCount(road->SegmentLaneCount(*state.segments.begin()));
         if (first.railroad)
         {
@@ -188,16 +199,6 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.roadNames = road->NameList();
             result.paintMarkings = road->paintMarkings;
             result.hasDeadEnd = road->HasDeadEnd();
-            if (result.segmentSelection)
-            {
-                for (int segment : state.segments)
-                {
-                    const auto& span = road->points[segment].bridge;
-                    if (!span) { result.bridgeDepth.reset(); result.mixedBridgeDepth = false; break; }
-                    if (result.bridgeDepth) result.mixedBridgeDepth |= *result.bridgeDepth != span->depth;
-                    else result.bridgeDepth = span->depth;
-                }
-            }
             if (!editingDraft && !group && target.kind == SelectionKind::Point && road->CanDeadEnd(target.point))
                 result.deadEndLength = road->points[target.point].deadEndLength;
         }

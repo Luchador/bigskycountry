@@ -458,7 +458,7 @@ struct WindowsPanels::Impl
         const int stripHeight = lastInspector && lastInspector->properties.HasTransitionSlot() ? 41 : 0;
         const int endHeight = lastInspector && lastInspector->properties.HasRoadDetail() ? 36 : 0;
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight + endHeight :
-                           page == PropertiesPage::Railroad ? 211 + stripHeight :
+                           page == PropertiesPage::Railroad ? 211 + stripHeight + endHeight :
                            page == PropertiesPage::Marker ? 267 :
                            page == PropertiesPage::Intersection ? 232 : page == PropertiesPage::Terrain ? 192 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
@@ -1073,7 +1073,7 @@ struct WindowsPanels::Impl
         }
         if (pageChanged || stripChanged || refreshDeadEnd)
         {
-            const int top = ROAD_PANEL_HEIGHT + (properties.HasTransitionSlot() ? 41 : 0);
+            const int top = (railroad ? 211 : ROAD_PANEL_HEIGHT) + (properties.HasTransitionSlot() ? 41 : 0);
             for (int id : {IDC_DEAD_END_LABEL, IDC_DEAD_END_LENGTH, IDC_DEAD_END_HINT})
             {
                 const auto at = DialogSize(road, id == IDC_DEAD_END_LENGTH ? 103 : 7,

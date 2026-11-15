@@ -441,7 +441,7 @@ std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& ra
 
 std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road& railway, const CrossingSite& site)
 {
-    if (road.HasOverpasses() || railway.trackSections.size() < 2)
+    if (road.HasOverpasses() || railway.HasOverpasses() || railway.trackSections.size() < 2)
         return {};
     const auto path = Path(road), rail = Path(railway);
     const auto s = Stations(path), rs = Stations(rail);

@@ -151,7 +151,7 @@ namespace RoadIO
         {
             if (!ValidPoint(p.position, p.heading.value_or(0.0), p.pitch) || !std::isfinite(p.roll) || !ValidHandles(p) || !ValidSurfaceUp(p.surfaceUp) ||
                 !ValidShoulders(p.segmentShoulders, road.style.railroad.has_value()) ||
-                (p.bridge && (!p.bridge->Valid() || road.style.railroad || p.bridge->lowerRoads.contains(road.id))) ||
+                (p.bridge && (!p.bridge->Valid() || p.bridge->lowerRoads.contains(road.id))) ||
                 p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
                 (p.segmentLanes && (road.style.railroad || (road.style.IsDivided() && p.segmentLanes % 2))) ||
                 !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
@@ -304,7 +304,7 @@ namespace RoadIO
                 {
                     auto& span = p.bridge.emplace();
                     std::int64_t sources = 0;
-                    if (!(in >> span.depth >> span.groundHeight >> sources) || sources < 0 || sources > 10000 || road.style.railroad)
+                    if (!(in >> span.depth >> span.groundHeight >> sources) || sources < 0 || sources > 10000 || (road.style.railroad && version < 23))
                     { in.setstate(std::ios::failbit); return road; }
                     for (std::int64_t j = 0; j < sources; ++j)
                     {

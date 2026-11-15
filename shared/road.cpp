@@ -876,6 +876,7 @@ void Road::Rebuild()
     {
         BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
+        BuildOverpasses();
         UpdateBounds();
         return;
     }

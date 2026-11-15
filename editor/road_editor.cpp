@@ -566,7 +566,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         roadMenuTarget.reset();
         if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return;
         auto& road = world.roads[target.index];
-        if (road.revision != target.revision || target.segment < 0 || target.segment + 1 >= static_cast<int>(road.points.size()) || road.style.railroad) return;
+        if (road.revision != target.revision || target.segment < 0 || target.segment + 1 >= static_cast<int>(road.points.size())) return;
         auto segments = state.selected == target.index && state.segments.contains(target.segment) ? state.segments : std::set<int>{target.segment};
         const bool remove = road.points[target.segment].bridge.has_value();
         // Removing a single clicked span removes its whole contiguous bridge.
@@ -800,7 +800,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
             {
                 roadMenuTarget->segment = at->segment;
                 flattenEnabled = FlattenElevation(road, at->segment).has_value();
-                if (!road.style.railroad) overpass = road.points[at->segment].bridge.has_value();
+                overpass = road.points[at->segment].bridge.has_value();
             }
         }
         canCreate = roadMenuTarget->insertion.has_value();
