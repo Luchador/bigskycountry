@@ -89,6 +89,14 @@ The world owns the returned object. Use `SetTransform` to edit its placement. A 
 
 The optional `OBJS` version 3 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, and 5 for a marker. A marker record ends with its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1 and 2 also load. Older markers use their original mesh colors and white text. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
 
+### Mesh editor
+
+Double-click a GLB model in the Content Browser's **Models** tab to open a floating **Mesh Editor**. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The main editor remains usable while this window is open.
+
+The right panel lists the model's named glTF material slots. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
+
+Assignments save immediately to `model.glb.bmesh` next to the GLB in `assets/models`. The original GLB is unchanged. These are shared model settings, not world edits or world undo actions; keep the sidecar in source control alongside the model. Rebuilding copies it to `build/cooked/models`. Recook the world after changing assignments so its material dependencies and asset fingerprints are current. Models without a sidecar continue to load as before.
+
 ### Place markers
 
 Right-click in the 3D viewport and choose **Create → Marker**. The editor places `assets/models/objects/marker/marker.glb` at the picked position and selects it. In the inspector, enter a place name in **Marker text** and press **Enter**. An empty name hides the lettering. The Outliner shows the name and the world saves it with the marker. Drag a `.bmat` from the **Textures** tab onto **Mesh material** or directly onto the marker mesh. **Clear material** restores the model’s own colors. Choose **Text color** to set the label independently. Windows opens a color picker, and the SDL inspector accepts a `#RRGGBB` value. Each marker saves its own settings and supports Undo and Redo.

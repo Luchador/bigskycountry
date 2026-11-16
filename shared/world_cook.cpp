@@ -159,6 +159,8 @@ bool Cook(WorldDocument& world, const std::string& file)
             if (e.bounds.Empty()) e.bounds.Include({});
             if (instance) { e.transform = instance->transform; if (instance->mesh) e.model = instance->mesh->assetPath; }
             asset(AssetKind::Model, e.model); asset(AssetKind::Material, material);
+            if (material.empty() && instance && instance->mesh && instance->mesh->materials)
+                for (const auto& slot : instance->mesh->materials->slots) asset(AssetKind::Material, slot.material);
             entities[e.id] = manifest.entities.size(); manifest.entities.push_back(std::move(e));
         };
         auto emit = [&](EntityId id, Layer layer, const std::string& material, std::array<MeshVertex, 3> t, bool flat = true) {
@@ -241,6 +243,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                 const auto& mesh = *instance.mesh; const auto normal = instance.transform.NormalTransform();
                 for (std::size_t j = 0; j < mesh.indices.size(); j += 3)
                 {
+                    const auto& surface = material.empty() ? mesh.MaterialAt(j) : material;
                     std::array<MeshVertex, 3> v;
                     for (int k = 0; k < 3; ++k)
                     {
@@ -249,7 +252,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                         if (terrain && chunk.boundary && material.empty())
                         { v[k].color.r *= TerrainChunk::groundColor.r; v[k].color.g *= TerrainChunk::groundColor.g; v[k].color.b *= TerrainChunk::groundColor.b; }
                     }
-                    if (terrain)
+                    if (terrain && (!material.empty() || !mesh.HasMaterials()))
                     {
                         const auto local = instance.transform.Unrotate(Math::Cross(v[1].position - v[0].position, v[2].position - v[0].position));
                         auto u = instance.transform.x, w = instance.transform.z;
@@ -257,7 +260,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                         else if (std::abs(local.z) > std::abs(local.y)) w = instance.transform.y;
                         for (auto& vertex : v) { auto p = vertex.position - instance.transform.origin; vertex.uv = {float(Math::Dot(p, u) / 4), float(Math::Dot(p, w) / 4)}; }
                     }
-                    emit(world.StableId(key), terrain ? Layer::Surface : Layer::Water, material, v, false);
+                    emit(world.StableId(key), terrain ? Layer::Surface : Layer::Water, surface, v, false);
                 }
             };
             bake(chunk.Instance(), true, chunk.material);

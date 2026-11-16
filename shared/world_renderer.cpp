@@ -178,6 +178,11 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
         return;
     }
     const Mesh& mesh = *instance.mesh;
+    if (lightGeometry && mesh.HasMaterials())
+    {
+        SubmitMaterialMesh(instance, {}, MeshUVs::Authored, tint);
+        return;
+    }
     projectedMesh.clear();
     projectedMesh.reserve(mesh.vertices.size());
     const auto normals = instance.transform.NormalTransform();
@@ -247,11 +252,12 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
     }
 }
 
-void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping)
+void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping, SDL_FColor tint)
 {
-    if (material.empty() || !instance.mesh)
+    if (!instance.mesh) return;
+    if (material.empty() && !instance.mesh->HasMaterials())
     {
-        SubmitMesh(instance);
+        SubmitMesh(instance, tint);
         return;
     }
     const Mesh& mesh = *instance.mesh;
@@ -263,7 +269,6 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         return Math::Normalize(normalMatrix.Direction(n));
     };
     const bool mirrored = instance.transform.Determinant() < 0;
-    const auto start = vertices.size();
     for (size_t i = 0; i < mesh.indices.size(); i += 3)
     {
         const auto& a = mesh.vertices[mesh.indices[i]];
@@ -273,9 +278,17 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
                                    instance.transform.Point(c.position)};
         const auto uv = mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) : std::array{a.uv, b.uv, c.uv};
-        SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, uv, &normals);
+        const auto start = vertices.size();
+        const auto color = [&](SDL_FColor c) { return SDL_FColor{c.r * tint.r, c.g * tint.g, c.b * tint.b, c.a}; };
+        SubmitMaterialTriangle(positions, {color(a.color), color(b.color), color(c.color)}, uv, &normals);
+        const auto& path = material.empty() ? mesh.MaterialAt(i) : material;
+        if (!path.empty())
+        {
+            if (!materialRanges.empty() && materialRanges.back().end == start && materialRanges.back().path == path)
+                materialRanges.back().end = vertices.size();
+            else materialRanges.push_back({start, vertices.size(), path});
+        }
     }
-    if (vertices.size() > start) materialRanges.push_back({start, vertices.size(), material});
 }
 
 bool WorldRenderer::CanRetain(const std::string& material)
@@ -319,7 +332,7 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
     const auto& mesh = *instance.mesh;
     const auto normalMatrix = instance.transform.NormalTransform();
     const bool mirrored = instance.transform.Determinant() < 0;
-    const bool textured = !geometry.material.empty();
+    const bool textured = !geometry.material.empty() || mesh.HasMaterials();
     const auto worldNormal = [&](Vector3 normal) {
         return textured && geometry.mapping == MeshUVs::TerrainProjection ? instance.transform.Direction(normal) :
             Math::Normalize(normalMatrix.Direction(normal));
@@ -346,7 +359,10 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
             {
                 const auto uv = geometry.mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) :
                     std::array{a.uv, b.uv, c.uv};
-                SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, uv, &normals);
+                const auto color = [&](SDL_FColor c) {
+                    return SDL_FColor{c.r * geometry.tint.r, c.g * geometry.tint.g, c.b * geometry.tint.b, c.a};
+                };
+                SubmitMaterialTriangle(positions, {color(a.color), color(b.color), color(c.color)}, uv, &normals);
             }
             else
             {
@@ -369,18 +385,32 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
     preparationNanos += SDL_GetTicksNS() - started;
     geometry.complete = geometry.pendingUpload.size() == mesh.indices.size();
     if (geometry.complete && !geometry.pendingUpload.empty())
-        geometry.parts.push_back({0, geometry.pendingUpload.size(), geometry.material});
+    {
+        if (!geometry.material.empty() || !mesh.HasMaterials())
+            geometry.parts.push_back({0, geometry.pendingUpload.size(), geometry.material});
+        else for (const auto& part : mesh.parts)
+        {
+            const auto& path = mesh.MaterialAt(part.firstIndex);
+            if (!geometry.parts.empty() && geometry.parts.back().end == part.firstIndex && geometry.parts.back().path == path)
+                geometry.parts.back().end += part.indexCount;
+            else geometry.parts.push_back({part.firstIndex, part.firstIndex + part.indexCount, path});
+        }
+    }
 }
 
 void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
                                     MeshUVs mapping, SDL_FColor tint)
 {
     if (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform)) return;
+    if (material.empty() && instance.mesh->HasMaterials()) mapping = MeshUVs::Authored;
     const auto emit = [&] {
         if (material.empty()) SubmitMesh(instance, tint);
-        else SubmitMaterialMesh(instance, material, mapping);
+        else SubmitMaterialMesh(instance, material, mapping, tint);
     };
-    if (!CanRetain(material))
+    bool retain = CanRetain(material);
+    if (retain && material.empty() && instance.mesh->materials)
+        for (const auto& slot : instance.mesh->materials->slots) retain &= CanRetain(slot.material);
+    if (!retain)
     {
         emit();
         return;
@@ -388,6 +418,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
     const auto& bounds = instance.mesh->bounds;
     auto& entry = resident[&instance];
     const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
+    const auto revision = instance.mesh->materials ? instance.mesh->materials->revision : 0;
     if (sameMesh && entry->transform != instance.transform)
     {
         // Stream moving placements. Once stationary, bake the new transform once.
@@ -397,7 +428,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         emit();
         return;
     }
-    if (!sameMesh || entry->moving ||
+    if (!sameMesh || entry->moving || entry->revision != revision ||
         entry->material != material || entry->mapping != mapping ||
         entry->tint.r != tint.r || entry->tint.g != tint.g || entry->tint.b != tint.b)
     {
@@ -405,6 +436,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         entry->device = device;
         entry->meshOwned = true;
         entry->mesh = instance.mesh;
+        entry->revision = revision;
         entry->transform = instance.transform;
         entry->material = material;
         entry->mapping = mapping;

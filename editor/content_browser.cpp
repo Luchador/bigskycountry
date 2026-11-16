@@ -438,6 +438,13 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
         else if (models && index < count && !rows[index].modelPath.empty())
         {
             Select(rows[index].modelPath);
+            if (event.button.clicks == 2)
+            {
+                auto* owner = SDL_GetWindowFromEvent(&event);
+                if (!meshWindow.Open(owner, textures, rows[index].modelPath))
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mesh Editor", SDL_GetError(), owner);
+                return {};
+            }
             return rows[index].modelPath;
         }
     }

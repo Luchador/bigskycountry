@@ -1,6 +1,7 @@
 #pragma once
 
 #include "material_editor.hpp"
+#include "mesh_editor.hpp"
 #include <SDL3/SDL.h>
 #include <memory>
 #ifndef _WIN32
@@ -17,6 +18,8 @@ public:
     enum class Tab { Models, Textures };
     void SetTab(Tab next);
     Tab ActiveTab() const { return tab; }
+    MeshEditorWindow& MeshWindow() { return meshWindow; }
+    const MeshEditorWindow& MeshWindow() const { return meshWindow; }
     TextureCatalog& Textures() { return textures; }
     void Refresh();
     static bool ConfirmMaterialDelete(SDL_Window* window, const std::string& path);
@@ -64,6 +67,7 @@ private:
     std::array<MaterialThumbnail, 2> materialThumbnails; // Primary and transition inspector slots.
     std::map<std::string, std::string> materialLabels;
     unsigned materialLabelRevision = 0;
+    MeshEditorWindow meshWindow;
     Tab tab = Tab::Models;
     TextureCatalog textures;
     bool texturesScanned = false;

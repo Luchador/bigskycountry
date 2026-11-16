@@ -45,6 +45,26 @@ struct MeshVertex
     SDL_FColor color{1, 1, 1, 1};
 };
 
+struct MeshMaterialSlot
+{
+    std::string name;
+    std::string material; // Relative to assets/textures; empty uses imported vertex colors.
+};
+
+// Shared between all imports/instances of the same model in this asset root.
+struct MeshMaterials
+{
+    std::vector<MeshMaterialSlot> slots;
+    std::string file;
+    AssetRoot root = AssetRoot::Project;
+    std::uint64_t revision = 1;
+};
+
+struct MeshPart
+{
+    std::size_t firstIndex, indexCount, slot;
+};
+
 struct Mesh
 {
     Bounds3 bounds; // Local space. Filled when an imported or generated world mesh is finished.
@@ -52,6 +72,10 @@ struct Mesh
     std::string assetPath; // Relative to assets/models.
     std::vector<MeshVertex> vertices;
     std::vector<std::uint32_t> indices; // Triangle list; front winding matches the world renderer.
+    std::vector<MeshPart> parts; // Imported primitive ranges, including their generated back faces.
+    std::shared_ptr<MeshMaterials> materials;
+    const std::string& MaterialAt(std::size_t index) const;
+    bool HasMaterials() const;
 };
 
 struct MeshInstance

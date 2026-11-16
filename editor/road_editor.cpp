@@ -2099,7 +2099,7 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 
 bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
 {
-    if (!UpdateWindowTitle()) return false;
+    if (!browser.MeshWindow().Draw() || !UpdateWindowTitle()) return false;
     const auto& activeHistory = lakeEdit ? lakeEdit->history : history;
     menu.SetHistoryEnabled(activeHistory.CanUndo() || dragChanged, activeHistory.CanRedo() && !dragChanged);
 
@@ -3359,6 +3359,29 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     // Recheck once after the event queue is drained, even if several events arrived.
     lastHoverPoint = {-1, -1};
 #ifndef _WIN32
+    if (!draggedAsset.empty() && browser.MeshWindow().Window() &&
+        (event.type == SDL_EVENT_MOUSE_MOTION || (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)))
+    {
+        float x, y; SDL_GetGlobalMouseState(&x, &y);
+        const auto slot = Material::ValidAssetPath(draggedAsset) ? browser.MeshWindow().SlotAtScreen(x, y) : std::nullopt;
+        browser.MeshWindow().Hover(slot);
+        if (browser.MeshWindow().ContainsScreen(x, y))
+        {
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
+            {
+                int wx, wy; SDL_GetWindowPosition(window, &wx, &wy);
+                if (slot && std::hypot(x - wx - assetPress.x, y - wy - assetPress.y) >= 4)
+                    browser.MeshWindow().Drop(*slot, draggedAsset);
+                browser.MeshWindow().Hover({});
+                draggedAsset.clear();
+            }
+            else if (!(event.motion.state & SDL_BUTTON_LMASK)) draggedAsset.clear();
+            return EditorEvent::Handled;
+        }
+    }
+#endif
+    if (browser.MeshWindow().Handle(event)) return EditorEvent::Handled;
+#ifndef _WIN32
     if (browser.MaterialWindow().Handle(event) || projectSettings.Handle(event)) return EditorEvent::Handled;
 #endif
     if (rampDrag && event.type == SDL_EVENT_KEY_DOWN)
@@ -3455,7 +3478,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.key.key == SDLK_ESCAPE) draggedAsset.clear();
-                return EditorEvent::Handled;
+                if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.clicks != 2) return EditorEvent::Handled;
             }
             if (event.type == SDL_EVENT_MOUSE_WHEEL) return EditorEvent::Handled;
             if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) draggedAsset.clear();

@@ -167,7 +167,13 @@ std::uint64_t FileHash(const std::string& file)
 std::uint64_t AssetHash(AssetKind kind, const std::string& path, AssetRoot root)
 {
     const auto file = AssetPaths::Root(root) + (kind == AssetKind::Model ? "models/" : "textures/") + path;
-    return FileHash(kind == AssetKind::Material ? Material::ResolveFile(file) : file);
+    const auto hash = FileHash(kind == AssetKind::Material ? Material::ResolveFile(file) : file);
+    if (kind == AssetKind::Model)
+    {
+        const auto sidecar = FileHash(file + ".bmesh");
+        if (sidecar) return (hash ^ sidecar) * 1099511628211ull;
+    }
+    return hash;
 }
 std::string DefaultPath(const WorldDocument& world)
 {

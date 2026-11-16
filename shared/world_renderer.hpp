@@ -69,7 +69,7 @@ public:
     bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     enum class MeshUVs { Authored, TerrainProjection };
-    void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored);
+    void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});
     // Long-lived world placements can reuse their GPU vertices across frames.
     void SubmitWorldMesh(const MeshInstance& instance, const std::string& material = {},
                          MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});

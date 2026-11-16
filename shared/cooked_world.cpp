@@ -17,9 +17,15 @@ namespace
 using namespace WorldPackage;
 std::size_t MeshBytes(const std::shared_ptr<const Mesh> &mesh)
 {
-    return mesh ? sizeof(Mesh) + mesh->vertices.capacity() * sizeof(MeshVertex) +
-                      mesh->indices.capacity() * sizeof(std::uint32_t)
-                : 0;
+    if (!mesh) return 0;
+    auto bytes = sizeof(Mesh) + mesh->vertices.capacity() * sizeof(MeshVertex) +
+        mesh->indices.capacity() * sizeof(std::uint32_t) + mesh->parts.capacity() * sizeof(MeshPart);
+    if (mesh->materials)
+    {
+        bytes += sizeof(MeshMaterials) + mesh->materials->slots.capacity() * sizeof(MeshMaterialSlot) + mesh->materials->file.capacity();
+        for (const auto& slot : mesh->materials->slots) bytes += slot.name.capacity() + slot.material.capacity();
+    }
+    return bytes;
 }
 std::size_t CellBytes(const Cell &cell)
 {

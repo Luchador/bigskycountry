@@ -844,6 +844,7 @@ struct WindowsPanels::Impl
         pressedTexture.clear();
         draggingTexture = false;
         materialEditor.Hover({});
+        browser->MeshWindow().Hover({});
         if (GetCapture() == list) ReleaseCapture();
     }
 
@@ -887,6 +888,10 @@ struct WindowsPanels::Impl
                 const bool material = Material::ValidAssetPath(self.pressedTexture);
                 const auto slot = material ? std::nullopt : self.materialEditor.SlotAt(point);
                 const HWND under = WindowFromPoint(point);
+                auto& meshEditor = self.browser->MeshWindow();
+                const HWND meshWindow = meshEditor.Window() ? static_cast<HWND>(SDL_GetPointerProperty(
+                    SDL_GetWindowProperties(meshEditor.Window()), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)) : nullptr;
+                const auto meshSlot = material && meshWindow == under ? meshEditor.SlotAtScreen(float(point.x), float(point.y)) : std::nullopt;
                 const bool strip = self.lastInspector && self.lastInspector->properties.HasTransitionSlot() &&
                                   under == GetDlgItem(self.road, IDC_TRANSITION_MATERIAL);
                 const bool inspector = material && self.lastInspector &&
@@ -896,9 +901,10 @@ struct WindowsPanels::Impl
                 if (msg == WM_LBUTTONUP)
                 {
                     const auto path = std::move(self.pressedTexture);
-                    const bool drop = self.draggingTexture && (slot || inspector || viewport);
+                    const bool drop = self.draggingTexture && (slot || meshSlot || inspector || viewport);
                     self.CancelTextureDrag(list);
-                    if (drop && material)
+                    if (drop && meshSlot) meshEditor.Drop(*meshSlot, path);
+                    else if (drop && material)
                     {
                         const auto target = inspector && self.inspected ? std::optional{self.inspected->target} : std::nullopt;
                         self.materialDrops.push_back({path, viewport, target, strip});
@@ -909,7 +915,8 @@ struct WindowsPanels::Impl
                 else if (self.draggingTexture)
                 {
                     self.materialEditor.Hover(slot);
-                    SetCursor(LoadCursorW(nullptr, (slot || inspector || viewport) ? IDC_CROSS : IDC_NO));
+                    meshEditor.Hover(meshSlot);
+                    SetCursor(LoadCursorW(nullptr, (slot || meshSlot || inspector || viewport) ? IDC_CROSS : IDC_NO));
                 }
                 return 0;
             }
@@ -1358,6 +1365,23 @@ struct WindowsPanels::Impl
                     self->PopulateTextures();
                     self->ShowBrowserTab();
                 }
+                return TRUE;
+            }
+            if (header->idFrom == IDC_MODELS && header->code == NM_DBLCLK)
+            {
+                TVHITTESTINFO hit{};
+                GetCursorPos(&hit.pt); ScreenToClient(header->hwndFrom, &hit.pt);
+                const auto item = TreeView_HitTest(header->hwndFrom, &hit);
+                if (!item || !(hit.flags & TVHT_ONITEM)) return FALSE;
+                TVITEMW row{}; row.mask = TVIF_PARAM; row.hItem = item;
+                if (!TreeView_GetItem(header->hwndFrom, &row)) return FALSE;
+                const auto& rows = self->browser->Rows();
+                if (row.lParam <= 0 || static_cast<std::size_t>(row.lParam) > rows.size()) return FALSE;
+                const auto& path = rows[row.lParam - 1].modelPath;
+                if (path.empty()) return FALSE;
+                self->CancelModelDrag();
+                if (!self->browser->MeshWindow().Open(self->frameWindow, self->browser->Textures(), path))
+                    MessageBoxW(self->frame, Wide(SDL_GetError()).c_str(), L"Mesh Editor", MB_OK | MB_ICONWARNING);
                 return TRUE;
             }
             if (header->idFrom == IDC_MODELS && header->code == TVN_BEGINDRAGW &&

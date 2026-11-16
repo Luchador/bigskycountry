@@ -1,4 +1,5 @@
 #include "mesh.hpp"
+#include "mesh_materials.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
@@ -126,11 +127,6 @@ namespace
             return SDL_SetError("Invalid mesh vertex attributes");
         }
 
-        if (p.material && p.material->alpha_mode != cgltf_alpha_mode_opaque)
-        {
-            return SDL_SetError("The world mesh pass requires opaque materials");
-        }
-
         const size_t start = mesh.vertices.size();
 
         const bool twoSided = p.material && p.material->double_sided;
@@ -211,7 +207,7 @@ namespace
         return true;
     }
 
-    bool ReadMesh(const cgltf_mesh& source, const MeshTransform& transform, Mesh& mesh)
+    bool ReadMesh(const cgltf_mesh& source, const MeshTransform& transform, Mesh& mesh, const cgltf_data& data)
     {
         if (!transform.Valid())
         {
@@ -220,10 +216,15 @@ namespace
 
         for (size_t i = 0; i < source.primitives_count; ++i)
         {
+            const auto first = mesh.indices.size();
+            const auto* material = source.primitives[i].material;
+            const auto slot = material ? static_cast<std::size_t>(material - data.materials) : data.materials_count;
+            if (slot == mesh.materials->slots.size()) mesh.materials->slots.push_back({"Default", {}});
             if (!ReadPrimitive(source.primitives[i], transform, mesh))
             {
                 return false;
             }
+            mesh.parts.push_back({first, mesh.indices.size() - first, slot});
         }
 
         return true;
@@ -261,6 +262,9 @@ namespace
             }
         }
 
+        mesh.materials = std::make_shared<MeshMaterials>();
+        for (std::size_t i = 0; i < data->materials_count; ++i)
+            mesh.materials->slots.push_back({data->materials[i].name ? data->materials[i].name : "Material " + std::to_string(i + 1), {}});
         std::vector<const cgltf_node*> pending;
         const auto* scene = data->scene ? data->scene : (data->scenes_count ? data->scenes : nullptr);
         if (scene)
@@ -286,7 +290,7 @@ namespace
                 transform.z.z = -1;
                 for (size_t i = 0; i < data->meshes_count; ++i)
                 {
-                    if (!ReadMesh(data->meshes[i], transform, mesh))
+                    if (!ReadMesh(data->meshes[i], transform, mesh, *data))
                     {
                         return false;
                     }
@@ -309,7 +313,7 @@ namespace
             {
                 return SDL_SetError("Expected static mesh nodes");
             }
-            if (!ReadMesh(*node->mesh, NodeTransform(*node), mesh))
+            if (!ReadMesh(*node->mesh, NodeTransform(*node), mesh, *data))
             {
                 return false;
             }
@@ -351,6 +355,7 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
 
     mesh->UpdateBounds();
     mesh->assetPath = name;
+    if (!MeshMaterialIO::Bind(*mesh, location)) return nullptr;
     loaded.emplace(name, mesh);
     return mesh;
 }

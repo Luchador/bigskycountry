@@ -32,11 +32,11 @@ class RoadEditor : public EditorTool
 public:
 #ifdef _WIN32
     SDL_Window* CreateRenderWindow(SDL_Window* frame) override { return panels.Create(frame, browser); }
-    bool ViewportFocused() const override { return panels.ViewportFocused(); }
+    bool ViewportFocused() const override { return !browser.MeshWindow().Focused() && panels.ViewportFocused(); }
 #else
     bool ViewportFocused() const override
     {
-        return !projectSettings.Focused() && !browser.Focused() && !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused();
+        return !browser.MeshWindow().Focused() && !projectSettings.Focused() && !browser.Focused() && !browser.MaterialWindow().Focused() && !transformPanel.Focused() && !outlinePanel.Focused();
     }
 #endif
     bool Initialize(SDL_Window* window, MeshAssets& models) override;
@@ -55,7 +55,7 @@ public:
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;
     bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
-    void ReleaseRenderResources() override { planRenderer.Clear(); planDraft.reset(); }
+    void ReleaseRenderResources() override { browser.MeshWindow().Close(); planRenderer.Clear(); planDraft.reset(); }
 
 private:
     enum class Drag

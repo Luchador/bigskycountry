@@ -77,6 +77,7 @@ add_library(BigSkyApplication STATIC
     shared/object_io.cpp
     shared/mesh.cpp
     shared/mesh_import.cpp
+    shared/mesh_materials.cpp
     shared/world_renderer.cpp
     shared/spatial_index.cpp
     shared/world_visibility.cpp
@@ -170,6 +171,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/main.cpp
     editor/content_browser.cpp
     editor/material_editor.cpp
+    editor/mesh_editor.cpp
     editor/material_preview.cpp
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
@@ -263,4 +265,7 @@ if(BIGSKY_BUILD_TESTS)
         editor/transform_inspector.cpp editor/road_group_transform.cpp)
     target_link_libraries(BigSkyRoadProfileTests PRIVATE BigSkyApplication)
     add_test(NAME road_profiles COMMAND BigSkyRoadProfileTests)
+    add_executable(BigSkyMeshMaterialTests tests/mesh_material_tests.cpp)
+    target_link_libraries(BigSkyMeshMaterialTests PRIVATE BigSkyApplication)
+    add_test(NAME mesh_materials COMMAND BigSkyMeshMaterialTests)
 endif()
