@@ -18,6 +18,7 @@ struct TerrainBoundary
 class TerrainChunk : private MeshPlacement
 {
 public:
+    using MeshPlacement::persistentId;
     using MeshPlacement::GetTransform;
     using MeshPlacement::Instance;
     using MeshPlacement::SetMesh;

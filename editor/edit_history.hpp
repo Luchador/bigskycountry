@@ -134,6 +134,7 @@ struct EditSnapshot
         std::string material;
         int folder = 0;
         std::optional<LakeDefinition> lake;
+        std::uint64_t persistentId = 0;
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;

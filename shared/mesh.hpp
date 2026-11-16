@@ -58,6 +58,7 @@ struct MeshInstance
 {
     std::shared_ptr<const Mesh> mesh;
     MeshTransform transform;
+    std::uint64_t persistentId = 0; // Authored placement identity; zero for transient render instances.
 };
 
 struct ObjectTransform
@@ -75,6 +76,7 @@ struct ObjectTransform
 class MeshPlacement
 {
 public:
+    std::uint64_t persistentId = 0; // Preserved by history; duplicates receive a new ID.
     const ObjectTransform& GetTransform() const { return transform; }
     bool SetTransform(const ObjectTransform& value);
     void SetMesh(std::shared_ptr<const Mesh> mesh);

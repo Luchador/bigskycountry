@@ -9,13 +9,13 @@
 
 enum class SceneKind
 {
-    World,
-    Folder,
-    Road,
-    Terrain,
-    Object,
-    Mesh,
-    Intersection
+    World = 0,
+    Folder = 1,
+    Road = 2,
+    Terrain = 3,
+    Object = 4,
+    Mesh = 5,
+    Intersection = 6
 };
 
 struct SceneKey

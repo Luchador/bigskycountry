@@ -10,6 +10,7 @@
 class CameraView;
 class TerrainChunk;
 struct RoadGeometry;
+struct RailroadTieRun;
 inline constexpr double worldNearDepth = 0.1;
 
 // Packed world-space vectors used by the CPU rasterizer and the GPU vertex layout.
@@ -53,6 +54,7 @@ public:
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
     void SubmitTerrain(const TerrainChunk& chunk, bool selected = false);
+    void SubmitRailroadTies(const RailroadTieRun& run, std::uint64_t revision, bool selected = false);
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     bool SphereVisible(Vector3 center, double radius) const;
     bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;

@@ -12,6 +12,14 @@
 #include <string>
 #include <vector>
 
+// Typed persistent identity. Road and intersection IDs retain their existing namespace.
+struct EntityId
+{
+    SceneKind kind = SceneKind::World;
+    std::uint64_t value = 0;
+    auto operator<=>(const EntityId&) const = default;
+};
+
 class WorldDocument
 {
 public:
@@ -78,12 +86,18 @@ public:
     }
 
     bool Open(const char* documentPath);
-    bool Save() const;
+    bool Save();
+    bool EnsureStableIds();
+    EntityId StableId(SceneKey key) const;
+    std::uint64_t AllocatePlacementId();
 
 private:
     std::map<int, IntersectionSurface> junctions; // Derived from the current road ends; never serialized.
     bool ValidConnections() const;
-    int lastRoadId = 0;
+    int lastRoadId = 0, lastIntersectionId = 0;
+    std::uint64_t lastPlacementId = 0;
+    bool ReadStableIds(const std::string& payload);
+    std::string WriteStableIds() const;
     std::uint64_t rampRevision = 0;
     std::uint64_t terrainRevision = 0;
     std::uint64_t bridgeRevision = 0;

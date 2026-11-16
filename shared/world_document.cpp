@@ -33,6 +33,7 @@ namespace
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
     constexpr Uint32 terrainVersion = 5;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
+    constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
     bool ReadRoads(std::string payload, Uint32 version, std::vector<Road>& roads)
@@ -307,7 +308,7 @@ bool WorldDocument::ValidConnections() const
 
 int WorldDocument::CreateIntersection(Vector3 position)
 {
-    int last = intersections.empty() ? 0 : intersections.rbegin()->first;
+    int last = std::max(lastIntersectionId, intersections.empty() ? 0 : intersections.rbegin()->first);
     for (const auto& chunk : terrain)
         if (chunk->boundary && !chunk->boundary->intersections.empty())
             last = std::max(last, *chunk->boundary->intersections.rbegin());
@@ -316,7 +317,7 @@ int WorldDocument::CreateIntersection(Vector3 position)
         SDL_SetError("Cannot place intersection");
         return 0;
     }
-    const int id = last + 1;
+    const int id = lastIntersectionId = last + 1;
     intersections.emplace(id, Intersection{position});
     return id;
 }
@@ -363,6 +364,7 @@ BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelP
     {
         return nullptr;
     }
+    if (!(object->persistentId = AllocatePlacementId())) return nullptr;
     return objects.emplace_back(std::move(object)).get();
 }
 
@@ -385,6 +387,10 @@ bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object,
     {
         return SDL_SetError("Invalid object insertion");
     }
+    if (!object->persistentId && !(object->persistentId = AllocatePlacementId())) return false;
+    for (const auto& existing : objects)
+        if (existing->persistentId == object->persistentId) return SDL_SetError("Duplicate object identity");
+    lastPlacementId = std::max(lastPlacementId, object->persistentId);
     objects.reserve(objects.size() + 1);
     hierarchy.ReplaceRange(SceneKind::Object, index, 0, 1, folder);
     objects.insert(objects.begin() + index, std::move(object));
@@ -395,6 +401,7 @@ TerrainChunk* WorldDocument::PlaceLake(const LakeDefinition& lake, const ObjectT
 {
     auto chunk = std::make_unique<TerrainChunk>();
     if (!chunk->SetLake(lake) || !chunk->SetTransform(transform)) return nullptr;
+    if (!(chunk->persistentId = AllocatePlacementId())) return nullptr;
     return terrain.emplace_back(std::move(chunk)).get();
 }
 
@@ -411,6 +418,7 @@ TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const Ob
         return nullptr;
     }
     chunk->SetMesh(std::move(model));
+    if (!(chunk->persistentId = AllocatePlacementId())) return nullptr;
     return terrain.emplace_back(std::move(chunk)).get();
 }
 
@@ -497,6 +505,7 @@ bool WorldDocument::Open(const char* documentPath)
         return SDL_SetError("Unsupported world version %u in '%s'", version, loaded.path.c_str());
     }
 
+    std::optional<std::string> identities;
     bool sawIntersections = false;
     bool sawRoads = false;
     bool sawMeshes = false;
@@ -544,7 +553,12 @@ bool WorldDocument::Open(const char* documentPath)
             return SDL_SetError("Incomplete world section in '%s'", loaded.path.c_str());
         }
 
-        if (section.tag == outlinerTag)
+        if (section.tag == identityTag)
+        {
+            if (identities || section.version != 1) return SDL_SetError("Duplicate or unsupported EIDS section");
+            identities = std::move(section.payload);
+        }
+        else if (section.tag == outlinerTag)
         {
             std::istringstream data(std::move(section.payload));
             data.imbue(std::locale::classic());
@@ -666,18 +680,20 @@ bool WorldDocument::Open(const char* documentPath)
             if (end->anchor) end->position = loaded.intersections.at(end->anchor->intersectionId).AnchorPosition(end->anchor->side);
         road.Rebuild();
     }
+    if (identities && !loaded.ReadStableIds(*identities)) return false;
+    if (!loaded.EnsureStableIds()) return false;
     loaded.UpdateIntersections();
     *this = std::move(loaded);
     return true;
 }
 
-bool WorldDocument::Save() const
+bool WorldDocument::Save()
 {
     if (path.empty())
     {
         return SDL_SetError("Open a world before saving it");
     }
-    if (!ValidConnections()) return false;
+    if (!ValidConnections() || !EnsureStableIds()) return false;
     for (const auto& [key, parent] : hierarchy.Members())
     {
         if (!Contains(key)) return SDL_SetError("Cannot save an outliner entry for a missing entity");
@@ -686,7 +702,7 @@ bool WorldDocument::Save() const
     std::ostringstream outlinerData;
     outlinerData.imbue(std::locale::classic());
     if (hasOutliner && !hierarchy.Write(outlinerData)) return SDL_SetError("Could not serialize the outliner");
-    const Uint32 knownSections = 1 + !meshes.empty() + !objects.empty() + !terrain.empty() + !intersections.empty() + hasOutliner;
+    const Uint32 knownSections = 2 + !meshes.empty() + !objects.empty() + !terrain.empty() + !intersections.empty() + hasOutliner;
     if (otherSections.size() > std::numeric_limits<Uint32>::max() - knownSections)
     {
         return SDL_SetError("Too many sections to save in '%s'", path.c_str());
@@ -782,6 +798,7 @@ bool WorldDocument::Save() const
     const Uint32 count = static_cast<Uint32>(otherSections.size()) + knownSections;
     bool wroteAll = SDL_WriteIO(output, worldMagic.data(), worldMagic.size()) == worldMagic.size() &&
                     SDL_WriteU32LE(output, worldVersion) && SDL_WriteU32LE(output, count) &&
+                    WriteSection(output, identityTag, 1, WriteStableIds()) &&
                     WriteSection(output, roadTag, RoadIO::currentVersion, std::move(roadData).str()) &&
                     (intersections.empty() || WriteSection(output, intersectionTag, intersectionVersion, std::move(junctionData).str())) &&
                     (meshes.empty() || WriteSection(output, meshTag, meshVersion, std::move(meshData).str())) &&

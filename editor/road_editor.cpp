@@ -1,3 +1,4 @@
+#include "world_package.hpp"
 #include "road_editor.hpp"
 #include "marker.hpp"
 #include "editor_theme.hpp"
@@ -722,7 +723,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         const int index = static_cast<int>(world.Terrain().size()) - 1;
         state.SelectRows({{SceneKind::Terrain, index}});
         EditSnapshot after(state);
-        after.addedTerrain = EditSnapshot::TerrainPlacement{{}, ObjectTransform{creationPoint}, {}, {}, 0, *world.Terrain().back()->Lake()};
+        after.addedTerrain = EditSnapshot::TerrainPlacement{{}, ObjectTransform{creationPoint}, {}, {}, 0, *world.Terrain().back()->Lake(), world.Terrain().back()->persistentId};
         history.Record(-1, std::move(before), std::move(after));
         outliner.Invalidate();
         Save(world);
@@ -732,6 +733,20 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
     if (command == EditorCommand::CreateMarker)
     {
         PlaceObject(world, ObjectType::Marker, Marker::modelPath, creationPoint);
+        return;
+    }
+    if (command == EditorCommand::CookWorld)
+    {
+        if (EditingDraft())
+        {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Cook world", "Finish the current road before cooking the world.", frame);
+            return;
+        }
+        if (!Save(world)) return;
+        const auto file = WorldPackage::DefaultPath(world);
+        const bool ok = WorldPackage::Cook(world, file);
+        const std::string message = ok ? "Cooked world saved to:\n" + file + "\n\nThe game will use it on the next launch. Recook after world or material edits." : SDL_GetError();
+        SDL_ShowSimpleMessageBox(ok ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR, "Cook world", message.c_str(), frame);
         return;
     }
     if (command == EditorCommand::Save)
@@ -2316,7 +2331,7 @@ void RoadEditor::FillSelection(WorldDocument& world)
     const SceneKey terrain{SceneKind::Terrain, static_cast<int>(world.Terrain().size()) - 1};
     state.SelectRows({terrain});
     EditSnapshot after(state);
-    after.addedTerrain = EditSnapshot::TerrainPlacement{{}, {}, std::move(boundary), {}, world.hierarchy.Parent(terrain)};
+    after.addedTerrain = EditSnapshot::TerrainPlacement{{}, {}, std::move(boundary), {}, world.hierarchy.Parent(terrain), {}, world.Terrain().back()->persistentId};
     history.Record(-1, std::move(before), std::move(after));
     Save(world);
 }
@@ -2844,7 +2859,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         EditSnapshot before(state);
         before.addedTerrain = EditSnapshot::TerrainPlacement{
             chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary,
-            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index}), chunk.Lake()};
+            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index}), chunk.Lake(), chunk.persistentId};
         world.RemoveTerrain(index);
         state.SelectRows({});
         EditSnapshot after(state);
@@ -3186,6 +3201,7 @@ void RoadEditor::MoveObjectCopy(WorldDocument& world, const ObjectTransform& pos
     const int index = static_cast<int>(world.Objects().size());
     const int folder = world.hierarchy.Parent({SceneKind::Object, source});
     auto copy = world.Objects().at(source)->Clone();
+    copy->persistentId = 0;
     if (!copy->SetTransform(pose) || !world.InsertObject(index, std::move(copy), folder))
     {
         status = SDL_GetError();

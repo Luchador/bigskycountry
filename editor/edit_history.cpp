@@ -465,6 +465,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
                                            world.PlaceTerrain(placement.modelPath, placement.transform);
         if (!chunk) return Result::Failed;
         chunk->material = placement.material;
+        if (placement.persistentId) chunk->persistentId = placement.persistentId;
         world.MoveLastTerrainTo(to.meshSelection.index);
         if (placement.folder) world.hierarchy.Move({{SceneKind::Terrain, to.meshSelection.index}}, placement.folder);
     }

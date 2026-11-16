@@ -12,6 +12,7 @@
 #include "world_state.hpp"
 #include "world_document.hpp"
 #include "world_visibility.hpp"
+#include "cooked_world.hpp"
 
 namespace
 {
@@ -53,6 +54,12 @@ namespace
         WorldRenderer worldRenderer(world.models.Location());
         FreeCamera freeCamera;
         WorldVisibility visibility;
+        CookedWorld cooked;
+        if (!roadTool)
+        {
+            if (cooked.Load(world)) SDL_Log("Using cooked world geometry (milestone 2 eager-load preview)");
+            else { SDL_Log("Using authored world geometry: %s", SDL_GetError()); SDL_ClearError(); }
+        }
         bool gameVisibilityStats = false;
 
         if (!world.roads.empty())
@@ -215,8 +222,10 @@ namespace
 
                 visibility.Synchronize(world);
                 const auto visible = visibility.Query(world, view, worldRenderer, g_ProjectSettings.ViewDistance(), roadTool != nullptr);
+                if (cooked.Ready()) cooked.Submit(worldRenderer, view, g_ProjectSettings.ViewDistance());
                 for (const auto key : visible)
                 {
+                    if (cooked.Ready() && (key.kind == SceneKind::Road || key.kind == SceneKind::Intersection || key.kind == SceneKind::Terrain)) continue;
                     const bool selected = roadTool && roadTool->GeometrySelected(key);
                     switch (key.kind)
                     {

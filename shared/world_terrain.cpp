@@ -112,6 +112,7 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
     if (!chunk->boundary->roads.empty()) lastRoadId = std::max(lastRoadId, *chunk->boundary->roads.rbegin());
     terrainRevision = 0;
     const SceneKey key{SceneKind::Terrain, static_cast<int>(terrain.size())};
+    if (!(chunk->persistentId = AllocatePlacementId())) return nullptr;
     auto& placed = terrain.emplace_back(std::move(chunk));
     if (folder) hierarchy.Move({key}, folder);
     return placed.get();

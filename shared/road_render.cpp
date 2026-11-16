@@ -264,16 +264,7 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
     {
         if (!segment.WithinDistance(camera->GetPosition(), g_ProjectSettings.RailroadDetailDistance())) continue;
         submitPart(&segment, origin, {}, [&] { SubmitColoredSurface(*this, segment.rails); });
-        for (const auto& run : segment.ties)
-        {
-            const double radius = run.Radius();
-            const auto center = run.Center();
-            if (!SphereVisible(center, radius) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing)
-                continue;
-            submitPart(&run, center, {}, [&] {
-                for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)});
-            });
-        }
+        for (const auto& run : segment.ties) SubmitRailroadTies(run, road.revision, selected);
     }
     const bool retained = residentDraws.size() != previousBatches;
     if (selected && (retained || start < vertices.size()) && viewport.w > 0 && viewport.h > 0)
@@ -292,6 +283,29 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
             AppendSelectionVertex(p, depth, RoadStyle::stripeHeight);
         });
     }
+}
+
+void WorldRenderer::SubmitRailroadTies(const RailroadTieRun& run, std::uint64_t revision, bool selected)
+{
+    const auto center = run.Center();
+    const double radius = run.Radius();
+    if (Math::Length(center - camera->GetPosition()) > g_ProjectSettings.RailroadDetailDistance() + radius ||
+        !SphereVisible(center, radius) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing) return;
+    const auto emit = [&] { for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)}); };
+    if (!CanRetain({})) { emit(); return; }
+    auto& entry = resident[&run];
+    if (!entry || entry->revision != revision)
+    {
+        entry = std::make_shared<ResidentGeometry>();
+        entry->revision = revision;
+        entry->origin = center;
+        const auto first = vertices.size(), firstMaterial = materialRanges.size();
+        packingOrigin = center;
+        emit();
+        CaptureGeometry(*entry, first, firstMaterial);
+    }
+    entry->lastFrame = frame;
+    if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), selected});
 }
 
 // Draw a road in the Editor's 2D view

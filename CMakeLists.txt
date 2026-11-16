@@ -48,6 +48,16 @@ FetchContent_Declare(ttf2mesh
 FetchContent_MakeAvailable(ttf2mesh)
 set_source_files_properties("${ttf2mesh_SOURCE_DIR}/ttf2mesh.c" PROPERTIES COMPILE_DEFINITIONS "TTF_NO_FILESYSTEM;TTF_NO_SIGNAL_H")
 
+# Boundary-preserving, index-only LOD simplification for cooked world cells.
+set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_GLTFPACK OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG 6daea4695c48338363b08022d2fb15deaef6ac09
+    GIT_SUBMODULES "")
+FetchContent_MakeAvailable(meshoptimizer)
+
 add_library(BigSkyApplication STATIC
     "${ttf2mesh_SOURCE_DIR}/ttf2mesh.c"
     shared/marker.cpp
@@ -80,6 +90,10 @@ add_library(BigSkyApplication STATIC
     shared/road_io.cpp
     shared/scene_hierarchy.cpp
     shared/world_document.cpp
+    shared/world_identity.cpp
+    shared/world_package.cpp
+    shared/world_cook.cpp
+    shared/cooked_world.cpp
     shared/terrain_fill.cpp
     shared/terrain_chunk.cpp
     shared/lake.cpp
@@ -117,8 +131,11 @@ add_library(BigSkyApplication STATIC
 set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp shared/project_settings.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
 target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
-target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static)
+target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static PRIVATE meshoptimizer)
 include(cmake/shaders.cmake)
+
+add_executable(BigSkyWorldCooker tools/world_cooker.cpp)
+target_link_libraries(BigSkyWorldCooker PRIVATE BigSkyApplication)
 
 add_executable(BigSkyCountry WIN32 game/main.cpp)
 target_link_libraries(BigSkyCountry PRIVATE BigSkyApplication)
@@ -214,6 +231,7 @@ set_property(SOURCE shared/asset_paths.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     "BIGSKY_COOKED_RELATIVE=u8\"$<PATH:RELATIVE_PATH,${cooked_root},$<TARGET_FILE_DIR:BigSkyCountry>>/\"")
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${meshoptimizer_SOURCE_DIR}/LICENSE.md" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/meshoptimizer.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${ttf2mesh_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/ttf2mesh.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${asset_root}/fonts/OpenSans-LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/OpenSans.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cjson_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cJSON.txt"
@@ -223,8 +241,9 @@ add_custom_target(BigSkyAssets
     VERBATIM
 )
 add_dependencies(BigSkyAssets BigSkyTextures)
-add_dependencies(BigSkyCountry BigSkyAssets)
-add_dependencies(BigSkyCountryEditor BigSkyAssets)
+add_dependencies(BigSkyWorldCooker BigSkyAssets)
+add_dependencies(BigSkyCountry BigSkyAssets BigSkyWorldCooker)
+add_dependencies(BigSkyCountryEditor BigSkyAssets BigSkyWorldCooker)
 
 option(BIGSKY_BUILD_TESTS "Build engine regression tests" OFF)
 if(BIGSKY_BUILD_TESTS)
@@ -232,4 +251,7 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyVisibilityTests tests/visibility_tests.cpp)
     target_link_libraries(BigSkyVisibilityTests PRIVATE BigSkyApplication)
     add_test(NAME visibility COMMAND BigSkyVisibilityTests)
+    add_executable(BigSkyWorldPackageTests tests/world_package_tests.cpp)
+    target_link_libraries(BigSkyWorldPackageTests PRIVATE BigSkyApplication)
+    add_test(NAME world_package COMMAND BigSkyWorldPackageTests)
 endif()

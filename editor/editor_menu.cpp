@@ -30,7 +30,7 @@ namespace
                        settings{0, L"&Settings", 0, true}, create{0, L"&Create"};
     constexpr MenuItem overpassItem{BSC_OVERPASS, L"&Overpass"}, removeOverpass{BSC_OVERPASS, L"Remove &Overpass"};
     constexpr MenuItem deadEndItem{BSC_CREATE_DEAD_END, L"&Dead End"};
-    constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}};
+    constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}, {BSC_FILE_COOK_WORLD, L"&Cook World"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
@@ -220,7 +220,7 @@ namespace
         if (message == WM_COMMAND && lParam == 0)
         {
             const int id = LOWORD(wParam);
-            if (id == BSC_FILE_SAVE || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
+            if (id == BSC_FILE_SAVE || id == BSC_FILE_COOK_WORLD || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
                 id == BSC_VIEW_ROAD_NAMES || id == BSC_VIEW_FOG || id == BSC_VIEW_VISIBILITY_STATS || id == BSC_PROJECT_SETTINGS)
             {
                 SDL_Event event{};
@@ -350,6 +350,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         case BSC_VIEW_FOG: return EditorCommand::ToggleFog;
         case BSC_VIEW_VISIBILITY_STATS: return EditorCommand::ToggleVisibilityStatistics;
         case BSC_PROJECT_SETTINGS: return EditorCommand::ProjectSettings;
+        case BSC_FILE_COOK_WORLD: return EditorCommand::CookWorld;
         case BSC_FILE_SAVE: return EditorCommand::Save;
         case BSC_EDIT_UNDO: return EditorCommand::Undo;
         case BSC_EDIT_REDO: return EditorCommand::Redo;
@@ -377,7 +378,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
 namespace
 {
     struct BarAction { const char* label; EditorCommand command; };
-    constexpr BarAction save[] = {{"Save", EditorCommand::Save}};
+    constexpr BarAction save[] = {{"Save", EditorCommand::Save}, {"Cook World", EditorCommand::CookWorld}};
     constexpr BarAction history[] = {{"Undo", EditorCommand::Undo}, {"Redo", EditorCommand::Redo}};
     constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe},
                                      {"Road Names", EditorCommand::ToggleRoadNames},
