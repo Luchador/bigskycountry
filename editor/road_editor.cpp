@@ -1155,14 +1155,26 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     if (p.page != PropertiesPage::Road && p.page != PropertiesPage::Railroad) return;
     const bool lanes = !p.style.railroad && (action == Action::More || action == Action::Fewer);
     const bool shoulder = !p.style.railroad && (action == Action::Left || action == Action::Right);
+    const bool division = !p.style.railroad && (action == Action::Divide || action == Action::NarrowerGap ||
+        action == Action::WiderGap || action == Action::ConcreteMedian || action == Action::GrassMedian);
     const bool left = action == Action::Left;
     const bool enabled = p.Mixed(left ? RoadProperty::Left : RoadProperty::Right) || !(left ? p.style.leftShoulder : p.style.rightShoulder);
-    if ((lanes || shoulder) && p.segmentSelection)
+    if ((lanes || shoulder || division) && p.segmentSelection)
     {
         auto& road = world.roads[state.selected];
         EditSnapshot before(state, &road);
-        const bool changed = lanes ? road.SetSegmentLaneCounts(state.segments, p.StepLanes(action == Action::More)) :
-                                     road.SetSegmentShoulders(state.segments, left, enabled);
+        bool changed = false;
+        if (division)
+        {
+            for (int segment : state.segments)
+            {
+                auto style = road.SegmentStyle(segment);
+                p.ApplyRoadStyle(style, action);
+                changed |= road.SetSegmentDivision({segment}, style.Division());
+            }
+        }
+        else changed = lanes ? road.SetSegmentLaneCounts(state.segments, p.StepLanes(action == Action::More)) :
+                               road.SetSegmentShoulders(state.segments, left, enabled);
         if (!changed) return;
         road.Rebuild();
         Commit(world, state.selected, std::move(before), &road);
@@ -1177,11 +1189,21 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
             {
                 std::fill(road.segmentLanes.begin(), road.segmentLanes.end(), 0);
                 road.laneNeighbors = {};
+                if (road.style.GetLaneCount() % 2)
+                {
+                    for (auto& point : road.segmentDivisions) if (point) point->enabled = false;
+                    for (auto& end : road.divisionNeighbors) if (end) end->enabled = false;
+                }
             }
             if (shoulder)
             {
                 for (auto& point : road.segmentShoulders) point[left ? 0 : 1] = 0;
                 for (auto& end : road.shoulderNeighbors) end[left ? 0 : 1] = 0;
+            }
+            if (division)
+            {
+                for (auto& point : road.segmentDivisions) point.reset();
+                road.divisionNeighbors = {};
             }
         });
         return;
@@ -1190,7 +1212,8 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     RoadStyle style = current;
     p.ApplyRoadStyle(style, action);
     const bool clearOverrides = !EditingDraft() && state.selected >= 0 &&
-        ((lanes && world.roads[state.selected].HasLaneOverrides()) || (shoulder && world.roads[state.selected].HasShoulderOverrides()));
+        ((lanes && world.roads[state.selected].HasLaneOverrides()) || (shoulder && world.roads[state.selected].HasShoulderOverrides()) ||
+         (division && world.roads[state.selected].HasDivisionOverrides()));
     if (style == current && !clearOverrides)
     {
         return;
@@ -1204,6 +1227,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
     {
         if (lanes) road->SetLaneCount(style.GetLaneCount());
         if (shoulder) road->SetShoulder(left, enabled);
+        if (division) road->SetDivision(style.Division());
         road->Rebuild();
     }
     Commit(world, index, std::move(before), road);
@@ -1481,11 +1505,13 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         {
             end.segmentLanes = road.points.front().segmentLanes;
             end.segmentShoulders = road.points.front().segmentShoulders;
+            end.segmentDivision = road.points.front().segmentDivision;
         }
         else
         {
             road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
             road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+            road.points.back().segmentDivision = road.points[road.points.size() - 2].segmentDivision;
         }
         road.points.insert(road.points.begin() + state.point, end);
     }
@@ -2414,11 +2440,13 @@ void RoadEditor::ConnectRoads(WorldDocument& world)
         {
             end.segmentLanes = road.points.front().segmentLanes;
             end.segmentShoulders = road.points.front().segmentShoulders;
+            end.segmentDivision = road.points.front().segmentDivision;
         }
         else
         {
             road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
             road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+            road.points.back().segmentDivision = road.points[road.points.size() - 2].segmentDivision;
         }
         road.points.insert(first ? road.points.begin() : road.points.end(), end);
     }
@@ -2537,11 +2565,13 @@ void RoadEditor::ConnectEndpoint(WorldDocument& world)
     {
         point.segmentLanes = road.points.front().segmentLanes;
         point.segmentShoulders = road.points.front().segmentShoulders;
+        point.segmentDivision = road.points.front().segmentDivision;
     }
     else
     {
         road.points.back().segmentLanes = road.points[road.points.size() - 2].segmentLanes;
         road.points.back().segmentShoulders = road.points[road.points.size() - 2].segmentShoulders;
+        road.points.back().segmentDivision = road.points[road.points.size() - 2].segmentDivision;
     }
     road.points.insert(road.points.begin() + index, point);
     road.Rebuild();

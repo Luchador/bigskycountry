@@ -258,4 +258,9 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyWorldStreamingTests tests/world_streaming_tests.cpp)
     target_link_libraries(BigSkyWorldStreamingTests PRIVATE BigSkyApplication)
     add_test(NAME world_streaming COMMAND BigSkyWorldStreamingTests)
+    add_executable(BigSkyRoadProfileTests tests/road_profile_tests.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyRoadProfileTests PRIVATE BigSkyApplication)
+    add_test(NAME road_profiles COMMAND BigSkyRoadProfileTests)
 endif()

@@ -300,17 +300,21 @@ With that endpoint selected, edit **End transition (m)** in the inspector and pr
 
 Both ends can have independent lengths. Changes save with the world and support undo/redo. Moving or rotating the road keeps its ends attached; Shift-dragging an endpoint carries its dead end to the new endpoint. Splitting retains caps only at the original outer ends. Connecting a capped endpoint to another road or intersection removes its cap. Railroads, interior control points, and connected endpoints cannot receive dead ends.
 
-### Per-segment lanes and shoulders
+### Per-segment lanes, shoulders and division
 
 Select a road's cyan control spline segment, then use **Segment lanes** in the inspector to change that segment's lane count. **Shift+click** adds other segments on the same road. A mixed selection displays **Mixed**; the plus/minus buttons set all selected segments to the same count. Divided roads change in steps of two.
 
 The adjacent segments provide smooth transitions between the edited configuration and the rest of the road. For example, changing a middle segment from two to four lanes gives it four lanes, with widening and narrowing tapers on the neighboring segments. Pavement, lane markings, green lane guides, shoulders, curbs, and transition strips follow the changing width. If differently edited segments meet directly, their adjoining halves share the taper. Terrain fills follow the new outer edges, and intersections use each connecting endpoint's lane count.
 
-Dashed white lane dividers are omitted wherever the lane count transitions. They resume on constant-width sections with their dash spacing preserved. Solid edge lines, yellow markings, and the editor's green lane guides remain visible through the transitions.
+Dashed white lane dividers are omitted where through lanes are added or removed. They resume on constant-width sections with their dash spacing preserved. Solid edge lines, yellow markings, and the editor's green lane guides remain visible through the transitions.
 
-Select the whole road and change its lane count to restore a uniform configuration, clearing its segment overrides. Other inspector properties, except shoulders, still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
+Select the whole road and change its lane count to restore a uniform lane count, clearing its lane overrides. Other inspector properties, except shoulders and division, still apply to the whole road. Lane edits save with the world and support undo/redo; splitting and extending roads preserve their authored lane counts.
 
 With segments selected, the **Segment shoulders (5 m each)** checkboxes toggle the left and right shoulders independently for those segments. Neighboring segments provide smooth tapers between no shoulder and the full 5 m width. Differently edited segments share the transition across their adjoining halves, just like lane counts. Lane edge lines stay at the travel-lane boundary, and curbs, transition strips, and terrain fills follow the changing outside edge. Changing a shoulder with the whole road selected clears segment overrides for that side only. Mixed selections show an indeterminate checkbox; clicking it enables that shoulder for the selection. Shoulder settings save with the world and support undo/redo, splitting, subdivision, and extension.
+
+With segments selected, **Divided road**, **Separation (m)** and **Median** apply only to those segments. A divided segment requires an even lane count. To change a five-lane road with a center turn lane into a four-lane divided road, select the destination segments, reduce their lane count to four, then enable **Divided road**. Use **5 m** separation to replace the center turn lane exactly: two 1 m inner shoulders and a 3 m median. The through lanes retain their width and their white dashed dividers continue through this transition without restarting their dash pattern. Other separation values taper the carriageways sideways. To go back to an odd lane count, disable division on those segments first.
+
+Division settings support undo/redo, save/load, splitting, subdivision and extension. Editing division with the whole road selected clears its division overrides. Existing worlds retain their previous road settings; save and recook the world after making segment changes to update the game.
 
 ### Editing road control points
 

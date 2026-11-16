@@ -42,6 +42,15 @@ namespace RoadEdgeColor
 
 enum class RoadMedian { Concrete, Grass };
 
+struct RoadDivision
+{
+    bool enabled = false;
+    double separation = 4.0;
+    RoadMedian median = RoadMedian::Concrete;
+    bool operator==(const RoadDivision&) const = default;
+    bool Valid() const;
+};
+
 struct RoadStyle
 {
     static constexpr double dashPeriod = 12.0; // One painted dash plus its gap, in meters.
@@ -78,6 +87,13 @@ struct RoadStyle
     void SetDivided(bool value) { divided = value && CanDivide(); }
     double DividedGap() const { return dividedGap; }
     void SetDividedGap(double meters);
+    RoadDivision Division() const { return {divided, dividedGap, median}; }
+    void SetDivision(const RoadDivision& value)
+    {
+        SetDivided(value.enabled);
+        SetDividedGap(value.separation);
+        median = value.median;
+    }
     double HalfSeparation() const { return divided ? dividedGap * 0.5 : 0.0; }
     double HalfMedianWidth() const { return divided ? HalfSeparation() - innerShoulderWidth : 0.0; }
     bool HasCenterTurnLane() const;
@@ -132,6 +148,7 @@ struct RoadPoint
     double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
     int segmentLanes = 0; // Outgoing segment override. Zero inherits the road and can taper to edited neighbors.
     std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
+    std::optional<RoadDivision> segmentDivision; // Outgoing segment; empty inherits the road default.
     std::optional<BridgeSettings> bridge; // Outgoing segment, independent of pavement/lane settings.
     bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
 };
@@ -244,6 +261,7 @@ struct Road : RoadGeometry
     RoadStyle style;
     std::array<int, 2> laneNeighbors{}; // Lane context retained at free ends when a taper is split into separate roads.
     std::array<std::array<int, 2>, 2> shoulderNeighbors{}; // First/last end, then left/right, using the same override codes.
+    std::array<std::optional<RoadDivision>, 2> divisionNeighbors{};
     int SegmentLaneCount(std::size_t segment) const;
     int MaximumLaneCount() const;
     double MaximumHalfTravelWidth() const;
@@ -258,7 +276,14 @@ struct Road : RoadGeometry
     std::vector<double> bridgeKnots;
     std::map<int, std::vector<Vector3>> bridgeGroundSources; // Derived lower-road rims, never saved.
     std::map<int, std::uint64_t> bridgeSourceRevisions;
-    bool HasProfileOverrides() const { return HasLaneOverrides() || HasShoulderOverrides(); }
+    bool HasProfileOverrides() const { return HasLaneOverrides() || HasShoulderOverrides() || HasDivisionOverrides(); }
+    bool HasDivisionOverrides() const;
+    double MaximumHalfSeparation() const;
+    RoadStyle SegmentStyle(std::size_t segment) const;
+    // Profile IDs: 0 = preceding split context, 1..N = segments, N+1 = following context.
+    RoadStyle SurfaceStyle(int profile) const;
+    bool SetSegmentDivision(const std::set<int>& segments, const RoadDivision& division);
+    void SetDivision(const RoadDivision& division);
     double MaximumShoulderWidth(bool left) const;
     bool SetSegmentShoulders(const std::set<int>& segments, bool left, bool enabled);
     void SetShoulder(bool left, bool enabled); // Whole road: clear overrides for this side only.
@@ -268,6 +293,7 @@ struct Road : RoadGeometry
     void SetLaneCount(int count); // Whole road: replace the default and clear segment overrides.
     struct ProfileBlend { int from, to; double mix; };
     using LaneBlend = ProfileBlend;
+    ProfileBlend SegmentSurfaceBlend(std::size_t segment, double fraction) const;
     LaneBlend SegmentLaneBlend(std::size_t segment, double fraction) const;
     ProfileBlend SegmentShoulderBlend(std::size_t segment, double fraction, bool left) const;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.

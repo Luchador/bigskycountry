@@ -173,9 +173,11 @@ void RoadProperties::Apply(Road& road) const
 {
     if (road.NameList() != names) road.SetNameList(names);
     road.style.material = style.material;
-    bool profileChanged = road.laneNeighbors != laneNeighbors || road.shoulderNeighbors != shoulderNeighbors;
+    bool profileChanged = road.laneNeighbors != laneNeighbors || road.shoulderNeighbors != shoulderNeighbors ||
+                          road.divisionNeighbors != divisionNeighbors;
     road.laneNeighbors = laneNeighbors;
     road.shoulderNeighbors = shoulderNeighbors;
+    road.divisionNeighbors = divisionNeighbors;
     for (std::size_t i = 0; i < std::min(road.points.size(), segmentLanes.size()); ++i)
     {
         profileChanged |= road.points[i].segmentLanes != segmentLanes[i];
@@ -185,6 +187,11 @@ void RoadProperties::Apply(Road& road) const
     {
         profileChanged |= road.points[i].segmentShoulders != segmentShoulders[i];
         road.points[i].segmentShoulders = segmentShoulders[i];
+    }
+    for (std::size_t i = 0; i < std::min(road.points.size(), segmentDivisions.size()); ++i)
+    {
+        profileChanged |= road.points[i].segmentDivision != segmentDivisions[i];
+        road.points[i].segmentDivision = segmentDivisions[i];
     }
     if (profileChanged || road.style != style || road.paintMarkings != paintMarkings)
     {

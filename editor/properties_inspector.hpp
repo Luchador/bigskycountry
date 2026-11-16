@@ -33,7 +33,7 @@ struct PropertiesInspector
     std::bitset<static_cast<size_t>(RoadProperty::Count)> mixed;
     bool Mixed(RoadProperty property) const { return mixed.test(static_cast<size_t>(property)); }
     int minLanes = 2, maxLanes = 2;
-    bool segmentSelection = false; // Lane-count and shoulder controls use this scope.
+    bool segmentSelection = false; // Lane, shoulder and division controls use this scope.
     double minExtraWidth = 0.0, maxExtraWidth = 0.0;
     double minGap = 4, maxGap = 4;
     bool canDivide = true, anyDivided = false;

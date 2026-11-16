@@ -22,7 +22,7 @@ namespace
             // End-cap tests must reach the raised crest as well as wide/banked toes.
             return std::hypot(outer, bed.height) + 1;
         }
-        return road.MaximumHalfTravelWidth() + road.style.HalfSeparation() +
+        return road.MaximumHalfTravelWidth() + road.MaximumHalfSeparation() +
                std::max(road.MaximumShoulderWidth(true), road.MaximumShoulderWidth(false)) + road.style.EdgeWidth() + 1;
     }
     double DeckBaseHeight(const Road& road, Vector3 position, Vector3 direction)

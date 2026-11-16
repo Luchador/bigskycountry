@@ -66,7 +66,7 @@ namespace
     {
         const Road* road = nullptr;
         std::vector<double> knots;
-        std::array<RoadStyle, RoadStyle::maxLanes + 1> styles;
+        std::vector<RoadStyle> styles;
 
         std::pair<std::size_t, double> Location(double distance) const
         {
@@ -79,7 +79,7 @@ namespace
         Road::LaneBlend At(double distance) const
         {
             const auto [segment, fraction] = Location(distance);
-            return road->SegmentLaneBlend(segment, fraction);
+            return road->SegmentSurfaceBlend(segment, fraction);
         }
 
         double Shoulder(double distance, bool left) const
@@ -425,9 +425,20 @@ namespace
                     // straddle the end of a transition on a curved segment.
                     const double start = stations[i ? i - 1 : i].distance;
                     const auto middle = profile.At((start + s.distance) * 0.5);
-                    const auto blending = [](Road::LaneBlend b)
-                    { return b.from != b.to && b.mix > 0 && b.mix < 1; };
-                    line.hiddenSpans.push_back(i && (middle.from != middle.to ||
+                    const auto losesLane = [&](Road::LaneBlend b)
+                    {
+                        const auto& from = profile.styles[b.from];
+                        const auto& to = profile.styles[b.to];
+                        if (from.GetLaneCount() == to.GetLaneCount()) return false;
+                        // Replacing a center turn lane with a median does not add
+                        // or remove through lanes. Keep their dash phase continuous.
+                        const bool centerConversion = (from.HasCenterTurnLane() && to.IsDivided()) ||
+                                                      (to.HasCenterTurnLane() && from.IsDivided());
+                        return !centerConversion || throughLanes(from) != throughLanes(to);
+                    };
+                    const auto blending = [&](Road::LaneBlend b)
+                    { return losesLane(b) && b.mix > 0 && b.mix < 1; };
+                    line.hiddenSpans.push_back(i && (losesLane(middle) ||
                         blending(profile.At(start)) || blending(profile.At(s.distance))));
                 }
             }
@@ -472,8 +483,7 @@ namespace
             marking([&](const RoadStyle& s) { return std::min(s.HalfSeparation() + halfTravel(s), inside(s) + lane * RoadStyle::laneWidth); },
                     [&](const RoadStyle& s) { return lane < throughLanes(s); }, false, true);
         }
-        if (road.style.IsDivided()) return; // Inner solid yellow lines are emitted with the pavement bands.
-        marking([&](const RoadStyle& s) { return inside(s) + yellowPairOffset; },
+        marking([&](const RoadStyle& s) { return inside(s) + (s.IsDivided() ? stripeWidth * 0.5 : yellowPairOffset); },
                 [](const RoadStyle& s) { return s.GetLaneCount() >= 2; }, true, false);
         marking([&](const RoadStyle& s) { return inside(s) - yellowPairOffset; },
                 [](const RoadStyle& s) { return s.HasCenterTurnLane(); }, true, true);
@@ -502,14 +512,18 @@ namespace
         const Vector3 outward = Math::Normalize(tangent) * (end ? 1.0 : -1.0);
         if (outward == Vector3{}) return {};
         const auto style = road.EndpointStyle(end == 0);
+        const double gap = path.profile ? path.profile->Mix(section.distance,
+            [](const RoadStyle& s) { return s.HalfSeparation(); }) : style.HalfSeparation();
+        const double median = path.profile ? path.profile->Mix(section.distance,
+            [](const RoadStyle& s) { return s.HalfMedianWidth(); }) : style.HalfMedianWidth();
         struct Rim { double offset, height, red; };
         const auto side = [&](int sign)
         {
             const auto widthOf = [&](const RoadStyle& s) { return sign < 0 ? s.RightWidth() : s.LeftWidth(); };
             const double width = path.profile ? path.profile->PavementWidth(section.distance, sign > 0) : widthOf(style);
             std::vector<Rim> rim{{0, 0, 1}};
-            if (style.HalfMedianWidth() > 0) rim.push_back({sign * style.HalfMedianWidth(), 0, 1});
-            if (style.IsDivided()) rim.push_back({sign * style.HalfSeparation(), 0, 1});
+            if (median > 0) rim.push_back({sign * median, 0, 1});
+            if (gap > 0) rim.push_back({sign * gap, 0, 1});
             rim.push_back({sign * width, 0, 1});
             if (style.edge != RoadEdge::None)
                 rim.push_back({sign * (width + RoadStyle::stripWidth), 0, style.edge == RoadEdge::Transition ? 0.0 : 1.0});
@@ -530,7 +544,6 @@ namespace
             const Vector3 p = section.At(at.offset) + outward * (point.deadEndLength * fraction)
                             + section.up * (at.height * remaining);
             const bool positive = at.offset >= 0;
-            const double gap = style.HalfSeparation();
             const double travelTile = path.profile ? path.profile->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : style.TravelLaneWidth();
             const double tileWidth = std::abs(at.offset) < gap ? 2 * RoadStyle::innerShoulderWidth : travelTile;
             const auto originU = [&](const RoadStyle& s) { return s.GetLaneCount() * 0.5 + (s.IsDivided() && !positive ? 1 : 0); };
@@ -582,18 +595,20 @@ namespace
         const int lanes = variable ? road.MaximumLaneCount() : road.style.GetLaneCount();
         auto widest = road.style;
         widest.SetLaneCount(lanes);
-        const double pavement = road.style.HalfSeparation() + road.MaximumHalfTravelWidth() +
+        const double pavement = road.MaximumHalfSeparation() + road.MaximumHalfTravelWidth() +
             road.MaximumShoulderWidth(side > 0);
         const double halfGap = road.style.HalfSeparation();
         const double halfMedian = road.style.HalfMedianWidth();
         const double laneWidth = widest.TravelLaneWidth();
-        const SDL_FColor medianColor = road.style.median == RoadMedian::Grass
-            ? SDL_FColor{0.29f, 0.49f, 0.24f, 1} : SDL_FColor{0.69f, 0.69f, 0.67f, 1};
+        const auto gapAt = [&](const CrossSection& s) { return variable ? path.profile->Mix(s.distance,
+            [](const RoadStyle& style) { return style.HalfSeparation(); }) : halfGap; };
+        const auto medianAt = [&](const CrossSection& s) { return variable ? path.profile->Mix(s.distance,
+            [](const RoadStyle& style) { return style.HalfMedianWidth(); }) : halfMedian; };
 
         // Split the asphalt at the yellow line and, on graded bends, along the other lane boundaries.
         std::vector<double> pavementCuts;
-        if (road.style.IsDivided()) pavementCuts.push_back(halfGap);
-        if (hasGradedBend || variable)
+        if (!variable && road.style.IsDivided()) pavementCuts.push_back(halfGap);
+        if (!variable && hasGradedBend)
         {
             const double firstLane = lanes % 2 ? laneWidth * 0.5 : laneWidth;
             for (int i = 0; i < (lanes + 1) / 2; ++i)
@@ -607,11 +622,12 @@ namespace
         const double centerU = lanes * 0.5 + (road.style.IsDivided() && side < 0 ? 1.0 : 0.0);
         const auto pavementVertex = [&](const CrossSection& section, double offset)
         {
-            const double tileWidth = offset < halfGap ? 2.0 * RoadStyle::innerShoulderWidth :
+            const double gap = gapAt(section);
+            const double tileWidth = offset < gap ? 2.0 * RoadStyle::innerShoulderWidth :
                 variable ? path.profile->Mix(section.distance, [](const RoadStyle& s) { return s.TravelLaneWidth(); }) : laneWidth;
             const double uOrigin = variable ? path.profile->Mix(section.distance, [&](const RoadStyle& s)
                 { return s.GetLaneCount() * 0.5 + (s.IsDivided() && side < 0 ? 1.0 : 0.0); }) : centerU;
-            const double u = uOrigin - side * (offset - halfGap) / tileWidth;
+            const double u = uOrigin - side * (offset - gap) / tileWidth;
             const double v = (section.distance + offset * section.bevelSlope) / RoadStyle::laneWidth;
             return Road::PavementVertex{section.At(offset), {static_cast<float>(u), static_cast<float>(v)}};
         };
@@ -726,24 +742,47 @@ namespace
             boundary.push_back(rb[faces]);
             lastRim = rb;
 
-            if (halfMedian > 0.0)
+            const double ma = medianAt(a), mb = medianAt(b);
+            if (ma > 0.0 || mb > 0.0)
             {
-                VisitBand(side, a, b, 0.0, halfMedian, BandPosition, [&](const Road::Triangle& t)
+                const auto vertex = [&](const CrossSection& s, double offset)
                 {
-                    road.edgeTriangles.push_back({Road::EdgeVertex{t[0], medianColor},
-                                                  Road::EdgeVertex{t[1], medianColor},
-                                                  Road::EdgeVertex{t[2], medianColor}});
-                });
+                    const double grass = variable ? path.profile->Mix(s.distance,
+                        [](const RoadStyle& style) { return style.median == RoadMedian::Grass; }) :
+                        road.style.median == RoadMedian::Grass;
+                    const SDL_FColor color{float(std::lerp(0.69, 0.29, grass)), float(std::lerp(0.69, 0.49, grass)),
+                                           float(std::lerp(0.67, 0.24, grass)), 1};
+                    return Road::EdgeVertex{s.At(offset), color};
+                };
+                VisitBand(side, a, b, 0.0, ma, 0.0, mb, vertex,
+                    [&](const auto& t) { road.edgeTriangles.push_back(t); });
             }
             const auto asphalt = [&](const auto& t) { road.pavementTriangles.push_back(t); };
-            double ia = halfMedian, ib = halfMedian;
-            for (double cut : pavementCuts)
+            double ia = ma, ib = mb;
+            const auto cut = [&](double ca, double cb)
             {
-                const double ca = std::min(cut, pa), cb = std::min(cut, pb);
+                ca = std::clamp(ca, ia, pa);
+                cb = std::clamp(cb, ib, pb);
+                if (ca == ia && cb == ib) return;
                 VisitBand(side, a, b, ia, ca, ib, cb, pavementVertex, asphalt);
                 ia = ca;
                 ib = cb;
+            };
+            if (variable)
+            {
+                cut(gapAt(a), gapAt(b));
+                for (int lane = 0; lane <= (lanes + 1) / 2; ++lane)
+                {
+                    const auto offset = [&](const RoadStyle& s)
+                    {
+                        const double halfTravel = s.GetLaneCount() * s.TravelLaneWidth() * 0.5;
+                        const double first = s.GetLaneCount() % 2 ? s.TravelLaneWidth() * 0.5 : 0.0;
+                        return s.HalfSeparation() + std::min(halfTravel, first + lane * s.TravelLaneWidth());
+                    };
+                    cut(path.profile->Mix(a.distance, offset), path.profile->Mix(b.distance, offset));
+                }
             }
+            else for (double offset : pavementCuts) cut(offset, offset);
             VisitBand(side, a, b, ia, pa, ib, pb, pavementVertex, asphalt);
 
             // The narrow end has zero added width. Use the same diagonal/winding
@@ -778,7 +817,7 @@ namespace
                     return s.At(d) + (vertical ? paintUp : s.up) * RoadStyle::stripeHeight;
                 };
                 const auto white = [&](const Road::Triangle& t) { road.whiteStripes.push_back(t); };
-                if (paintDivided)
+                if (paintDivided && !variable)
                     VisitBand(side, a, b, halfGap, halfGap + stripeWidth, raised,
                               [&](const Road::Triangle& t) { road.yellowStripes.push_back(t); });
                 const auto edgePaint = [&](const Road::Triangle& t) {
@@ -1078,11 +1117,9 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     {
         auto& profile = path.profile.emplace();
         profile.road = this;
-        for (int i = 1; i <= RoadStyle::maxLanes; ++i)
-        {
-            profile.styles[i] = style;
-            profile.styles[i].SetLaneCount(i);
-        }
+        profile.styles.reserve(points.size() + 1);
+        for (std::size_t i = 0; i <= points.size(); ++i)
+            profile.styles.push_back(SurfaceStyle(static_cast<int>(i)));
         for (auto sample : pointSamples)
             profile.knots.push_back(path.distances[std::min(sample > firstSample ? sample - firstSample : 0, path.distances.size() - 1)]);
         profile.knots.front() = 0;

@@ -90,21 +90,14 @@ bool Road::CanDivideAllSegments() const
 
 RoadStyle Road::EndpointStyle(bool first) const
 {
-    auto result = style;
-    if (points.size() >= 2)
-    {
-        const auto segment = first ? 0 : points.size() - 2;
-        result.SetLaneCount(SegmentLaneCount(segment));
-        result.leftShoulder = SegmentShoulder(segment, true);
-        result.rightShoulder = SegmentShoulder(segment, false);
-    }
-    return result;
+    return points.size() >= 2 ? SegmentStyle(first ? 0 : points.size() - 2) : style;
 }
 
 bool Road::SetSegmentLaneCounts(const std::set<int>& segments, int count)
 {
-    if (style.railroad || count < 1 || count > RoadStyle::maxLanes || (style.IsDivided() && count % 2) ||
+    if (style.railroad || count < 1 || count > RoadStyle::maxLanes ||
         segments.empty() || *segments.begin() < 0 || static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size()) return false;
+    for (int i : segments) if (count % 2 && SegmentStyle(i).IsDivided()) return false;
     bool changed = false;
     for (int i : segments)
     {
@@ -117,8 +110,103 @@ bool Road::SetSegmentLaneCounts(const std::set<int>& segments, int count)
 void Road::SetLaneCount(int count)
 {
     style.SetLaneCount(count);
-    for (auto& point : points) point.segmentLanes = 0;
+    for (auto& point : points)
+    {
+        point.segmentLanes = 0;
+        if (count % 2 && point.segmentDivision) point.segmentDivision->enabled = false;
+    }
+    for (auto& end : divisionNeighbors) if (count % 2 && end) end->enabled = false;
     laneNeighbors = {};
+}
+
+bool RoadDivision::Valid() const
+{
+    return std::isfinite(separation) && separation >= RoadStyle::minSeparation &&
+        (median == RoadMedian::Concrete || median == RoadMedian::Grass);
+}
+
+bool Road::HasDivisionOverrides() const
+{
+    if (divisionNeighbors[0] || divisionNeighbors[1]) return true;
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) if (points[i].segmentDivision) return true;
+    return false;
+}
+
+RoadStyle Road::SurfaceStyle(int profile) const
+{
+    auto result = style;
+    int lanes = style.GetLaneCount();
+    auto division = style.Division();
+    if (profile > 0 && static_cast<std::size_t>(profile) < points.size())
+    {
+        const auto& point = points[profile - 1];
+        if (point.segmentLanes) lanes = point.segmentLanes;
+        if (point.segmentDivision) division = *point.segmentDivision;
+    }
+    else
+    {
+        const int end = profile == 0 ? 0 : 1;
+        if (laneNeighbors[end]) lanes = laneNeighbors[end];
+        if (divisionNeighbors[end]) division = *divisionNeighbors[end];
+    }
+    result.SetLaneCount(lanes);
+    result.SetDivision(division);
+    return result;
+}
+
+RoadStyle Road::SegmentStyle(std::size_t segment) const
+{
+    auto result = SurfaceStyle(static_cast<int>(segment) + 1);
+    result.leftShoulder = SegmentShoulder(segment, true);
+    result.rightShoulder = SegmentShoulder(segment, false);
+    return result;
+}
+
+double Road::MaximumHalfSeparation() const
+{
+    double maximum = style.HalfSeparation();
+    for (std::size_t i = 0; i <= points.size(); ++i)
+        maximum = std::max(maximum, SurfaceStyle(static_cast<int>(i)).HalfSeparation());
+    return maximum;
+}
+
+bool Road::SetSegmentDivision(const std::set<int>& segments, const RoadDivision& division)
+{
+    if (style.railroad || !division.Valid() || segments.empty() || *segments.begin() < 0 ||
+        static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size()) return false;
+    if (division.enabled)
+        for (int i : segments) if (style.oneWay || SegmentLaneCount(i) % 2) return false;
+    bool changed = false;
+    for (int i : segments)
+    {
+        changed |= points[i].segmentDivision != division;
+        points[i].segmentDivision = division;
+    }
+    return changed;
+}
+
+void Road::SetDivision(const RoadDivision& division)
+{
+    style.SetDivision(division);
+    for (auto& point : points) point.segmentDivision.reset();
+    divisionNeighbors = {};
+}
+
+Road::ProfileBlend Road::SegmentSurfaceBlend(std::size_t segment, double fraction) const
+{
+    const int own = static_cast<int>(segment) + 1;
+    if (segment + 1 >= points.size()) return {own, own, 0};
+    const auto edited = [&](std::size_t i) { return points[i].segmentLanes || points[i].segmentDivision.has_value(); };
+    const int before = segment > 0 && edited(segment - 1) ? own - 1 :
+        segment == 0 && (laneNeighbors[0] || divisionNeighbors[0]) && !points.front().Joined() ? 0 : own;
+    const int after = segment + 2 < points.size() && edited(segment + 1) ? own + 1 :
+        segment + 2 == points.size() && (laneNeighbors[1] || divisionNeighbors[1]) && !points.back().Joined() ? own + 1 : own;
+    const auto ease = [](double u) { return u * u * u * (u * (u * 6 - 15) + 10); };
+    const double t = std::clamp(fraction, 0.0, 1.0);
+    if (!edited(segment)) return {before, after, ease(t)};
+    if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
+    if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
+    return {own, own, 0};
 }
 
 namespace
@@ -147,8 +235,8 @@ namespace
 
 Road::LaneBlend Road::SegmentLaneBlend(std::size_t segment, double fraction) const
 {
-    return BlendSegment(*this, segment, fraction, style.GetLaneCount(), laneNeighbors,
-                        [](const RoadPoint& p) { return p.segmentLanes; });
+    const auto blend = SegmentSurfaceBlend(segment, fraction);
+    return {SurfaceStyle(blend.from).GetLaneCount(), SurfaceStyle(blend.to).GetLaneCount(), blend.mix};
 }
 
 bool Road::SegmentShoulder(std::size_t segment, bool left) const
@@ -471,6 +559,7 @@ Road Road::NewSection() const
     result.style = style;
     result.laneNeighbors = laneNeighbors;
     result.shoulderNeighbors = shoulderNeighbors;
+    result.divisionNeighbors = divisionNeighbors;
     result.bridgeNeighbors = bridgeNeighbors;
     result.bridgeGroundSources = bridgeGroundSources;
     result.rotation = rotation;
@@ -485,6 +574,8 @@ Road Road::Section(std::size_t first, std::size_t last) const
                             last + 1 < points.size() ? points[last].segmentLanes : laneNeighbors[1]};
     result.shoulderNeighbors = {first > 0 ? points[first - 1].segmentShoulders : shoulderNeighbors[0],
                                 last + 1 < points.size() ? points[last].segmentShoulders : shoulderNeighbors[1]};
+    result.divisionNeighbors = {first > 0 ? points[first - 1].segmentDivision : divisionNeighbors[0],
+                                last + 1 < points.size() ? points[last].segmentDivision : divisionNeighbors[1]};
     result.bridgeNeighbors = {first > 0 ? points[first - 1].bridge.has_value() : bridgeNeighbors[0],
                               last + 1 < points.size() ? points[last].bridge.has_value() : bridgeNeighbors[1]};
     // An automatic tangent at a cut may depend on the neighbor we just removed.
@@ -547,6 +638,7 @@ bool Road::InsertStation(int segment, double t, int stationId)
         RoadPoint knot{};
         knot.segmentLanes = a.segmentLanes;
         knot.segmentShoulders = a.segmentShoulders;
+        knot.segmentDivision = a.segmentDivision;
         knot.bridge = a.bridge;
         knot.surfaceUp = SurfaceUp(segment, t);
         knot.rampStation = stationId;
@@ -595,6 +687,7 @@ bool Road::SubdivideSegments(const std::set<int>& segments)
         RoadPoint middle{};
         middle.segmentLanes = start.segmentLanes;
         middle.segmentShoulders = start.segmentShoulders;
+        middle.segmentDivision = start.segmentDivision;
         middle.bridge = start.bridge;
         middle.position = start.position + (end.position - start.position) * 0.5;
         middle.roll = start.roll + 0.5 * std::remainder(end.roll - start.roll, 2 * std::numbers::pi);
@@ -808,8 +901,9 @@ void Road::Rebuild()
     for (std::size_t i = 1; i < points.size(); ++i)
     {
         const Vector3 b = points[i].position;
-        const auto early = SegmentLaneBlend(i - 1, 0.25), late = SegmentLaneBlend(i - 1, 0.75);
-        bool profileTransition = !style.railroad && (early.from != early.to || late.from != late.to);
+        const auto early = SegmentSurfaceBlend(i - 1, 0.25), late = SegmentSurfaceBlend(i - 1, 0.75);
+        bool profileTransition = !style.railroad &&
+            (SurfaceStyle(early.from) != SurfaceStyle(early.to) || SurfaceStyle(late.from) != SurfaceStyle(late.to));
         for (bool left : {false, true})
         {
             const auto a = SegmentShoulderBlend(i - 1, 0.25, left), b = SegmentShoulderBlend(i - 1, 0.75, left);

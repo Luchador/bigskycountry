@@ -1,4 +1,7 @@
 {
 	"railroadDetailDistanceMeters":	300,
-	"viewDistanceMeters":	8000
+	"viewDistanceMeters":	16000,
+	"streamGeometryMiB":	512,
+	"streamAssetsMiB":	512,
+	"streamCollisionMiB":	256
 }

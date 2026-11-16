@@ -174,7 +174,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
                 else result.bridgeDepth = span->depth;
             }
         }
-        if (result.segmentSelection) first.SetLaneCount(road->SegmentLaneCount(*state.segments.begin()));
+        if (result.segmentSelection) first = road->SegmentStyle(*state.segments.begin());
         if (first.railroad)
         {
             result.page = PropertiesPage::Railroad;
@@ -250,20 +250,33 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             bool firstCount = true;
             result.mixed.reset(static_cast<std::size_t>(RoadProperty::Left));
             result.mixed.reset(static_cast<std::size_t>(RoadProperty::Right));
+            result.mixed.reset(static_cast<std::size_t>(RoadProperty::Divided));
+            result.mixed.reset(static_cast<std::size_t>(RoadProperty::Median));
             const auto counts = [&](const Road& item, bool selectedSegments)
             {
-                result.canDivide &= item.CanDivideAllSegments();
+                if (!selectedSegments) result.canDivide &= item.CanDivideAllSegments();
                 for (std::size_t i = 0; i + 1 < item.points.size(); ++i)
                 {
                     if (selectedSegments && !state.segments.contains(static_cast<int>(i))) continue;
                     const int count = item.SegmentLaneCount(i);
+                    const auto local = item.SegmentStyle(i);
+                    result.canDivide &= local.CanDivide();
                     const bool left = item.SegmentShoulder(i, true), right = item.SegmentShoulder(i, false);
                     if (firstCount)
                     {
                         result.minLanes = result.maxLanes = count;
                         result.style.leftShoulder = left;
                         result.style.rightShoulder = right;
+                        result.style.SetLaneCount(count);
+                        result.style.SetDivision(local.Division());
+                        result.anyDivided = local.IsDivided();
+                        result.minGap = result.maxGap = local.DividedGap();
                     }
+                    if (local.IsDivided() != result.style.IsDivided()) result.mixed.set(static_cast<std::size_t>(RoadProperty::Divided));
+                    if (local.median != result.style.median) result.mixed.set(static_cast<std::size_t>(RoadProperty::Median));
+                    result.anyDivided |= local.IsDivided();
+                    result.minGap = std::min(result.minGap, local.DividedGap());
+                    result.maxGap = std::max(result.maxGap, local.DividedGap());
                     if (left != result.style.leftShoulder) result.mixed.set(static_cast<std::size_t>(RoadProperty::Left));
                     if (right != result.style.rightShoulder) result.mixed.set(static_cast<std::size_t>(RoadProperty::Right));
                     firstCount = false;
@@ -276,7 +289,8 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             else counts(*road, result.segmentSelection);
             if (result.minLanes != result.maxLanes) result.mixed.set(static_cast<std::size_t>(RoadProperty::Width));
             else result.style.SetLaneCount(result.minLanes);
-            if (result.Mixed(RoadProperty::Left) || result.Mixed(RoadProperty::Right))
+            if (result.Mixed(RoadProperty::Left) || result.Mixed(RoadProperty::Right) ||
+                result.Mixed(RoadProperty::Divided) || result.minGap != result.maxGap)
                 result.mixed.set(static_cast<std::size_t>(RoadProperty::Width));
             if (result.segmentSelection)
             {
