@@ -7,11 +7,16 @@
 #include <map>
 #include <optional>
 #include <utility>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 struct SurfaceMaterialTexture
 {
     DdsTexture cpu;
     SDL_GPUTexture* gpu = nullptr;
+    std::size_t bytes = 0;
+    std::uint64_t lastUsed = 0;
 };
 
 struct SurfaceMaterial
@@ -20,6 +25,7 @@ struct SurfaceMaterial
     static constexpr unsigned shaderMapCount = 6;
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
+    std::uint64_t lastUsed = 0;
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     // Linear radiance: apply atmosphere before the final display conversion.
     SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
@@ -35,6 +41,10 @@ public:
     SurfaceMaterialCache(const SurfaceMaterialCache&) = delete;
     SurfaceMaterialCache& operator=(const SurfaceMaterialCache&) = delete;
     const SurfaceMaterial* Get(const std::string& path, SDL_GPUDevice* target);
+    // Called before any material pointers for this frame are acquired.
+    void BeginFrame(SDL_GPUDevice* target, std::size_t budget);
+    std::size_t Bytes() const;
+    std::size_t TextureCount() const;
     void Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const;
 
 private:
@@ -48,4 +58,19 @@ private:
     std::map<std::string, std::optional<SurfaceMaterial>> materials;
     using TextureKey = std::pair<std::string, DdsTexture::Format>;
     std::map<TextureKey, std::optional<SurfaceMaterialTexture>> textures;
+    std::map<std::string, std::optional<Material>> definitions;
+    std::uint64_t frame = 0, epoch = 0;
+    bool asynchronous = false;
+    struct Job { TextureKey key; std::uint64_t epoch; };
+    struct Completion { Job job; DdsTexture image; std::string error; };
+    std::map<TextureKey, std::uint64_t> requested;
+    std::optional<Job> pending, job;
+    std::optional<Completion> completion;
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::thread worker;
+    bool stopping = false;
+    void Run();
+    void Publish(const TextureKey& key, DdsTexture image);
+    void Touch(SurfaceMaterial& material);
 };

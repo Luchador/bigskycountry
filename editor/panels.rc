@@ -183,7 +183,7 @@ BEGIN
     CONTROL "Translucency multiplier", IDC_MAT_FACTOR, "msctls_trackbar32", WS_TABSTOP | TBS_NOTICKS | NOT WS_VISIBLE, 248, 175, 130, 18
 END
 
-IDD_PROJECT_SETTINGS DIALOGEX 0, 0, 360, 220
+IDD_PROJECT_SETTINGS DIALOGEX 0, 0, 390, 270
 STYLE DS_SHELLFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN
 EXSTYLE WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT
 CAPTION "Project Settings"
@@ -199,5 +199,13 @@ BEGIN
     PUSHBUTTON "16 km", IDC_VIEW_DISTANCE_16, 302, 53, 38, 15
     LTEXT "3D visibility radius in game kilometers (0.1 - 128).", -1, 10, 80, 330, 12
     LTEXT "Applies to the editor and game. Press F3 for visibility statistics.", -1, 10, 95, 335, 12
-    DEFPUSHBUTTON "Apply", IDOK, 146, 118, 65, 16
+    LTEXT "Geometry per CPU/GPU cache (MiB)", -1, 10, 122, 155, 12
+    EDITTEXT IDC_STREAM_GEOMETRY, 174, 119, 65, 15, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Shared models + textures (MiB)", -1, 10, 146, 155, 12
+    EDITTEXT IDC_STREAM_ASSETS, 174, 143, 65, 15, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Streamed collision (MiB)", -1, 10, 170, 155, 12
+    EDITTEXT IDC_STREAM_COLLISION, 174, 167, 65, 15, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Nearby collision and active GPU assets stay protected.", -1, 10, 194, 370, 12
+    LTEXT "Editor source data and undo are always kept resident.", -1, 10, 209, 370, 12
+    DEFPUSHBUTTON "Apply", IDOK, 174, 234, 65, 16
 END

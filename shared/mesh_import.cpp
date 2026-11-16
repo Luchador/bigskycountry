@@ -354,3 +354,8 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
     loaded.emplace(name, mesh);
     return mesh;
 }
+
+void MeshAssets::PruneUnused()
+{
+    std::erase_if(loaded, [](const auto& item) { return item.second.use_count() == 1; });
+}

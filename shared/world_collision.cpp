@@ -84,6 +84,7 @@ void WorldCollision::AddMesh(const MeshInstance& instance)
 
 void WorldCollision::Build(const WorldDocument& world)
 {
+    chunks.clear();
     triangles.clear();
     nodes.clear();
     const auto road = [&](const RoadGeometry& geometry) {
@@ -178,6 +179,8 @@ std::optional<WorldCollision::Hit> WorldCollision::Raycast(Vector3 origin, Vecto
     std::optional<Hit> hit;
     if (!nodes.empty() && distance >= 0 && Math::Length(direction) > 0)
         Trace(0, origin, Math::Normalize(direction), walkableOnly, hit, distance);
+    for (const auto& [key, chunk] : chunks)
+        if (const auto next = chunk->Raycast(origin, direction, distance, walkableOnly)) { hit = next; distance = next->distance; }
     return hit;
 }
 
@@ -211,7 +214,9 @@ bool WorldCollision::Overlap(size_t index, Vector3 center, double radius) const
 
 bool WorldCollision::SphereBlocked(Vector3 center, double radius) const
 {
-    return !nodes.empty() && Overlap(0, center, radius);
+    if (!nodes.empty() && Overlap(0, center, radius)) return true;
+    for (const auto& [key, chunk] : chunks) if (chunk->SphereBlocked(center, radius)) return true;
+    return false;
 }
 
 void WorldCollision::Contact(size_t index, Vector3 center, double radius, std::optional<BodyContact>& result) const
@@ -243,5 +248,17 @@ std::optional<BodyContact> WorldCollision::SphereContact(Vector3 center, double 
 {
     std::optional<BodyContact> contact;
     if (!nodes.empty()) Contact(0, center, radius, contact);
+    for (const auto& [key, chunk] : chunks)
+        if (const auto next = chunk->SphereContact(center, radius); next && (!contact || next->penetration > contact->penetration)) contact = next;
     return contact;
+}
+
+std::size_t WorldCollision::MemoryBytes() const
+{
+    return sizeof(*this) + triangles.capacity() * sizeof(Triangle) + nodes.capacity() * sizeof(Node);
+}
+const Bounds3& WorldCollision::Bounds() const
+{
+    static const Bounds3 empty;
+    return nodes.empty() ? empty : nodes.front().bounds;
 }

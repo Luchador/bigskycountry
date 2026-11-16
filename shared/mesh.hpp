@@ -93,6 +93,7 @@ class MeshAssets
 public:
     explicit MeshAssets(AssetRoot location = AssetRoot::Cooked) : location(location) {}
     AssetRoot Location() const { return location; }
+    void PruneUnused();
     std::shared_ptr<const Mesh> Load(const std::string& relativePath);
 
 private:

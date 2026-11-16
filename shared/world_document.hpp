@@ -85,6 +85,8 @@ public:
         }
     }
 
+    // Resolve a runtime source path without loading authored meshes; saving is disabled.
+    bool OpenPath(const char* documentPath);
     bool Open(const char* documentPath);
     bool Save();
     bool EnsureStableIds();
@@ -122,5 +124,6 @@ private:
     std::vector<std::unique_ptr<TerrainChunk>> terrain;
     std::vector<std::unique_ptr<BSCObject>> objects;
     std::string path;
+    bool runtimePathOnly = false;
     std::vector<Section> otherSections; // Copied verbatim when this build edits a world with newer data types.
 };

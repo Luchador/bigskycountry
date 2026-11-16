@@ -47,17 +47,8 @@ void WorldVisibility::Synchronize(const WorldDocument& world)
         const auto& object = *world.Objects()[i];
         if (!object.Instance().mesh) continue;
         auto bounds = objects[i].Get(object.Instance());
-        if (const auto* marker = dynamic_cast<const Marker*>(&object); marker && !bounds.Empty() && !marker->Text().empty())
-        {
-            // Include a conservative Y-billboard envelope without constructing
-            // distant glyph meshes. UTF-8 byte count overestimates glyph count.
-            const auto scale = marker->GetTransform().scale;
-            const double radius = Marker::capHeight * double(marker->Text().size()) * 2 * std::abs(scale.x);
-            const Vector3 top{(bounds.min.x + bounds.max.x) * 0.5, bounds.max.y + Marker::labelGap,
-                              (bounds.min.z + bounds.max.z) * 0.5};
-            bounds.Include(top - Vector3{radius, 0, radius});
-            bounds.Include(top + Vector3{radius, Marker::capHeight * 3 * std::abs(scale.y), radius});
-        }
+        if (const auto* marker = dynamic_cast<const Marker*>(&object))
+            bounds = Marker::VisibilityBounds(bounds, marker->Text(), marker->GetTransform().scale);
         index.Upsert({SceneKind::Object, i}, bounds);
     }
     index.EndSync();

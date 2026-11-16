@@ -17,6 +17,9 @@ namespace
 
 SurfaceMaterialCache::~SurfaceMaterialCache()
 {
+    { std::lock_guard lock(mutex); stopping = true; job.reset(); }
+    condition.notify_one();
+    if (worker.joinable()) worker.join();
     ClearTextures();
     if (sampler) SDL_ReleaseGPUSampler(device, sampler);
 }
@@ -26,6 +29,116 @@ void SurfaceMaterialCache::ClearTextures()
     for (auto& [key, texture] : textures)
         if (texture && texture->gpu) SDL_ReleaseGPUTexture(device, texture->gpu);
     textures.clear();
+}
+
+std::size_t SurfaceMaterialCache::Bytes() const
+{
+    std::size_t bytes = 0;
+    for (const auto& [key, texture] : textures) if (texture) bytes += texture->bytes;
+    return bytes;
+}
+std::size_t SurfaceMaterialCache::TextureCount() const
+{
+    return std::count_if(textures.begin(), textures.end(), [](const auto& e) { return e.second && e.first.first.front() != ':'; });
+}
+void SurfaceMaterialCache::Run()
+{
+    for (;;)
+    {
+        Job request;
+        {
+            std::unique_lock lock(mutex);
+            condition.wait(lock, [&] { return stopping || job.has_value(); });
+            if (stopping) return;
+            request = std::move(*job); job.reset();
+        }
+        Completion done; done.job = request;
+        try
+        {
+            if (!done.image.Load(DdsTexture::CookedPath(request.key.first, request.key.second), request.key.second))
+                done.error = SDL_GetError();
+        }
+        catch (const std::exception& e) { done.error = e.what(); }
+        std::lock_guard lock(mutex);
+        if (stopping) return;
+        completion = std::move(done);
+    }
+}
+void SurfaceMaterialCache::Publish(const TextureKey& key, DdsTexture image)
+{
+    auto& texture = textures[key];
+    if (device)
+    {
+        if (auto* gpu = image.Upload(device))
+        {
+            auto& value = texture.emplace(); value.gpu = gpu; value.bytes = image.DataBytes(); value.lastUsed = frame;
+        }
+    }
+    else
+    {
+        image.Decode();
+        auto& value = texture.emplace(); value.bytes = image.DataBytes(); value.cpu = std::move(image); value.lastUsed = frame;
+    }
+}
+void SurfaceMaterialCache::Touch(SurfaceMaterial& material)
+{
+    material.lastUsed = frame;
+    // Each map can be referenced by arbitrarily many materials, with one residency charge.
+    for (auto* map : material.maps) if (map) const_cast<SurfaceMaterialTexture*>(map)->lastUsed = frame;
+}
+void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
+{
+    device = target;
+    ++frame;
+    // Keep stable bindings across frames; invalidate only after publication,
+    // eviction or an authoring revision, before new draw pointers are acquired.
+    bool bindingsChanged = false;
+    if (revision != Material::Revision())
+    {
+        definitions.clear(); revision = Material::Revision(); bindingsChanged = true;
+        if (imageRevision != Material::ImageRevision())
+        {
+            ++epoch; ClearTextures(); requested.clear(); imageRevision = Material::ImageRevision();
+        }
+    }
+    asynchronous = location == AssetRoot::Cooked;
+    std::optional<Completion> done;
+    {
+        std::lock_guard lock(mutex);
+        if (completion) { done = std::move(completion); completion.reset(); pending.reset(); }
+    }
+    if (done && done->job.epoch == epoch)
+    {
+        const auto request = requested.find(done->job.key);
+        if (request != requested.end() && request->second + 2 >= frame)
+        {
+            if (done->error.empty()) { Publish(done->job.key, std::move(done->image)); bindingsChanged = true; }
+            else
+            {
+                textures.try_emplace(done->job.key); // Failed maps use neutral fallback until Refresh.
+                SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Streaming texture '%s': %s", done->job.key.first.c_str(), done->error.c_str());
+            }
+        }
+    }
+    std::erase_if(requested, [&](const auto& e) { return e.second + 2 < frame; });
+    std::size_t bytes = Bytes();
+    // Active maps and neutral fallbacks are pinned. Trim unused shared maps under
+    // pressure, and release cold maps even when the working set is below budget.
+    for (;;)
+    {
+        auto victim = textures.end();
+        for (auto it = textures.begin(); it != textures.end(); ++it)
+        {
+            if (!it->second || it->first.first.front() == ':' || it->second->lastUsed + 1 >= frame) continue;
+            if (bytes <= budget && it->second->lastUsed + 120 >= frame) continue;
+            if (victim == textures.end() || it->second->lastUsed < victim->second->lastUsed) victim = it;
+        }
+        if (victim == textures.end()) break;
+        bytes -= victim->second->bytes;
+        if (victim->second->gpu) SDL_ReleaseGPUTexture(device, victim->second->gpu);
+        textures.erase(victim); bindingsChanged = true;
+    }
+    if (bindingsChanged) materials.clear();
 }
 
 const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path, MaterialSlot slot, bool whiteEmission)
@@ -38,7 +151,20 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
     const auto format = formats[index];
     // ':' cannot occur in an asset path. Give each neutral map its own cache key.
     const auto key = path.empty() ? (whiteEmission ? ":white" : ":" + std::to_string(index)) : path;
-    auto [it, inserted] = textures.try_emplace(TextureKey{key, format});
+    const TextureKey textureKey{key, format};
+    if (asynchronous && !path.empty() && !textures.contains(textureKey))
+    {
+        requested[textureKey] = frame;
+        if (!pending)
+        {
+            if (!worker.joinable()) worker = std::thread([this] { Run(); });
+            pending = Job{textureKey, epoch};
+            { std::lock_guard lock(mutex); job = pending; }
+            condition.notify_one();
+        }
+        return Map({}, slot, whiteEmission);
+    }
+    auto [it, inserted] = textures.try_emplace(textureKey);
     if (inserted)
     {
         DdsTexture image;
@@ -61,18 +187,7 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
                 loaded = pixels && image.FromImage(pixels.get(), format);
             }
         }
-        if (loaded)
-        {
-            if (device)
-            {
-                if (auto* gpu = image.Upload(device)) it->second.emplace().gpu = gpu;
-            }
-            else
-            {
-                image.Decode();
-                it->second.emplace().cpu = std::move(image);
-            }
-        }
+        if (loaded) Publish(textureKey, std::move(image));
         if (!it->second) SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Surface material texture '%s': %s", path.c_str(), SDL_GetError());
     }
     if (it->second) return &*it->second;
@@ -85,22 +200,26 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
     if (revision != Material::Revision())
     {
         materials.clear();
+        definitions.clear();
         revision = Material::Revision();
         if (imageRevision != Material::ImageRevision())
         {
-            ClearTextures();
+            ++epoch; ClearTextures(); requested.clear();
             imageRevision = Material::ImageRevision();
         }
     }
     auto [it, inserted] = materials.try_emplace(path);
     if (inserted)
     {
-        Material definition;
-        if (!Material::ValidAssetPath(path) || !definition.Load(root + path))
+        auto [definitionIt, newDefinition] = definitions.try_emplace(path);
+        if (newDefinition)
         {
-            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Surface material '%s': %s", path.c_str(), SDL_GetError());
-            return nullptr;
+            Material value;
+            if (Material::ValidAssetPath(path) && value.Load(root + path)) definitionIt->second = std::move(value);
+            else SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Surface material '%s': %s", path.c_str(), SDL_GetError());
         }
+        if (!definitionIt->second) return nullptr;
+        const auto& definition = *definitionIt->second;
         if (device && !sampler)
         {
             SDL_GPUSamplerCreateInfo info{};
@@ -124,6 +243,17 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         }
         it->second = material;
     }
+    if (!inserted && it->second && it->second->lastUsed != frame)
+    {
+        const auto& definition = *definitions.at(path);
+        for (std::size_t i = 0; i < materialSlotCount; ++i)
+        {
+            const auto slot = static_cast<MaterialSlot>(i);
+            if (definition.Uses(slot))
+                it->second->maps[i] = Map(definition.textures[i], slot, definition.type == MaterialType::Unlit && slot == MaterialSlot::Emissive);
+        }
+    }
+    if (it->second) Touch(*it->second);
     return it->second ? &*it->second : nullptr;
 }
 

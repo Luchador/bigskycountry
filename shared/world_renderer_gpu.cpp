@@ -312,10 +312,13 @@ bool WorldRenderer::DrawGPU()
         if (mesh.pendingUpload.empty() || mesh.uploadFrame == frame) continue;
         if (mesh.pendingUpload.size() > maxVertices) return SDL_SetError("World mesh exceeds GPU buffer limit");
         const auto size = static_cast<Uint32>(mesh.pendingUpload.size() * sizeof(WorldDepthVertex));
+        // Bound normal upload bursts. Permit one oversized batch so it cannot starve.
+        if (!uploads.empty() && Uint64(total) + size - bytes > 16 * 1024 * 1024) continue;
         if (size > std::numeric_limits<Uint32>::max() - total) return SDL_SetError("World upload exceeds GPU buffer limit");
         const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX, size, 0};
         if (!mesh.buffer) mesh.buffer = SDL_CreateGPUBuffer(device, &info);
         if (!mesh.buffer) return false;
+        mesh.bufferBytes = size;
         mesh.uploadFrame = frame;
         uploads.push_back({&mesh, total, size});
         total += size;
@@ -455,6 +458,7 @@ bool WorldRenderer::DrawGPU()
         boundMaterial = material;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
+        if (!batch.geometry->buffer) return;
         bindSource(batch.geometry->buffer, batch.geometry.get());
         for (const auto& part : batch.geometry->parts)
         {

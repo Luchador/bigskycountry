@@ -41,7 +41,7 @@ namespace
         return nullptr;
     }
 
-    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, WorldDocument& world, EditorTool* roadTool)
+    bool RunWindowLoop(SDL_Window* window, SDL_Renderer* renderer, ApplicationMode mode, WorldDocument& world, EditorTool* roadTool, CookedWorld& cooked)
     {
         Input input(window);
 
@@ -54,13 +54,8 @@ namespace
         WorldRenderer worldRenderer(world.models.Location());
         FreeCamera freeCamera;
         WorldVisibility visibility;
-        CookedWorld cooked;
-        if (!roadTool)
-        {
-            if (cooked.Load(world)) SDL_Log("Using cooked world geometry (milestone 2 eager-load preview)");
-            else { SDL_Log("Using authored world geometry: %s", SDL_GetError()); SDL_ClearError(); }
-        }
         bool gameVisibilityStats = false;
+        unsigned cacheSweep = 0;
 
         if (!world.roads.empty())
         {
@@ -85,7 +80,7 @@ namespace
         std::unique_ptr<GameSession> game;
         if (mode == ApplicationMode::Game)
         {
-            game = std::make_unique<GameSession>(window, world);
+            game = std::make_unique<GameSession>(window, world, cooked.Ready() ? &cooked : nullptr);
             if (!game->Start()) return false;
         }
         Uint64 previousTime = SDL_GetTicksNS();
@@ -95,6 +90,7 @@ namespace
         {
             const Uint64 frameStart = SDL_GetTicksNS();
             input.BeginFrame();
+            if (++cacheSweep == 120) { world.models.PruneUnused(); cacheSweep = 0; }
 
             SDL_Event event;
 
@@ -195,6 +191,7 @@ namespace
             if (mode == ApplicationMode::Game)
             {
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
+                game->Stream(input.IsCameraEnabled() ? freeCamera.GetPosition() : game->View().GetPosition(), worldRenderer);
                 game->Update(elapsedNanoseconds / 1.0e9);
             }
 
@@ -258,6 +255,7 @@ namespace
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
                 worldRenderer.BeginUnlit();
+                if (cooked.Ready()) cooked.SubmitLabels(worldRenderer, view);
                 for (const auto key : visible)
                     if (key.kind == SceneKind::Object)
                         if (const auto* marker = dynamic_cast<const Marker*>(world.Objects()[key.index].get()))
@@ -272,8 +270,9 @@ namespace
                 {
                     return false;
                 }
-                if ((roadTool ? roadTool->VisibilityStatisticsEnabled() : gameVisibilityStats) &&
-                    !visibility.DrawStatistics(renderer, g_ProjectSettings.ViewDistance())) return false;
+                if (roadTool ? roadTool->VisibilityStatisticsEnabled() : gameVisibilityStats)
+                    if (!(cooked.Ready() ? cooked.DrawStatistics(renderer) : visibility.DrawStatistics(renderer, g_ProjectSettings.ViewDistance())) ||
+                        !worldRenderer.DrawCacheStatistics(renderer)) return false;
             }
 
             if (game && !game->DrawHUD(renderer)) return false;
@@ -320,8 +319,19 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
         const auto location = mode == ApplicationMode::Editor ? AssetRoot::Project : AssetRoot::Cooked;
         if (!g_ProjectSettings.Load(location)) SDL_Log("Project Settings: %s", SDL_GetError());
         WorldDocument world(location);
-        success = world.Open(worldFile) && (!roadTool || roadTool->Initialize(window, world.models)) &&
-                  RunWindowLoop(window, renderer, mode, world, roadTool);
+        CookedWorld cooked;
+        success = world.OpenPath(worldFile);
+        if (success && mode == ApplicationMode::Game && cooked.Load(world))
+            SDL_Log("Streaming cooked world asynchronously");
+        else if (success)
+        {
+            if (mode == ApplicationMode::Game) SDL_Log("Using authored world (cook format v2 for streaming): %s", SDL_GetError());
+            SDL_ClearError();
+            const std::string source = world.Path();
+            success = world.Open(source.c_str());
+        }
+        success = success && (!roadTool || roadTool->Initialize(window, world.models)) &&
+                  RunWindowLoop(window, renderer, mode, world, roadTool, cooked);
     }
 
     if (!success)

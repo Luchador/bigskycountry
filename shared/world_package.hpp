@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 1;
+    inline constexpr std::uint32_t version = 2;
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -32,6 +32,7 @@ namespace WorldPackage
         std::vector<Batch> batches;
         std::vector<Ties> ties;
     };
+    enum class PayloadKind : std::uint32_t { Near, Distant, Collision };
     struct Entity
     {
         EntityId id;
@@ -39,6 +40,12 @@ namespace WorldPackage
         std::string name, model, material;
         MeshTransform transform;
         Bounds3 bounds;
+        ObjectType type = ObjectType::Object;
+        ObjectTransform pose;
+        float health = 100, acceleration = 0;
+        bool invincible = false;
+        std::string markerText;
+        std::array<Uint8, 3> markerColor{255, 255, 255};
         std::vector<EntityId> dependencies;
     };
     enum class AssetKind : std::uint32_t { Model, Material };
@@ -49,16 +56,20 @@ namespace WorldPackage
         std::uint64_t hash = 0; // Zero records a missing optional asset/fallback.
         std::array<std::string, materialSlotCount> textures; // Logical paths, indexed by MaterialSlot.
     };
+    struct Payload { std::uint64_t offset = 0, bytes = 0, hash = 0; };
     struct CellRecord
     {
         CellKey key;
         Bounds3 bounds;
-        std::uint64_t offset = 0, bytes = 0, hash = 0, nearTriangles = 0, distantTriangles = 0;
+        std::array<Payload, 3> payloads;
+        std::uint64_t nearTriangles = 0, distantTriangles = 0;
         std::vector<EntityId> owners;
     };
+    struct Spawn { Vector3 position; double yaw = 0; };
     struct Manifest
     {
         std::uint64_t sourceHash = 0;
+        std::vector<Spawn> spawns;
         std::vector<Entity> entities;
         std::vector<Asset> assets;
         std::vector<CellRecord> cells;
@@ -70,6 +81,8 @@ namespace WorldPackage
         bool Open(const std::string& file);
         bool Matches(const std::string& sourceWorld, AssetRoot root) const;
         bool ReadCell(std::size_t index, Cell& cell) const;
+        bool ReadRender(std::size_t index, PayloadKind lod, Cell& cell) const;
+        bool ReadCollision(std::size_t index, MeshInstance& mesh) const;
         const Manifest& Index() const { return manifest; }
     private:
         std::string path;

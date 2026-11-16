@@ -4,8 +4,8 @@
 
 namespace
 {
-    constexpr SDL_FRect distanceBoxes[]{{20, 69, 125, 23}, {20, 125, 125, 23}};
-    constexpr SDL_FRect applyBox{20, 226, 80, 23};
+    constexpr SDL_FRect distanceBoxes[]{{20, 69, 125, 23}, {20, 125, 125, 23}, {20, 235, 125, 23}, {20, 291, 125, 23}, {20, 347, 125, 23}};
+    constexpr SDL_FRect applyBox{20, 440, 80, 23};
     constexpr SDL_FRect presetBoxes[]{{155, 125, 64, 23}, {229, 125, 64, 23}, {303, 125, 64, 23}};
     constexpr const char* presetValues[]{"4", "8", "16"};
 }
@@ -18,8 +18,8 @@ bool SdlProjectSettings::Open(SDL_Window* owner)
         return SDL_RaiseWindow(window);
     }
 
-    values = {ProjectDistanceFields::Text(), ProjectDistanceFields::Text(true)};
-    constexpr int width = 600, height = 380;
+    values = {ProjectDistanceFields::Text(0), ProjectDistanceFields::Text(1), ProjectDistanceFields::Text(2), ProjectDistanceFields::Text(3), ProjectDistanceFields::Text(4)};
+    constexpr int width = 600, height = 500;
     const auto props = SDL_CreateProperties();
     if (!props) return false;
     const bool configured =
@@ -40,7 +40,7 @@ bool SdlProjectSettings::Open(SDL_Window* owner)
     SDL_DestroyProperties(props);
     if (!window) return false;
     renderer = SDL_CreateRenderer(window, nullptr);
-    if (renderer && SDL_SetWindowMinimumSize(window, 560, 280) && Paint() && SDL_RaiseWindow(window)) return true;
+    if (renderer && SDL_SetWindowMinimumSize(window, 600, 490) && Paint() && SDL_RaiseWindow(window)) return true;
     Close();
     return false;
 }
@@ -64,15 +64,20 @@ bool SdlProjectSettings::Paint() const
         !SDL_RenderDebugText(renderer, 20, 48, "Rail and tie render distance (m)") ||
         !SDL_RenderDebugText(renderer, 20, 104, "View distance (km)") ||
         !SDL_RenderDebugText(renderer, 20, 169, "3D visibility radius in game kilometers (0.1 - 128).") ||
-        !SDL_RenderDebugText(renderer, 20, 189, "Editor and game. F3 toggles visibility statistics.")) return false;
-    for (int i = 0; i < 2; ++i)
+        !SDL_RenderDebugText(renderer, 20, 189, "Editor and game. F3 toggles visibility statistics.") ||
+        !SDL_RenderDebugText(renderer, 20, 214, "Geometry budget per CPU/GPU cache (MiB)") ||
+        !SDL_RenderDebugText(renderer, 20, 270, "Shared model + texture budget (MiB)") ||
+        !SDL_RenderDebugText(renderer, 20, 326, "Streamed collision budget (MiB)") ||
+        !SDL_RenderDebugText(renderer, 20, 390, "Nearby collision and active GPU assets stay protected.") ||
+        !SDL_RenderDebugText(renderer, 20, 410, "Editor source data and undo are always kept resident.")) return false;
+    for (int i = 0; i < 5; ++i)
         if (!distanceField.DrawField(renderer, distanceBoxes[i], {}, i, values[i], true)) return false;
     for (int i = 0; i < 3; ++i)
         if (!EditorTheme::SetColor(renderer, EditorTheme::button) || !SDL_RenderFillRect(renderer, &presetBoxes[i]) ||
             !EditorTheme::SetColor(renderer, EditorTheme::text) ||
             !SDL_RenderDebugTextFormat(renderer, presetBoxes[i].x + 10, presetBoxes[i].y + 7, "%s km", presetValues[i])) return false;
     return EditorTheme::SetColor(renderer, EditorTheme::button) && SDL_RenderFillRect(renderer, &applyBox) &&
-           EditorTheme::SetColor(renderer, EditorTheme::text) && SDL_RenderDebugText(renderer, 40, 233, "Apply") &&
+           EditorTheme::SetColor(renderer, EditorTheme::text) && SDL_RenderDebugText(renderer, 40, 447, "Apply") &&
            SDL_RenderPresent(renderer);
 }
 
@@ -86,8 +91,8 @@ void SdlProjectSettings::StoreField()
 void SdlProjectSettings::Apply()
 {
     StoreField();
-    if (ProjectDistanceFields::Apply(values[0], values[1]))
-        values = {ProjectDistanceFields::Text(), ProjectDistanceFields::Text(true)};
+    if (ProjectDistanceFields::Apply(values[0], values[1], values[2], values[3], values[4]))
+        values = {ProjectDistanceFields::Text(0), ProjectDistanceFields::Text(1), ProjectDistanceFields::Text(2), ProjectDistanceFields::Text(3), ProjectDistanceFields::Text(4)};
     else
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Project Settings", SDL_GetError(), window);
 }
@@ -106,7 +111,7 @@ bool SdlProjectSettings::Handle(const SDL_Event& event)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
         StoreField();
-        for (int i = 0; i < 2; ++i)
+        for (int i = 0; i < 5; ++i)
             if (SDL_PointInRectFloat(&point, &distanceBoxes[i]))
             {
                 activeField = i;

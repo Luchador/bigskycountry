@@ -18,6 +18,7 @@ public:
     void Solid(Format expected, std::array<Uint8, 4> rgba);
     // Decode the block data for CPU sampling. Upload can use either representation.
     void Decode();
+    std::size_t DataBytes() const;
     SDL_GPUTexture* Upload(SDL_GPUDevice* device);
     std::array<float, 4> Sample(float u, float v, float footprint) const;
 

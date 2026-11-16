@@ -47,6 +47,11 @@ public:
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
     // Fog is opt-in for world viewports; thumbnails and material previews stay clear.
+    void Forget(const void* key) { resident.erase(key); }
+    std::size_t ResidentBytes() const;
+    bool DrawCacheStatistics(SDL_Renderer* target) const;
+    std::size_t TextureBytes() const { return materialCache.Bytes(); }
+    std::size_t TextureCount() const { return materialCache.TextureCount(); }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
                double viewDistance = 0);
     void BeginUnlit() { lightGeometry = false; }
@@ -107,6 +112,7 @@ private:
     {
         SDL_GPUDevice* device = nullptr;
         SDL_GPUBuffer* buffer = nullptr;
+        std::size_t bufferBytes = 0;
         ~ResidentGeometry();
         Vector3 origin{};
         std::vector<WorldDepthVertex> pendingUpload;

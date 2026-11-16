@@ -3,11 +3,12 @@
 #include "mesh.hpp"
 #include "rigid_body.hpp"
 #include <optional>
+#include <map>
 
 class WorldDocument;
 
-// Built once from the authored world when gameplay starts. Dynamic pawns are
-// checked separately by GameWorld, so moving a car never rebuilds this tree.
+// Immutable per-chunk BVHs can be attached/detached on the main thread.
+// Dynamic pawns remain separate; streaming never rebuilds a whole-world tree.
 class WorldCollision
 {
 public:
@@ -19,6 +20,12 @@ public:
     void Build(const WorldDocument& world);
     void AddMesh(const MeshInstance& instance);
     void Finish();
+    void Attach(std::uint64_t key, std::shared_ptr<const WorldCollision> chunk) { chunks[key] = std::move(chunk); }
+    void Detach(std::uint64_t key) { chunks.erase(key); }
+    void ClearChunks() { chunks.clear(); }
+    std::size_t ChunkCount() const { return chunks.size(); }
+    std::size_t MemoryBytes() const;
+    const Bounds3& Bounds() const;
     std::optional<Hit> Raycast(Vector3 origin, Vector3 direction, double distance, bool walkableOnly = false) const;
     std::optional<Hit> Ground(Vector3 feet, double above, double below) const;
     bool SphereBlocked(Vector3 center, double radius) const;
@@ -26,6 +33,7 @@ public:
     std::optional<BodyContact> SphereContact(Vector3 center, double radius) const;
 
 private:
+    std::map<std::uint64_t, std::shared_ptr<const WorldCollision>> chunks;
     struct Triangle { Vector3 a, b, c, normal; Bounds3 bounds; };
     struct Node { Bounds3 bounds; size_t first = 0, count = 0, left = 0, right = 0; };
     std::vector<Triangle> triangles;

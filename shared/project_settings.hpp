@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asset_paths.hpp"
+#include "streaming_settings.hpp"
 
 class ProjectSettings
 {
@@ -10,8 +11,11 @@ public:
     static constexpr double minViewDistance = 100, maxViewDistance = 128000;
     bool Load(AssetRoot location);
     bool SaveDistances(double railroadMeters, double viewMeters);
+    const StreamingSettings& Streaming() const { return streaming; }
+    bool SaveOptions(double railroadMeters, double viewMeters, const StreamingSettings& budgets);
 
 private:
+    StreamingSettings streaming;
     static constexpr double defaultRailroadDetailDistance = 300.0;
     double railroadDetailDistance = defaultRailroadDetailDistance;
     static constexpr double defaultViewDistance = 8000.0;

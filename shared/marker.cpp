@@ -82,6 +82,18 @@ namespace
     }
 }
 
+Bounds3 Marker::VisibilityBounds(Bounds3 bounds, std::string_view text, Vector3 scale)
+{
+    if (bounds.Empty() || text.empty()) return bounds;
+    // Conservative Y-billboard envelope, without constructing distant glyph meshes.
+    const double radius = capHeight * double(text.size()) * 2 * std::abs(scale.x);
+    const Vector3 top{(bounds.min.x + bounds.max.x) * 0.5, bounds.max.y + labelGap,
+                      (bounds.min.z + bounds.max.z) * 0.5};
+    bounds.Include(top - Vector3{radius, 0, radius});
+    bounds.Include(top + Vector3{radius, capHeight * 3 * std::abs(scale.y), radius});
+    return bounds;
+}
+
 bool Marker::SetText(std::string value)
 {
     const char* p = value.data();

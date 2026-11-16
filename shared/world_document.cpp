@@ -459,23 +459,28 @@ void WorldDocument::TickObjects(float deltaSeconds)
     }
 }
 
-bool WorldDocument::Open(const char* documentPath)
+bool WorldDocument::OpenPath(const char* documentPath)
 {
-    WorldDocument loaded(models.Location());
-    if (documentPath)
-    {
-        loaded.path = documentPath;
-    }
+    // Only a fresh document can become a path-only runtime catalog.
+    if (!path.empty() || !roads.empty() || !objects.empty() || !terrain.empty() || !meshes.empty())
+        return SDL_SetError("Runtime streaming requires an empty world document");
+    if (documentPath) path = documentPath;
     else
     {
         char* directory = SDL_GetPrefPath("BigSkyCountry", "BigSkyCountry");
-        if (!directory)
-        {
-            return false;
-        }
-        loaded.path = std::string(directory) + "world.wld";
+        if (!directory) return false;
+        path = std::string(directory) + "world.wld";
         SDL_free(directory);
     }
+    runtimePathOnly = true;
+    return true;
+}
+
+bool WorldDocument::Open(const char* documentPath)
+{
+    WorldDocument loaded(models.Location());
+    if (!loaded.OpenPath(documentPath)) return false;
+    loaded.runtimePathOnly = false;
 
     const std::filesystem::path filePath(std::u8string(loaded.path.begin(), loaded.path.end()));
     std::error_code error;
@@ -689,6 +694,7 @@ bool WorldDocument::Open(const char* documentPath)
 
 bool WorldDocument::Save()
 {
+    if (runtimePathOnly) return SDL_SetError("Cannot save a streamed runtime world over authored data");
     if (path.empty())
     {
         return SDL_SetError("Open a world before saving it");

@@ -2,6 +2,7 @@
 #include "world_lighting.hpp"
 #include "spatial_index.hpp"
 #include "marker.hpp"
+#include "vehicle.hpp"
 #include <meshoptimizer.h>
 #include <algorithm>
 #include <cmath>
@@ -196,6 +197,15 @@ bool Cook(WorldDocument& world, const std::string& file)
                 }
             }
         };
+        for (const auto& road : world.roads)
+        {
+            if (road.style.railroad) continue;
+            const auto samples = road.laneCenterlines.empty() ? road.SegmentSamples(0) : std::span<const Vector3>(road.laneCenterlines.front());
+            if (samples.size() < 3) continue;
+            const auto i = samples.size() / 2;
+            const auto tangent = samples[i + 1] - samples[i - 1];
+            manifest.spawns.push_back({samples[i], std::atan2(tangent.x, tangent.z)});
+        }
         for (std::size_t i = 0; i < world.roads.size(); ++i)
         {
             const auto& road = world.roads[i]; const SceneKey key{SceneKind::Road, static_cast<int>(i)};
@@ -216,6 +226,10 @@ bool Cook(WorldDocument& world, const std::string& file)
         {
             const auto& object = *world.Objects()[i]; const auto* marker = dynamic_cast<const Marker*>(&object);
             entity({SceneKind::Object, int(i)}, meshBounds(object.Instance()), {}, &object.Instance(), marker ? marker->material : "");
+            auto& e = manifest.entities.back(); e.type = object.Type(); e.pose = object.GetTransform();
+            e.health = object.health; e.invincible = object.invincible;
+            if (const auto* vehicle = dynamic_cast<const Vehicle*>(&object)) e.acceleration = vehicle->acceleration;
+            if (marker) { e.markerText = marker->Text(); e.markerColor = marker->textColor; }
         }
         for (std::size_t i = 0; i < world.Terrain().size(); ++i)
         {
@@ -249,6 +263,10 @@ bool Cook(WorldDocument& world, const std::string& file)
             bake(chunk.Instance(), true, chunk.material);
             if (chunk.Lake()) bake(chunk.Water(), false, LakeDefinition::waterMaterial);
         }
+        for (const auto& e : manifest.entities)
+            if ((e.id.kind == SceneKind::Terrain || e.id.kind == SceneKind::Mesh) && !e.bounds.Empty())
+                manifest.spawns.push_back({(e.bounds.min + e.bounds.max) * 0.5, 0});
+        if (manifest.spawns.empty()) manifest.spawns.push_back({});
         // Dependency edges are metadata, not recursive render/load requirements. Cycles are expected.
         auto link = [&](EntityId a, EntityId b) {
             if (a == b || !entities.contains(a) || !entities.contains(b)) return;

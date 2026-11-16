@@ -3,6 +3,7 @@
 #include "bscobject.hpp"
 #include <array>
 #include <optional>
+#include <string_view>
 
 class CameraView;
 class WorldRenderer;
@@ -20,6 +21,7 @@ public:
     const std::string& Text() const { return text; }
     bool SetText(std::string value);
     void SubmitLabel(WorldRenderer& renderer, const CameraView& camera) const;
+    static Bounds3 VisibilityBounds(Bounds3 meshBounds, std::string_view text, Vector3 scale);
     std::string material; // Per-instance .bmat path. Empty uses the GLB's mesh colors.
     using TextColor = std::array<Uint8, 3>;
     TextColor textColor{255, 255, 255}; // Display RGB for the unlit lettering.

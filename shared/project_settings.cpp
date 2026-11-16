@@ -63,6 +63,18 @@ bool ProjectSettings::Load(AssetRoot location)
     if (view && (!cJSON_IsNumber(view) || !std::isfinite(view->valuedouble) ||
                  view->valuedouble < minViewDistance || view->valuedouble > maxViewDistance))
         return SDL_SetError("Invalid view distance in %s", path.c_str());
+    StreamingSettings loaded;
+    const auto readBudget = [&](const char* key, std::size_t& bytes) {
+        const auto* value = cJSON_GetObjectItemCaseSensitive(settings.get(), key);
+        if (!value) return true;
+        if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) || value->valuedouble < 64 || value->valuedouble > 16384)
+            return SDL_SetError("Invalid %s (expected 64 to 16384 MiB)", key);
+        bytes = static_cast<std::size_t>(value->valuedouble * StreamingSettings::MiB);
+        return true;
+    };
+    if (!readBudget("streamGeometryMiB", loaded.geometryBytes) || !readBudget("streamAssetsMiB", loaded.assetBytes) ||
+        !readBudget("streamCollisionMiB", loaded.collisionBytes)) return false;
+    streaming = loaded;
     railroadDetailDistance = distance ? distance->valuedouble : defaultRailroadDetailDistance;
     viewDistance = view ? view->valuedouble : defaultViewDistance;
     return true;
@@ -70,6 +82,14 @@ bool ProjectSettings::Load(AssetRoot location)
 
 bool ProjectSettings::SaveDistances(double meters, double viewMeters)
 {
+    return SaveOptions(meters, viewMeters, streaming);
+}
+
+bool ProjectSettings::SaveOptions(double meters, double viewMeters, const StreamingSettings& budgets)
+{
+    for (auto bytes : {budgets.geometryBytes, budgets.assetBytes, budgets.collisionBytes})
+        if (bytes < 64 * StreamingSettings::MiB || bytes > 16384 * StreamingSettings::MiB)
+            return SDL_SetError("Streaming budgets must be between 64 and 16384 MiB.");
     if (!std::isfinite(meters) || meters < 0)
         return SDL_SetError("Enter a distance of zero or more meters.");
     if (!std::isfinite(viewMeters) || viewMeters < minViewDistance || viewMeters > maxViewDistance)
@@ -81,9 +101,16 @@ bool ProjectSettings::SaveDistances(double meters, double viewMeters)
     if (!cJSON_AddNumberToObject(settings.get(), distanceKey, meters)) return SDL_OutOfMemory();
     cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), viewDistanceKey);
     if (!cJSON_AddNumberToObject(settings.get(), viewDistanceKey, viewMeters)) return SDL_OutOfMemory();
+    const auto addBudget = [&](const char* key, std::size_t bytes) {
+        cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), key);
+        return cJSON_AddNumberToObject(settings.get(), key, double(bytes) / StreamingSettings::MiB) != nullptr;
+    };
+    if (!addBudget("streamGeometryMiB", budgets.geometryBytes) || !addBudget("streamAssetsMiB", budgets.assetBytes) ||
+        !addBudget("streamCollisionMiB", budgets.collisionBytes)) return SDL_OutOfMemory();
     std::unique_ptr<char, decltype(&cJSON_free)> data(cJSON_Print(settings.get()), cJSON_free);
     if (!data) return SDL_OutOfMemory();
     if (!WriteSettings(source, data.get())) return false;
+    streaming = budgets;
     railroadDetailDistance = meters;
     viewDistance = viewMeters;
 

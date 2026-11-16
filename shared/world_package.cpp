@@ -80,21 +80,59 @@ namespace
         }
         void End() const { if (!data.empty()) throw std::runtime_error("Trailing cooked record data"); }
     };
-    Writer EncodeCell(const Cell& cell)
+    Writer EncodeCell(const Cell& cell, PayloadKind lod)
     {
-        Writer w; w.Count(cell.batches.size());
-        for (const auto& b : cell.batches) { w.Id(b.owner); w.U32(unsigned(b.layer)); w.String(b.material); w.MeshData(b.nearMesh); w.MeshData(b.distantMesh); }
-        w.Count(cell.ties.size());
-        for (const auto& ties : cell.ties) { w.Id(ties.owner); w.Transform(ties.run.first); w.Transform(ties.run.last); w.U32(ties.run.count); }
+        Writer w;
+        std::vector<const Batch*> batches;
+        for (const auto& b : cell.batches)
+        {
+            const auto& mesh = lod == PayloadKind::Near ? b.nearMesh : b.distantMesh;
+            if (mesh.mesh && !mesh.mesh->indices.empty()) batches.push_back(&b);
+        }
+        w.Count(batches.size());
+        for (const auto* b : batches)
+        {
+            w.Id(b->owner); w.U32(unsigned(b->layer)); w.String(b->material);
+            w.MeshData(lod == PayloadKind::Near ? b->nearMesh : b->distantMesh);
+        }
+        w.Count(lod == PayloadKind::Near ? cell.ties.size() : 0);
+        if (lod == PayloadKind::Near)
+            for (const auto& ties : cell.ties) { w.Id(ties.owner); w.Transform(ties.run.first); w.Transform(ties.run.last); w.U32(ties.run.count); }
+        return w;
+    }
+    Writer EncodeCollision(const Cell& cell)
+    {
+        std::vector<Vector3> positions;
+        std::vector<std::uint32_t> indices;
+        auto append = [&](const MeshInstance& instance) {
+            if (!instance.mesh) return;
+            if (positions.size() + instance.mesh->vertices.size() > UINT32_MAX) throw std::runtime_error("Collision chunk too large");
+            const auto base = static_cast<std::uint32_t>(positions.size());
+            for (const auto& v : instance.mesh->vertices) positions.push_back(instance.transform.Point(v.position) - cell.key.Origin());
+            for (auto i : instance.mesh->indices) indices.push_back(base + i);
+        };
+        for (const auto& b : cell.batches)
+            if (b.layer != Layer::Paint && b.layer != Layer::Water) append(b.nearMesh);
+        for (const auto& ties : cell.ties)
+            for (int i = 0; i < ties.run.count; ++i) append({RailroadTieMesh(), ties.run.At(i)});
+        Writer w; w.Count(positions.size()); w.Count(indices.size());
+        for (auto p : positions) w.Vec(p);
+        for (auto i : indices) w.U32(i);
         return w;
     }
     Writer EncodeManifest(const Manifest& m)
     {
         Writer w; w.U64(m.sourceHash); w.F64(cellMeters); w.F64(distantMeters);
+        w.Count(m.spawns.size());
+        for (const auto& spawn : m.spawns) { w.Vec(spawn.position); w.F64(spawn.yaw); }
         w.Count(m.entities.size());
         for (const auto& e : m.entities)
         {
             w.Id(e.id); w.U32(e.folder); w.String(e.name); w.String(e.model); w.String(e.material); w.Transform(e.transform); w.Bounds(e.bounds);
+            w.U32(static_cast<unsigned>(e.type));
+            w.Vec(e.pose.position); w.Vec(e.pose.rotation); w.Vec(e.pose.scale);
+            w.F32(e.health); w.F32(e.acceleration); w.U32(e.invincible);
+            w.String(e.markerText); for (auto color : e.markerColor) w.U32(color);
             w.Count(e.dependencies.size()); for (auto dep : e.dependencies) w.Id(dep);
         }
         w.Count(m.assets.size());
@@ -103,7 +141,8 @@ namespace
         for (const auto& c : m.cells)
         {
             w.U32(std::bit_cast<std::uint32_t>(c.key.x)); w.U32(std::bit_cast<std::uint32_t>(c.key.z)); w.Bounds(c.bounds);
-            w.U64(c.offset); w.U64(c.bytes); w.U64(c.hash); w.U64(c.nearTriangles); w.U64(c.distantTriangles);
+            for (const auto& p : c.payloads) { w.U64(p.offset); w.U64(p.bytes); w.U64(p.hash); }
+            w.U64(c.nearTriangles); w.U64(c.distantTriangles);
             w.Count(c.owners.size()); for (auto id : c.owners) w.Id(id);
         }
         return w;
@@ -151,10 +190,15 @@ bool Write(const std::string& file, Manifest manifest, std::span<const Cell> cel
         std::uint64_t offset = 0;
         for (const auto& cell : cells)
         {
-            CellRecord record; record.key = cell.key; record.offset = offset;
-            auto encoded = EncodeCell(cell);
-            if (encoded.data.size() > maxCellBytes) throw std::runtime_error("Cell exceeds 512 MiB; reduce authored density");
-            record.bytes = encoded.data.size(); record.hash = Hash(encoded.data); offset += record.bytes;
+            CellRecord record; record.key = cell.key;
+            for (auto kind : {PayloadKind::Near, PayloadKind::Distant, PayloadKind::Collision})
+            {
+                auto encoded = kind == PayloadKind::Collision ? EncodeCollision(cell) : EncodeCell(cell, kind);
+                if (encoded.data.size() > maxCellBytes) throw std::runtime_error("Cell exceeds 512 MiB; reduce authored density");
+                auto& p = record.payloads[static_cast<std::size_t>(kind)];
+                p.offset = offset; p.bytes = encoded.data.size(); p.hash = Hash(encoded.data); offset += p.bytes;
+                if (!data.write(encoded.data.data(), encoded.data.size())) throw std::runtime_error("Cannot write chunk payload");
+            }
             std::set<EntityId> owners;
             for (const auto& b : cell.batches)
             {
@@ -170,7 +214,6 @@ bool Write(const std::string& file, Manifest manifest, std::span<const Cell> cel
                 record.bounds.Include(ties.run.Center() - Vector3{r, r, r}); record.bounds.Include(ties.run.Center() + Vector3{r, r, r});
             }
             record.owners.assign(owners.begin(), owners.end()); manifest.cells.push_back(record);
-            if (!data.write(encoded.data.data(), encoded.data.size())) throw std::runtime_error("Cannot write chunk payload");
         }
         data.close(); if (!data) throw std::runtime_error("Cannot finish chunk payload");
         auto index = EncodeManifest(manifest);
@@ -203,10 +246,19 @@ bool Reader::Open(const std::string& file)
         auto data = Read(in, bytes, maxManifestBytes); if (Hash(data) != checksum) throw std::runtime_error("Manifest checksum mismatch");
         Input r{data}; Manifest m; m.sourceHash = r.U64();
         if (r.F64() != cellMeters || r.F64() != distantMeters) throw std::runtime_error("Unsupported world cook recipe");
+        for (auto n = r.Count(32); n; --n) m.spawns.push_back({r.Vec(), r.F64()});
         std::set<EntityId> ids;
-        for (auto n = r.Count(176); n; --n)
+        for (auto n = r.Count(280); n; --n)
         {
             Entity e; e.id = r.Id(); e.folder = static_cast<int>(r.U32()); e.name = r.String(); e.model = r.String(); e.material = r.String(); e.transform = r.Transform(); e.bounds = r.Bounds();
+            const auto type = r.U32(); if (type > unsigned(ObjectType::Marker)) throw std::runtime_error("Invalid object type");
+            e.type = static_cast<ObjectType>(type);
+            e.pose.position = r.Vec(); e.pose.rotation = r.Vec(); e.pose.scale = r.Vec();
+            if (!e.pose.ToMeshTransform().Valid()) throw std::runtime_error("Invalid object pose");
+            e.health = r.F32(); e.acceleration = r.F32(); const auto invincible = r.U32();
+            if (e.health < 0 || invincible > 1) throw std::runtime_error("Invalid object properties"); e.invincible = invincible != 0;
+            e.markerText = r.String();
+            for (auto& channel : e.markerColor) { auto c = r.U32(); if (c > 255) throw std::runtime_error("Invalid marker color"); channel = static_cast<Uint8>(c); }
             for (auto d = r.Count(12); d; --d) e.dependencies.push_back(r.Id());
             if (!ids.insert(e.id).second) throw std::runtime_error("Duplicate entity ID");
             m.entities.push_back(std::move(e));
@@ -222,13 +274,20 @@ bool Reader::Open(const std::string& file)
             m.assets.push_back(std::move(a));
         }
         std::set<CellKey> keys; std::uint64_t end = 0;
-        for (auto n = r.Count(100); n; --n)
+        for (auto n = r.Count(148); n; --n)
         {
             CellRecord c; c.key.x = std::bit_cast<std::int32_t>(r.U32()); c.key.z = std::bit_cast<std::int32_t>(r.U32()); c.bounds = r.Bounds();
-            c.offset = r.U64(); c.bytes = r.U64(); c.hash = r.U64(); c.nearTriangles = r.U64(); c.distantTriangles = r.U64();
+            for (auto& p : c.payloads)
+            {
+                p.offset = r.U64(); p.bytes = r.U64(); p.hash = r.U64();
+                if (p.offset != end || p.bytes > maxCellBytes || end > static_cast<std::uint64_t>(size) - 28 - bytes || p.bytes > static_cast<std::uint64_t>(size) - 28 - bytes - end)
+                    throw std::runtime_error("Invalid cell directory");
+                end += p.bytes;
+            }
+            c.nearTriangles = r.U64(); c.distantTriangles = r.U64();
             for (auto d = r.Count(12); d; --d) { auto id = r.Id(); if (!ids.contains(id)) throw std::runtime_error("Unknown cell owner"); c.owners.push_back(id); }
-            if (!keys.insert(c.key).second || c.offset != end || c.bytes > maxCellBytes || end > static_cast<std::uint64_t>(size) - 28 - bytes || c.bytes > static_cast<std::uint64_t>(size) - 28 - bytes - end) throw std::runtime_error("Invalid cell directory");
-            end += c.bytes; m.cells.push_back(std::move(c));
+            if (!keys.insert(c.key).second) throw std::runtime_error("Duplicate cell address");
+            m.cells.push_back(std::move(c));
         }
         r.End(); if (28 + bytes + end != static_cast<std::uint64_t>(size)) throw std::runtime_error("Unexpected cooked world length");
         manifest = std::move(m); payloadStart = 28 + bytes; path = file; return true;
@@ -242,21 +301,23 @@ bool Reader::Matches(const std::string& sourceWorld, AssetRoot root) const
         if (AssetHash(a.kind, a.path, root) != a.hash) return SDL_SetError("Cooked world is stale (asset changed: %s)", a.path.c_str());
     return true;
 }
-bool Reader::ReadCell(std::size_t index, Cell& cell) const
+bool Reader::ReadRender(std::size_t index, PayloadKind lod, Cell& cell) const
 {
     try
     {
         if (path.empty() || index >= manifest.cells.size()) throw std::runtime_error("Invalid cell request");
+        if (lod != PayloadKind::Near && lod != PayloadKind::Distant) throw std::runtime_error("Invalid render LOD");
         const auto& c = manifest.cells[index];
-        std::ifstream in(Utf8(path), std::ios::binary); in.seekg(static_cast<std::streamoff>(payloadStart + c.offset));
-        auto data = Read(in, c.bytes, maxCellBytes); if (Hash(data) != c.hash) throw std::runtime_error("Cell checksum mismatch");
+        const auto& p = c.payloads[static_cast<std::size_t>(lod)];
+        std::ifstream in(Utf8(path), std::ios::binary); in.seekg(static_cast<std::streamoff>(payloadStart + p.offset));
+        auto data = Read(in, p.bytes, maxCellBytes); if (Hash(data) != p.hash) throw std::runtime_error("Cell checksum mismatch");
         Input r{data}; Cell result; result.key = c.key;
         auto owner = [&] { auto id = r.Id(); if (std::find(c.owners.begin(), c.owners.end(), id) == c.owners.end()) throw std::runtime_error("Invalid batch owner"); return id; };
-        for (auto n = r.Count(36); n; --n)
+        for (auto n = r.Count(28); n; --n)
         {
             Batch b; b.owner = owner(); auto layer = r.U32(); if (layer > unsigned(Layer::Transition)) throw std::runtime_error("Invalid mesh layer");
             b.layer = static_cast<Layer>(layer); b.material = r.String(); if (!b.material.empty() && !Material::ValidAssetPath(b.material)) throw std::runtime_error("Invalid material path");
-            b.nearMesh = r.MeshData(c.key.Origin()); b.distantMesh = r.MeshData(c.key.Origin()); result.batches.push_back(std::move(b));
+            b.nearMesh = r.MeshData(c.key.Origin()); result.batches.push_back(std::move(b));
         }
         for (auto n = r.Count(208); n; --n)
         {
@@ -268,4 +329,35 @@ bool Reader::ReadCell(std::size_t index, Cell& cell) const
     }
     catch (const std::exception& e) { return SDL_SetError("Cooked cell: %s", e.what()); }
 }
+bool Reader::ReadCell(std::size_t index, Cell& cell) const
+{
+    Cell near, distant;
+    if (!ReadRender(index, PayloadKind::Near, near) || !ReadRender(index, PayloadKind::Distant, distant)) return false;
+    for (auto& b : near.batches)
+    {
+        const auto it = std::find_if(distant.batches.begin(), distant.batches.end(), [&](const auto& d) {
+            return b.owner == d.owner && b.layer == d.layer && b.material == d.material;
+        });
+        b.distantMesh = it == distant.batches.end() ? MeshInstance{std::make_shared<Mesh>(), b.nearMesh.transform} : it->nearMesh;
+    }
+    cell = std::move(near); return true;
+}
+bool Reader::ReadCollision(std::size_t index, MeshInstance& mesh) const
+{
+    try
+    {
+        if (path.empty() || index >= manifest.cells.size()) throw std::runtime_error("Invalid collision cell request");
+        const auto& c = manifest.cells[index]; const auto& p = c.payloads[2];
+        std::ifstream in(Utf8(path), std::ios::binary); in.seekg(static_cast<std::streamoff>(payloadStart + p.offset));
+        auto data = Read(in, p.bytes, maxCellBytes); if (Hash(data) != p.hash) throw std::runtime_error("Collision checksum mismatch");
+        Input r{data}; const auto nv = r.U32(), ni = r.U32();
+        if (ni % 3 || std::uint64_t(nv) * 24 + std::uint64_t(ni) * 4 != r.data.size()) throw std::runtime_error("Invalid collision size");
+        auto result = std::make_shared<Mesh>(); result->vertices.reserve(nv); result->indices.reserve(ni);
+        for (std::uint32_t i = 0; i < nv; ++i) result->vertices.push_back({r.Vec(), {}});
+        for (std::uint32_t i = 0; i < ni; ++i) { auto v = r.U32(); if (v >= nv) throw std::runtime_error("Invalid collision index"); result->indices.push_back(v); }
+        result->UpdateBounds(); mesh = {std::move(result), MeshTransform{c.key.Origin()}}; return true;
+    }
+    catch (const std::exception& e) { return SDL_SetError("Cooked collision: %s", e.what()); }
+}
+
 }

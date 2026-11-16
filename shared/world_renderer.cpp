@@ -4,10 +4,33 @@
 #include "editor_colors.hpp"
 #include "view_geometry.hpp"
 #include "spatial_index.hpp"
+#include "project_settings.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+
+bool WorldRenderer::DrawCacheStatistics(SDL_Renderer* target) const
+{
+    const auto& settings = g_ProjectSettings.Streaming();
+    constexpr double mib = StreamingSettings::MiB;
+    const auto geometry = ResidentBytes(), textures = TextureBytes();
+    const SDL_FRect box{8, 36, 735, 34};
+    return SDL_SetRenderDrawColor(target, 24, 26, 30, 255) && SDL_RenderFillRect(target, &box) &&
+        SDL_SetRenderDrawColor(target, 230, 232, 235, 255) &&
+        SDL_RenderDebugTextFormat(target, 16, 44, "Render cache %.1f/%.0f MiB | Textures %.1f/%.0f MiB (%zu shared)",
+            geometry / mib, settings.geometryBytes / mib, textures / mib, settings.assetBytes / (2 * mib), TextureCount()) &&
+        SDL_RenderDebugText(target, 16, 58, geometry > settings.geometryBytes || textures > settings.assetBytes / 2 ?
+            "Budget pressure: active resources pinned" : "Unused render resources released automatically");
+}
+
+std::size_t WorldRenderer::ResidentBytes() const
+{
+    std::size_t bytes = 0;
+    for (const auto& [key, entry] : resident)
+        bytes += entry->bufferBytes + entry->pendingUpload.capacity() * sizeof(WorldDepthVertex);
+    return bytes;
+}
 
 bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance)
 {
@@ -28,6 +51,19 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     // Allow brief trips outside the frustum without keeping deleted or distant
     // geometry indefinitely. SDL defers destruction while a buffer is in flight.
     std::erase_if(resident, [&](const auto& entry) { return frame - entry.second->lastFrame > 120; });
+    // Editor objects, selections and history are never evicted. Only disposable
+    // render buffers are reclaimed, and currently visible geometry stays pinned.
+    auto residentBytes = ResidentBytes();
+    const auto budget = g_ProjectSettings.Streaming().geometryBytes;
+    while (residentBytes > budget)
+    {
+        auto victim = resident.end();
+        for (auto it = resident.begin(); it != resident.end(); ++it)
+            if (it->second->lastFrame + 1 < frame && (victim == resident.end() || it->second->lastFrame < victim->second->lastFrame)) victim = it;
+        if (victim == resident.end()) break;
+        residentBytes -= victim->second->bufferBytes + victim->second->pendingUpload.capacity() * sizeof(WorldDepthVertex);
+        resident.erase(victim);
+    }
     vertices.clear();
     outline.clear();
     materialRanges.clear();
@@ -38,7 +74,9 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedRanges.clear();
     outlineStart = 0;
-    return viewport.w <= 0 || viewport.h <= 0 || PrepareTarget(target, viewport.w, viewport.h);
+    if (viewport.w > 0 && viewport.h > 0 && !PrepareTarget(target, viewport.w, viewport.h)) return false;
+    materialCache.BeginFrame(device, g_ProjectSettings.Streaming().assetBytes / 2);
+    return true;
 }
 
 WorldDepthVertex WorldRenderer::WorldToClip(Vector3 position, SDL_FColor color) const

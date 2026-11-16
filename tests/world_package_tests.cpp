@@ -164,7 +164,7 @@ namespace
         Check(water && ties>0 && far<near, "Missing lake/railroad/LOD data");
         const auto bad=(root/"bad.bscworld").string(); auto corrupt=bytes; corrupt.back()^=1; Put(bad,corrupt);
         WorldPackage::Reader damaged; Check(damaged.Open(bad), "Directory should be readable without loading payload");
-        WorldPackage::Cell cell; Check(!damaged.ReadCell(damaged.Index().cells.size()-1,cell), "Corrupt cell accepted");
+        MeshInstance collision; Check(!damaged.ReadCollision(damaged.Index().cells.size()-1,collision), "Corrupt collision accepted");
         corrupt=bytes; corrupt[28]^=1; Put(bad,corrupt); Check(!damaged.Open(bad), "Corrupt manifest accepted");
         corrupt=bytes; corrupt.resize(20); Put(bad,corrupt); Check(!damaged.Open(bad), "Truncated header accepted");
         corrupt=bytes; corrupt[8]=99; Put(bad,corrupt); Check(!damaged.Open(bad), "Unknown version accepted");

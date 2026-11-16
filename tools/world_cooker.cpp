@@ -12,7 +12,8 @@ int main(int argc, char** argv)
         for (std::size_t i = 0; i < reader.Index().cells.size(); ++i)
         {
             WorldPackage::Cell cell;
-            if (!reader.ReadCell(i, cell)) { std::cerr << SDL_GetError() << '\n'; return 1; }
+            MeshInstance collision;
+            if (!reader.ReadCell(i, cell) || !reader.ReadCollision(i, collision)) { std::cerr << SDL_GetError() << '\n'; return 1; }
             near += reader.Index().cells[i].nearTriangles; far += reader.Index().cells[i].distantTriangles;
         }
         std::cout << reader.Index().entities.size() << " entities, " << reader.Index().cells.size() << " cells, "

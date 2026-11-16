@@ -143,6 +143,13 @@ bool DdsTexture::FromImage(SDL_Surface* rgba, Format expected)
     }
 }
 
+std::size_t DdsTexture::DataBytes() const
+{
+    std::size_t bytes = blocks.size();
+    for (const auto& mip : mips) bytes += mip.pixels.size();
+    return bytes;
+}
+
 void DdsTexture::Decode()
 {
     if (blocks.empty()) return;

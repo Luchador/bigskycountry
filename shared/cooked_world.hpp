@@ -1,18 +1,44 @@
 #pragma once
 #include "world_package.hpp"
-#include "spatial_index.hpp"
+#include "streaming_settings.hpp"
+#include <memory>
+#include <span>
+
 class WorldRenderer;
+class WorldCollision;
 class CameraView;
-// Milestone 2 preview: eager CPU payload loading, lazy renderer uploads.
-// Reader supports independent cells; asynchronous residency is the next milestone.
+
+// Main-thread residency controller. The worker owns only CPU decoding/BVH work;
+// SDL GPU objects, scene publication and collision attachment stay on the main thread.
 class CookedWorld
 {
-public:
-    bool Load(const WorldDocument& source);
-    bool Ready() const { return ready; }
-    void Submit(WorldRenderer& renderer, const CameraView& camera, double radius);
-private:
-    bool ready = false;
-    std::vector<WorldPackage::Cell> cells;
-    SpatialIndex index;
+  public:
+    CookedWorld();
+    ~CookedWorld();
+    CookedWorld(const CookedWorld &) = delete;
+    CookedWorld &operator=(const CookedWorld &) = delete;
+    bool Load(const WorldDocument &source);
+    bool LoadPath(const std::string &source);
+    bool Ready() const;
+    void Update(Vector3 eye, std::span<const Vector3> physicsSources, WorldCollision &collision,
+                WorldRenderer *renderer, double radius, const StreamingSettings &settings);
+    bool CollisionReady(Vector3 position, double radius = 64) const;
+    const std::vector<WorldPackage::Spawn> &Spawns() const;
+    void Submit(WorldRenderer &renderer, const CameraView &camera, double radius);
+    void SubmitLabels(WorldRenderer &renderer, const CameraView &camera);
+    bool DrawStatistics(SDL_Renderer *renderer) const;
+    const std::string &Error() const;
+    struct Statistics
+    {
+        std::size_t totalCells = 0, nearCells = 0, distantCells = 0, collisionChunks = 0;
+        std::size_t modelAssets = 0, modelInstances = 0;
+        std::size_t geometryBytes = 0, modelBytes = 0, collisionBytes = 0;
+        std::size_t completed = 0, discarded = 0, evicted = 0, queued = 0, failed = 0;
+        bool pressure = false;
+    };
+    const Statistics &Stats() const;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 };

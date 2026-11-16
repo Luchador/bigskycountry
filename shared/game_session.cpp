@@ -1,4 +1,6 @@
 #include "game_session.hpp"
+#include "cooked_world.hpp"
+#include "project_settings.hpp"
 #include "car.hpp"
 #include "character.hpp"
 #include "test_pawn_meshes.hpp"
@@ -14,8 +16,8 @@ namespace
     constexpr double fixedStep = 1.0 / 60.0;
 }
 
-GameSession::GameSession(SDL_Window* window, WorldDocument& document)
-    : document(document), world(document), player(world), input(window)
+GameSession::GameSession(SDL_Window* window, WorldDocument& document, CookedWorld* streaming)
+    : document(document), world(document), player(world), input(window), streaming(streaming)
 {
 }
 
@@ -40,6 +42,13 @@ bool GameSession::TryStartAt(Vector3 position, double yaw)
 
 bool GameSession::Start()
 {
+    if (streaming)
+    {
+        if (streaming->Spawns().empty()) return SDL_SetError("Cooked world has no spawn candidates");
+        const auto position = streaming->Spawns().front().position;
+        loadingCamera.LookAt(position + Vector3{0, 5, -10}, position);
+        return input.SetCaptured(true);
+    }
     bool placed = false;
     for (const auto& road : document.roads)
     {
@@ -72,8 +81,61 @@ bool GameSession::Start()
         placed = TryStartAt({0,0,0}, 0);
     }
     if (!placed) return SDL_SetError("Could not find a clear player and test car spawn");
-    player.controller.camera.Update(*player.controller.Controlled(), 1.0, 0, world.collision);
+    FinishStart();
     return input.SetCaptured(true);
+}
+
+bool GameSession::FinishStart()
+{
+    started = true;
+    player.controller.camera.Update(*player.controller.Controlled(), 1.0, 0, world.collision);
+    return true;
+}
+
+std::vector<Vector3> GameSession::PhysicsSources() const
+{
+    if (!started) return {streaming->Spawns()[spawnIndex].position};
+    std::vector<Vector3> sources;
+    for (const auto& pawn : world.Pawns())
+    {
+        if (const auto* character = dynamic_cast<const Character*>(pawn.get()); character && character->IsSeated()) continue;
+        const auto position = pawn->GetTransform().position;
+        Vector3 velocity{};
+        if (const auto* car = dynamic_cast<const Car*>(pawn.get())) velocity = car->Velocity();
+        else if (const auto* character = dynamic_cast<const Character*>(pawn.get())) velocity = character->Velocity();
+        // Cover the complete upcoming frame, including fast falls and airborne vehicles.
+        const auto travel = velocity * 0.5;
+        const int steps = std::max(1, static_cast<int>(std::ceil(Math::Length(travel) / 32.0)));
+        for (int i = 0; i <= steps; ++i) sources.push_back(position + travel * (double(i) / steps));
+    }
+    return sources;
+}
+
+void GameSession::Stream(Vector3 eye, WorldRenderer& renderer)
+{
+    if (!streaming) return;
+    const auto sources = PhysicsSources();
+    streaming->Update(eye, sources, world.collision, &renderer, g_ProjectSettings.ViewDistance(), g_ProjectSettings.Streaming());
+    collisionReady = std::all_of(sources.begin(), sources.end(), [&](Vector3 p) { return streaming->CollisionReady(p); });
+    if (!started && collisionReady)
+    {
+        const auto& candidates = streaming->Spawns();
+        const auto& spawn = candidates[spawnIndex];
+        if (TryStartAt(spawn.position, spawn.yaw)) FinishStart();
+        else if (spawnIndex + 1 < candidates.size())
+        {
+            ++spawnIndex;
+            loadingCamera.LookAt(candidates[spawnIndex].position + Vector3{0, 5, -10}, candidates[spawnIndex].position);
+        }
+        else
+        {
+            // This fallback is permitted only after collision is complete for every attempted spawn.
+            testGround = {TestPawnMeshes::Ground(), {}};
+            world.collision.AddMesh(testGround); world.collision.Finish();
+            if (TryStartAt({0, 0, 0}, 0)) FinishStart();
+        }
+        collisionReady = false; // Revalidate around the newly spawned pawns next frame.
+    }
 }
 
 bool GameSession::Handle(const SDL_Event& event)
@@ -100,6 +162,13 @@ bool GameSession::SetDebugCamera(bool enabled)
 void GameSession::Update(double seconds)
 {
     seconds = std::clamp(seconds, 0.0, 0.25);
+    if (streaming && (!started || !collisionReady))
+    {
+        accumulator = 0; // Never catch up physics through an unloaded collision boundary.
+        input.Read(PawnInputProfile::OnFoot); // Consume presses/look, but preserve held movement keys.
+        player.controller.StopInput();
+        return;
+    }
     player.EnsurePossession();
     auto* pawn = player.controller.Controlled();
     if (!pawn) return;
@@ -160,6 +229,8 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer) const
         status = "Mouse released";
     }
     else if (status.empty()) status = "Escape: release mouse   F1: debug camera";
+    if (streaming && (!started || !collisionReady))
+        status = streaming->Error().empty() ? "Loading nearby collision..." : "Collision unavailable. Recook the world and restart.";
     const float y = std::max(0.0f, float(viewport.h) - 56.0f);
     const SDL_FRect background{0,y,float(viewport.w),56};
     return SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
