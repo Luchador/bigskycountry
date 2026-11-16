@@ -8,7 +8,7 @@
 #include <cmath>
 #include <limits>
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
@@ -31,6 +31,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     materialRanges.clear();
     lightGeometry = environment != nullptr;
     lights = environment ? *environment : WorldLighting{};
+    fog = atmosphere ? std::optional{*atmosphere} : std::nullopt;
     wireframeEnd = 0;
     foregroundStart = std::numeric_limits<std::size_t>::max();
     selectedRanges.clear();
@@ -49,8 +50,12 @@ WorldDepthVertex WorldRenderer::WorldToClip(Vector3 position, SDL_FColor color) 
         return vertex;
     }
     const Vector3 v = camera->WorldToView(position);
-    return {static_cast<float>(v.x * scaleX), static_cast<float>(v.y * scaleY),
-            static_cast<float>(worldNearDepth), static_cast<float>(v.z), color};
+    WorldDepthVertex vertex{static_cast<float>(v.x * scaleX), static_cast<float>(v.y * scaleY),
+                            static_cast<float>(worldNearDepth), static_cast<float>(v.z), color};
+    // Every world surface needs a camera-relative position for pixel fog, even
+    // untextured meshes. Keep the subtraction in double at continental distances.
+    vertex.view = camera->GetPosition() - position;
+    return vertex;
 }
 
 void WorldRenderer::SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color)
@@ -178,7 +183,6 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
         vertex.lit = lightGeometry;
         vertex.tangent = tangent;
         vertex.handedness = handedness;
-        if (!packingOrigin) vertex.view = camera->GetPosition() - p;
         vertices.push_back(vertex);
     }
 }

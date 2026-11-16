@@ -198,7 +198,9 @@ namespace
 
             if (!roadTool || !roadTool->IsPlanView())
             {
-                if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) || !worldRenderer.Begin(renderer, view, &sky.Lighting()))
+                const bool fogEnabled = !roadTool || roadTool->FogEnabled();
+                if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) ||
+                    !worldRenderer.Begin(renderer, view, &sky.Lighting(), fogEnabled ? &sky.Fog() : nullptr))
                 {
                     return false;
                 }

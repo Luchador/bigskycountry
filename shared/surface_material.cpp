@@ -147,7 +147,7 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
-SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
+SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
                                   Vector3 tangent, float handedness, Vector3 view, float vertexRed) const
 {
     const auto sample = [&](MaterialSlot slot) {
@@ -156,8 +156,8 @@ SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const World
     if (type == MaterialType::Unlit)
     {
         const auto glow = sample(MaterialSlot::Emissive);
-        return {Srgb::ToDisplay(glow[0] * tint.r), Srgb::ToDisplay(glow[1] * tint.g),
-                Srgb::ToDisplay(glow[2] * tint.b), sample(MaterialSlot::Translucency)[0] * tint.a};
+        return {glow[0] * tint.r, glow[1] * tint.g, glow[2] * tint.b,
+                sample(MaterialSlot::Translucency)[0] * tint.a};
     }
     auto color = sample(MaterialSlot::BaseColor);
     if (type == MaterialType::AlphaCutout && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
@@ -178,6 +178,6 @@ SDL_FColor SurfaceMaterial::Shade(float u, float v, float footprint, const World
     tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
     const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
     const Vector3 mapped = Math::Normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
-    return lights.Shade(mapped, view, {color[0], color[1], color[2], 1}, {orm[0], orm[1], orm[2]},
+    return lights.ShadeLinear(mapped, view, {color[0], color[1], color[2], 1}, {orm[0], orm[1], orm[2]},
                         {glow[0], glow[1], glow[2]});
 }

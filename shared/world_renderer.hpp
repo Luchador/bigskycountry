@@ -3,6 +3,7 @@
 #include "mesh.hpp"
 #include <optional>
 #include "surface_material.hpp"
+#include "world_fog.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
@@ -44,7 +45,8 @@ public:
 
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
-    bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr);
+    // Fog is opt-in for world viewports; thumbnails and material previews stay clear.
+    bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr);
     void BeginUnlit() { lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
@@ -130,6 +132,7 @@ private:
     void AppendSelectionVertex(SDL_FPoint point, double depth, double lift = 0);
     SurfaceMaterialCache materialCache;
     WorldLighting lights{};
+    std::optional<WorldFog> fog;
     bool lightGeometry = false;
     std::size_t wireframeEnd = 0, foregroundStart = 0;
     struct VertexRange { std::size_t first, end; };

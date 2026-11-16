@@ -21,6 +21,16 @@ SDL_FColor Srgb::ToLinear(SDL_FColor c)
 
 SDL_FColor WorldLighting::Shade(Vector3 normal, Vector3 view, SDL_FColor base, Vector3 orm, Vector3 emission) const
 {
+    return Srgb::ToDisplay(ShadeLinear(normal, view, base, orm, emission));
+}
+
+SDL_FColor Srgb::ToDisplay(SDL_FColor c)
+{
+    return {ToDisplay(c.r), ToDisplay(c.g), ToDisplay(c.b), c.a};
+}
+
+SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor base, Vector3 orm, Vector3 emission) const
+{
     const double gloss = 1.0 - orm.y;
     if (gloss > 0.0) view = Math::Normalize(view);
     Vector3 diffuse = ambient * orm.x;
@@ -41,7 +51,7 @@ SDL_FColor WorldLighting::Shade(Vector3 normal, Vector3 view, SDL_FColor base, V
     illuminate(moon);
     const auto channel = [&](float albedo, double d, double s, double e)
     {
-        return Srgb::ToDisplay(static_cast<float>(e + albedo * d + std::lerp(0.08, double(albedo), orm.z) * s));
+        return static_cast<float>(e + albedo * d + std::lerp(0.08, double(albedo), orm.z) * s);
     };
     return {channel(base.r, diffuse.x, specular.x, emission.x), channel(base.g, diffuse.y, specular.y, emission.y),
             channel(base.b, diffuse.z, specular.z, emission.z), base.a};

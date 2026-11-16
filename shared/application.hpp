@@ -30,6 +30,7 @@ public:
     virtual bool GeometrySelected(SceneKey key) const = 0;
     virtual const Road* PreviewRoad() const { return nullptr; }
     virtual bool WireframeEnabled() const { return false; }
+    virtual bool FogEnabled() const { return true; }
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;
     virtual EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) = 0;

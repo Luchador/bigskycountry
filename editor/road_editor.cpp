@@ -531,6 +531,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleRoadNames();
         return;
     }
+    if (command == EditorCommand::ToggleFog)
+    {
+        menu.ToggleFog();
+        return;
+    }
     const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
     Release(world);
     if (undoPreview) return;

@@ -1,4 +1,5 @@
 #include "world_renderer.hpp"
+#include "camera_view.hpp"
 #include "view_geometry.hpp"
 
 #include <algorithm>
@@ -143,7 +144,11 @@ bool WorldRenderer::DrawSoftware()
                 a.color.r == b.color.r && a.color.g == b.color.g && a.color.b == b.color.b &&
                 a.color.r == c.color.r && a.color.g == c.color.g && a.color.b == c.color.b;
             SDL_FColor flat{};
-            if (flatColor) flat = lights.Shade(Math::Normalize(a.normal), {}, a.color);
+            if (flatColor)
+            {
+                flat = lights.ShadeLinear(Math::Normalize(a.normal), {}, a.color);
+                if (!fog) flat = Srgb::ToDisplay(flat);
+            }
             for (int y = top; y < bottom; ++y)
             {
                 auto* row = static_cast<Uint8*>(pixels) + static_cast<std::size_t>(y) * pitch;
@@ -199,9 +204,11 @@ bool WorldRenderer::DrawSoftware()
                         const Vector3 view = (a.view*u + b.view*v + c.view*w) * (1.0 / sum);
                         const float red = material->type == MaterialType::Transition ?
                             float((u*a.color.r + v*b.color.r + w*c.color.r) / sum) : 1.f;
-                        const auto color = material->Shade(float(tu), float(tv), footprint, lights, normal,
+                        auto color = material->ShadeLinear(float(tu), float(tv), footprint, lights, normal,
                                                            face.tangent, face.handedness, view, red);
                         if (color.a == 0) continue;
+                        if (fog && lit) color = fog->Apply(color, view, camera->GetPosition().y);
+                        color = Srgb::ToDisplay(color);
                         if (translucent)
                         {
                             // SDL's software texture uses straight alpha for the final sky composite.
@@ -230,7 +237,13 @@ bool WorldRenderer::DrawSoftware()
                         color = {float((u*a.color.r + v*b.color.r + w*c.color.r) / sum),
                                  float((u*a.color.g + v*b.color.g + w*c.color.g) / sum),
                                  float((u*a.color.b + v*b.color.b + w*c.color.b) / sum), 1};
-                        if (lit) color = lights.Shade(Math::Normalize(a.normal*u + b.normal*v + c.normal*w), {}, color);
+                        if (lit) color = lights.ShadeLinear(Math::Normalize(a.normal*u + b.normal*v + c.normal*w), {}, color);
+                    }
+                    if (lit)
+                    {
+                        if (fog)
+                            color = Srgb::ToDisplay(fog->Apply(color, (a.view*u + b.view*v + c.view*w) * (1.0 / sum), camera->GetPosition().y));
+                        else if (!flatColor) color = Srgb::ToDisplay(color);
                     }
                     pixel[0] = Channel(color.r);
                     pixel[1] = Channel(color.g);

@@ -406,8 +406,13 @@ bool WorldRenderer::DrawGPU()
     SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
     // Matches WorldLights in world.hlsl. Both world surface pipelines read this block.
     const auto pack = [](Vector3 v) -> SDL_FColor { return {float(v.x), float(v.y), float(v.z), 0}; };
+    const SDL_FColor fogDensity = fog ? SDL_FColor{float(fog->density), float(fog->heightFalloff),
+        float(camera->GetPosition().y - fog->baseHeight), float(fog->startDistance)} : SDL_FColor{};
     const SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
-                                pack(lights.moon.radiance), pack(lights.ambient)};
+                                pack(lights.moon.radiance), pack(lights.ambient), fogDensity,
+                                {fog ? float(fog->airDensity) : 0.f, 0, 0, 0},
+                                fog ? fog->zenith : SDL_FColor{}, fog ? fog->oppositeHorizon : SDL_FColor{},
+                                fog ? fog->sunwardHorizon : SDL_FColor{}, fog ? pack(fog->horizontalSun) : SDL_FColor{}};
     SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
     // Form the origin-to-eye offset in double before packing the shader uniforms.
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };

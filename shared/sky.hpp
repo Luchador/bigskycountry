@@ -3,6 +3,7 @@
 #include "moon.hpp"
 #include "sun.hpp"
 #include "world_lighting.hpp"
+#include "world_fog.hpp"
 #include <SDL3/SDL.h>
 #include <vector>
 
@@ -18,6 +19,7 @@ struct SkyEnvironment
     SkyPalette colors;
     SDL_FColor sunTint;
     WorldLighting lights;
+    WorldFog fog;
     static SkyEnvironment At(double timeOfDayMinutes);
 };
 
@@ -27,6 +29,7 @@ public:
     // Use one Sky per renderer and destroy it before the renderer.
     bool Draw(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes);
     const WorldLighting& Lighting() const { return environment.lights; }
+    const WorldFog& Fog() const { return environment.fog; }
 
 private:
     Sun sun;

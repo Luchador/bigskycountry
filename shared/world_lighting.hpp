@@ -14,9 +14,11 @@ struct WorldLighting
     DirectionalLight sun, moon;
     Vector3 ambient;
 
-    // The software equivalent of ShadeSurface in shaders/world.hlsl.
+    // ShadeLinear mirrors ShadeSurface in shaders/world.hlsl. Shade also encodes to sRGB.
     SDL_FColor Shade(Vector3 normal, Vector3 view, SDL_FColor linearBase,
                      Vector3 orm = {1, 1, 0}, Vector3 emission = {}) const;
+    SDL_FColor ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor linearBase,
+                           Vector3 orm = {1, 1, 0}, Vector3 emission = {}) const;
 };
 
 namespace Srgb
@@ -24,4 +26,5 @@ namespace Srgb
     float ToLinear(float display);
     float ToDisplay(float linear);
     SDL_FColor ToLinear(SDL_FColor display);
+    SDL_FColor ToDisplay(SDL_FColor linear);
 }

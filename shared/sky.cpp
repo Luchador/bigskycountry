@@ -106,6 +106,10 @@ SkyEnvironment SkyEnvironment::At(double timeOfDayMinutes)
     const double elevation = std::asin(std::clamp(sun.y, -1.0, 1.0));
     sky.sunTint = Sun::Tint(elevation);
     sky.colors = ColorsAt(elevation * 180.0 / std::numbers::pi);
+    sky.fog.zenith = sky.colors.zenith;
+    sky.fog.oppositeHorizon = sky.colors.oppositeHorizon;
+    sky.fog.sunwardHorizon = sky.colors.sunwardHorizon;
+    sky.fog.horizontalSun = Math::Normalize({sun.x, 0, sun.z});
 
     // Linear intensities relative to a white, fully illuminated diffuse surface.
     constexpr double sunlight = 0.90, moonlight = 0.12, skylight = 0.60;

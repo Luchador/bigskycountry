@@ -49,6 +49,7 @@ public:
     }
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
+    bool FogEnabled() const override { return menu.FogEnabled(); }
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;

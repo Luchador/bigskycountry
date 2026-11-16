@@ -4,7 +4,7 @@
 #include <optional>
 #include "material_action.hpp"
 
-enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ToggleRoadNames, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake,
+enum class EditorCommand { Save, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake,
                            CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
 struct RampMenuOptions { bool exit, entrance; };
 struct SplitMenuOptions { bool enabled, railroad; };
@@ -32,11 +32,14 @@ public:
     void ToggleWireframe();
     bool RoadNamesEnabled() const { return roadNames; }
     void ToggleRoadNames();
+    bool FogEnabled() const { return fog; }
+    void ToggleFog();
     void SetHistoryEnabled(bool canUndo, bool canRedo);
     std::optional<EditorCommand> Command(const SDL_Event& event) const;
 
 private:
     bool roadNames = true;
+    bool fog = true;
     bool wireframe = false, undoEnabled = false, redoEnabled = false;
     SDL_WindowID windowID = 0;
 #ifdef _WIN32

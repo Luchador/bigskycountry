@@ -57,6 +57,7 @@ add_library(BigSkyApplication STATIC
     shared/material.cpp
     shared/dds_texture.cpp
     shared/world_lighting.cpp
+    shared/world_fog.cpp
     shared/surface_material.cpp
     shared/bscobject.cpp
     shared/building.cpp

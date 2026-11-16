@@ -59,6 +59,9 @@ cbuffer WorldLights : register(b0, space3)
     float4 sunDirection, sunRadiance;
     float4 moonDirection, moonRadiance;
     float4 skyAmbient;
+    float4 fogDensity; // density, height falloff, eye height minus base, start distance
+    float4 fogAir;     // uniform air density in x; zero density disables fog
+    float4 fogZenith, fogOpposite, fogSunward, fogSun;
 };
 
 float3 UnitVector(float3 v)
@@ -94,14 +97,47 @@ float3 ShadeSurface(float3 normal, float3 view, float3 base, float3 orm, float3 
     Illuminate(sunDirection.xyz, sunRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     Illuminate(moonDirection.xyz, moonRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     float3 c = emission + base * diffuse + lerp(0.08, base, orm.b) * specular;
-    // SDL composites the world into a display-encoded color target.
-    return ToDisplay(c);
+    return c;
+}
+
+float3 ToLinear(float3 c)
+{
+    return lerp(c / 12.92, pow((c + 0.055) / 1.055, 2.4), step(0.04045, c));
+}
+
+// Analytic height-fog integration: no ray marching or extra render target.
+// Keep the software equivalent in WorldFog in sync.
+float3 ApplyFog(float3 linearColor, float3 view)
+{
+    if (fogDensity.x == 0 && fogAir.x == 0) return linearColor;
+    float distance = length(view);
+    if (distance <= fogDensity.w) return linearColor;
+    float3 ray = -view / distance;
+    float y0 = fogDensity.z + ray.y * fogDensity.w;
+    float y1 = fogDensity.z - view.y;
+    float span = fogDensity.y * abs(y1 - y0);
+    float average = span < 0.001 ? 1 - span * 0.5 + span * span / 6 : (1 - exp(-span)) / span;
+    float lowerDensity = fogDensity.x * exp(clamp(-fogDensity.y * min(y0, y1), -80, 8));
+    float opticalDepth = (distance - fogDensity.w) * (fogAir.x + lowerDensity * average);
+    float transmission = exp(-clamp(opticalDepth, 0, 80));
+
+    // Match the sky's sunward/opposite horizon and its day/night palette.
+    float facing = saturate(0.5 + 0.5 * dot(ray, fogSun.xyz));
+    float3 haze = lerp(fogOpposite.rgb, fogSunward.rgb, facing * facing);
+    if (ray.y >= 0) haze = lerp(haze, fogZenith.rgb, sqrt(ray.y));
+    else
+    {
+        float depth = min(-ray.y * 2, 1);
+        haze = lerp(haze, lerp(fogOpposite.rgb, fogZenith.rgb, 0.55), depth * (2 - depth));
+    }
+    return lerp(ToLinear(haze), linearColor, transmission);
 }
 
 float4 PSMain(WorldFragment input) : SV_Target0
 {
     if (input.normal.w == 0) return input.color;
-    return float4(ShadeSurface(UnitVector(input.normal.xyz), 0, input.color.rgb, float3(1, 1, 0), 0), input.color.a);
+    float3 c = ShadeSurface(UnitVector(input.normal.xyz), 0, input.color.rgb, float3(1, 1, 0), 0);
+    return float4(ToDisplay(ApplyFog(c, input.view)), input.color.a);
 }
 
 // Multiplying by reciprocal clip W makes each component a linear screen-space
@@ -153,6 +189,7 @@ float4 MaterialPS(WorldFragment input) : SV_Target0
         float alpha = alphaOrOuterNormal.Sample(opacitySampler, input.uv).r * tint.a;
         if (alpha <= 0) discard;
         float3 c = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb * tint.rgb;
+        if (input.normal.w != 0) c = ApplyFog(c, input.view);
         return float4(ToDisplay(c), alpha);
     }
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
@@ -174,5 +211,8 @@ float4 MaterialPS(WorldFragment input) : SV_Target0
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
     float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
-    return float4(ShadeSurface(mapped, input.view, base.rgb, orm, glow), 1);
+    float3 c = ShadeSurface(mapped, input.view, base.rgb, orm, glow);
+    if (input.normal.w != 0) c = ApplyFog(c, input.view);
+    // SDL composites the world into a display-encoded color target.
+    return float4(ToDisplay(c), 1);
 }

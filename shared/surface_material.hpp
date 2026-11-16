@@ -21,7 +21,8 @@ struct SurfaceMaterial
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
-    SDL_FColor Shade(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
+    // Linear radiance: apply atmosphere before the final display conversion.
+    SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
                      Vector3 tangent, float handedness, Vector3 view, float vertexRed) const;
 };
 
