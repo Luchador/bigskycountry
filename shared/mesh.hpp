@@ -32,6 +32,7 @@ struct Bounds3
 {
     static constexpr double inf = std::numeric_limits<double>::infinity();
     Vector3 min{inf, inf, inf}, max{-inf, -inf, -inf};
+    bool operator==(const Bounds3&) const = default;
     bool Empty() const { return min.x > max.x; }
     void Include(Vector3 point);
 };

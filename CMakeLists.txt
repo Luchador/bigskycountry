@@ -68,6 +68,8 @@ add_library(BigSkyApplication STATIC
     shared/mesh.cpp
     shared/mesh_import.cpp
     shared/world_renderer.cpp
+    shared/spatial_index.cpp
+    shared/world_visibility.cpp
     shared/intersection.cpp
     shared/highway_ramp.cpp
     shared/railroad_crossing.cpp
@@ -223,3 +225,11 @@ add_custom_target(BigSkyAssets
 add_dependencies(BigSkyAssets BigSkyTextures)
 add_dependencies(BigSkyCountry BigSkyAssets)
 add_dependencies(BigSkyCountryEditor BigSkyAssets)
+
+option(BIGSKY_BUILD_TESTS "Build engine regression tests" OFF)
+if(BIGSKY_BUILD_TESTS)
+    enable_testing()
+    add_executable(BigSkyVisibilityTests tests/visibility_tests.cpp)
+    target_link_libraries(BigSkyVisibilityTests PRIVATE BigSkyApplication)
+    add_test(NAME visibility COMMAND BigSkyVisibilityTests)
+endif()

@@ -177,7 +177,7 @@ bool WorldRenderer::CreatePipelines()
     }
     if (translucentPipeline)
     {
-        wireframePipeline = materialPipeline("WireframePS", wireframe_frag_dxil, wireframe_frag_spirv, 0);
+        wireframePipeline = materialPipeline("WireframePS", wireframe_frag_dxil, wireframe_frag_spirv, 0, 1);
     }
 
     if (wireframePipeline)
@@ -408,11 +408,12 @@ bool WorldRenderer::DrawGPU()
     const auto pack = [](Vector3 v) -> SDL_FColor { return {float(v.x), float(v.y), float(v.z), 0}; };
     const SDL_FColor fogDensity = fog ? SDL_FColor{float(fog->density), float(fog->heightFalloff),
         float(camera->GetPosition().y - fog->baseHeight), float(fog->startDistance)} : SDL_FColor{};
-    const SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
+    SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
                                 pack(lights.moon.radiance), pack(lights.ambient), fogDensity,
                                 {fog ? float(fog->airDensity) : 0.f, 0, 0, 0},
                                 fog ? fog->zenith : SDL_FColor{}, fog ? fog->oppositeHorizon : SDL_FColor{},
-                                fog ? fog->sunwardHorizon : SDL_FColor{}, fog ? pack(fog->horizontalSun) : SDL_FColor{}};
+                                fog ? fog->sunwardHorizon : SDL_FColor{}, fog ? pack(fog->horizontalSun) : SDL_FColor{},
+                                {float(viewDistance * viewDistance), float(1 / focal), float(viewport.w) * 0.5f, float(viewport.h) * 0.5f}};
     SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
     // Form the origin-to-eye offset in double before packing the shader uniforms.
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };
@@ -506,6 +507,8 @@ bool WorldRenderer::DrawGPU()
             return false;
         }
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
+        lighting[11] = {}; // Editor foreground handles remain visible at any distance.
+        SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
         source = nullptr; // Bindings are local to a render pass.
         bindSource(vertexBuffer, nullptr);
         draw(foregroundStart, vertices.size(), 0);

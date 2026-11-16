@@ -62,7 +62,19 @@ cbuffer WorldLights : register(b0, space3)
     float4 fogDensity; // density, height falloff, eye height minus base, start distance
     float4 fogAir;     // uniform air density in x; zero density disables fog
     float4 fogZenith, fogOpposite, fogSunward, fogSun;
+    float4 visibility; // radius squared, inverse focal length, viewport half width/height
 };
+
+void ClipVisibility(WorldFragment input)
+{
+    if (visibility.x > 0)
+    {
+        // SV_Position.w is reciprocal clip W (view depth). Reconstruct distance
+        // for every pass, including wireframe and screen-expanded orange outlines.
+        float2 ray = (input.position.xy - visibility.zw) * visibility.y;
+        clip(visibility.x * input.position.w * input.position.w - (1 + dot(ray, ray)));
+    }
+}
 
 float3 UnitVector(float3 v)
 {
@@ -135,6 +147,7 @@ float3 ApplyFog(float3 linearColor, float3 view)
 
 float4 PSMain(WorldFragment input) : SV_Target0
 {
+    ClipVisibility(input);
     if (input.normal.w == 0) return input.color;
     float3 c = ShadeSurface(UnitVector(input.normal.xyz), 0, input.color.rgb, float3(1, 1, 0), 0);
     return float4(ToDisplay(ApplyFog(c, input.view)), input.color.a);
@@ -144,6 +157,7 @@ float4 PSMain(WorldFragment input) : SV_Target0
 // edge equation. Its gradient converts the threshold to pixels at any zoom.
 float4 WireframePS(WorldFragment input) : SV_Target0
 {
+    ClipVisibility(input);
     float3 edge = float3(input.uv, 1 - input.uv.x - input.uv.y) * input.position.w;
     float3 dx = ddx(edge), dy = ddy(edge);
     const float halfWidth = 1.0;
@@ -184,6 +198,7 @@ float3 DecodeNormalXY(float2 channels)
 
 float4 MaterialPS(WorldFragment input) : SV_Target0
 {
+    ClipVisibility(input);
     if (unlit)
     {
         float alpha = alphaOrOuterNormal.Sample(opacitySampler, input.uv).r * tint.a;

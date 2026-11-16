@@ -11,6 +11,7 @@ namespace
 {
     constexpr auto filename = "project-settings.json";
     constexpr auto distanceKey = "railroadDetailDistanceMeters";
+    constexpr auto viewDistanceKey = "viewDistanceMeters";
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
     Json ReadSettings(const std::string& path)
@@ -58,23 +59,33 @@ bool ProjectSettings::Load(AssetRoot location)
     const auto* distance = cJSON_GetObjectItemCaseSensitive(settings.get(), distanceKey);
     if (distance && (!cJSON_IsNumber(distance) || !std::isfinite(distance->valuedouble) || distance->valuedouble < 0))
         return SDL_SetError("Invalid railroad detail distance in %s", path.c_str());
+    const auto* view = cJSON_GetObjectItemCaseSensitive(settings.get(), viewDistanceKey);
+    if (view && (!cJSON_IsNumber(view) || !std::isfinite(view->valuedouble) ||
+                 view->valuedouble < minViewDistance || view->valuedouble > maxViewDistance))
+        return SDL_SetError("Invalid view distance in %s", path.c_str());
     railroadDetailDistance = distance ? distance->valuedouble : defaultRailroadDetailDistance;
+    viewDistance = view ? view->valuedouble : defaultViewDistance;
     return true;
 }
 
-bool ProjectSettings::SaveRailroadDetailDistance(double meters)
+bool ProjectSettings::SaveDistances(double meters, double viewMeters)
 {
     if (!std::isfinite(meters) || meters < 0)
         return SDL_SetError("Enter a distance of zero or more meters.");
+    if (!std::isfinite(viewMeters) || viewMeters < minViewDistance || viewMeters > maxViewDistance)
+        return SDL_SetError("Enter a view distance between 0.1 and 128 kilometers.");
     const auto source = AssetPaths::Root(AssetRoot::Project) + filename;
     auto settings = ReadSettings(source);
     if (!settings) return false;
     cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), distanceKey);
     if (!cJSON_AddNumberToObject(settings.get(), distanceKey, meters)) return SDL_OutOfMemory();
+    cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), viewDistanceKey);
+    if (!cJSON_AddNumberToObject(settings.get(), viewDistanceKey, viewMeters)) return SDL_OutOfMemory();
     std::unique_ptr<char, decltype(&cJSON_free)> data(cJSON_Print(settings.get()), cJSON_free);
     if (!data) return SDL_OutOfMemory();
     if (!WriteSettings(source, data.get())) return false;
     railroadDetailDistance = meters;
+    viewDistance = viewMeters;
 
     // Publish immediately for a game launched from this build. Other builds
     // and packaged games get the same source settings through asset staging.

@@ -3,12 +3,13 @@
 #include "terrain_chunk.hpp"
 #include "editor_colors.hpp"
 #include "view_geometry.hpp"
+#include "spatial_index.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
@@ -16,6 +17,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     }
     renderer = target;
     camera = &view;
+    viewDistance = std::isfinite(distance) && distance > 0 ? distance : 0;
     viewport.x = viewport.y = 0;
     focal = std::min(viewport.w, viewport.h) * 0.5;
     scaleX = viewport.w > 0 ? 2.0 * focal / viewport.w : 0.0;
@@ -79,6 +81,9 @@ void WorldRenderer::SubmitTriangle(const std::array<Vector3, 3>& positions, cons
 bool WorldRenderer::BoundsVisible(const Bounds3& bounds, const MeshTransform* placement) const
 {
     if (bounds.Empty()) return true; // Unbounded editor overlays use normal clipping.
+    if (viewDistance > 0 && foregroundStart == std::numeric_limits<size_t>::max() &&
+        BoundsDistanceSquared(placement ? WorldBounds(bounds, *placement) : bounds, camera->GetPosition()) > viewDistance * viewDistance)
+        return false;
     // Reject only if every corner is outside the same plane. Transform corners
     // with the full instance matrix so mirrored and sheared placements work too.
     unsigned outside = 31;
@@ -104,6 +109,8 @@ bool WorldRenderer::BoundsVisible(const Bounds3& bounds, const MeshTransform* pl
 
 bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 {
+    if (viewDistance > 0 && foregroundStart == std::numeric_limits<size_t>::max() &&
+        Math::Length(center - camera->GetPosition()) > viewDistance + radius) return false;
     const Vector3 p = camera->WorldToView(center);
     // Clip-space side planes expressed in view meters, expanded by the sphere radius.
     return p.z + radius >= worldNearDepth &&
@@ -249,7 +256,7 @@ void WorldRenderer::CaptureGeometry(ResidentGeometry& geometry, size_t start, si
 void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
                                     MeshUVs mapping, SDL_FColor tint)
 {
-    if (!instance.mesh) return;
+    if (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform)) return;
     const auto emit = [&] {
         if (material.empty()) SubmitMesh(instance, tint);
         else SubmitMaterialMesh(instance, material, mapping);
@@ -260,7 +267,6 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         return;
     }
     const auto& bounds = instance.mesh->bounds;
-    if (!BoundsVisible(bounds, &instance.transform)) return;
     auto& entry = resident[&instance];
     const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
     if (sameMesh && entry->transform != instance.transform)

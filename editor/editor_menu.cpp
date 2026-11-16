@@ -35,7 +35,8 @@ namespace
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
                                       {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED},
-                                      {BSC_VIEW_FOG, L"&Fog", MF_CHECKED}};
+                                      {BSC_VIEW_FOG, L"&Fog", MF_CHECKED},
+                                      {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3"}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_Y_INTERSECTION, L"Create &Y-Intersection"},
                                         {BSC_CREATE_LAKE, L"Create &Lake"}, {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
@@ -124,7 +125,7 @@ namespace
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, WindowsTheme::Color(fg));
             if (!item.bar) { r.left += pad; r.right -= pad; }
-            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES || item.id == BSC_VIEW_FOG)
+            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES || item.id == BSC_VIEW_FOG || item.id == BSC_VIEW_VISIBILITY_STATS)
             {
                 if (draw->itemState & ODS_CHECKED)
                 {
@@ -220,7 +221,7 @@ namespace
         {
             const int id = LOWORD(wParam);
             if (id == BSC_FILE_SAVE || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
-                id == BSC_VIEW_ROAD_NAMES || id == BSC_VIEW_FOG || id == BSC_PROJECT_SETTINGS)
+                id == BSC_VIEW_ROAD_NAMES || id == BSC_VIEW_FOG || id == BSC_VIEW_VISIBILITY_STATS || id == BSC_PROJECT_SETTINGS)
             {
                 SDL_Event event{};
                 event.type = static_cast<Uint32>(eventType);
@@ -309,6 +310,15 @@ void EditorMenu::ToggleFog()
 #endif
 }
 
+void EditorMenu::ToggleVisibilityStatistics()
+{
+    visibilityStatistics = !visibilityStatistics;
+#ifdef _WIN32
+    CheckMenuItem(static_cast<HMENU>(viewMenu), BSC_VIEW_VISIBILITY_STATS,
+                  MF_BYCOMMAND | (visibilityStatistics ? MF_CHECKED : MF_UNCHECKED));
+#endif
+}
+
 void EditorMenu::SetHistoryEnabled(bool canUndo, bool canRedo)
 {
 #ifdef _WIN32
@@ -338,6 +348,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         case BSC_VIEW_WIREFRAME: return EditorCommand::ToggleWireframe;
         case BSC_VIEW_ROAD_NAMES: return EditorCommand::ToggleRoadNames;
         case BSC_VIEW_FOG: return EditorCommand::ToggleFog;
+        case BSC_VIEW_VISIBILITY_STATS: return EditorCommand::ToggleVisibilityStatistics;
         case BSC_PROJECT_SETTINGS: return EditorCommand::ProjectSettings;
         case BSC_FILE_SAVE: return EditorCommand::Save;
         case BSC_EDIT_UNDO: return EditorCommand::Undo;
@@ -345,6 +356,9 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         }
     }
 #endif
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.windowID == windowID && !event.key.repeat &&
+        event.key.key == SDLK_F3 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI)))
+        return EditorCommand::ToggleVisibilityStatistics;
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.windowID == windowID && !event.key.repeat &&
         (event.key.mod & SDL_KMOD_CTRL) &&
         !(event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI)))
@@ -367,11 +381,12 @@ namespace
     constexpr BarAction history[] = {{"Undo", EditorCommand::Undo}, {"Redo", EditorCommand::Redo}};
     constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe},
                                      {"Road Names", EditorCommand::ToggleRoadNames},
-                                     {"Fog", EditorCommand::ToggleFog}};
+                                     {"Fog", EditorCommand::ToggleFog},
+                                     {"Visibility Statistics  F3", EditorCommand::ToggleVisibilityStatistics}};
     constexpr BarAction settings[] = {{"Project Settings", EditorCommand::ProjectSettings}};
     struct BarMenu { const char* label; std::span<const BarAction> items; };
     constexpr BarMenu menus[] = {{"File", save}, {"Edit", history}, {"View", display}, {"Settings", settings}};
-    constexpr int dropdownWidth = 160;
+    constexpr int dropdownWidth = 232;
 
     constexpr auto barTabs = []
     {
@@ -631,7 +646,8 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
             !SDL_RenderDebugText(renderer, row.x + 24, row.y + 9, items[i].label)) return false;
         if ((items[i].command == EditorCommand::ToggleWireframe && wireframe) ||
             (items[i].command == EditorCommand::ToggleRoadNames && roadNames) ||
-            (items[i].command == EditorCommand::ToggleFog && fog))
+            (items[i].command == EditorCommand::ToggleFog && fog) ||
+            (items[i].command == EditorCommand::ToggleVisibilityStatistics && visibilityStatistics))
         {
             const SDL_FPoint check[] = {{row.x + 6, row.y + 13}, {row.x + 9, row.y + 16}, {row.x + 16, row.y + 8}};
             if (!SDL_RenderLines(renderer, check, 3)) return false;

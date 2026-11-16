@@ -1,3 +1,4 @@
 {
-    "railroadDetailDistanceMeters": 300
+    "railroadDetailDistanceMeters": 300,
+    "viewDistanceMeters": 8000
 }

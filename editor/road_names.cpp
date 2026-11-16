@@ -6,6 +6,8 @@
 #include "viewport_picker.hpp"
 #include "world_document.hpp"
 #include "world_renderer.hpp"
+#include "project_settings.hpp"
+#include "spatial_index.hpp"
 #include <ttf2mesh.h>
 #include <algorithm>
 #include <cmath>
@@ -75,6 +77,8 @@ namespace
         bool Visible(const Bounds3& bounds) const
         {
             if (bounds.Empty()) return true;
+            if (!plan && BoundsDistanceSquared(bounds, camera.GetPosition()) >
+                std::pow(g_ProjectSettings.ViewDistance(), 2)) return false;
             const Vector3 middle = (bounds.min + bounds.max) * 0.5;
             const auto v = View(middle);
             const double radius = Math::Length(bounds.max - middle) * (plan ? scale : 1);
@@ -87,6 +91,27 @@ namespace
         bool Project(Vector3 from, Vector3 to, SDL_FPoint& a, SDL_FPoint& b) const
         {
             auto p = View(from), q = View(to);
+            if (!plan)
+            {
+                // Clip name-bearing spline spans to the same spherical range as
+                // pavement, including a long segment with both ends outside it.
+                const auto d = q - p;
+                const double length2 = Math::Dot(d, d);
+                const double radius = g_ProjectSettings.ViewDistance();
+                if (length2 > 0)
+                {
+                    const double middle = -Math::Dot(p, d) / length2;
+                    const auto nearest = p + d * middle;
+                    const double half2 = (radius * radius - Math::Dot(nearest, nearest)) / length2;
+                    if (half2 < 0) return false;
+                    const double half = std::sqrt(half2);
+                    const double first = std::max(0.0, middle - half), last = std::min(1.0, middle + half);
+                    if (last <= first) return false;
+                    q = p + d * last;
+                    p = p + d * first;
+                }
+                else if (Math::Dot(p, p) > radius * radius) return false;
+            }
             if (!plan && !ViewGeometry::ClipLine(p, q, {0, 0, 1}, worldNearDepth)) return false;
             for (auto side : sides)
                 if (!ViewGeometry::ClipLine(p, q, side, 0)) return false;

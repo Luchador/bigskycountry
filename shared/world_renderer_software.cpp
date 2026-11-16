@@ -174,12 +174,17 @@ bool WorldRenderer::DrawSoftware()
                     {
                         continue;
                     }
-                    if (!outline && !material)
-                    {
-                        sample = {depth, selected};
-                    }
                     const double u = wa * a.invW, v = wb * b.invW, w = wc * c.invW;
                     const double sum = u + v + w;
+                    if (viewDistance > 0 && first < foregroundStart)
+                    {
+                        const double rayX = (x + 0.5 - width * 0.5) / focal;
+                        const double rayY = (y + 0.5 - height * 0.5) / focal;
+                        const double inverseDepth = sum / area;
+                        if (viewDistance * viewDistance * inverseDepth * inverseDepth < 1 + rayX * rayX + rayY * rayY)
+                            continue; // Discard before writing color, depth, or selection.
+                    }
+                    if (!outline && !material) sample = {depth, selected};
                     Uint8* pixel = row + static_cast<std::size_t>(x) * 4;
                     if (wire)
                     {

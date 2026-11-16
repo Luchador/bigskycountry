@@ -536,6 +536,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleFog();
         return;
     }
+    if (command == EditorCommand::ToggleVisibilityStatistics)
+    {
+        menu.ToggleVisibilityStatistics();
+        return;
+    }
     const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
     Release(world);
     if (undoPreview) return;

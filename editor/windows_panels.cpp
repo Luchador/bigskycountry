@@ -1481,15 +1481,26 @@ struct WindowsPanels::Impl
             self.projectSettings = dialog;
             SetWindowLongPtrW(dialog, DWLP_USER, l);
             WindowsTheme::ApplyDialog(dialog);
-            SetDlgItemTextW(dialog, IDC_RAIL_DETAIL_DISTANCE, Wide(RailroadDistanceField::Text()).c_str());
+            SetDlgItemTextW(dialog, IDC_RAIL_DETAIL_DISTANCE, Wide(ProjectDistanceFields::Text()).c_str());
             SendDlgItemMessageW(dialog, IDC_RAIL_DETAIL_DISTANCE, EM_SETLIMITTEXT, 64, 0);
+            SetDlgItemTextW(dialog, IDC_VIEW_DISTANCE, Wide(ProjectDistanceFields::Text(true)).c_str());
+            SendDlgItemMessageW(dialog, IDC_VIEW_DISTANCE, EM_SETLIMITTEXT, 64, 0);
+            return TRUE;
+        }
+        if (message == WM_COMMAND && LOWORD(w) >= IDC_VIEW_DISTANCE_4 && LOWORD(w) <= IDC_VIEW_DISTANCE_16)
+        {
+            const wchar_t* values[] = {L"4", L"8", L"16"};
+            SetDlgItemTextW(dialog, IDC_VIEW_DISTANCE, values[LOWORD(w) - IDC_VIEW_DISTANCE_4]);
             return TRUE;
         }
         if (message == WM_COMMAND && LOWORD(w) == IDOK)
         {
             HWND field = GetDlgItem(dialog, IDC_RAIL_DETAIL_DISTANCE);
-            if (RailroadDistanceField::Apply(ReadEdit(field)))
-                SetWindowTextW(field, Wide(RailroadDistanceField::Text()).c_str());
+            if (ProjectDistanceFields::Apply(ReadEdit(field), ReadEdit(GetDlgItem(dialog, IDC_VIEW_DISTANCE))))
+            {
+                SetWindowTextW(field, Wide(ProjectDistanceFields::Text()).c_str());
+                SetDlgItemTextW(dialog, IDC_VIEW_DISTANCE, Wide(ProjectDistanceFields::Text(true)).c_str());
+            }
             else
                 MessageBoxW(dialog, Wide(SDL_GetError()).c_str(), L"Project Settings", MB_OK | MB_ICONERROR);
             SetFocus(field);
@@ -1754,9 +1765,9 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
         }
     }
     ACCEL keys[] = {{FCONTROL | FVIRTKEY, 'S', BSC_FILE_SAVE}, {FCONTROL | FVIRTKEY, 'Z', BSC_EDIT_UNDO},
-                    {FCONTROL | FVIRTKEY, 'Y', BSC_EDIT_REDO}};
+                    {FCONTROL | FVIRTKEY, 'Y', BSC_EDIT_REDO}, {FVIRTKEY, VK_F3, BSC_VIEW_VISIBILITY_STATS}};
 
-    p.shortcuts = CreateAcceleratorTableW(keys, 3);
+    p.shortcuts = CreateAcceleratorTableW(keys, static_cast<int>(std::size(keys)));
 
     if (!p.shortcuts)
     {

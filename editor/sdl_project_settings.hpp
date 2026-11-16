@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sdl_transform_panel.hpp"
+#include <array>
 
 class SdlProjectSettings
 {
@@ -13,6 +14,9 @@ private:
     bool Paint() const;
     void Close();
     void Apply();
+    void StoreField();
+    std::array<std::string, 2> values;
+    int activeField = -1;
     SDL_Renderer* renderer = nullptr;
     SdlTransformPanel distanceField;
     SDL_Window* window = nullptr; // The editor frame owns the utility window.

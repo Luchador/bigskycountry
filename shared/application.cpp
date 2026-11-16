@@ -11,6 +11,7 @@
 #include "marker.hpp"
 #include "world_state.hpp"
 #include "world_document.hpp"
+#include "world_visibility.hpp"
 
 namespace
 {
@@ -51,6 +52,8 @@ namespace
         Sky sky;
         WorldRenderer worldRenderer(world.models.Location());
         FreeCamera freeCamera;
+        WorldVisibility visibility;
+        bool gameVisibilityStats = false;
 
         if (!world.roads.empty())
         {
@@ -146,6 +149,11 @@ namespace
                     if (!input.SetCameraEnabled(debug) || !game->SetDebugCamera(debug)) return false;
                     continue;
                 }
+                if (game && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F3 && !event.key.repeat)
+                {
+                    gameVisibilityStats = !gameVisibilityStats;
+                    continue;
+                }
                 if (game && !input.IsCameraEnabled())
                 {
                     if (!game->Handle(event)) return false;
@@ -200,51 +208,51 @@ namespace
             {
                 const bool fogEnabled = !roadTool || roadTool->FogEnabled();
                 if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) ||
-                    !worldRenderer.Begin(renderer, view, &sky.Lighting(), fogEnabled ? &sky.Fog() : nullptr))
+                    !worldRenderer.Begin(renderer, view, &sky.Lighting(), fogEnabled ? &sky.Fog() : nullptr, g_ProjectSettings.ViewDistance()))
                 {
                     return false;
                 }
 
-                const auto hidden = [&](SceneKey key) { return roadTool && world.hierarchy.EditorHidden(key); };
-                for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
+                visibility.Synchronize(world);
+                const auto visible = visibility.Query(world, view, worldRenderer, g_ProjectSettings.ViewDistance(), roadTool != nullptr);
+                for (const auto key : visible)
                 {
-                    if (hidden({SceneKind::Road, i})) continue;
-                    const Road& road = world.roads[i];
-                    worldRenderer.SubmitRoad(road, road.style.material, roadTool && roadTool->GeometrySelected({SceneKind::Road, i}));
+                    const bool selected = roadTool && roadTool->GeometrySelected(key);
+                    switch (key.kind)
+                    {
+                    case SceneKind::Road:
+                        worldRenderer.SubmitRoad(world.roads[key.index], world.roads[key.index].style.material, selected);
+                        break;
+                    case SceneKind::Intersection:
+                        worldRenderer.SubmitRoad(world.IntersectionSurfaces().at(key.index).geometry,
+                                                 world.intersections.at(key.index).material, selected);
+                        break;
+                    case SceneKind::Mesh:
+                        worldRenderer.SubmitWorldMesh(world.meshes[key.index]);
+                        break;
+                    case SceneKind::Terrain:
+                        worldRenderer.SubmitTerrain(*world.Terrain()[key.index], selected);
+                        break;
+                    case SceneKind::Object:
+                        if (const auto* marker = dynamic_cast<const Marker*>(world.Objects()[key.index].get()))
+                            worldRenderer.SubmitWorldMesh(marker->Instance(), marker->material);
+                        else
+                            worldRenderer.SubmitWorldMesh(world.Objects()[key.index]->Instance());
+                        break;
+                    default: break;
+                    }
                 }
                 if (const Road* preview = roadTool ? roadTool->PreviewRoad() : nullptr)
                     worldRenderer.SubmitRoad(*preview, preview->style.material, false);
-                for (const auto& [id, junction] : world.IntersectionSurfaces())
-                {
-                    if (hidden({SceneKind::Intersection, id})) continue;
-                    worldRenderer.SubmitRoad(junction.geometry, world.intersections.at(id).material, roadTool && roadTool->GeometrySelected({SceneKind::Intersection, id}));
-                }
-
-                for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
-                    if (!hidden({SceneKind::Mesh, i})) worldRenderer.SubmitWorldMesh(world.meshes[i]);
-                for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
-                    if (!hidden({SceneKind::Terrain, i}))
-                        worldRenderer.SubmitTerrain(*world.Terrain()[i], roadTool && roadTool->GeometrySelected({SceneKind::Terrain, i}));
-                for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
-                {
-                    if (hidden({SceneKind::Object, i})) continue;
-                    const auto& object = world.Objects()[i];
-                    if (const auto* marker = dynamic_cast<const Marker*>(object.get()))
-                        worldRenderer.SubmitWorldMesh(marker->Instance(), marker->material);
-                    else
-                        worldRenderer.SubmitWorldMesh(object->Instance());
-                }
 
                 if (game) game->Submit(worldRenderer);
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
                 worldRenderer.BeginUnlit();
-                for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
-                {
-                    if (hidden({SceneKind::Object, i})) continue;
-                    if (const auto* marker = dynamic_cast<const Marker*>(world.Objects()[i].get()))
-                        marker->SubmitLabel(worldRenderer, view);
-                }
+                for (const auto key : visible)
+                    if (key.kind == SceneKind::Object)
+                        if (const auto* marker = dynamic_cast<const Marker*>(world.Objects()[key.index].get()))
+                            marker->SubmitLabel(worldRenderer, view);
 
                 if (roadTool)
                 {
@@ -255,6 +263,8 @@ namespace
                 {
                     return false;
                 }
+                if ((roadTool ? roadTool->VisibilityStatisticsEnabled() : gameVisibilityStats) &&
+                    !visibility.DrawStatistics(renderer, g_ProjectSettings.ViewDistance())) return false;
             }
 
             if (game && !game->DrawHUD(renderer)) return false;

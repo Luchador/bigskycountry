@@ -46,7 +46,8 @@ public:
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
     // Fog is opt-in for world viewports; thumbnails and material previews stay clear.
-    bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr);
+    bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
+               double viewDistance = 0);
     void BeginUnlit() { lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
@@ -54,6 +55,7 @@ public:
     void SubmitTerrain(const TerrainChunk& chunk, bool selected = false);
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     bool SphereVisible(Vector3 center, double radius) const;
+    bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     enum class MeshUVs { Authored, TerrainProjection };
     void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored);
@@ -67,7 +69,6 @@ public:
     bool End();
 
 private:
-    bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();
@@ -81,6 +82,7 @@ private:
     const CameraView* camera = nullptr;
     SDL_Rect viewport{};
     double focal = 0, scaleX = 0, scaleY = 0;
+    double viewDistance = 0; // Zero disables distance culling for previews.
     std::vector<WorldDepthVertex> vertices;
     std::vector<WorldDepthVertex> projectedMesh;
     std::vector<WorldDepthVertex> outline;
