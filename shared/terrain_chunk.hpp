@@ -22,10 +22,14 @@ public:
     using MeshPlacement::Instance;
     using MeshPlacement::SetMesh;
 
-    const std::optional<LakeDefinition>& Lake() const { return lake; }
+    const std::optional<LakeDefinition>& Lake() const { return lakeDraft ? lakeDraft : lake; }
     const MeshInstance& Water() const { return water; }
-    const auto& Shoreline() const { return shoreline; }
+    const auto& Shoreline() const { return lakeDraft ? draftShoreline : shoreline; }
     bool SetLake(const LakeDefinition& definition);
+    bool EditingLake() const { return lakeDraft.has_value(); }
+    bool BeginLakeEdit();
+    bool FinishLakeEdit(); // Failed validation keeps the draft open and old meshes intact.
+    void CancelLakeEdit();
 
     struct OutlineEdge
     {
@@ -44,6 +48,7 @@ public:
 
     bool SetTransform(const ObjectTransform& t)
     {
+        if (lakeDraft && t != GetTransform()) return SDL_SetError("Finish shoreline editing before moving the lake");
         if (lake && (t.rotation.x != 0 || t.rotation.z != 0)) return SDL_SetError("Lakes must remain horizontal");
         if (boundary && t != ObjectTransform{}) return SDL_SetError("Move the terrain boundary to transform this chunk");
         if (t.scale != Vector3{1, 1, 1})
@@ -57,6 +62,8 @@ public:
 
 private:
     std::optional<LakeDefinition> lake;
+    std::optional<LakeDefinition> lakeDraft; // Transient editor state; never serialized.
+    std::vector<LakeSample> draftShoreline;
     MeshInstance water;
     std::vector<LakeSample> shoreline;
     mutable std::weak_ptr<const Mesh> outlinedMesh;

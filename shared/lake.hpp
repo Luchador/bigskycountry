@@ -40,6 +40,9 @@ struct LakeSample
 
 struct LakeGeometry
 {
+    // Cheap authoring preview: finite/spacing checks and spline samples only.
+    // Polygon validation, triangulation and basin heights wait until Build.
+    static std::optional<std::vector<LakeSample>> Sample(const LakeDefinition& lake);
     std::shared_ptr<const Mesh> bed, water;
     std::vector<LakeSample> shoreline; // Closed, including the repeated first sample.
     // Invalid/self-crossing edits leave the previous meshes intact.

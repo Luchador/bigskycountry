@@ -5,6 +5,15 @@
 
 bool TerrainChunk::SetLake(const LakeDefinition& definition)
 {
+    if (lakeDraft)
+    {
+        if (*lakeDraft == definition) return true;
+        auto samples = LakeGeometry::Sample(definition);
+        if (!samples) return false;
+        lakeDraft = definition;
+        draftShoreline = std::move(*samples);
+        return true;
+    }
     if (lake == definition) return true;
     auto geometry = LakeGeometry::Build(definition);
     if (!geometry) return false;
@@ -13,6 +22,37 @@ bool TerrainChunk::SetLake(const LakeDefinition& definition)
     water = {std::move(geometry->water), Instance().transform};
     shoreline = std::move(geometry->shoreline);
     return true;
+}
+
+bool TerrainChunk::BeginLakeEdit()
+{
+    if (!lake) return SDL_SetError("Select a lake to edit its shoreline");
+    if (lakeDraft) return true;
+    lakeDraft = lake;
+    draftShoreline = shoreline;
+    return true;
+}
+
+bool TerrainChunk::FinishLakeEdit()
+{
+    if (!lakeDraft) return true;
+    if (lakeDraft != lake)
+    {
+        auto geometry = LakeGeometry::Build(*lakeDraft);
+        if (!geometry) return false;
+        lake = std::move(lakeDraft);
+        SetMesh(std::move(geometry->bed));
+        water = {std::move(geometry->water), Instance().transform};
+        shoreline = std::move(geometry->shoreline);
+    }
+    CancelLakeEdit();
+    return true;
+}
+
+void TerrainChunk::CancelLakeEdit()
+{
+    lakeDraft.reset();
+    draftShoreline.clear();
 }
 
 const std::vector<TerrainChunk::OutlineEdge>& TerrainChunk::Outline() const

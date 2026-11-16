@@ -215,7 +215,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         fields.value.rotation.y = world.intersections.at(target.index).yaw;
         break;
     case SelectionKind::LakePoint:
-        if (i >= world.Terrain().size() || !world.Terrain()[i]->Lake() || target.point < 0 ||
+        if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingLake() || target.point < 0 ||
             static_cast<std::size_t>(target.point) >= world.Terrain()[i]->Lake()->points.size()) return {};
         fields.value.position = world.Terrain()[i]->Instance().transform.Point(world.Terrain()[i]->Lake()->points[target.point].position);
         break;
@@ -224,7 +224,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         {
             return {};
         }
-        fields.roadBound = world.Terrain()[i]->boundary.has_value();
+        fields.roadBound = world.Terrain()[i]->boundary.has_value() || world.Terrain()[i]->EditingLake();
         fields.levelOnly = world.Terrain()[i]->Lake().has_value();
         fields.value = world.Terrain()[i]->GetTransform();
         break;
@@ -409,7 +409,7 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
     {
         return world.Terrain()[index]->SetTransform(transform);
     }
-    if (target.kind == SelectionKind::LakePoint && index < world.Terrain().size() && world.Terrain()[index]->Lake())
+    if (target.kind == SelectionKind::LakePoint && index < world.Terrain().size() && world.Terrain()[index]->EditingLake())
     {
         auto& chunk = *world.Terrain()[index];
         auto lake = *chunk.Lake();

@@ -161,9 +161,9 @@ bool LakeDefinition::Write(std::ostream& out) const
     return bool(out);
 }
 
-std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
+std::optional<std::vector<LakeSample>> LakeGeometry::Sample(const LakeDefinition& lake)
 {
-    const auto fail = [](const char* error) -> std::optional<LakeGeometry> { SDL_SetError("%s", error); return {}; };
+    const auto fail = [](const char* error) -> std::optional<std::vector<LakeSample>> { SDL_SetError("%s", error); return {}; };
     const auto count = lake.points.size();
     if (count < 3 || count > LakeDefinition::maxPoints || !std::isfinite(lake.depth) || lake.depth <= 0 || lake.depth > 1000)
         return fail("Invalid lake size or depth");
@@ -176,8 +176,7 @@ std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
             return fail("Lake points must be finite and at least 0.5 m apart");
         perimeter += Math::Length(a.outgoing) + Math::Length(b.incoming) + Math::Length(b.position + b.incoming - a.position - a.outgoing);
     }
-    LakeGeometry result;
-    Bounds3 bounds;
+    std::vector<LakeSample> rim;
     const double step = std::max(2.0, perimeter / 2048);
     for (int i = 0; i < static_cast<int>(count); ++i)
     {
@@ -189,12 +188,23 @@ std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
         {
             const double t = double(j) / steps;
             const auto p = lake.Evaluate(i, t);
-            bounds.Include(p);
-            result.shoreline.push_back({p, i, t});
+            rim.push_back({p, i, t});
         }
     }
-    auto& rim = result.shoreline;
     rim.push_back({rim.front().position, static_cast<int>(count) - 1, 1});
+    return rim;
+}
+
+std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
+{
+    const auto fail = [](const char* error) -> std::optional<LakeGeometry> { SDL_SetError("%s", error); return {}; };
+    auto samples = Sample(lake);
+    if (!samples) return {};
+    LakeGeometry result;
+    result.shoreline = std::move(*samples);
+    const auto& rim = result.shoreline;
+    Bounds3 bounds;
+    for (const auto& sample : rim) bounds.Include(sample.position);
     double area = 0;
     for (std::size_t i = 1; i < rim.size(); ++i)
     {

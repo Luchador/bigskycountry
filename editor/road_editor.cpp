@@ -274,7 +274,7 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
 {
     const auto lakeTarget = state.meshSelection;
     if ((lakeTarget.kind == SelectionKind::Terrain || lakeTarget.kind == SelectionKind::LakePoint) &&
-        !state.HasHiddenSelection(world.hierarchy))
+        !state.HasHiddenSelection(world.hierarchy) && world.Terrain().at(lakeTarget.index)->EditingLake())
         overlay.DrawLake(renderer, *world.Terrain().at(lakeTarget.index), lakeTarget.point, camera, scene);
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world); road && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected}))
@@ -334,6 +334,13 @@ SDL_FPoint RoadEditor::Handle(const Road& road, int index) const
 #ifndef _WIN32
 std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& properties) const
 {
+    if (properties.lake)
+    {
+        if (properties.editingLake)
+            return {{Action::FinishLake, {12, 73, 128, 28}, "Finish Editing"},
+                    {Action::CancelLake, {146, 73, 60, 28}, "Cancel"}};
+        return {{Action::EditLake, {12, 73, 194, 28}, "Edit Shoreline"}};
+    }
     if (properties.page == PropertiesPage::Railroad)
     {
         const auto& bed = *properties.style.railroad;
@@ -437,6 +444,7 @@ bool RoadEditor::UpdateWindowTitle()
     const bool pendingText = transformPanel.HasPendingEdit();
 #endif
     const bool dirty = history.WorldRevision() != savedRevision || dragChanged || pendingText ||
+                       (lakeEdit && lakeEdit->history.WorldRevision() != 0) ||
                        (state.draft && !state.draft->points.empty());
     if (dirty == titleShowsChanges || !frame) return true;
     if (!SDL_SetWindowTitle(frame, dirty ? (cleanTitle + " *").c_str() : cleanTitle.c_str())) return false;
@@ -446,6 +454,7 @@ bool RoadEditor::UpdateWindowTitle()
 
 bool RoadEditor::Save(WorldDocument& world)
 {
+    if (!FinishLakeEditing(world)) return false;
     UpdateWindowTitle();
     world.UpdateIntersections();
     saveFailed = !world.Save();
@@ -525,6 +534,15 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
     const bool undoPreview = command == EditorCommand::Undo && drag == Drag::AnchorRoad;
     Release(world);
     if (undoPreview) return;
+    if (lakeEdit && (command == EditorCommand::Undo || command == EditorCommand::Redo))
+    {
+        const auto result = command == EditorCommand::Undo ? lakeEdit->history.Undo(world, state) : lakeEdit->history.Redo(world, state);
+        if (result == EditHistory::Result::Failed) status = SDL_GetError();
+        else status.clear();
+        UpdateWindowTitle();
+        return;
+    }
+    if (lakeEdit && command != EditorCommand::Save && (!FinishLakeEditing(world) || !Save(world))) return;
     if (command == EditorCommand::CreateExitRamp || command == EditorCommand::CreateEntranceRamp)
     {
         CreateRamp(command, world);
@@ -698,6 +716,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         history.Record(-1, std::move(before), std::move(after));
         outliner.Invalidate();
         Save(world);
+        BeginLakeEditing(world);
         return;
     }
     if (command == EditorCommand::CreateMarker)
@@ -854,6 +873,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
                                 std::optional<SDL_FPoint> viewportPoint, bool strip)
 {
+    if (lakeEdit && (!FinishLakeEditing(world) || !Save(world))) return;
     RoadPick target{RoadPickKind::Road, EditingDraft() ? -1 : state.selected};
     if (!viewportPoint && !EditingDraft())
     {
@@ -946,6 +966,7 @@ void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_F
 
 void RoadEditor::PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position)
 {
+    if (lakeEdit && (!FinishLakeEditing(world) || !Save(world))) return;
     const int index = static_cast<int>(world.Objects().size());
     EditSnapshot before(state);
     if (!world.PlaceObject(type, path, ObjectTransform{position}))
@@ -982,6 +1003,9 @@ void RoadEditor::BeginDraft(WorldDocument& world)
 
 void RoadEditor::Activate(Action action, WorldDocument& world)
 {
+    if (action == Action::EditLake) { BeginLakeEditing(world); return; }
+    if (action == Action::FinishLake) { if (FinishLakeEditing(world)) Save(world); return; }
+    if (action == Action::CancelLake) { CancelLakeEditing(world); return; }
     switch (action)
     {
     case Action::ChooseIntersectionPaint:
@@ -1928,6 +1952,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
                transformPanel.DrawField(renderer, {12, 210, 194, 28}, state.Target(), InspectorEdit::intersectionSize, properties.IntersectionSizeText(), true) &&
                Text(renderer, 12, 290, "F: fill central island", muted);
     }
+    if (properties.editingLake && !Text(renderer, 12, 181, "Enter: finish | Esc: cancel", muted)) return false;
     if (properties.page != PropertiesPage::Road)
         return Text(renderer, 12, 48, properties.detail.c_str(), muted);
     if (!Text(renderer, 12, roadNamesBox.y - 15, "Road names", muted) ||
@@ -2024,7 +2049,8 @@ bool RoadEditor::SetContentViewport(SDL_Renderer* renderer)
 bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera)
 {
     if (!UpdateWindowTitle()) return false;
-    menu.SetHistoryEnabled(history.CanUndo() || dragChanged, history.CanRedo() && !dragChanged);
+    const auto& activeHistory = lakeEdit ? lakeEdit->history : history;
+    menu.SetHistoryEnabled(activeHistory.CanUndo() || dragChanged, activeHistory.CanRedo() && !dragChanged);
 
     if (planView)
     {
@@ -2073,7 +2099,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
-        properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.materialSlot ? 182 : 110;
+        properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.lake ? 205 : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;
@@ -2516,13 +2542,61 @@ bool RoadEditor::GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const
            (snapPick || (!subtract && (!anchorHit || state.RoadGroupSelected()) && !pickPoint));
 }
 
+void RoadEditor::BeginLakeEditing(WorldDocument& world)
+{
+    if (lakeEdit || planView || drag != Drag::None) return;
+    const auto target = state.meshSelection;
+    if (target.kind != SelectionKind::Terrain || state.HasHiddenSelection(world.hierarchy)) return;
+    auto& chunk = *world.Terrain().at(target.index);
+    if (!chunk.BeginLakeEdit()) { status = SDL_GetError(); return; }
+    lakeEdit.emplace(LakeEditSession{target.index, *chunk.Lake(), {}});
+    status.clear();
+}
+
+bool RoadEditor::FinishLakeEditing(WorldDocument& world)
+{
+    if (!lakeEdit) return true;
+    Release(world);
+    auto& chunk = *world.Terrain().at(lakeEdit->index);
+    if (!chunk.FinishLakeEdit())
+    {
+        status = std::string(SDL_GetError()) + ". Fix the shoreline or Cancel editing.";
+        if (frame) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Lake shoreline", status.c_str(), frame);
+        return false;
+    }
+    state.SelectRows({{SceneKind::Terrain, lakeEdit->index}});
+    if (*chunk.Lake() != lakeEdit->original)
+    {
+        EditSnapshot before(state), after(state);
+        before.lake = EditSnapshot::LakeEdit{lakeEdit->index, lakeEdit->original};
+        after.lake = EditSnapshot::LakeEdit{lakeEdit->index, *chunk.Lake()};
+        history.Record(-1, std::move(before), std::move(after));
+    }
+    lakeEdit.reset();
+    status.clear();
+    UpdateWindowTitle();
+    return true;
+}
+
+void RoadEditor::CancelLakeEditing(WorldDocument& world)
+{
+    if (!lakeEdit) return;
+    Release(world);
+    world.Terrain().at(lakeEdit->index)->CancelLakeEdit();
+    state.SelectRows({{SceneKind::Terrain, lakeEdit->index}});
+    lakeEdit.reset();
+    status.clear();
+    UpdateWindowTitle();
+}
+
 bool RoadEditor::PickLakeControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick)
 {
+    if (!lakeEdit) return false;
     const auto target = state.meshSelection;
     if ((target.kind != SelectionKind::Terrain && target.kind != SelectionKind::LakePoint) ||
         state.HasHiddenSelection(world.hierarchy)) return false;
     auto& chunk = *world.Terrain().at(target.index);
-    if (!chunk.Lake()) return false;
+    if (!chunk.EditingLake()) return false;
     ViewportPicker picker(camera, scene, mouse);
     overlay.Pick(picker, world, Selected(world), camera, scene);
     const auto hit = overlay.PickLake(picker, chunk, camera, scene);
@@ -2638,6 +2712,9 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         }
     }
 
+    if (lakeEdit && !(hit.kind == RoadPickKind::Terrain && hit.index == lakeEdit->index) &&
+        (!FinishLakeEditing(world) || !Save(world))) return;
+
     if (hit.kind == RoadPickKind::Intersection && hit.side >= 0)
     {
         const IntersectionAnchor anchor{hit.index, hit.side};
@@ -2751,6 +2828,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
     }
     if (state.meshSelection.kind == SelectionKind::Terrain)
     {
+        if (lakeEdit && (!FinishLakeEditing(world) || !Save(world))) return;
         const int index = state.meshSelection.index;
         const auto& chunk = *world.Terrain().at(index);
         EditSnapshot before(state);
@@ -2851,6 +2929,9 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
 void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 {
     Release(world);
+    if (lakeEdit && cmd.op != OutlineOp::Expand &&
+        !(cmd.op == OutlineOp::Select && cmd.items == std::set<SceneKey>{{SceneKind::Terrain, lakeEdit->index}}) &&
+        (!FinishLakeEditing(world) || !Save(world))) return;
     if (cmd.op == OutlineOp::FillTerrain)
     {
         if ((state.RoadGroupSelected() || state.Target().kind == SelectionKind::Intersection) && state.SelectedRows() == cmd.items) FillSelection(world);
@@ -3023,7 +3104,12 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
         EditSnapshot after(state);
         after.lake = EditSnapshot::LakeEdit{before.lake->index, *world.Terrain()[before.lake->index]->Lake()};
         before.meshTransform.reset();
-        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        if (lakeEdit)
+        {
+            lakeEdit->history.Record(-1, std::move(before), std::move(after));
+            UpdateWindowTitle();
+        }
+        else if (history.Record(-1, std::move(before), std::move(after))) Save(world);
     }
     else if (drag == Drag::DuplicateObject)
     {
@@ -3228,6 +3314,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (event.type == SDL_EVENT_QUIT)
     {
         Release(world);
+        if (lakeEdit && !Save(world)) return EditorEvent::Handled;
         return EditorEvent::Pass;
     }
     if (rightClick && SDL_GetWindowFromEvent(&event) == window)
@@ -3530,6 +3617,14 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             Release(world);
             return EditorEvent::Handled;
         }
+        if (lakeEdit && ViewportFocused() && !SDL_GetWindowRelativeMouseMode(window) &&
+            !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)) &&
+            (event.key.key == SDLK_RETURN || event.key.key == SDLK_ESCAPE))
+        {
+            if (event.key.key == SDLK_ESCAPE) CancelLakeEditing(world);
+            else if (FinishLakeEditing(world)) Save(world);
+            return EditorEvent::Handled;
+        }
         if (!planView && state.Target().kind != SelectionKind::None && !SDL_GetWindowRelativeMouseMode(window) &&
             !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
             (event.key.key == SDLK_W || event.key.key == SDLK_E))
@@ -3547,6 +3642,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (event.key.key == SDLK_R || (event.key.key == SDLK_ESCAPE && planView))
         {
+            if (lakeEdit && !Save(world)) return EditorEvent::Handled;
             ChangeView(world, camera);
             return EditorEvent::Handled;
         }

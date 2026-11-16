@@ -736,6 +736,7 @@ bool WorldDocument::Save() const
     terrainData << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto& chunk : terrain)
     {
+        if (chunk->EditingLake()) return SDL_SetError("Finish or cancel shoreline editing before saving");
         if (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material))
             return SDL_SetError("Cannot save invalid terrain material");
         if (chunk->Lake())

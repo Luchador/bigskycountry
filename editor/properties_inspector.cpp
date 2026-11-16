@@ -323,8 +323,11 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
     {
         const auto& chunk = *world.Terrain().at(target.index);
         result.page = PropertiesPage::Terrain;
+        result.lake = chunk.Lake().has_value();
+        result.editingLake = chunk.EditingLake();
         result.title = std::string(chunk.Lake() ? "Lake " : "Terrain ") + std::to_string(target.index + 1);
-        if (chunk.Lake()) result.detail = std::to_string(chunk.Lake()->points.size()) + " shoreline points | 5 m bed";
+        if (chunk.Lake()) result.detail = std::to_string(chunk.Lake()->points.size()) +
+            (chunk.EditingLake() ? " points | Editing shoreline" : " shoreline points | 5 m bed");
         else if (chunk.boundary)
             result.detail = chunk.Instance().mesh ? "Follows road boundary" : "Road boundary is open";
         else result.detail = chunk.Instance().mesh->assetPath;

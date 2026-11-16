@@ -118,6 +118,9 @@ private:
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
     bool PickLakeControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick);
     void MoveLakePoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
+    void BeginLakeEditing(WorldDocument& world);
+    bool FinishLakeEditing(WorldDocument& world);
+    void CancelLakeEditing(WorldDocument& world);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void RotatePlanPoint(Road& road);
@@ -208,6 +211,13 @@ private:
     void FinishRampControl(WorldDocument& world, bool commit);
     RoadEditorState state;
     EditHistory history;
+    struct LakeEditSession
+    {
+        int index;
+        LakeDefinition original;
+        EditHistory history; // Draft edits stay out of document undo until Finish.
+    };
+    std::optional<LakeEditSession> lakeEdit;
     SceneOutliner outliner;
     EditorMenu menu;
     RoadOverlay overlay;
