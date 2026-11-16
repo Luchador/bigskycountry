@@ -110,7 +110,9 @@ void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
     if (done && done->job.epoch == epoch)
     {
         const auto request = requested.find(done->job.key);
-        if (request != requested.end() && request->second + 2 >= frame)
+        // A turn away must not cancel a useful read that is already in flight.
+        // Publish once and let the normal memory budget decide its lifetime.
+        if (request != requested.end())
         {
             if (done->error.empty()) { Publish(done->job.key, std::move(done->image)); bindingsChanged = true; }
             else
@@ -120,17 +122,19 @@ void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
             }
         }
     }
-    std::erase_if(requested, [&](const auto& e) { return e.second + 2 < frame; });
+    std::erase_if(requested, [&](const auto& e) {
+        return (!pending || pending->key != e.first) && e.second + 2 < frame;
+    });
     std::size_t bytes = Bytes();
-    // Active maps and neutral fallbacks are pinned. Trim unused shared maps under
-    // pressure, and release cold maps even when the working set is below budget.
+    // Keep warm maps while there is room. A frame-count timeout reloaded them
+    // every time the camera spun around, even with hundreds of MiB to spare.
     for (;;)
     {
         auto victim = textures.end();
         for (auto it = textures.begin(); it != textures.end(); ++it)
         {
             if (!it->second || it->first.first.front() == ':' || it->second->lastUsed + 1 >= frame) continue;
-            if (bytes <= budget && it->second->lastUsed + 120 >= frame) continue;
+            if (bytes <= budget) continue;
             if (victim == textures.end() || it->second->lastUsed < victim->second->lastUsed) victim = it;
         }
         if (victim == textures.end()) break;

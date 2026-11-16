@@ -31,10 +31,17 @@ Render cells and model placements are requested inside the view distance plus a
 512 m preload ring, and unloaded outside the view distance plus 768 m. Near/far
 LOD has 128 m hysteresis. A cell's conservative bounds can extend beyond its grid
 address (for example, a tie run); visibility and collision use the bounds.
-Geometry upload bursts are normally limited to 16 MiB per frame, with one
-oversized batch allowed to prevent starvation. One completed texture is published
-per frame. GPU allocation/upload and some instance setup still occur on the main
-thread; this is not texture mip streaming or a guarantee of zero frame spikes.
+Newly visible static meshes are packed incrementally, with an 8,192-triangle and
+approximately 2 ms preparation budget per frame (checked every 256 triangles).
+Railroad ties share that preparation budget; editor road batches check it between
+batches. Resident geometry uploads are capped at 4 MiB and eight buffers per
+frame, including oversized meshes, which resume at their last byte offset. A
+buffer is drawn only after its final upload has been submitted. Already resident
+geometry continues rendering while new buffers are prepared. Dynamic geometry,
+such as moving pawns, is independent of this resident-upload budget.
+One completed texture is published per frame. GPU allocation/upload and some
+instance setup still occur on the main thread; this is not texture mip streaming
+or a guarantee of zero frame spikes.
 
 Collision is independent of visual LOD. Full-detail solid surfaces are cooked
 without paint or water, and chunk BVHs are attached/detached without rebuilding a
@@ -74,9 +81,14 @@ Under pressure, farthest unprotected CPU geometry/models and unused render
 resources are evicted first. Cells within 128 m, pawn collision dependencies,
 and currently active GPU geometry/maps stay pinned and may exceed a target.
 Known payload/model sizes are retained for admission checks so over-budget
-content does not reload every frame. Unused GPU buffers and textures also expire
-after 120 renderer frames. Lower view distance if the active set exceeds the GPU
-budget. **F3** shows cell, model, collision, cache-memory and error counters;
+content does not reload every frame. Unused GPU buffers and textures stay warm
+while there is room in their budgets, instead of expiring after 120 unseen frames.
+Unloading a streamed cell or placement still explicitly releases its buffers;
+deleted mesh owners are also reclaimed. An in-flight texture read is allowed to
+finish even if the camera turns away, avoiding repeated reads of the same map.
+Lower view distance if the active set exceeds the GPU budget. **F3** shows cell,
+model, collision, cache-memory and error counters, plus triangles prepared and
+resident geometry bytes uploaded this frame;
 pressure is reported rather than silently removing required support surfaces.
 
 The **editor keeps the full authored document, selected objects, open spline
@@ -188,7 +200,13 @@ payload validation, stale/corrupt packages, lazy loading, seams, LOD residency,
 budget pressure without churn, parked-pawn pins, camera teleport cancellation,
 catalog replacement, worker shutdown, shared models/textures, and source-save
 protection. `BigSkyWorldStreamingTests --gpu` additionally checks texture sharing,
-texture refresh, GPU cache expiration, and explicit eviction using a GPU renderer.
+texture refresh, warm caches across camera turns, incremental large-mesh
+preparation/uploads, cancellation, and explicit eviction using a GPU renderer.
+
+These scheduling/cache changes work with existing version-2 packages; they do not
+require recooking. For a camera-turn check, press F3 and turn away and back after
+several seconds. Below the cache budgets, previously seen geometry should return
+with zero preparation/uploads. First visits spread that work over several frames.
 
 For a manual check: recook, launch the game, press F3, then use F1 to fly several
 kilometers away and back. Resident render counts should move with the camera;

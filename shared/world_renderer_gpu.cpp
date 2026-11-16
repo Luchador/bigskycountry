@@ -303,24 +303,28 @@ bool WorldRenderer::DrawGPU()
     constexpr size_t maxVertices = std::numeric_limits<Uint32>::max() / sizeof(WorldDepthVertex);
     if (vertices.size() > maxVertices) return SDL_SetError("Dynamic world vertex buffer exceeds GPU limit");
     const auto bytes = static_cast<Uint32>(vertices.size() * sizeof(WorldDepthVertex));
-    struct Upload { ResidentGeometry* geometry; Uint32 offset, size; };
+    struct Upload { ResidentGeometry* geometry; Uint32 offset, destination, size; };
     std::vector<Upload> uploads;
     Uint32 total = bytes;
     for (const auto& draw : residentDraws)
     {
         auto& mesh = *draw.geometry;
-        if (mesh.pendingUpload.empty() || mesh.uploadFrame == frame) continue;
+        if (!mesh.complete || mesh.pendingUpload.empty() || mesh.uploadFrame == frame) continue;
         if (mesh.pendingUpload.size() > maxVertices) return SDL_SetError("World mesh exceeds GPU buffer limit");
-        const auto size = static_cast<Uint32>(mesh.pendingUpload.size() * sizeof(WorldDepthVertex));
-        // Bound normal upload bursts. Permit one oversized batch so it cannot starve.
-        if (!uploads.empty() && Uint64(total) + size - bytes > 16 * 1024 * 1024) continue;
+        const auto fullSize = static_cast<Uint32>(mesh.pendingUpload.size() * sizeof(WorldDepthVertex));
+        // A large mesh uploads over multiple frames. Never bypass the burst limit,
+        // and do not draw an incomplete buffer. Also cap small-buffer allocations.
+        constexpr Uint32 burst = 4 * 1024 * 1024;
+        if (uploads.size() >= 8 || total - bytes >= burst) continue;
+        const auto size = std::min(fullSize - static_cast<Uint32>(mesh.uploadedBytes), burst - (total - bytes));
         if (size > std::numeric_limits<Uint32>::max() - total) return SDL_SetError("World upload exceeds GPU buffer limit");
-        const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX, size, 0};
+        const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX, fullSize, 0};
         if (!mesh.buffer) mesh.buffer = SDL_CreateGPUBuffer(device, &info);
         if (!mesh.buffer) return false;
-        mesh.bufferBytes = size;
+        mesh.bufferBytes = fullSize;
         mesh.uploadFrame = frame;
-        uploads.push_back({&mesh, total, size});
+        mesh.uploadEnd = mesh.uploadedBytes + size;
+        uploads.push_back({&mesh, total, static_cast<Uint32>(mesh.uploadedBytes), size});
         total += size;
     }
     const auto grow = [](Uint32 required, Uint32 previous) {
@@ -353,7 +357,8 @@ bool WorldRenderer::DrawGPU()
         if (!mapped) return false;
         if (bytes) std::memcpy(mapped, vertices.data(), bytes);
         for (const auto& item : uploads)
-            std::memcpy(mapped + item.offset, item.geometry->pendingUpload.data(), item.size);
+            std::memcpy(mapped + item.offset,
+                reinterpret_cast<const Uint8*>(item.geometry->pendingUpload.data()) + item.destination, item.size);
         SDL_UnmapGPUTransferBuffer(device, upload);
     }
 
@@ -388,13 +393,13 @@ bool WorldRenderer::DrawGPU()
             SDL_CancelGPUCommandBuffer(commands);
             return false;
         }
-        const auto send = [&](SDL_GPUBuffer* buffer, Uint32 offset, Uint32 size, bool cycle) {
+        const auto send = [&](SDL_GPUBuffer* buffer, Uint32 offset, Uint32 destination, Uint32 size, bool cycle) {
             const SDL_GPUTransferBufferLocation src{upload, offset};
-            const SDL_GPUBufferRegion dst{buffer, 0, size};
+            const SDL_GPUBufferRegion dst{buffer, destination, size};
             SDL_UploadToGPUBuffer(copy, &src, &dst, cycle);
         };
-        if (bytes) send(vertexBuffer, 0, bytes, true);
-        for (const auto& item : uploads) send(item.geometry->buffer, item.offset, item.size, false);
+        if (bytes) send(vertexBuffer, 0, 0, bytes, true);
+        for (const auto& item : uploads) send(item.geometry->buffer, item.offset, item.destination, item.size, false);
         SDL_EndGPUCopyPass(copy);
     }
 
@@ -458,7 +463,9 @@ bool WorldRenderer::DrawGPU()
         boundMaterial = material;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
-        if (!batch.geometry->buffer) return;
+        const auto& mesh = *batch.geometry;
+        if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
+            !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes))) return;
         bindSource(batch.geometry->buffer, batch.geometry.get());
         for (const auto& part : batch.geometry->parts)
         {
@@ -519,6 +526,12 @@ bool WorldRenderer::DrawGPU()
         SDL_EndGPURenderPass(pass);
     }
     if (!SDL_SubmitGPUCommandBuffer(commands)) return false;
-    for (const auto& item : uploads) std::vector<WorldDepthVertex>().swap(item.geometry->pendingUpload);
+    for (const auto& item : uploads)
+    {
+        auto& mesh = *item.geometry;
+        mesh.uploadedBytes = mesh.uploadEnd;
+        uploadedBytes += item.size;
+        if (mesh.uploadedBytes == mesh.bufferBytes) std::vector<WorldDepthVertex>().swap(mesh.pendingUpload);
+    }
     return true;
 }

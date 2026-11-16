@@ -15,13 +15,22 @@ bool WorldRenderer::DrawCacheStatistics(SDL_Renderer* target) const
     const auto& settings = g_ProjectSettings.Streaming();
     constexpr double mib = StreamingSettings::MiB;
     const auto geometry = ResidentBytes(), textures = TextureBytes();
-    const SDL_FRect box{8, 36, 735, 34};
+    const SDL_FRect box{8, 36, 735, 50};
     return SDL_SetRenderDrawColor(target, 24, 26, 30, 255) && SDL_RenderFillRect(target, &box) &&
         SDL_SetRenderDrawColor(target, 230, 232, 235, 255) &&
         SDL_RenderDebugTextFormat(target, 16, 44, "Render cache %.1f/%.0f MiB | Textures %.1f/%.0f MiB (%zu shared)",
             geometry / mib, settings.geometryBytes / mib, textures / mib, settings.assetBytes / (2 * mib), TextureCount()) &&
         SDL_RenderDebugText(target, 16, 58, geometry > settings.geometryBytes || textures > settings.assetBytes / 2 ?
-            "Budget pressure: active resources pinned" : "Unused render resources released automatically");
+            "Budget pressure: active resources pinned" : "Warm render resources retained within memory budgets") &&
+        SDL_RenderDebugTextFormat(target, 16, 72, "Prepared %zu tris | Uploaded %.2f MiB this frame | %zu ready buffers",
+            preparedVertices / 3, uploadedBytes / mib, ReadyBuffers());
+}
+
+std::size_t WorldRenderer::ReadyBuffers() const
+{
+    return std::count_if(resident.begin(), resident.end(), [](const auto& e) {
+        return e.second->buffer && e.second->uploadedBytes == e.second->bufferBytes;
+    });
 }
 
 std::size_t WorldRenderer::ResidentBytes() const
@@ -46,11 +55,17 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     scaleX = viewport.w > 0 ? 2.0 * focal / viewport.w : 0.0;
     scaleY = viewport.h > 0 ? 2.0 * focal / viewport.h : 0.0;
     ++frame;
+    preparedVertices = uploadedBytes = preparationNanos = 0;
     residentDraws.clear();
     residentWire = false;
-    // Allow brief trips outside the frustum without keeping deleted or distant
-    // geometry indefinitely. SDL defers destruction while a buffer is in flight.
-    std::erase_if(resident, [&](const auto& entry) { return frame - entry.second->lastFrame > 120; });
+    // Looking away does not unload a warm buffer. Streamed cells explicitly call
+    // Forget on unload; authored mesh owners can expire here. Other disposable
+    // buffers remain in the bounded LRU cache until memory is needed.
+    std::erase_if(resident, [&](const auto& entry) {
+        const auto& geometry = *entry.second;
+        return (geometry.meshOwned && geometry.mesh.expired()) ||
+            (!geometry.buffer && geometry.pendingUpload.empty() && frame - geometry.lastFrame > 120);
+    });
     // Editor objects, selections and history are never evicted. Only disposable
     // render buffers are reclaimed, and currently visible geometry stays pinned.
     auto residentBytes = ResidentBytes();
@@ -289,6 +304,72 @@ void WorldRenderer::CaptureGeometry(ResidentGeometry& geometry, size_t start, si
     vertices.resize(start);
     materialRanges.resize(firstMaterial);
     geometry.device = device;
+    geometry.complete = true;
+}
+
+bool WorldRenderer::CanPrepare() const
+{
+    return preparedVertices < maxPreparedVertices && preparationNanos < maxPreparationNanos;
+}
+
+void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& instance)
+{
+    if (geometry.complete || !CanPrepare()) return;
+    const auto started = SDL_GetTicksNS();
+    const auto& mesh = *instance.mesh;
+    const auto normalMatrix = instance.transform.NormalTransform();
+    const bool mirrored = instance.transform.Determinant() < 0;
+    const bool textured = !geometry.material.empty();
+    const auto worldNormal = [&](Vector3 normal) {
+        return textured && geometry.mapping == MeshUVs::TerrainProjection ? instance.transform.Direction(normal) :
+            Math::Normalize(normalMatrix.Direction(normal));
+    };
+    // Pack directly into the pending buffer. Preserve the dynamic stream without
+    // copying already prepared triangles each time this mesh resumes.
+    vertices.swap(geometry.pendingUpload);
+    vertices.reserve(mesh.indices.size());
+    packingOrigin = geometry.origin;
+    while (vertices.size() < mesh.indices.size() && preparedVertices < maxPreparedVertices)
+    {
+        const auto count = std::min({mesh.indices.size() - vertices.size(),
+            maxPreparedVertices - preparedVertices, std::size_t(256 * 3)});
+        const auto end = vertices.size() + count;
+        for (auto i = vertices.size(); i < end; i += 3)
+        {
+            const auto& a = mesh.vertices[mesh.indices[i]];
+            const auto& b = mesh.vertices[mesh.indices[i + (mirrored ? 2 : 1)]];
+            const auto& c = mesh.vertices[mesh.indices[i + (mirrored ? 1 : 2)]];
+            const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
+                                       instance.transform.Point(c.position)};
+            const std::array normals{worldNormal(a.normal), worldNormal(b.normal), worldNormal(c.normal)};
+            if (textured)
+            {
+                const auto uv = geometry.mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) :
+                    std::array{a.uv, b.uv, c.uv};
+                SubmitMaterialTriangle(positions, {a.color, b.color, c.color}, uv, &normals);
+            }
+            else
+            {
+                const std::array colors{a.color, b.color, c.color};
+                for (std::size_t j = 0; j < 3; ++j)
+                {
+                    const auto color = colors[j], tint = geometry.tint;
+                    auto vertex = WorldToClip(positions[j], {color.r * tint.r, color.g * tint.g, color.b * tint.b, 1});
+                    vertex.normal = normals[j];
+                    vertex.lit = 1;
+                    vertices.push_back(vertex);
+                }
+            }
+        }
+        preparedVertices += count;
+        if (preparationNanos + SDL_GetTicksNS() - started >= maxPreparationNanos) break;
+    }
+    packingOrigin.reset();
+    vertices.swap(geometry.pendingUpload);
+    preparationNanos += SDL_GetTicksNS() - started;
+    geometry.complete = geometry.pendingUpload.size() == mesh.indices.size();
+    if (geometry.complete && !geometry.pendingUpload.empty())
+        geometry.parts.push_back({0, geometry.pendingUpload.size(), geometry.material});
 }
 
 void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
@@ -321,17 +402,16 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         entry->tint.r != tint.r || entry->tint.g != tint.g || entry->tint.b != tint.b)
     {
         entry = std::make_shared<ResidentGeometry>();
+        entry->device = device;
+        entry->meshOwned = true;
         entry->mesh = instance.mesh;
         entry->transform = instance.transform;
         entry->material = material;
         entry->mapping = mapping;
         entry->tint = tint;
         entry->origin = bounds.Empty() ? instance.transform.origin : instance.transform.Point((bounds.min + bounds.max) * 0.5);
-        const size_t start = vertices.size(), firstMaterial = materialRanges.size();
-        packingOrigin = entry->origin;
-        emit();
-        CaptureGeometry(*entry, start, firstMaterial);
     }
+    PrepareMesh(*entry, instance);
     entry->lastFrame = frame;
     if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), false});
 }

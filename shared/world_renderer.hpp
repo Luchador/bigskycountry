@@ -49,6 +49,10 @@ public:
     // Fog is opt-in for world viewports; thumbnails and material previews stay clear.
     void Forget(const void* key) { resident.erase(key); }
     std::size_t ResidentBytes() const;
+    // Per-frame work counters, also displayed by the F3 overlay.
+    std::size_t PreparedVertices() const { return preparedVertices; }
+    std::size_t UploadedBytes() const { return uploadedBytes; }
+    std::size_t ReadyBuffers() const;
     bool DrawCacheStatistics(SDL_Renderer* target) const;
     std::size_t TextureBytes() const { return materialCache.Bytes(); }
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
@@ -113,6 +117,9 @@ private:
         SDL_GPUDevice* device = nullptr;
         SDL_GPUBuffer* buffer = nullptr;
         std::size_t bufferBytes = 0;
+        std::size_t uploadedBytes = 0, uploadEnd = 0;
+        bool complete = false; // CPU packing finished; GPU upload may still be in progress.
+        bool meshOwned = false;
         ~ResidentGeometry();
         Vector3 origin{};
         std::vector<WorldDepthVertex> pendingUpload;
@@ -134,6 +141,14 @@ private:
     std::unordered_map<const void*, std::shared_ptr<ResidentGeometry>> resident;
     std::vector<ResidentDraw> residentDraws;
     std::uint64_t frame = 0;
+    std::size_t preparedVertices = 0, uploadedBytes = 0;
+    std::uint64_t preparationNanos = 0;
+    // Bound both triangle work and elapsed preparation time. Large meshes resume
+    // next frame, rather than escaping the budget as a single oversized batch.
+    static constexpr std::size_t maxPreparedVertices = 8192 * 3;
+    static constexpr std::uint64_t maxPreparationNanos = 2'000'000;
+    bool CanPrepare() const;
+    void PrepareMesh(ResidentGeometry& geometry, const MeshInstance& instance);
     bool residentWire = false;
     std::optional<Vector3> packingOrigin;
     bool CanRetain(const std::string& material);

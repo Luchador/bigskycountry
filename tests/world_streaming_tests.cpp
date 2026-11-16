@@ -272,6 +272,9 @@ void SharedTextures(SDL_GPUDevice *device = nullptr)
         const auto bytes = cache.Bytes();
         for (int i = 0; i < 50; ++i) use();
         Check(cache.Bytes() == bytes && cache.TextureCount() == 1, "Repeated materials grew texture residency");
+        for (int i = 0; i < 150; ++i) cache.BeginFrame(device, 1024);
+        Check(cache.Bytes() == bytes && cache.TextureCount() == 1, "Turning away expired a warm texture below budget");
+        use();
         cache.BeginFrame(device, 1);
         cache.BeginFrame(device, 1);
         Check(cache.TextureCount() == 0, "Unused texture ignored budget pressure");
@@ -304,6 +307,7 @@ void GpuCaches()
         WorldRenderer renderer(AssetRoot::Project);
         CameraView camera;
         WorldLighting lights;
+        lights.ambient = {0.5, 0.5, 0.5};
         camera.LookAt({256, 150, -300}, {256, 0, 256});
         Fixture fixture;
         const auto &mesh = fixture.cells[1].batches.front().nearMesh;
@@ -316,12 +320,99 @@ void GpuCaches()
         draw(true);
         Check(renderer.ResidentBytes() > 0, "Geometry was not retained on GPU");
         for (int i = 0; i < 125; ++i) draw(false);
-        Check(renderer.ResidentBytes() == 0, "Cold GPU geometry stayed resident");
+        Check(renderer.ResidentBytes() > 0, "Turning away expired warm GPU geometry below budget");
         draw(true);
+        Check(renderer.PreparedVertices() == 0 && renderer.UploadedBytes() == 0,
+              "Turning back rebuilt or uploaded warm geometry");
         renderer.Forget(&mesh);
         draw(false);
         Check(renderer.ResidentBytes() == 0 && mesh.mesh && !mesh.mesh->indices.empty(),
               "GPU eviction removed authored data or retained buffers");
+
+        // Many triangles in a single batch used to bypass the upload limit and
+        // all normals/tangents were prepared on its first visible frame.
+        auto grid = std::make_shared<Mesh>();
+        constexpr unsigned side = 128;
+        for (unsigned z = 0; z <= side; ++z)
+            for (unsigned x = 0; x <= side; ++x)
+                grid->vertices.push_back({{4.0 * x, 0, 4.0 * z}, {0, 1, 0}});
+        for (unsigned z = 0; z < side; ++z)
+            for (unsigned x = 0; x < side; ++x)
+            {
+                const auto a = z * (side + 1) + x, b = a + 1, c = a + side + 1, d = c + 1;
+                grid->indices.insert(grid->indices.end(), {a, c, b, b, c, d});
+            }
+        grid->UpdateBounds();
+        MeshInstance large{grid};
+        std::size_t prepared = 0, uploaded = 0;
+        int frames = 0, uploadFrames = 0;
+        const auto expected = grid->indices.size() * sizeof(WorldDepthVertex);
+        const auto pixel = [&] {
+            auto* surface = SDL_RenderReadPixels(target, nullptr);
+            Check(surface != nullptr, "Read incremental render");
+            std::array<Uint8, 4> color;
+            const bool ok = SDL_ReadSurfacePixel(surface, surface->w / 2, surface->h / 2,
+                &color[0], &color[1], &color[2], &color[3]);
+            SDL_DestroySurface(surface);
+            Check(ok, "Read incremental render pixel");
+            return color;
+        };
+        std::array<Uint8, 4> completePixel{};
+        while (!renderer.ReadyBuffers() && frames++ < 200)
+        {
+            Check(SDL_RenderClear(target) && renderer.Begin(target, camera, &lights), "Begin incremental geometry frame");
+            renderer.SubmitWorldMesh(large);
+            Check(renderer.End(), "Publish incremental geometry frame");
+            Check(renderer.PreparedVertices() <= 8192 * 3 && renderer.UploadedBytes() <= 4 * 1024 * 1024,
+                  "Large batch bypassed preparation/upload burst limit");
+            prepared += renderer.PreparedVertices();
+            uploaded += renderer.UploadedBytes();
+            if (renderer.UploadedBytes()) ++uploadFrames;
+            if (uploaded < expected)
+            {
+                Check(renderer.ReadyBuffers() == 0, "Partially uploaded mesh became drawable");
+                if (renderer.UploadedBytes())
+                {
+                    const auto color = pixel();
+                    Check(color[0] == 20 && color[1] == 30 && color[2] == 50,
+                          "Partially uploaded geometry was rendered");
+                }
+            }
+            else completePixel = pixel();
+            Check(SDL_RenderPresent(target), "Present incremental geometry frame");
+        }
+        std::cout << "Large GPU batch: " << prepared / 3 << " tris prepared over " << frames
+                  << " frames; " << uploaded << " bytes in " << uploadFrames << " upload frames\n";
+        Check(renderer.ReadyBuffers() == 1 && prepared == grid->indices.size() && uploaded == expected &&
+              frames >= 4 && uploadFrames >= 2, "Incremental mesh failed to finish exactly once");
+        Check(SDL_RenderClear(target) && renderer.Begin(target, camera, &lights), "Begin reference frame");
+        renderer.SubmitMesh(large);
+        Check(renderer.End(), "Draw reference frame");
+        Check(pixel() == completePixel && completePixel[0] > 50,
+              "Completed upload differs from the immediate mesh renderer");
+        Check(SDL_RenderPresent(target), "Present reference frame");
+        renderer.Forget(&large);
+        draw(false);
+        Check(renderer.ResidentBytes() == 0, "Incremental buffer survived explicit unload");
+
+        // Cancellation during preparation must not resurrect the old mesh.
+        Check(renderer.Begin(target, camera, &lights), "Begin cancelled preparation");
+        renderer.SubmitWorldMesh(large);
+        Check(renderer.End(), "End cancelled preparation");
+        renderer.Forget(&large);
+        draw(false);
+        Check(renderer.ResidentBytes() == 0, "Cancelled preparation retained memory");
+        for (int i = 0; i < 200; ++i)
+        {
+            Check(renderer.Begin(target, camera, &lights), "Begin cancelled upload");
+            renderer.SubmitWorldMesh(large);
+            Check(renderer.End() && SDL_RenderPresent(target), "End cancelled upload");
+            if (renderer.UploadedBytes()) break;
+        }
+        Check(renderer.UploadedBytes() > 0 && !renderer.ReadyBuffers(), "Expected a partial upload to cancel");
+        renderer.Forget(&large);
+        draw(false);
+        Check(renderer.ResidentBytes() == 0, "Cancelled upload retained memory");
     }
     SDL_DestroyRenderer(target);
     SDL_DestroyWindow(window);

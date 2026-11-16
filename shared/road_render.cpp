@@ -245,6 +245,12 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
         auto& entry = resident[key];
         if (!entry || entry->revision != road.revision || entry->material != path)
         {
+            if (!CanPrepare())
+            {
+                if (!entry) resident.erase(key);
+                return;
+            }
+            const auto started = SDL_GetTicksNS();
             entry = std::make_shared<ResidentGeometry>();
             entry->revision = road.revision;
             entry->material = path;
@@ -253,6 +259,8 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
             packingOrigin = origin;
             emit();
             CaptureGeometry(*entry, first, firstMaterial);
+            preparedVertices += entry->pendingUpload.size();
+            preparationNanos += SDL_GetTicksNS() - started;
         }
         entry->lastFrame = frame;
         if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), selected});
@@ -299,10 +307,26 @@ void WorldRenderer::SubmitRailroadTies(const RailroadTieRun& run, std::uint64_t 
         entry = std::make_shared<ResidentGeometry>();
         entry->revision = revision;
         entry->origin = center;
-        const auto first = vertices.size(), firstMaterial = materialRanges.size();
+        entry->device = device;
+    }
+    if (!entry->complete && CanPrepare())
+    {
+        const auto& mesh = RailroadTieMesh();
+        int next = static_cast<int>(entry->pendingUpload.size() / mesh->indices.size());
+        vertices.swap(entry->pendingUpload);
         packingOrigin = center;
-        emit();
-        CaptureGeometry(*entry, first, firstMaterial);
+        while (next < run.count && CanPrepare())
+        {
+            const auto started = SDL_GetTicksNS();
+            SubmitMesh({mesh, run.At(next++)});
+            preparedVertices += mesh->indices.size();
+            preparationNanos += SDL_GetTicksNS() - started;
+        }
+        packingOrigin.reset();
+        vertices.swap(entry->pendingUpload);
+        entry->complete = next == run.count;
+        if (entry->complete && !entry->pendingUpload.empty())
+            entry->parts.push_back({0, entry->pendingUpload.size(), {}});
     }
     entry->lastFrame = frame;
     if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), selected});
