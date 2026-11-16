@@ -3,6 +3,18 @@
 #include <algorithm>
 #include <map>
 
+bool TerrainChunk::SetLake(const LakeDefinition& definition)
+{
+    if (lake == definition) return true;
+    auto geometry = LakeGeometry::Build(definition);
+    if (!geometry) return false;
+    lake = definition;
+    SetMesh(std::move(geometry->bed));
+    water = {std::move(geometry->water), Instance().transform};
+    shoreline = std::move(geometry->shoreline);
+    return true;
+}
+
 const std::vector<TerrainChunk::OutlineEdge>& TerrainChunk::Outline() const
 {
     const auto& mesh = Instance().mesh;

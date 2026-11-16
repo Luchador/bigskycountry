@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "type": "unlit",
+    "emissiveTint": [0.12, 0.37, 0.45],
+    "translucencyMultiplier": 0.68,
+    "textures": {}
+}

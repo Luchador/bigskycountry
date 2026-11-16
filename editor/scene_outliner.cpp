@@ -249,8 +249,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     for (int i = 0; i < static_cast<int>(sizes[1]); ++i)
     {
         const auto& chunk = *world.Terrain()[i];
-        const auto label = chunk.boundary ? "Road-bounded terrain #" + std::to_string(i + 1) : ModelLabel(chunk.Instance(), i);
-        add(SceneKind::Terrain, i, label, "Terrain");
+        const auto label = chunk.Lake() ? "Lake " + std::to_string(i + 1) :
+                          chunk.boundary ? "Road-bounded terrain #" + std::to_string(i + 1) : ModelLabel(chunk.Instance(), i);
+        add(SceneKind::Terrain, i, label, chunk.Lake() ? "Lake" : "Terrain");
     }
     for (int i = 0; i < static_cast<int>(sizes[2]); ++i)
     {

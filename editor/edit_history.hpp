@@ -133,9 +133,17 @@ struct EditSnapshot
         std::optional<TerrainBoundary> boundary;
         std::string material;
         int folder = 0;
+        std::optional<LakeDefinition> lake;
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
+    struct LakeEdit
+    {
+        int index;
+        LakeDefinition definition;
+        bool operator==(const LakeEdit&) const = default;
+    };
+    std::optional<LakeEdit> lake;
     struct PlacedMaterial
     {
         SceneKey target;

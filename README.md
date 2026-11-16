@@ -170,6 +170,14 @@ Select the Y-intersection and press **F** to fill the island with subdivided ter
 
 Click an intersection anchor in the 3D or top-down view to edit its **Stop line** checkbox. Each anchor defaults to on and remembers its setting when a road is disconnected. On a generated junction the white bar runs across the incoming travel lanes, starting at the road paint and extending 0.60 m onto the intersection. When an attached road is selected, its endpoint takes priority at the shared marker. Select the junction surface or its Outliner row, then click the anchor to inspect it.
 
+### Lakes
+
+In the 3D viewport, right-click and choose **Create → Create Lake**. A lake starts as a 200 m diameter circle with four shoreline control points at 90-degree intervals. Click its water surface or its Lake row in the Outliner to show the teal shoreline and point markers.
+
+Drag a shoreline point directly to reshape the lake in XZ, or select it and use the translation gizmo/Transform fields. Double-click between points on the shoreline to insert a point without changing the existing curve. **Delete** removes the selected point; at least three must remain. Self-crossing or collapsed shorelines are rejected. Select the whole lake to translate its water level, rotate it around Y, or delete it. **Esc** cancels a point drag; **Ctrl+Z/Ctrl+Y** undo and redo creation, edits, transforms, and deletion.
+
+Water stays horizontal. A subdivided terrain basin slopes down from the exact shoreline to a maximum depth of 5 m. The terrain material slot affects the bed; `assets/textures/world/M_LakeWater.bmat` supplies the shared translucent water color. The bed participates in collision, while water does not act as a solid floor. Lakes are standalone terrain chunks; this first version does not excavate overlapping terrain or add swimming/buoyancy. Authored spline points and handles are saved in the world; meshes are rebuilt only when the shoreline changes or the world loads. Lakes also appear in the top-down overview and respect Outliner folder visibility.
+
 ### Scene outliner
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or imported terrain chunk in the list makes its transform available for editing.

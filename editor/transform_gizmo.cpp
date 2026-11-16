@@ -106,6 +106,7 @@ void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placeme
     for (int axis = 0; axis < 3; ++axis)
     {
         if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
+        if (mode == GizmoMode::Translate && placement.horizontalTranslation && axis == 1) continue;
         renderer.SubmitMesh(Handle(placement, axes, axis), hoveredAxis == axis ? EditorColors::amber : axisColors[axis]);
     }
 }
@@ -118,6 +119,7 @@ std::optional<int> TransformGizmo::PickAxis(ViewportPicker& picker, const GizmoP
     for (int axis = 0; axis < 3; ++axis)
     {
         if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
+        if (mode == GizmoMode::Translate && placement.horizontalTranslation && axis == 1) continue;
         if (picker.TestMesh(Handle(placement, axes, axis)))
         {
             hit = axis;

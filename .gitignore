@@ -21,3 +21,6 @@
 !/assets/textures/surfaces/roads/
 /assets/textures/surfaces/roads/*
 !/assets/textures/surfaces/roads/M_Asphalt01.bmat
+!/assets/textures/world/
+/assets/textures/world/*
+!/assets/textures/world/M_LakeWater.bmat

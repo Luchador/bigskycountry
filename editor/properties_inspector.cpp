@@ -319,12 +319,13 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : names.at(target.point);
         result.stopLine = world.intersections.at(target.index).stopLines.test(target.point);
     }
-    else if (target.kind == SelectionKind::Terrain)
+    else if (target.kind == SelectionKind::Terrain || target.kind == SelectionKind::LakePoint)
     {
         const auto& chunk = *world.Terrain().at(target.index);
         result.page = PropertiesPage::Terrain;
-        result.title = "Terrain " + std::to_string(target.index + 1);
-        if (chunk.boundary)
+        result.title = std::string(chunk.Lake() ? "Lake " : "Terrain ") + std::to_string(target.index + 1);
+        if (chunk.Lake()) result.detail = std::to_string(chunk.Lake()->points.size()) + " shoreline points | 5 m bed";
+        else if (chunk.boundary)
             result.detail = chunk.Instance().mesh ? "Follows road boundary" : "Road boundary is open";
         else result.detail = chunk.Instance().mesh->assetPath;
         result.material = chunk.material;

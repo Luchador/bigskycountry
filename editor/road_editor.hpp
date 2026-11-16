@@ -65,7 +65,8 @@ private:
         Measure,
         AnchorRoad,
         Gizmo,
-        DuplicateObject
+        DuplicateObject,
+        LakePoint
     };
     using Action = RoadAction;
 #ifndef _WIN32
@@ -115,6 +116,8 @@ private:
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
+    bool PickLakeControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick);
+    void MoveLakePoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void RotatePlanPoint(Road& road);

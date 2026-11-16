@@ -8,7 +8,7 @@
 
 class WorldDocument;
 
-enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor, RoadGroup };
+enum class SelectionKind { None, Road, Point, Object, Terrain, Intersection, Anchor, RoadGroup, LakePoint };
 struct TransformTarget
 {
     SelectionKind kind = SelectionKind::None;
@@ -30,6 +30,7 @@ struct TransformFields
     ObjectTransform value;
     static constexpr int geographicLocation = 9; // A single latitude/longitude edit affecting X and Z.
     bool roadBound = false;
+    bool levelOnly = false;
     bool CanEdit(int field) const;
     double DisplayValue(int field) const;
     std::string Text(int field) const;

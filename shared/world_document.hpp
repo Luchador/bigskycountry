@@ -42,6 +42,7 @@ public:
     bool InsertObject(int index, std::unique_ptr<BSCObject>&& object, int folder);
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
+    TerrainChunk* PlaceLake(const LakeDefinition& lake, const ObjectTransform& transform = {});
     int AllocateRoadId();
     int NextRampStationId() const;
     void RefreshRampConnections(bool force = false);

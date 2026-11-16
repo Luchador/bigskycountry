@@ -215,11 +215,14 @@ void PlanRenderer::Road(const RoadGeometry& road, RoadLayer layer)
 
 void PlanRenderer::Terrain(const TerrainChunk& chunk)
 {
-    const auto& instance = chunk.Instance();
-    if (!chunk.boundary || !instance.mesh) return;
+    const auto& instance = chunk.Lake() ? chunk.Water() : chunk.Instance();
+    if ((!chunk.boundary && !chunk.Lake()) || !instance.mesh) return;
     auto& c = *impl;
-    // Road-bounded meshes are already in world coordinates and cannot be transformed.
-    if (!c.Visible(instance.mesh->bounds)) return;
+    Bounds3 worldBounds;
+    const auto& bounds = instance.mesh->bounds;
+    for (double x : {bounds.min.x, bounds.max.x})
+        for (double z : {bounds.min.z, bounds.max.z}) worldBounds.Include(instance.transform.Point({x, bounds.min.y, z}));
+    if (!c.Visible(worldBounds)) return;
     auto& entry = c.terrain[&chunk];
     if (entry.mesh.lock() != instance.mesh || entry.transform != instance.transform)
     {
@@ -228,12 +231,12 @@ void PlanRenderer::Terrain(const TerrainChunk& chunk)
         entry.transform = instance.transform;
     }
     entry.lastFrame = c.frame;
-    const auto& bounds = instance.mesh->bounds;
-    const Vector3 origin = bounds.Empty() ? Vector3{} : (bounds.min + bounds.max) * 0.5;
+    const Vector3 origin = (worldBounds.min + worldBounds.max) * 0.5;
     c.Use(entry.surface, origin, [&](auto& batch) {
         batch.vertices.reserve(instance.mesh->indices.size());
         for (auto index : instance.mesh->indices)
-            batch.Add(instance.transform.Point(instance.mesh->vertices[index].position), TerrainChunk::groundColor);
+            batch.Add(instance.transform.Point(instance.mesh->vertices[index].position),
+                      chunk.Lake() ? SDL_FColor{0.12f, 0.37f, 0.45f, 1} : TerrainChunk::groundColor);
     });
 }
 

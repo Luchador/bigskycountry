@@ -53,7 +53,8 @@ std::set<SceneKey> RoadEditorState::SelectedRows() const
     if (meshSelection.kind == SelectionKind::Intersection || meshSelection.kind == SelectionKind::Anchor)
         return {{SceneKind::Intersection, meshSelection.index}};
     if (meshSelection.kind == SelectionKind::Object) return {{SceneKind::Object, meshSelection.index}};
-    if (meshSelection.kind == SelectionKind::Terrain) return {{SceneKind::Terrain, meshSelection.index}};
+    if (meshSelection.kind == SelectionKind::Terrain || meshSelection.kind == SelectionKind::LakePoint)
+        return {{SceneKind::Terrain, meshSelection.index}};
     return {};
 }
 
@@ -69,7 +70,8 @@ bool RoadEditorState::GeometrySelected(SceneKey key) const
 {
     if (key.kind == SceneKind::Road && key.index == selected) return true;
     if (key.kind == SceneKind::Intersection && meshSelection == TransformTarget{SelectionKind::Intersection, key.index}) return true;
-    if (key.kind == SceneKind::Terrain && meshSelection == TransformTarget{SelectionKind::Terrain, key.index}) return true;
+    if (key.kind == SceneKind::Terrain && key.index == meshSelection.index &&
+        (meshSelection.kind == SelectionKind::Terrain || meshSelection.kind == SelectionKind::LakePoint)) return true;
     return outlineSelection.contains(key);
 }
 
@@ -196,7 +198,7 @@ bool EditHistory::Action::ChangesWorld() const
 {
     return roadIndex >= 0 || !after.roadProperties.empty() || object || after.meshTransform || after.roadGroup || after.junction ||
            after.objectInvincible || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
-           before.addedTerrain || after.addedTerrain;
+           before.addedTerrain || after.addedTerrain || after.lake;
 }
 
 bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object)
@@ -458,7 +460,8 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     if (to.addedTerrain)
     {
         const auto& placement = *to.addedTerrain;
-        auto* chunk = placement.boundary ? world.PlaceTerrainFill(*placement.boundary, true) :
+        auto* chunk = placement.lake ? world.PlaceLake(*placement.lake, placement.transform) :
+                     placement.boundary ? world.PlaceTerrainFill(*placement.boundary, true) :
                                            world.PlaceTerrain(placement.modelPath, placement.transform);
         if (!chunk) return Result::Failed;
         chunk->material = placement.material;
@@ -529,7 +532,8 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         if (!path) return Result::Failed;
         *path = to.placedMaterial->path;
     }
-    if (to.meshTransform && !SetPlacementTransform(world, to.meshSelection, *to.meshTransform))
+    if (to.lake && !world.Terrain().at(to.lake->index)->SetLake(to.lake->definition)) return Result::Failed;
+    if (to.meshTransform && !to.lake && !SetPlacementTransform(world, to.meshSelection, *to.meshTransform))
     {
         return Result::Failed;
     }

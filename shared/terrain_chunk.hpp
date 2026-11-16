@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "lake.hpp"
 
 #include <array>
 #include <cstdint>
@@ -21,6 +22,11 @@ public:
     using MeshPlacement::Instance;
     using MeshPlacement::SetMesh;
 
+    const std::optional<LakeDefinition>& Lake() const { return lake; }
+    const MeshInstance& Water() const { return water; }
+    const auto& Shoreline() const { return shoreline; }
+    bool SetLake(const LakeDefinition& definition);
+
     struct OutlineEdge
     {
         Vector3 a, b, normal; // Adjacent face normal, for surface-aligned outline depth.
@@ -38,15 +44,21 @@ public:
 
     bool SetTransform(const ObjectTransform& t)
     {
+        if (lake && (t.rotation.x != 0 || t.rotation.z != 0)) return SDL_SetError("Lakes must remain horizontal");
         if (boundary && t != ObjectTransform{}) return SDL_SetError("Move the terrain boundary to transform this chunk");
         if (t.scale != Vector3{1, 1, 1})
         {
             return SDL_SetError("Terrain chunks use unit scale");
         }
-        return MeshPlacement::SetTransform(t);
+        if (!MeshPlacement::SetTransform(t)) return false;
+        water.transform = Instance().transform;
+        return true;
     }
 
 private:
+    std::optional<LakeDefinition> lake;
+    MeshInstance water;
+    std::vector<LakeSample> shoreline;
     mutable std::weak_ptr<const Mesh> outlinedMesh;
     mutable std::vector<OutlineEdge> outline;
 };

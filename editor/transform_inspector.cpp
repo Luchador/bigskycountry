@@ -54,7 +54,8 @@ bool TransformFields::CanEdit(int field) const
     }
 
     if (field == geographicLocation) return true;
-    if (target.YawOnly()) return field < 3 || field == 4;
+    if (target.kind == SelectionKind::LakePoint) return field == 0 || field == 2;
+    if (target.YawOnly() || levelOnly) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
 }
 
@@ -213,12 +214,18 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         fields.value.position = world.intersections.at(target.index).position;
         fields.value.rotation.y = world.intersections.at(target.index).yaw;
         break;
+    case SelectionKind::LakePoint:
+        if (i >= world.Terrain().size() || !world.Terrain()[i]->Lake() || target.point < 0 ||
+            static_cast<std::size_t>(target.point) >= world.Terrain()[i]->Lake()->points.size()) return {};
+        fields.value.position = world.Terrain()[i]->Instance().transform.Point(world.Terrain()[i]->Lake()->points[target.point].position);
+        break;
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
         {
             return {};
         }
         fields.roadBound = world.Terrain()[i]->boundary.has_value();
+        fields.levelOnly = world.Terrain()[i]->Lake().has_value();
         fields.value = world.Terrain()[i]->GetTransform();
         break;
     case SelectionKind::Object:
@@ -402,6 +409,14 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
     {
         return world.Terrain()[index]->SetTransform(transform);
     }
+    if (target.kind == SelectionKind::LakePoint && index < world.Terrain().size() && world.Terrain()[index]->Lake())
+    {
+        auto& chunk = *world.Terrain()[index];
+        auto lake = *chunk.Lake();
+        auto position = chunk.Instance().transform.Unrotate(transform.position - chunk.GetTransform().position);
+        position.y = 0;
+        return lake.MovePoint(target.point, position) && chunk.SetLake(lake);
+    }
     return SDL_SetError("Invalid mesh selection");
 }
 
@@ -425,7 +440,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
         return original.Transform(world, target.members, start.position, {}, axis, delta);
     }
 
-    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection)
+    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection || target.kind == SelectionKind::LakePoint)
     {
         return SetPlacementTransform(world, target, t);
     }

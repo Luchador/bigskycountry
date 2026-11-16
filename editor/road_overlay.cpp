@@ -417,6 +417,51 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
     }
 }
 
+void RoadOverlay::DrawLake(WorldRenderer& renderer, const TerrainChunk& lake, int point, const FreeCamera& camera, SDL_Rect scene) const
+{
+    if (!lake.Lake() || ViewportFocalLength(scene) <= 0) return;
+    const auto& frame = lake.Instance().transform;
+    std::vector<Vector3> samples;
+    samples.reserve(lake.Shoreline().size());
+    for (const auto& sample : lake.Shoreline()) samples.push_back(frame.Point(sample.position));
+    const OverlayStroke stroke(camera, scene, ViewportFocalLength(scene));
+    VisitSplineTriangles(stroke, camera, samples, [&](Vector3 a, Vector3 b, Vector3 c)
+    {
+        renderer.SubmitTriangle(a, b, c, EditorColors::blue);
+    });
+    for (int i = 0; i < static_cast<int>(lake.Lake()->points.size()); ++i)
+        if (const auto placement = PointPlacement(frame.Point(lake.Lake()->points[i].position), camera, scene))
+            renderer.SubmitMesh(Marker(*placement), i == point ? EditorColors::orange : EditorColors::blue);
+}
+
+std::optional<LakePick> RoadOverlay::PickLake(ViewportPicker& picker, const TerrainChunk& lake, const FreeCamera& camera, SDL_Rect scene) const
+{
+    if (!lake.Lake() || ViewportFocalLength(scene) <= 0) return {};
+    const OverlayStroke stroke(camera, scene, ViewportFocalLength(scene));
+    const auto& frame = lake.Instance().transform;
+    const auto& rim = lake.Shoreline();
+    std::optional<LakePick> result;
+    for (std::size_t i = 1; i < rim.size(); ++i)
+    {
+        const auto& a = rim[i - 1];
+        const auto& b = rim[i];
+        const std::array samples{frame.Point(a.position), frame.Point(b.position)};
+        VisitSplineTriangles(stroke, camera, samples, [&](Vector3 p, Vector3 q, Vector3 r)
+        {
+            if (!picker.TestTriangle(p, q, r)) return;
+            const auto local = frame.Unrotate(SplinePosition(picker, scene) - frame.origin);
+            const auto d = b.position - a.position;
+            const double fraction = std::clamp(Math::Dot(local - a.position, d) / Math::Dot(d, d), 0.0, 1.0);
+            const double endT = a.segment == b.segment ? b.t : 1;
+            result = LakePick{-1, a.segment, a.t + (endT - a.t) * fraction};
+        }, 6.0f);
+    }
+    for (int i = 0; i < static_cast<int>(lake.Lake()->points.size()); ++i)
+        if (const auto placement = PointPlacement(frame.Point(lake.Lake()->points[i].position), camera, scene))
+            if (picker.TestMesh(Marker(*placement))) result = LakePick{i};
+    return result;
+}
+
 RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, const Road* selected, const FreeCamera& camera, SDL_Rect scene, bool preferAnchor, Vector3* placement) const
 {
     RoadPick hit;
@@ -432,6 +477,7 @@ RoadPick RoadOverlay::Pick(ViewportPicker& picker, const WorldDocument& world, c
     {
         if (world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
         if (picker.TestMesh(world.Terrain()[i]->Instance())) hit = {RoadPickKind::Terrain, i};
+        if (picker.TestMesh(world.Terrain()[i]->Water())) hit = {RoadPickKind::Terrain, i};
     }
     for (int i = static_cast<int>(world.meshes.size()) - 1; i >= 0; --i)
     {

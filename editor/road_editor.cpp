@@ -197,9 +197,15 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     }
     const auto fields = Inspect(world, target);
     if (fields.target.kind == SelectionKind::None || fields.roadBound) return {};
+    if (target.kind == SelectionKind::LakePoint && gizmo.mode == GizmoMode::Rotate) return {};
     const Vector3 offset = target.kind == SelectionKind::Road ? world.roads.at(target.index).GuideOffset() : Vector3{};
-    auto placement = GizmoPlacement::At(fields.value.position + offset, camera, scene);
-    if (placement) placement->yawOnly = target.YawOnly();
+    auto placement = target.kind == SelectionKind::LakePoint ? RoadOverlay::PointPlacement(fields.value.position, camera, scene) :
+                     GizmoPlacement::At(fields.value.position + offset, camera, scene);
+    if (placement)
+    {
+        placement->yawOnly = target.YawOnly() || fields.levelOnly;
+        placement->horizontalTranslation = target.kind == SelectionKind::LakePoint;
+    }
     if (placement && gizmo.settings.space == GizmoSpace::Local)
     {
         const auto frame = ObjectTransform{{}, fields.value.rotation}.ToMeshTransform();
@@ -266,6 +272,10 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera)
 {
+    const auto lakeTarget = state.meshSelection;
+    if ((lakeTarget.kind == SelectionKind::Terrain || lakeTarget.kind == SelectionKind::LakePoint) &&
+        !state.HasHiddenSelection(world.hierarchy))
+        overlay.DrawLake(renderer, *world.Terrain().at(lakeTarget.index), lakeTarget.point, camera, scene);
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world); road && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected}))
     {
@@ -673,6 +683,23 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Save(world);
         return;
     }
+    if (command == EditorCommand::CreateLake)
+    {
+        EditSnapshot before(state);
+        if (!world.PlaceLake(LakeDefinition::Circle(), ObjectTransform{creationPoint}))
+        {
+            status = SDL_GetError();
+            return;
+        }
+        const int index = static_cast<int>(world.Terrain().size()) - 1;
+        state.SelectRows({{SceneKind::Terrain, index}});
+        EditSnapshot after(state);
+        after.addedTerrain = EditSnapshot::TerrainPlacement{{}, ObjectTransform{creationPoint}, {}, {}, 0, *world.Terrain().back()->Lake()};
+        history.Record(-1, std::move(before), std::move(after));
+        outliner.Invalidate();
+        Save(world);
+        return;
+    }
     if (command == EditorCommand::CreateMarker)
     {
         PlaceObject(world, ObjectType::Marker, Marker::modelPath, creationPoint);
@@ -831,7 +858,8 @@ void RoadEditor::AssignMaterial(WorldDocument& world, const std::string& path, c
     if (!viewportPoint && !EditingDraft())
     {
         if (state.meshSelection.kind == SelectionKind::Object) target = {RoadPickKind::Object, state.meshSelection.index};
-        if (state.meshSelection.kind == SelectionKind::Terrain) target = {RoadPickKind::Terrain, state.meshSelection.index};
+        if (state.meshSelection.kind == SelectionKind::Terrain || state.meshSelection.kind == SelectionKind::LakePoint)
+            target = {RoadPickKind::Terrain, state.meshSelection.index};
         if (state.meshSelection.kind == SelectionKind::Intersection) target = {RoadPickKind::Intersection, state.meshSelection.index};
     }
     if (viewportPoint)
@@ -1491,6 +1519,7 @@ void RoadEditor::RotatePlanPoint(Road& road)
 
 void RoadEditor::Release(WorldDocument& world)
 {
+    if (drag == Drag::LakePoint) SDL_CaptureMouse(false);
     if (rampDrag) FinishRampControl(world, false);
     if (dragStart && dragChanged)
     {
@@ -2487,6 +2516,69 @@ bool RoadEditor::GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const
            (snapPick || (!subtract && (!anchorHit || state.RoadGroupSelected()) && !pickPoint));
 }
 
+bool RoadEditor::PickLakeControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick)
+{
+    const auto target = state.meshSelection;
+    if ((target.kind != SelectionKind::Terrain && target.kind != SelectionKind::LakePoint) ||
+        state.HasHiddenSelection(world.hierarchy)) return false;
+    auto& chunk = *world.Terrain().at(target.index);
+    if (!chunk.Lake()) return false;
+    ViewportPicker picker(camera, scene, mouse);
+    overlay.Pick(picker, world, Selected(world), camera, scene);
+    const auto hit = overlay.PickLake(picker, chunk, camera, scene);
+    if (!hit) return false;
+    if (hit->point >= 0)
+    {
+        state.meshSelection = {SelectionKind::LakePoint, target.index, hit->point};
+        dragStart.emplace(state);
+        dragStart->lake = EditSnapshot::LakeEdit{target.index, *chunk.Lake()};
+        dragStart->meshTransform = Inspect(world, state.meshSelection).value;
+        anchorPress = mouse;
+        drag = Drag::LakePoint;
+        gizmo.mode = GizmoMode::Translate;
+        SDL_CaptureMouse(true);
+    }
+    else if (doubleClick)
+    {
+        EditSnapshot before(state);
+        before.lake = EditSnapshot::LakeEdit{target.index, *chunk.Lake()};
+        auto lake = *chunk.Lake();
+        if (!lake.InsertPoint(hit->segment, hit->t) || !chunk.SetLake(lake))
+        {
+            status = SDL_GetError();
+            return true;
+        }
+        state.meshSelection = {SelectionKind::LakePoint, target.index, hit->segment + 1};
+        CommitTransform(world, std::move(before));
+    }
+    // A single click on the shoreline keeps it selected for the second click.
+    return true;
+}
+
+void RoadEditor::MoveLakePoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer)
+{
+    mouse = pointer;
+    const auto& start = *dragStart->meshTransform;
+    const SDL_FPoint delta{pointer.x - anchorPress.x, pointer.y - anchorPress.y};
+    auto& chunk = *world.Terrain()[state.meshSelection.index];
+    if (delta.x == 0 && delta.y == 0)
+    {
+        chunk.SetLake(dragStart->lake->definition);
+        dragChanged = false;
+        return;
+    }
+    const auto position = DragAtElevation(camera, scene, start.position, delta);
+    if (!position) return;
+    ObjectTransform pose = start;
+    pose.position = *position;
+    auto lake = dragStart->lake->definition;
+    auto local = chunk.Instance().transform.Unrotate(pose.position - chunk.GetTransform().position);
+    local.y = 0;
+    if (!lake.MovePoint(state.meshSelection.point, local) || !chunk.SetLake(lake)) { status = SDL_GetError(); return; }
+    status.clear();
+    dragChanged = *chunk.Lake() != dragStart->lake->definition;
+}
+
 void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers)
 {
     const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
@@ -2537,6 +2629,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
             {
                 dragStart.emplace(state);
                 dragStart->meshTransform = Inspect(world, state.meshSelection).value;
+                if (state.meshSelection.kind == SelectionKind::LakePoint)
+                    dragStart->lake = EditSnapshot::LakeEdit{state.meshSelection.index, *world.Terrain()[state.meshSelection.index]->Lake()};
                 drag = shift && state.meshSelection.kind == SelectionKind::Object && gizmo.mode == GizmoMode::Translate
                            ? Drag::DuplicateObject : Drag::Gizmo;
             }
@@ -2643,6 +2737,18 @@ void RoadEditor::SubdivideSelection(WorldDocument& world)
 void RoadEditor::DeleteSelection(WorldDocument& world)
 {
     if (EditingDraft() || drag != Drag::None) return;
+    if (state.meshSelection.kind == SelectionKind::LakePoint)
+    {
+        const auto target = state.meshSelection;
+        auto& chunk = *world.Terrain().at(target.index);
+        auto lake = *chunk.Lake();
+        EditSnapshot before(state);
+        before.lake = EditSnapshot::LakeEdit{target.index, lake};
+        if (!lake.RemovePoint(target.point) || !chunk.SetLake(lake)) { status = SDL_GetError(); return; }
+        state.SelectRows({{SceneKind::Terrain, target.index}});
+        CommitTransform(world, std::move(before));
+        return;
+    }
     if (state.meshSelection.kind == SelectionKind::Terrain)
     {
         const int index = state.meshSelection.index;
@@ -2650,7 +2756,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         EditSnapshot before(state);
         before.addedTerrain = EditSnapshot::TerrainPlacement{
             chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary,
-            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index})};
+            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index}), chunk.Lake()};
         world.RemoveTerrain(index);
         state.SelectRows({});
         EditSnapshot after(state);
@@ -2897,6 +3003,8 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
     if (*desired == fields.value) return;
     const Road* road = Selected(world);
     EditSnapshot before(state, road);
+    if (edit.target.kind == SelectionKind::LakePoint)
+        before.lake = EditSnapshot::LakeEdit{edit.target.index, *world.Terrain()[edit.target.index]->Lake()};
     if (edit.target.kind == SelectionKind::Intersection || edit.target.kind == SelectionKind::RoadGroup)
         before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
     else if (!road) before.meshTransform = fields.value;
@@ -2910,7 +3018,14 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
 
 void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
 {
-    if (drag == Drag::DuplicateObject)
+    if (before.lake)
+    {
+        EditSnapshot after(state);
+        after.lake = EditSnapshot::LakeEdit{before.lake->index, *world.Terrain()[before.lake->index]->Lake()};
+        before.meshTransform.reset();
+        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+    }
+    else if (drag == Drag::DuplicateObject)
     {
         const int index = state.meshSelection.index;
         const int folder = world.hierarchy.Parent({SceneKind::Object, index});
@@ -3052,7 +3167,9 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         }
         if (mesh)
         {
-            if (!SetPlacementTransform(world, state.meshSelection, pose)) return;
+            if (dragStart->lake && pose == start)
+                world.Terrain()[state.meshSelection.index]->SetLake(dragStart->lake->definition);
+            else if (!SetPlacementTransform(world, state.meshSelection, pose)) return;
         }
         else
         {
@@ -3392,7 +3509,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (dragStart && event.key.key == SDLK_ESCAPE)
         {
-            if (drag == Drag::DuplicateObject) MoveObjectCopy(world, *dragStart->meshTransform);
+            if (dragStart->lake) world.Terrain()[dragStart->lake->index]->SetLake(dragStart->lake->definition);
+            else if (drag == Drag::DuplicateObject) MoveObjectCopy(world, *dragStart->meshTransform);
             else if (dragStart->roadGroup) dragStart->roadGroup->Restore(world);
             else if (dragStart->meshTransform)
             {
@@ -3630,7 +3748,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
 #endif
     }
-    if (!planView && !DraggingGizmo() && drag != Drag::AnchorRoad && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
+    if (!planView && !DraggingGizmo() && drag != Drag::AnchorRoad && drag != Drag::LakePoint && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         return EditorEvent::Pass;
     }
@@ -3657,7 +3775,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             else
             {
-                PickWorldRoad(world, camera, modifiers);
+                if (!PickLakeControl(world, camera, e.button.clicks >= 2)) PickWorldRoad(world, camera, modifiers);
             }
         }
         else if (!planView)
@@ -3680,7 +3798,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (drag == Drag::AnchorRoad)
+        if (drag == Drag::LakePoint)
+        {
+            if (e.motion.state & SDL_BUTTON_LMASK) MoveLakePoint(world, camera, pointer);
+            else Release(world);
+        }
+        else if (drag == Drag::AnchorRoad)
         {
             if (e.motion.state & SDL_BUTTON_LMASK) UpdateAnchorRoad(camera, pointer);
             else Release(world);
@@ -3701,7 +3824,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                             drag == Drag::Pan ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
         if (e.button.button == button)
         {
-            if (drag == Drag::AnchorRoad)
+            if (drag == Drag::LakePoint) MoveLakePoint(world, camera, pointer);
+            else if (drag == Drag::AnchorRoad)
             {
                 UpdateAnchorRoad(camera, pointer);
                 FinishAnchorRoad(world);

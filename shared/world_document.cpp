@@ -31,7 +31,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 4;
+    constexpr Uint32 terrainVersion = 5;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
 
@@ -127,6 +127,20 @@ namespace
                     !ReadIds(in, boundary.roads) || !ReadIds(in, boundary.intersections) || (boundary.roads.empty() && boundary.intersections.empty()))
                     return SDL_SetError("Invalid terrain boundary in TERR");
                 auto* chunk = world.PlaceTerrainFill(std::move(boundary), true);
+                if (!chunk) return false;
+                chunk->material = std::move(material);
+                in >> std::ws;
+                continue;
+            }
+            if (kind == "lake" && version >= 5)
+            {
+                ObjectTransform t;
+                LakeDefinition lake;
+                std::string material;
+                if (!(in >> t.position.x >> t.position.y >> t.position.z >> t.rotation.y >> std::quoted(material)) ||
+                    (!material.empty() && !Material::ValidAssetPath(material)) || !lake.Read(in))
+                    return SDL_SetError("Invalid lake in TERR");
+                auto* chunk = world.PlaceLake(lake, t);
                 if (!chunk) return false;
                 chunk->material = std::move(material);
                 in >> std::ws;
@@ -375,6 +389,13 @@ bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object,
     hierarchy.ReplaceRange(SceneKind::Object, index, 0, 1, folder);
     objects.insert(objects.begin() + index, std::move(object));
     return true;
+}
+
+TerrainChunk* WorldDocument::PlaceLake(const LakeDefinition& lake, const ObjectTransform& transform)
+{
+    auto chunk = std::make_unique<TerrainChunk>();
+    if (!chunk->SetLake(lake) || !chunk->SetTransform(transform)) return nullptr;
+    return terrain.emplace_back(std::move(chunk)).get();
 }
 
 TerrainChunk* WorldDocument::PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform)
@@ -717,6 +738,15 @@ bool WorldDocument::Save() const
     {
         if (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material))
             return SDL_SetError("Cannot save invalid terrain material");
+        if (chunk->Lake())
+        {
+            const auto& t = chunk->GetTransform();
+            terrainData << "lake " << t.position.x << ' ' << t.position.y << ' ' << t.position.z << ' ' << t.rotation.y
+                        << ' ' << std::quoted(chunk->material) << ' ';
+            if (!chunk->Lake()->Write(terrainData)) return SDL_SetError("Cannot save lake");
+            terrainData << '\n';
+            continue;
+        }
         if (chunk->boundary)
         {
             terrainData << "fill " << std::quoted(chunk->material);

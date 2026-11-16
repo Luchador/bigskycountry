@@ -22,6 +22,7 @@ struct GizmoPlacement
 
     // A fixed-size gizmo centered on any visible world-space pivot.
     bool yawOnly = false; // Keep intersections horizontal.
+    bool horizontalTranslation = false;
     static std::optional<GizmoPlacement> At(Vector3 pivot, const FreeCamera& camera, SDL_Rect scene);
 };
 

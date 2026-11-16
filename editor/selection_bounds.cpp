@@ -50,6 +50,11 @@ Bounds3 SelectionBounds(const WorldDocument& world, const RoadEditorState& state
         if (state.anchorSelection) anchor(*state.anchorSelection);
         return result;
     }
+    if (state.meshSelection.kind == SelectionKind::LakePoint)
+    {
+        result.Include(Inspect(world, state.meshSelection).value.position);
+        return result;
+    }
     if (state.meshSelection.kind == SelectionKind::Anchor)
     {
         anchor({state.meshSelection.index, state.meshSelection.point});
