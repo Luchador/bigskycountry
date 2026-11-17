@@ -31,7 +31,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 6;
+    constexpr Uint32 terrainVersion = 7;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -98,13 +98,14 @@ namespace
         return out.good() || SDL_SetError("Could not serialize mesh instances");
     }
 
-    bool ReadIds(std::istream& in, std::set<int>& ids)
+    template <class Id> bool ReadIds(std::istream& in, std::set<Id>& ids)
     {
         int count;
         if (!(in >> count) || count < 0) return false;
         for (int i = 0; i < count; ++i)
         {
-            int id;
+            Id id;
+            if (!(in >> std::ws) || in.peek() == '-') return false;
             if (!(in >> id) || id <= 0 || !ids.insert(id).second) return false;
         }
         return true;
@@ -125,7 +126,8 @@ namespace
                 TerrainBoundary boundary;
                 std::string material;
                 if (!(in >> std::quoted(material)) || (!material.empty() && !Material::ValidAssetPath(material)) ||
-                    !ReadIds(in, boundary.roads) || !ReadIds(in, boundary.intersections) || (boundary.roads.empty() && boundary.intersections.empty()))
+                    !ReadIds(in, boundary.roads) || !ReadIds(in, boundary.intersections) ||
+                    (version >= 7 && !ReadIds(in, boundary.waterBodies)) || boundary.Empty())
                     return SDL_SetError("Invalid terrain boundary in TERR");
                 auto* chunk = world.PlaceTerrainFill(std::move(boundary), true);
                 if (!chunk) return false;
@@ -784,6 +786,8 @@ bool WorldDocument::Save()
                 terrainData << ' ' << ids->size();
                 for (int id : *ids) terrainData << ' ' << id;
             }
+            terrainData << ' ' << chunk->boundary->waterBodies.size();
+            for (auto id : chunk->boundary->waterBodies) terrainData << ' ' << id;
             terrainData << '\n';
             continue;
         }

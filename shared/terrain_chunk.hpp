@@ -11,6 +11,8 @@
 struct TerrainBoundary
 {
     std::set<int> roads, intersections; // Stable world IDs, independent of outliner order.
+    std::set<std::uint64_t> waterBodies; // Explicit river/lake boundary sources, also stable IDs.
+    bool Empty() const { return roads.empty() && intersections.empty() && waterBodies.empty(); }
     bool operator==(const TerrainBoundary&) const = default;
 };
 

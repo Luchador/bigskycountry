@@ -2431,6 +2431,8 @@ void RoadEditor::FillSelection(WorldDocument& world)
     {
         if (key.kind == SceneKind::Road) boundary.roads.insert(world.roads.at(key.index).id);
         else if (key.kind == SceneKind::Intersection) boundary.intersections.insert(key.index);
+        else if (key.kind == SceneKind::Terrain && world.Terrain().at(key.index)->HasWater())
+            boundary.waterBodies.insert(world.Terrain()[key.index]->persistentId);
     }
     for (std::size_t i = 0; i < world.Terrain().size(); ++i)
     {
@@ -2686,7 +2688,8 @@ bool RoadEditor::GizmoTakesClick(RoadPick hit, SDL_Keymod modifiers) const
     const bool addSegment = state.point < 0 && shift && hit.kind == RoadPickKind::Segment;
     const bool addElement = shift && state.point < 0 &&
         (hit.kind == RoadPickKind::Intersection || (hit.kind == RoadPickKind::Road && hit.index != state.selected));
-    return !addElement && !addSegment &&
+    const bool addPlaced = shift && (hit.kind == RoadPickKind::Terrain || hit.kind == RoadPickKind::Object || hit.kind == RoadPickKind::Mesh);
+    return !addElement && !addPlaced && !addSegment &&
            (snapPick || (!subtract && (!anchorHit || state.RoadGroupSelected()) && !pickPoint));
 }
 
@@ -2942,11 +2945,10 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
     case RoadPickKind::Object:
     case RoadPickKind::Terrain:
         state.drawing = false;
-        state.SelectPoint(-1, -1);
-        state.meshSelection = {hit.kind == RoadPickKind::Object ? SelectionKind::Object : SelectionKind::Terrain, hit.index};
+        state.PickElement({hit.kind == RoadPickKind::Object ? SceneKind::Object : SceneKind::Terrain, hit.index}, shift, subtract);
         break;
     case RoadPickKind::Mesh:
-        state.SelectRows({{SceneKind::Mesh, hit.index}});
+        state.PickElement({SceneKind::Mesh, hit.index}, shift, subtract);
         break;
     case RoadPickKind::Empty:
         if (!shift && !subtract) state.SelectPoint(-1, -1);
@@ -3098,7 +3100,7 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
         (!FinishWaterEditing(world) || !Save(world))) return;
     if (cmd.op == OutlineOp::FillTerrain)
     {
-        if (IsTerrainFillSelection(state.SelectedRows()) && state.SelectedRows() == cmd.items) FillSelection(world);
+        if (IsTerrainFillSelection(state.SelectedRows(), &world) && state.SelectedRows() == cmd.items) FillSelection(world);
     }
     else if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object ||
              cmd.target.kind == SceneKind::Intersection || cmd.target.kind == SceneKind::Terrain))
@@ -3738,7 +3740,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (!event.key.repeat && drag == Drag::None)
         {
             if (!state.groupEndpoints.empty()) ConnectRoads(world);
-            else if (IsTerrainFillSelection(state.SelectedRows())) FillSelection(world);
+            else if (IsTerrainFillSelection(state.SelectedRows(), &world)) FillSelection(world);
             else ConnectEndpoint(world);
         }
         return EditorEvent::Handled;

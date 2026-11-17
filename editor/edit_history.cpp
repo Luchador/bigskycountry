@@ -83,21 +83,24 @@ bool IsRoadGroup(const std::set<SceneKey>& keys)
     });
 }
 
-bool IsTerrainFillSelection(const std::set<SceneKey>& keys)
+bool IsTerrainFillSelection(const std::set<SceneKey>& keys, const WorldDocument* world)
 {
     return std::ranges::any_of(keys, [](SceneKey key) { return key.kind == SceneKind::Intersection; }) ||
-           std::ranges::count_if(keys, [](SceneKey key) { return key.kind == SceneKind::Road; }) >= 2;
+           std::ranges::count_if(keys, [&](SceneKey key) {
+               return key.kind == SceneKind::Road || (world && key.kind == SceneKind::Terrain &&
+                      world->Contains(key) && world->Terrain()[key.index]->HasWater());
+           }) >= 2;
 }
 
 void RoadEditorState::PickElement(SceneKey key, bool add, bool subtract)
 {
-    if (subtract && !GeometrySelected(key)) return;
     auto keys = SelectedRows();
+    if (subtract && !keys.contains(key)) return;
     if (subtract) keys.erase(key);
     else
     {
         if (!add) keys.clear();
-        std::erase_if(keys, [](SceneKey k) { return k.kind != SceneKind::Road && k.kind != SceneKind::Intersection; });
+        std::erase_if(keys, [](SceneKey k) { return k.kind == SceneKind::World || k.kind == SceneKind::Folder; });
         keys.insert(key);
     }
     SelectRows(keys);

@@ -291,4 +291,9 @@ if(BIGSKY_BUILD_TESTS)
         editor/transform_inspector.cpp editor/road_group_transform.cpp)
     target_link_libraries(BigSkyRailroadJunctionTests PRIVATE BigSkyApplication)
     add_test(NAME railroad_junctions COMMAND BigSkyRailroadJunctionTests)
+    add_executable(BigSkyRiverFillTests tests/river_fill_tests.cpp
+        editor/plan_selection.cpp editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyRiverFillTests PRIVATE BigSkyApplication)
+    add_test(NAME river_fill COMMAND BigSkyRiverFillTests)
 endif()

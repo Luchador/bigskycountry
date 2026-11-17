@@ -364,8 +364,9 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
                                            std::span<const std::vector<Vector3>> exclusions, std::span<const Segment> junctionSeams)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
-    if (first == footprints.end() && links.empty()) return {};
-    Outline outline{first == footprints.end() ? links.front()[0] : (*first)->outline.front()};
+    const auto shore = std::find_if(exclusions.begin(), exclusions.end(), [](const auto& rim) { return rim.size() >= 3; });
+    if (first == footprints.end() && links.empty() && shore == exclusions.end()) return {};
+    Outline outline{first != footprints.end() ? (*first)->outline.front() : !links.empty() ? links.front()[0] : shore->front()};
     outline.junctionSeams = junctionSeams;
     const auto addRim = [&](const std::vector<Vector3>& rim)
     {
@@ -423,8 +424,8 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
             outline.solidWalls.insert(outline.solidWalls.end(), slab.walls.begin(), slab.walls.end());
         }
     }
-    // Treat the lake as an occupied footprint, using its already-built shoreline.
-    // The same constrained edges then bound the land pocket's inner ring.
+    // Water occupies its committed shoreline footprint. These exact edges can
+    // bound either an inner hole or the outside of an adjoining land pocket.
     for (const auto& rim : exclusions) addRim(rim);
     for (const auto& link : links) outline.AddEdge(link[0], link[1]);
     if (outline.points.size() < 3) return {};

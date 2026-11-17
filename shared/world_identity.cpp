@@ -50,6 +50,11 @@ bool WorldDocument::EnsureStableIds()
         if (*id && !used.insert(*id).second) return SDL_SetError("Duplicate world placement identity");
         lastPlacementId = std::max(lastPlacementId, *id);
     }
+    // Deleted boundary sources retain their IDs so a new placement cannot
+    // silently replace a missing river after saving and loading.
+    for (const auto& chunk : terrain)
+        if (chunk->boundary && !chunk->boundary->waterBodies.empty())
+            lastPlacementId = std::max(lastPlacementId, *chunk->boundary->waterBodies.rbegin());
     for (auto* id : placements)
         if (!*id && !(*id = AllocatePlacementId())) return false;
     return true;

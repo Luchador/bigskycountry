@@ -62,6 +62,7 @@ class SceneOutliner
     std::string NewFolderName() const;
     const auto& Rows() const { return rows; }
     const auto& Selection() const { return selection; }
+    bool CanFillTerrain(const std::set<SceneKey>& keys) const { return document && IsTerrainFillSelection(keys, document); }
     unsigned Version() const { return version; }
 
   private:

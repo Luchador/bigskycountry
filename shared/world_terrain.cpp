@@ -57,6 +57,14 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     for (const auto* footprint : footprints)
         if (!footprint->bounds.Empty()) { bounds.Include(footprint->bounds.min); bounds.Include(footprint->bounds.max); }
     for (const auto& link : links) for (auto point : link) bounds.Include(point);
+    auto missingWater = boundary.waterBodies;
+    for (const auto& water : terrain)
+    {
+        if (!boundary.waterBodies.contains(water->persistentId) || !water->HasWater() || !water->Water().mesh) continue;
+        missingWater.erase(water->persistentId);
+        const auto b = WorldBounds(water->Water().mesh->bounds, water->Water().transform);
+        if (!b.Empty()) { bounds.Include(b.min); bounds.Include(b.max); }
+    }
     std::vector<const TerrainChunk*> lakes;
     for (const auto& lake : terrain)
     {
@@ -69,7 +77,19 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     std::ranges::sort(lakes, [](const auto* a, const auto* b) { return a->persistentId < b->persistentId; });
     std::vector<std::pair<std::uint64_t, std::uint64_t>> waterRevisions;
     for (const auto* lake : lakes) waterRevisions.emplace_back(lake->persistentId, lake->WaterRevision());
+    for (auto id : missingWater) waterRevisions.emplace_back(id, 0);
+    std::ranges::sort(waterRevisions);
     if (revisions == chunk.sourceRevisions && links == chunk.anchorLinks && waterRevisions == chunk.sourceWaterBodies) return;
+    if (!missingWater.empty())
+    {
+        // A selected bank is part of the authored perimeter, not just an optional
+        // exclusion. Suspend the fill until that source returns (e.g. on undo).
+        chunk.SetMesh({});
+        chunk.sourceRevisions = std::move(revisions);
+        chunk.anchorLinks = std::move(links);
+        chunk.sourceWaterBodies = std::move(waterRevisions);
+        return;
+    }
     std::vector<std::vector<Vector3>> shorelines;
     for (const auto* lake : lakes)
     {
@@ -130,10 +150,11 @@ void WorldDocument::RefreshTerrainFills()
 
 TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool allowOpen)
 {
-    if ((boundary.roads.empty() && boundary.intersections.empty()) || (!boundary.roads.empty() && *boundary.roads.begin() <= 0) ||
-        (!boundary.intersections.empty() && *boundary.intersections.begin() <= 0))
+    if (boundary.Empty() || (!boundary.roads.empty() && *boundary.roads.begin() <= 0) ||
+        (!boundary.intersections.empty() && *boundary.intersections.begin() <= 0) ||
+        (!boundary.waterBodies.empty() && *boundary.waterBodies.begin() == 0))
     {
-        SDL_SetError("Select the roads and intersections around the area to fill");
+        SDL_SetError("Select roads, railroads, intersections, rivers or lakes around the area to fill");
         return nullptr;
     }
     RefreshOverpasses();
@@ -142,6 +163,12 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
     int folder = 0;
     if (!allowOpen)
     {
+        for (const auto& water : terrain)
+            if (chunk->boundary->waterBodies.contains(water->persistentId) && water->EditingWater())
+            {
+                SDL_SetError("Finish editing the selected river or lake before filling terrain");
+                return nullptr;
+            }
         std::map<int, const Road*> byId;
         for (std::size_t i = 0; i < roads.size(); ++i)
         {
@@ -153,13 +180,17 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
         RebuildTerrain(*chunk, byId);
         if (!chunk->Instance().mesh)
         {
-            SDL_SetError("Select roads and intersections that enclose an area at matching elevations");
+            SDL_SetError("Select boundaries that enclose dry land, with road edges meeting river/lake banks at matching elevations");
             return nullptr;
         }
     }
     if (!folder)
         for (int id : chunk->boundary->intersections)
             if ((folder = hierarchy.Parent({SceneKind::Intersection, id}))) break;
+    if (!folder)
+        for (std::size_t i = 0; i < terrain.size(); ++i)
+            if (chunk->boundary->waterBodies.contains(terrain[i]->persistentId) &&
+                (folder = hierarchy.Parent({SceneKind::Terrain, static_cast<int>(i)}))) break;
     if (!chunk->boundary->roads.empty()) lastRoadId = std::max(lastRoadId, *chunk->boundary->roads.rbegin());
     terrainRevision = 0;
     const SceneKey key{SceneKind::Terrain, static_cast<int>(terrain.size())};

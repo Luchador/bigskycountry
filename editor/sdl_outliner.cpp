@@ -246,7 +246,7 @@ bool SdlOutliner::Key(SDL_Window* window, const SDL_Event& e, const SceneOutline
         return true;
     }
     if (!e.key.repeat && k == SDLK_F && !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
-        IsTerrainFillSelection(m.Selection()))
+        m.CanFillTerrain(m.Selection()))
     {
         cmd = OutlineCommand{OutlineOp::FillTerrain, {}, m.Selection()};
         return true;

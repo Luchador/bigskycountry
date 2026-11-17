@@ -171,7 +171,7 @@ void WindowsOutliner::Sync(const SceneOutliner& data)
 bool WindowsOutliner::QueueTerrainFill(bool repeat)
 {
     auto keys = Selected();
-    if (!IsTerrainFillSelection(keys)) return false;
+    if (!model || !model->CanFillTerrain(keys)) return false;
     if (!repeat) Queue({OutlineOp::FillTerrain, {}, std::move(keys)});
     return true;
 }
