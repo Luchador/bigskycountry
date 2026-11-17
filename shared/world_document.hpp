@@ -50,6 +50,8 @@ public:
     bool InsertObject(int index, std::unique_ptr<BSCObject>&& object, int folder);
     const std::vector<std::unique_ptr<BSCObject>>& Objects() const { return objects; }
     TerrainChunk* PlaceTerrain(const std::string& modelPath, const ObjectTransform& transform = {});
+    TerrainChunk* PlaceWater(const WaterDefinition& water, const ObjectTransform& transform = {});
+    TerrainChunk* PlaceRiver(const RiverDefinition& river, const ObjectTransform& transform = {}) { return PlaceWater(river, transform); }
     TerrainChunk* PlaceLake(const LakeDefinition& lake, const ObjectTransform& transform = {});
     int AllocateRoadId();
     int NextRampStationId() const;
@@ -102,7 +104,7 @@ private:
     std::string WriteStableIds() const;
     std::uint64_t rampRevision = 0;
     std::uint64_t terrainRevision = 0;
-    std::uint64_t terrainLakeRevision = 0;
+    std::uint64_t terrainWaterRevision = 0;
     std::uint64_t bridgeRevision = 0;
     std::size_t bridgeRoadCount = 0;
     std::uint64_t crossingRevision = 0;

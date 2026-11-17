@@ -216,7 +216,7 @@ void PlanRenderer::Road(const RoadGeometry& road, RoadLayer layer)
 
 void PlanRenderer::Terrain(const TerrainChunk& chunk)
 {
-    const auto& instance = chunk.Lake() ? chunk.Water() : chunk.Instance();
+    const auto& instance = chunk.HasWater() ? chunk.Water() : chunk.Instance();
     if (!instance.mesh) return;
     auto& c = *impl;
     const auto worldBounds = WorldBounds(instance.mesh->bounds, instance.transform);
@@ -234,7 +234,7 @@ void PlanRenderer::Terrain(const TerrainChunk& chunk)
         batch.vertices.reserve(instance.mesh->indices.size());
         for (auto index : instance.mesh->indices)
             batch.Add(instance.transform.Point(instance.mesh->vertices[index].position),
-                      chunk.Lake() ? SDL_FColor{0.12f, 0.37f, 0.45f, 1} : TerrainChunk::groundColor);
+                      chunk.HasWater() ? SDL_FColor{0.12f, 0.37f, 0.45f, 1} : TerrainChunk::groundColor);
     });
 }
 

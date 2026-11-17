@@ -98,7 +98,7 @@ std::set<SceneKey> SelectPlanBox(const WorldDocument& world, const PlanSelection
     for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
     {
         const auto& chunk = *world.Terrain()[i];
-        mesh({SceneKind::Terrain, i}, chunk.Lake() ? chunk.Water() : chunk.Instance());
+        mesh({SceneKind::Terrain, i}, chunk.HasWater() ? chunk.Water() : chunk.Instance());
     }
     for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i) mesh({SceneKind::Object, i}, world.Objects()[i]->Instance());
     for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i) mesh({SceneKind::Mesh, i}, world.meshes[i]);

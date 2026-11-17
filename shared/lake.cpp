@@ -197,11 +197,17 @@ std::optional<std::vector<LakeSample>> LakeGeometry::Sample(const LakeDefinition
 
 std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
 {
-    const auto fail = [](const char* error) -> std::optional<LakeGeometry> { SDL_SetError("%s", error); return {}; };
     auto samples = Sample(lake);
     if (!samples) return {};
+    return BuildShoreline(std::move(*samples), lake.depth);
+}
+
+std::optional<LakeGeometry> LakeGeometry::BuildShoreline(std::vector<LakeSample> samples, double depth)
+{
+    const auto fail = [](const char* error) -> std::optional<LakeGeometry> { SDL_SetError("%s", error); return {}; };
+    if (samples.size() < 4 || !std::isfinite(depth) || depth <= 0 || depth > 1000) return fail("Invalid water boundary or depth");
     LakeGeometry result;
-    result.shoreline = std::move(*samples);
+    result.shoreline = std::move(samples);
     const auto& rim = result.shoreline;
     Bounds3 bounds;
     for (const auto& sample : rim) bounds.Include(sample.position);
@@ -209,15 +215,15 @@ std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
     for (std::size_t i = 1; i < rim.size(); ++i)
     {
         const auto a = rim[i - 1].position, b = rim[i].position;
-        if (Math::Length(a - b) < 1e-6) return fail("Lake shoreline folds back on itself");
+        if (Math::Length(a - b) < 1e-6) return fail("Water boundary folds back on itself");
         area += a.x * b.z - b.x * a.z;
         for (std::size_t j = i + 2; j < rim.size(); ++j)
         {
             if (i == 1 && j + 1 == rim.size()) continue;
-            if (Crosses(a, b, rim[j - 1].position, rim[j].position)) return fail("Lake shoreline cannot cross itself");
+            if (Crosses(a, b, rim[j - 1].position, rim[j].position)) return fail("Water boundary cannot cross itself");
         }
     }
-    if (std::abs(area) < 1) return fail("Lake shoreline encloses too little area");
+    if (std::abs(area) < 1) return fail("Water boundary encloses too little area");
     std::vector<CDT::V2d<double>> vertices;
     std::vector<CDT::Edge> edges;
     const auto rimCount = static_cast<CDT::VertInd>(rim.size() - 1);
@@ -232,7 +238,7 @@ std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
         water.insertVertices(vertices);
         water.insertEdges(edges);
         water.eraseOuterTrianglesAndHoles();
-        result.water = MakeMesh(water, false, lake.depth, rim);
+        result.water = MakeMesh(water, false, depth, rim);
         // Interior samples make a subdivided basin, including narrow areas where
         // a regular grid would miss the polygon altogether.
         const double spacing = std::max(5.0, std::max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) / 96);
@@ -250,12 +256,12 @@ std::optional<LakeGeometry> LakeGeometry::Build(const LakeDefinition& lake)
         bed.insertVertices(vertices);
         bed.insertEdges(edges);
         bed.eraseOuterTrianglesAndHoles();
-        result.bed = MakeMesh(bed, true, lake.depth, rim);
+        result.bed = MakeMesh(bed, true, depth, rim);
     }
     catch (const std::exception&)
     {
-        return fail("Lake shoreline cannot be triangulated");
+        return fail("Water boundary cannot be triangulated");
     }
-    if (result.bed->indices.empty() || result.water->indices.empty()) return fail("Lake shoreline encloses no surface");
+    if (result.bed->indices.empty() || result.water->indices.empty()) return fail("Water boundary encloses no surface");
     return result;
 }

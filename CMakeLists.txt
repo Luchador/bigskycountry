@@ -98,6 +98,7 @@ add_library(BigSkyApplication STATIC
     shared/terrain_fill.cpp
     shared/terrain_chunk.cpp
     shared/lake.cpp
+    shared/river.cpp
     shared/world_terrain.cpp
     shared/road_render.cpp
     shared/plan_renderer.cpp
@@ -272,6 +273,11 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyPlanSelectionTests tests/plan_selection_tests.cpp editor/plan_selection.cpp)
     target_link_libraries(BigSkyPlanSelectionTests PRIVATE BigSkyApplication)
     add_test(NAME plan_selection COMMAND BigSkyPlanSelectionTests)
+    add_executable(BigSkyRiverTests tests/river_tests.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyRiverTests PRIVATE BigSkyApplication)
+    add_test(NAME rivers COMMAND BigSkyRiverTests)
     add_executable(BigSkyTerrainFillTests tests/terrain_fill_tests.cpp)
     target_link_libraries(BigSkyTerrainFillTests PRIVATE BigSkyApplication)
     add_test(NAME terrain_fill COMMAND BigSkyTerrainFillTests)

@@ -39,7 +39,7 @@ namespace
                                       {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3"}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     constexpr MenuItem createItems[] = {{BSC_CREATE_ROAD, L"&Create Road"}, {BSC_CREATE_RAILROAD, L"Create R&ailroad"}, {BSC_CREATE_INTERSECTION, L"Create &Intersection"}, {BSC_CREATE_Y_INTERSECTION, L"Create &Y-Intersection"},
-                                        {BSC_CREATE_LAKE, L"Create &Lake"}, {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
+                                        {BSC_CREATE_LAKE, L"Create &Lake"}, {BSC_CREATE_RIVER, L"Create Ri&ver"}, {BSC_CREATE_MARKER, L"&Marker"}, {BSC_RAILROAD_CROSSING, L"Create Railroad &Crossing"}};
     constexpr MenuItem removeCrossing{BSC_RAILROAD_CROSSING,L"Remove Railroad &Crossing"};
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
     constexpr MenuItem splitRoad{BSC_SPLIT_ROAD, L"&Split Road"};
@@ -408,6 +408,7 @@ namespace
                                          {"Create Intersection", EditorCommand::CreateIntersection},
                                          {"Create Y-Intersection", EditorCommand::CreateYIntersection},
                                          {"Create Lake", EditorCommand::CreateLake},
+                                         {"Create River", EditorCommand::CreateRiver},
                                          {"Marker", EditorCommand::CreateMarker},
                                          {"Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing},
                                          {"Overpass", EditorCommand::ToggleOverpass},
@@ -551,6 +552,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     if (choice == BSC_CREATE_EXIT_RAMP) return EditorCommand::CreateExitRamp;
     if (choice == BSC_CREATE_ENTRANCE_RAMP) return EditorCommand::CreateEntranceRamp;
     if (choice == BSC_CREATE_Y_INTERSECTION) return EditorCommand::CreateYIntersection;
+    if (choice == BSC_CREATE_RIVER) return EditorCommand::CreateRiver;
     if (choice == BSC_CREATE_LAKE) return EditorCommand::CreateLake;
     if (choice == BSC_CREATE_INTERSECTION) return EditorCommand::CreateIntersection;
     if (choice == BSC_CREATE_MARKER)

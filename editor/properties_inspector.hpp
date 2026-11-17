@@ -53,7 +53,7 @@ struct PropertiesInspector
     Marker::TextColor textColor{255, 255, 255};
     const char* MaterialCaption() const;
     bool materialSlot = false, invincible = false;
-    bool lake = false, editingLake = false;
+    bool water = false, river = false, editingWater = false;
     bool stopLine = false;
     double radius = 0;
     bool yIntersection = false, island = false;

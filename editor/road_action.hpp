@@ -38,7 +38,7 @@ enum class RoadAction
     NorthSouthIntersectionPaint,
     EastWestIntersectionPaint,
     ToggleInvincible,
-    EditLake,
-    FinishLake,
-    CancelLake
+    EditWater,
+    FinishWater,
+    CancelWater
 };

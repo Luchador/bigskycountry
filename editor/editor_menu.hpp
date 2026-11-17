@@ -4,7 +4,7 @@
 #include <optional>
 #include "material_action.hpp"
 
-enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake,
+enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
                            CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
 struct RampMenuOptions { bool exit, entrance; };
 struct SplitMenuOptions { bool enabled, railroad; };

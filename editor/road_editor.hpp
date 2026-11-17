@@ -69,7 +69,7 @@ private:
         AnchorRoad,
         Gizmo,
         DuplicateObject,
-        LakePoint,
+        WaterPoint,
         BoxSelect
     };
     using Action = RoadAction;
@@ -123,11 +123,11 @@ private:
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
-    bool PickLakeControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick);
-    void MoveLakePoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
-    void BeginLakeEditing(WorldDocument& world);
-    bool FinishLakeEditing(WorldDocument& world);
-    void CancelLakeEditing(WorldDocument& world);
+    bool PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick);
+    void MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
+    void BeginWaterEditing(WorldDocument& world);
+    bool FinishWaterEditing(WorldDocument& world);
+    void CancelWaterEditing(WorldDocument& world);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
     void MovePoint(Road& road, Vector3 position);
     void RotatePlanPoint(Road& road);
@@ -218,13 +218,14 @@ private:
     void FinishRampControl(WorldDocument& world, bool commit);
     RoadEditorState state;
     EditHistory history;
-    struct LakeEditSession
+    struct WaterEditSession
     {
         int index;
-        LakeDefinition original;
+        WaterDefinition original;
         EditHistory history; // Draft edits stay out of document undo until Finish.
     };
-    std::optional<LakeEditSession> lakeEdit;
+    std::optional<WaterEditSession> waterEdit;
+    int riverExtendEnd = -1;
     SceneOutliner outliner;
     EditorMenu menu;
     RoadOverlay overlay;

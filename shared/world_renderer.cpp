@@ -465,7 +465,7 @@ void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk, bool selected)
     const auto start = vertices.size(), firstResident = residentDraws.size();
     SubmitWorldMesh(chunk.Instance(), chunk.material, MeshUVs::TerrainProjection,
                     chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
-    if (chunk.Lake()) SubmitWorldMesh(chunk.Water(), LakeDefinition::waterMaterial);
+    if (chunk.HasWater()) SubmitWorldMesh(chunk.Water(), LakeDefinition::waterMaterial);
     if (!selected || viewport.w <= 0 || viewport.h <= 0) return;
     // Both cached GPU batches and streamed/software triangles participate in
     // the same depth/stencil selection mask used by roads and intersections.

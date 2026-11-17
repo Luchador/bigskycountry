@@ -31,7 +31,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 5;
+    constexpr Uint32 terrainVersion = 6;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -133,15 +133,15 @@ namespace
                 in >> std::ws;
                 continue;
             }
-            if (kind == "lake" && version >= 5)
+            if ((kind == "lake" && version >= 5) || (kind == "river" && version >= 6))
             {
                 ObjectTransform t;
-                LakeDefinition lake;
+                WaterDefinition water = kind == "river" ? WaterDefinition{RiverDefinition{}} : WaterDefinition{LakeDefinition{}};
                 std::string material;
                 if (!(in >> t.position.x >> t.position.y >> t.position.z >> t.rotation.y >> std::quoted(material)) ||
-                    (!material.empty() && !Material::ValidAssetPath(material)) || !lake.Read(in))
-                    return SDL_SetError("Invalid lake in TERR");
-                auto* chunk = world.PlaceLake(lake, t);
+                    (!material.empty() && !Material::ValidAssetPath(material)) || !std::visit([&](auto& source) { return source.Read(in); }, water))
+                    return SDL_SetError("Invalid water body in TERR");
+                auto* chunk = world.PlaceWater(water, t);
                 if (!chunk) return false;
                 chunk->material = std::move(material);
                 in >> std::ws;
@@ -399,8 +399,13 @@ bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object,
 
 TerrainChunk* WorldDocument::PlaceLake(const LakeDefinition& lake, const ObjectTransform& transform)
 {
+    return PlaceWater(lake, transform);
+}
+
+TerrainChunk* WorldDocument::PlaceWater(const WaterDefinition& water, const ObjectTransform& transform)
+{
     auto chunk = std::make_unique<TerrainChunk>();
-    if (!chunk->SetLake(lake) || !chunk->SetTransform(transform)) return nullptr;
+    if (!chunk->SetWater(water) || !chunk->SetTransform(transform)) return nullptr;
     if (!(chunk->persistentId = AllocatePlacementId())) return nullptr;
     return terrain.emplace_back(std::move(chunk)).get();
 }
@@ -429,7 +434,7 @@ bool WorldDocument::RemoveTerrain(std::size_t index)
         return SDL_SetError("Invalid terrain chunk index");
     }
     hierarchy.ReplaceRange(SceneKind::Terrain, static_cast<int>(index), 1, 0);
-    if (terrain[index]->Lake()) terrainLakeRevision = 0;
+    if (terrain[index]->HasWater()) terrainWaterRevision = 0;
     terrain.erase(terrain.begin() + index);
     return true;
 }
@@ -759,15 +764,15 @@ bool WorldDocument::Save()
     terrainData << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto& chunk : terrain)
     {
-        if (chunk->EditingLake()) return SDL_SetError("Finish or cancel shoreline editing before saving");
+        if (chunk->EditingWater()) return SDL_SetError("Finish or cancel shoreline editing before saving");
         if (!chunk->material.empty() && !Material::ValidAssetPath(chunk->material))
             return SDL_SetError("Cannot save invalid terrain material");
-        if (chunk->Lake())
+        if (chunk->HasWater())
         {
             const auto& t = chunk->GetTransform();
-            terrainData << "lake " << t.position.x << ' ' << t.position.y << ' ' << t.position.z << ' ' << t.rotation.y
+            terrainData << (chunk->River() ? "river " : "lake ") << t.position.x << ' ' << t.position.y << ' ' << t.position.z << ' ' << t.rotation.y
                         << ' ' << std::quoted(chunk->material) << ' ';
-            if (!chunk->Lake()->Write(terrainData)) return SDL_SetError("Cannot save lake");
+            if (!std::visit([&](const auto& source) { return source.Write(terrainData); }, *chunk->WaterSource())) return SDL_SetError("Cannot save water body");
             terrainData << '\n';
             continue;
         }

@@ -6,7 +6,7 @@
 class WorldDocument;
 struct RoadEditorState;
 class TerrainChunk;
-struct LakePick { int point = -1, segment = -1; double t = 0; };
+struct WaterPick { int point = -1, segment = -1; double t = 0; int bank = -1; };
 
 enum class RoadPickKind { Empty, Road, Segment, Point, Object, Terrain, Mesh, Intersection };
 
@@ -34,8 +34,8 @@ class RoadOverlay
 {
 public:
     RoadOverlay();
-    void DrawLake(WorldRenderer& renderer, const TerrainChunk& lake, int point, const FreeCamera& camera, SDL_Rect scene) const;
-    std::optional<LakePick> PickLake(ViewportPicker& picker, const TerrainChunk& lake, const FreeCamera& camera, SDL_Rect scene) const;
+    void DrawWater(WorldRenderer& renderer, const TerrainChunk& lake, int point, const FreeCamera& camera, SDL_Rect scene) const;
+    std::optional<WaterPick> PickWater(ViewportPicker& picker, const TerrainChunk& lake, const FreeCamera& camera, SDL_Rect scene) const;
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
     static Vector3 SplinePosition(const ViewportPicker& pick, SDL_Rect scene);
     void Draw(WorldRenderer& renderer, const Road& road, const RoadEditorState& selection, int roadIndex,

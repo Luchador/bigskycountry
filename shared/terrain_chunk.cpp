@@ -5,6 +5,7 @@
 
 bool TerrainChunk::SetLake(const LakeDefinition& definition)
 {
+    if (river) return SDL_SetError("Cannot turn a river into a lake");
     if (lakeDraft)
     {
         if (*lakeDraft == definition) return true;
@@ -21,7 +22,7 @@ bool TerrainChunk::SetLake(const LakeDefinition& definition)
     SetMesh(std::move(geometry->bed));
     water = {std::move(geometry->water), Instance().transform};
     shoreline = std::move(geometry->shoreline);
-    LakeChanged();
+    WaterChanged();
     return true;
 }
 
@@ -45,7 +46,7 @@ bool TerrainChunk::FinishLakeEdit()
         SetMesh(std::move(geometry->bed));
         water = {std::move(geometry->water), Instance().transform};
         shoreline = std::move(geometry->shoreline);
-        LakeChanged();
+        WaterChanged();
     }
     CancelLakeEdit();
     return true;
@@ -55,6 +56,70 @@ void TerrainChunk::CancelLakeEdit()
 {
     lakeDraft.reset();
     draftShoreline.clear();
+}
+
+bool TerrainChunk::SetWater(const WaterDefinition& definition)
+{
+    return std::visit([&](const auto& source) {
+        using T = std::decay_t<decltype(source)>;
+        if constexpr (std::is_same_v<T, LakeDefinition>) return SetLake(source);
+        else return SetRiver(source);
+    }, definition);
+}
+
+bool TerrainChunk::SetRiver(const RiverDefinition& definition)
+{
+    if (lake) return SDL_SetError("Cannot turn a lake into a river");
+    if (riverDraft)
+    {
+        if (*riverDraft == definition) return true;
+        auto samples = RiverGeometry::Sample(definition);
+        if (!samples) return false;
+        riverDraft = definition;
+        draftShoreline = std::move(*samples);
+        return true;
+    }
+    if (river == definition) return true;
+    auto geometry = RiverGeometry::Build(definition);
+    if (!geometry) return false;
+    river = definition;
+    SetMesh(std::move(geometry->bed));
+    water = {std::move(geometry->water), Instance().transform};
+    shoreline = std::move(geometry->shoreline);
+    WaterChanged();
+    return true;
+}
+
+bool TerrainChunk::BeginWaterEdit()
+{
+    if (!river) return BeginLakeEdit();
+    if (riverDraft) return true;
+    riverDraft = river;
+    draftShoreline = shoreline;
+    return true;
+}
+
+bool TerrainChunk::FinishWaterEdit()
+{
+    if (!riverDraft) return FinishLakeEdit();
+    if (riverDraft != river)
+    {
+        auto geometry = RiverGeometry::Build(*riverDraft);
+        if (!geometry) return false;
+        river = std::move(riverDraft);
+        SetMesh(std::move(geometry->bed));
+        water = {std::move(geometry->water), Instance().transform};
+        shoreline = std::move(geometry->shoreline);
+        WaterChanged();
+    }
+    CancelWaterEdit();
+    return true;
+}
+
+void TerrainChunk::CancelWaterEdit()
+{
+    riverDraft.reset();
+    CancelLakeEdit();
 }
 
 const std::vector<TerrainChunk::OutlineEdge>& TerrainChunk::Outline() const

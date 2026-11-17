@@ -1,7 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
-#include "lake.hpp"
+#include "river.hpp"
 
 #include <array>
 #include <cstdint>
@@ -24,12 +24,26 @@ public:
     using MeshPlacement::SetMesh;
 
     const std::optional<LakeDefinition>& Lake() const { return lakeDraft ? lakeDraft : lake; }
+    const std::optional<RiverDefinition>& River() const { return riverDraft ? riverDraft : river; }
+    bool HasWater() const { return lake.has_value() || river.has_value(); }
+    std::optional<WaterDefinition> WaterSource() const
+    {
+        if (River()) return *River();
+        if (Lake()) return *Lake();
+        return {};
+    }
+    bool SetWater(const WaterDefinition& definition);
+    bool SetRiver(const RiverDefinition& definition);
+    bool EditingWater() const { return lakeDraft.has_value() || riverDraft.has_value(); }
+    bool BeginWaterEdit();
+    bool FinishWaterEdit();
+    void CancelWaterEdit();
     const MeshInstance& Water() const { return water; }
-    const auto& Shoreline() const { return lakeDraft ? draftShoreline : shoreline; }
+    const auto& Shoreline() const { return EditingWater() ? draftShoreline : shoreline; }
     // Terrain seams follow the committed mesh, not the lightweight edit preview.
     const auto& BuiltShoreline() const { return shoreline; }
-    std::uint64_t LakeRevision() const { return lakeRevision; }
-    static std::uint64_t LatestLakeRevision() { return latestLakeRevision; }
+    std::uint64_t WaterRevision() const { return waterRevision; }
+    static std::uint64_t LatestWaterRevision() { return latestWaterRevision; }
     bool SetLake(const LakeDefinition& definition);
     bool EditingLake() const { return lakeDraft.has_value(); }
     bool BeginLakeEdit();
@@ -49,15 +63,15 @@ public:
     // Derived state, never serialized. A missing rim temporarily suspends the mesh.
     std::vector<std::uint64_t> sourceRevisions;
     std::vector<std::array<Vector3, 2>> anchorLinks;
-    // Candidate lake IDs and committed revisions. IDs survive outliner reordering;
+    // Candidate lake/river IDs and committed revisions. IDs survive outliner reordering;
     // these derived dependencies are rediscovered after loading the authored world.
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> sourceLakes;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> sourceWaterBodies;
     std::string material; // Relative .bmat path, or empty to use the mesh colors.
 
     bool SetTransform(const ObjectTransform& t)
     {
-        if (lakeDraft && t != GetTransform()) return SDL_SetError("Finish shoreline editing before moving the lake");
-        if (lake && (t.rotation.x != 0 || t.rotation.z != 0)) return SDL_SetError("Lakes must remain horizontal");
+        if (EditingWater() && t != GetTransform()) return SDL_SetError("Finish shoreline editing before moving the water body");
+        if (HasWater() && (t.rotation.x != 0 || t.rotation.z != 0)) return SDL_SetError("Water surfaces must remain horizontal");
         if (boundary && t != ObjectTransform{}) return SDL_SetError("Move the terrain boundary to transform this chunk");
         if (t.scale != Vector3{1, 1, 1})
         {
@@ -66,14 +80,15 @@ public:
         const bool changed = t != GetTransform();
         if (!MeshPlacement::SetTransform(t)) return false;
         water.transform = Instance().transform;
-        if (lake && changed) LakeChanged();
+        if (HasWater() && changed) WaterChanged();
         return true;
     }
 
 private:
-    void LakeChanged() { lakeRevision = ++latestLakeRevision; }
-    inline static std::uint64_t latestLakeRevision = 0;
-    std::uint64_t lakeRevision = 0;
+    void WaterChanged() { waterRevision = ++latestWaterRevision; }
+    inline static std::uint64_t latestWaterRevision = 0;
+    std::uint64_t waterRevision = 0;
+    std::optional<RiverDefinition> river, riverDraft;
     std::optional<LakeDefinition> lake;
     std::optional<LakeDefinition> lakeDraft; // Transient editor state; never serialized.
     std::vector<LakeSample> draftShoreline;

@@ -60,16 +60,16 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     std::vector<const TerrainChunk*> lakes;
     for (const auto& lake : terrain)
     {
-        if (!lake->Lake() || !lake->Water().mesh || bounds.Empty()) continue;
+        if (!lake->HasWater() || !lake->Water().mesh || bounds.Empty()) continue;
         const auto b = WorldBounds(lake->Water().mesh->bounds, lake->Water().transform);
         // Ignore elevation here: surrounding terrain slopes down/up to the shore.
         if (!b.Empty() && b.max.x >= bounds.min.x && b.min.x <= bounds.max.x &&
             b.max.z >= bounds.min.z && b.min.z <= bounds.max.z) lakes.push_back(lake.get());
     }
     std::ranges::sort(lakes, [](const auto* a, const auto* b) { return a->persistentId < b->persistentId; });
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> lakeRevisions;
-    for (const auto* lake : lakes) lakeRevisions.emplace_back(lake->persistentId, lake->LakeRevision());
-    if (revisions == chunk.sourceRevisions && links == chunk.anchorLinks && lakeRevisions == chunk.sourceLakes) return;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> waterRevisions;
+    for (const auto* lake : lakes) waterRevisions.emplace_back(lake->persistentId, lake->WaterRevision());
+    if (revisions == chunk.sourceRevisions && links == chunk.anchorLinks && waterRevisions == chunk.sourceWaterBodies) return;
     std::vector<std::vector<Vector3>> shorelines;
     for (const auto* lake : lakes)
     {
@@ -80,15 +80,15 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
-    chunk.sourceLakes = std::move(lakeRevisions);
+    chunk.sourceWaterBodies = std::move(waterRevisions);
 }
 
 void WorldDocument::RefreshTerrainFills()
 {
     RefreshOverpasses();
-    if (terrainRevision == RoadGeometry::latestRevision && terrainLakeRevision == TerrainChunk::LatestLakeRevision()) return;
+    if (terrainRevision == RoadGeometry::latestRevision && terrainWaterRevision == TerrainChunk::LatestWaterRevision()) return;
     terrainRevision = RoadGeometry::latestRevision;
-    terrainLakeRevision = TerrainChunk::LatestLakeRevision();
+    terrainWaterRevision = TerrainChunk::LatestWaterRevision();
     std::map<int, const Road*> byId;
     bool indexed = false;
     for (auto& chunk : terrain)

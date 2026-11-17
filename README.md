@@ -190,6 +190,16 @@ Terrain fills automatically leave holes for lakes and meet their exact shoreline
 
 Water stays horizontal. A subdivided terrain basin slopes down from the exact shoreline to a maximum depth of 5 m. The terrain material slot affects the bed; `assets/textures/world/M_LakeWater.bmat` supplies the shared translucent water color. The bed participates in collision, while water does not act as a solid floor. Lakes are standalone terrain chunks; this first version does not excavate overlapping terrain or add swimming/buoyancy. Only the finished spline points and handles are saved in the world; meshes are rebuilt on Finish, undo/redo of a finished edit, or world load. Lakes also appear in the top-down overview and respect Outliner folder visibility.
 
+### Rivers
+
+In the 3D viewport, right-click **Create → Create River**. The new river starts at the cursor, 25 m wide and 200 m long, with **Edit River Banks** active. Two teal open splines define its banks, and larger green handles mark the center of its start and end. Drag either bank's teal points independently to change the width and course. Double-click a bank between points to insert a control point while preserving that curve; each bank may have a different point count. **Delete** removes a selected bank point, leaving at least two per bank.
+
+**Shift-drag a green end handle** to extend the river from either end. This adds a point to both banks, preserving the end's width. Dragging an end handle without Shift moves both bank ends together. Bank points and end handles also support the X/Z translation gizmo and Transform fields.
+
+Only the splines update during editing; the previous water and bed remain visible. **Finish Editing / Enter** rebuilds the surface and subdivided riverbed once. **Cancel / Esc** discards the draft; Esc during a drag cancels that gesture. Ctrl+Z/Ctrl+Y work within the draft, and a finished editing session is one document undo step. Crossing/collapsed banks are rejected on Finish, keeping the edit open and the last valid geometry intact. Rivers remain level in this version and share the lake water material and 5 m maximum basin depth; actual depth tapers with distance from the boundary. The bed, rather than the water surface, supplies collision.
+
+Rivers appear as **River** in the Outliner, support normal selection, movement, Y rotation, deletion, hiding, and top-down box selection, and participate in visibility and streaming. Road-bounded terrain fills automatically leave their footprints uncovered and follow committed bank changes just as they follow lake shorelines. Authored `TERR` version 6 stores both bank splines and their handles; older terrain and lake records still load. Recook the world after editing rivers for the streamed game.
+
 ### Scene outliner
 
 The **Outliner** above Transform lists the world’s roads, intersections, terrain chunks, placed objects, and static meshes. Click an entry to select it. Selecting a road or a control point in the viewport highlights its road in the list. Selecting a single road, object, or imported terrain chunk in the list makes its transform available for editing.

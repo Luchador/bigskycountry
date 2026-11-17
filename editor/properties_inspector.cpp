@@ -333,15 +333,18 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : names.at(target.point);
         result.stopLine = world.intersections.at(target.index).stopLines.test(target.point);
     }
-    else if (target.kind == SelectionKind::Terrain || target.kind == SelectionKind::LakePoint)
+    else if (target.kind == SelectionKind::Terrain || target.kind == SelectionKind::WaterPoint)
     {
         const auto& chunk = *world.Terrain().at(target.index);
         result.page = PropertiesPage::Terrain;
-        result.lake = chunk.Lake().has_value();
-        result.editingLake = chunk.EditingLake();
-        result.title = std::string(chunk.Lake() ? "Lake " : "Terrain ") + std::to_string(target.index + 1);
-        if (chunk.Lake()) result.detail = std::to_string(chunk.Lake()->points.size()) +
-            (chunk.EditingLake() ? " points | Editing shoreline" : " shoreline points | 5 m bed");
+        result.water = chunk.HasWater();
+        result.river = chunk.River().has_value();
+        result.editingWater = chunk.EditingWater();
+        result.title = std::string(chunk.River() ? "River " : chunk.Lake() ? "Lake " : "Terrain ") + std::to_string(target.index + 1);
+        if (chunk.River()) result.detail = std::to_string(chunk.River()->banks[0].size()) + " / " + std::to_string(chunk.River()->banks[1].size()) +
+            (chunk.EditingWater() ? " bank points | Editing" : " bank points | Riverbed");
+        else if (chunk.Lake()) result.detail = std::to_string(chunk.Lake()->points.size()) +
+            (chunk.EditingWater() ? " points | Editing shoreline" : " shoreline points | 5 m bed");
         else if (chunk.boundary)
             result.detail = chunk.Instance().mesh ? "Follows road boundary" : "Road boundary is open";
         else result.detail = chunk.Instance().mesh->assetPath;

@@ -987,9 +987,9 @@ struct WindowsPanels::Impl
             case IDC_RADIUS_MORE: PostAction(RoadAction::LargerRadius); return;
             case IDC_STOP_LINE: PostAction(RoadAction::ToggleStopLine); return;
             case IDC_INVINCIBLE: PostAction(RoadAction::ToggleInvincible); return;
-            case IDC_LAKE_EDIT: PostAction(RoadAction::EditLake); SetFocus(frame); return;
-            case IDC_LAKE_FINISH: PostAction(RoadAction::FinishLake); SetFocus(frame); return;
-            case IDC_LAKE_CANCEL: PostAction(RoadAction::CancelLake); SetFocus(frame); return;
+            case IDC_LAKE_EDIT: PostAction(RoadAction::EditWater); SetFocus(frame); return;
+            case IDC_LAKE_FINISH: PostAction(RoadAction::FinishWater); SetFocus(frame); return;
+            case IDC_LAKE_CANCEL: PostAction(RoadAction::CancelWater); SetFocus(frame); return;
             case IDC_FEWER: PostAction(RoadAction::Fewer); return;
             case IDC_MORE: PostAction(RoadAction::More); return;
             case IDC_DIVIDED: PostAction(RoadAction::Divide); return;
@@ -1056,9 +1056,11 @@ struct WindowsPanels::Impl
         const bool railroad = properties.page == PropertiesPage::Railroad;
         const bool junction = properties.page == PropertiesPage::Intersection;
         const bool yJunction = junction && properties.yIntersection;
-        ShowWindow(GetDlgItem(road, IDC_LAKE_EDIT), properties.lake && !properties.editingLake ? SW_SHOWNA : SW_HIDE);
+        SetDlgItemTextW(road, IDC_LAKE_HINT, properties.river ? L"Enter: finish | Esc: cancel\nShift-drag green ends: extend\nDouble-click banks: add point" : L"Enter: finish | Esc: cancel");
+        SetDlgItemTextW(road, IDC_LAKE_EDIT, properties.river ? L"Edit River Banks" : L"Edit Shoreline");
+        ShowWindow(GetDlgItem(road, IDC_LAKE_EDIT), properties.water && !properties.editingWater ? SW_SHOWNA : SW_HIDE);
         for (int id : {IDC_LAKE_FINISH, IDC_LAKE_CANCEL, IDC_LAKE_HINT})
-            ShowWindow(GetDlgItem(road, id), properties.editingLake ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, id), properties.editingWater ? SW_SHOWNA : SW_HIDE);
         for (int id : {IDC_INTERSECTION_SIZE_LABEL, IDC_INTERSECTION_SIZE, IDC_INTERSECTION_ISLAND, IDC_INTERSECTION_FILL_HINT})
             ShowWindow(GetDlgItem(road, id), yJunction ? SW_SHOWNA : SW_HIDE);
         for (int id : {IDC_INTERSECTION_PAINT_LABEL, IDC_INTERSECTION_PAINT})

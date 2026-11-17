@@ -139,7 +139,7 @@ void GeometryAndUpdates()
     world.RefreshTerrainFills(); Sealed(*fill->Instance().mesh, *lake);
     Check(world.RemoveTerrain(2) && world.RemoveTerrain(1), "Delete both lakes");
     world.RefreshTerrainFills();
-    Check(fill->Instance().mesh && std::abs(Area(*fill->Instance().mesh) - Area(*original)) < 1e-5 && fill->sourceLakes.empty(), "Deleted lakes left stale holes/dependencies");
+    Check(fill->Instance().mesh && std::abs(Area(*fill->Instance().mesh) - Area(*original)) < 1e-5 && fill->sourceWaterBodies.empty(), "Deleted lakes left stale holes/dependencies");
     auto* restored = world.PlaceLake(shape, ObjectTransform{origin + Vector3{0,3,0}});
     Check(restored, "Restore deleted lake"); world.RefreshTerrainFills(); Sealed(*fill->Instance().mesh, *restored);
     const auto beforeRoadEdit = fill->Instance().mesh;

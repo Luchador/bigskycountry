@@ -236,7 +236,7 @@ bool Cook(WorldDocument& world, const std::string& file)
         for (std::size_t i = 0; i < world.Terrain().size(); ++i)
         {
             const auto& chunk = *world.Terrain()[i]; const SceneKey key{SceneKind::Terrain, int(i)};
-            entity(key, meshBounds(chunk.Instance()), chunk.Lake() ? "Lake" : "Terrain", &chunk.Instance(), chunk.material);
+            entity(key, meshBounds(chunk.Instance()), chunk.River() ? "River" : chunk.Lake() ? "Lake" : "Terrain", &chunk.Instance(), chunk.material);
             auto bake = [&](const MeshInstance& instance, bool terrain, const std::string& material) {
                 if (!instance.mesh) return;
                 asset(AssetKind::Material, material);
@@ -264,7 +264,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                 }
             };
             bake(chunk.Instance(), true, chunk.material);
-            if (chunk.Lake()) bake(chunk.Water(), false, LakeDefinition::waterMaterial);
+            if (chunk.HasWater()) bake(chunk.Water(), false, LakeDefinition::waterMaterial);
         }
         for (const auto& e : manifest.entities)
             if ((e.id.kind == SceneKind::Terrain || e.id.kind == SceneKind::Mesh) && !e.bounds.Empty())
@@ -297,7 +297,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                 auto id = world.StableId({SceneKind::Terrain, int(i)});
                 for (int road : boundary->roads) link(id, {SceneKind::Road, std::uint64_t(road)});
                 for (int junction : boundary->intersections) link(id, {SceneKind::Intersection, std::uint64_t(junction)});
-                for (const auto& [lake, revision] : world.Terrain()[i]->sourceLakes) link(id, {SceneKind::Terrain, lake});
+                for (const auto& [lake, revision] : world.Terrain()[i]->sourceWaterBodies) link(id, {SceneKind::Terrain, lake});
             }
         for (auto& e : manifest.entities) { auto& d = e.dependencies; std::sort(d.begin(), d.end()); d.erase(std::unique(d.begin(), d.end()), d.end()); }
         std::vector<Cell> packed; packed.reserve(cells.size());

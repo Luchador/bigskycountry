@@ -54,7 +54,7 @@ bool TransformFields::CanEdit(int field) const
     }
 
     if (field == geographicLocation) return true;
-    if (target.kind == SelectionKind::LakePoint) return field == 0 || field == 2;
+    if (target.kind == SelectionKind::WaterPoint) return field == 0 || field == 2;
     if (target.YawOnly() || levelOnly) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
 }
@@ -214,18 +214,18 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         fields.value.position = world.intersections.at(target.index).position;
         fields.value.rotation.y = world.intersections.at(target.index).yaw;
         break;
-    case SelectionKind::LakePoint:
-        if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingLake() || target.point < 0 ||
-            static_cast<std::size_t>(target.point) >= world.Terrain()[i]->Lake()->points.size()) return {};
-        fields.value.position = world.Terrain()[i]->Instance().transform.Point(world.Terrain()[i]->Lake()->points[target.point].position);
+    case SelectionKind::WaterPoint:
+        if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingWater() || target.point < 0 ||
+            target.point >= WaterPointCount(*world.Terrain()[i]->WaterSource())) return {};
+        fields.value.position = world.Terrain()[i]->Instance().transform.Point(WaterPoint(*world.Terrain()[i]->WaterSource(), target.point));
         break;
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
         {
             return {};
         }
-        fields.roadBound = world.Terrain()[i]->boundary.has_value() || world.Terrain()[i]->EditingLake();
-        fields.levelOnly = world.Terrain()[i]->Lake().has_value();
+        fields.roadBound = world.Terrain()[i]->boundary.has_value() || world.Terrain()[i]->EditingWater();
+        fields.levelOnly = world.Terrain()[i]->HasWater();
         fields.value = world.Terrain()[i]->GetTransform();
         break;
     case SelectionKind::Object:
@@ -409,13 +409,13 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
     {
         return world.Terrain()[index]->SetTransform(transform);
     }
-    if (target.kind == SelectionKind::LakePoint && index < world.Terrain().size() && world.Terrain()[index]->EditingLake())
+    if (target.kind == SelectionKind::WaterPoint && index < world.Terrain().size() && world.Terrain()[index]->EditingWater())
     {
         auto& chunk = *world.Terrain()[index];
-        auto lake = *chunk.Lake();
+        auto water = *chunk.WaterSource();
         auto position = chunk.Instance().transform.Unrotate(transform.position - chunk.GetTransform().position);
         position.y = 0;
-        return lake.MovePoint(target.point, position) && chunk.SetLake(lake);
+        return MoveWaterPoint(water, target.point, position) && chunk.SetWater(water);
     }
     return SDL_SetError("Invalid mesh selection");
 }
@@ -440,7 +440,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
         return original.Transform(world, target.members, start.position, {}, axis, delta);
     }
 
-    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection || target.kind == SelectionKind::LakePoint)
+    if (target.kind == SelectionKind::Object || target.kind == SelectionKind::Terrain || target.kind == SelectionKind::Intersection || target.kind == SelectionKind::WaterPoint)
     {
         return SetPlacementTransform(world, target, t);
     }

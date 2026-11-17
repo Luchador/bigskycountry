@@ -36,6 +36,7 @@ struct LakeSample
     Vector3 position;
     int segment;
     double t;
+    int bank = -1; // Rivers: 0/1 for banks, -1 for the closing end cap.
 };
 
 struct LakeGeometry
@@ -47,4 +48,6 @@ struct LakeGeometry
     std::vector<LakeSample> shoreline; // Closed, including the repeated first sample.
     // Invalid/self-crossing edits leave the previous meshes intact.
     static std::optional<LakeGeometry> Build(const LakeDefinition& lake);
+    // Shared polygon validation, water triangulation and subdivided basin builder.
+    static std::optional<LakeGeometry> BuildShoreline(std::vector<LakeSample> rim, double depth);
 };
