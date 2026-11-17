@@ -7,9 +7,10 @@
 namespace
 {
 Vector3 Mix(Vector3 a, Vector3 b, double t) { return a + (b - a) * t; }
-bool FlatFinite(Vector3 p)
+bool FinitePoint(Vector3 p)
 {
-    return std::isfinite(p.x) && std::isfinite(p.z) && p.y == 0 && std::abs(p.x) <= 200000 && std::abs(p.z) <= 200000;
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
+           std::abs(p.x) <= 200000 && std::abs(p.y) <= 200000 && std::abs(p.z) <= 200000;
 }
 }
 
@@ -65,7 +66,7 @@ void RiverDefinition::SmoothHandles(int bank)
 
 bool RiverDefinition::MovePoint(int point, Vector3 position)
 {
-    if (point < 0 || point >= PointCount() || !FlatFinite(position)) return SDL_SetError("Invalid river point");
+    if (point < 0 || point >= PointCount() || !FinitePoint(position)) return SDL_SetError("Invalid river point");
     const int end = End(point);
     if (end >= 0)
     {
@@ -88,9 +89,9 @@ bool RiverDefinition::MovePoint(int point, Vector3 position)
 
 bool RiverDefinition::Extend(int end, Vector3 position)
 {
-    if ((end != 0 && end != 1) || !FlatFinite(position)) return SDL_SetError("Invalid river endpoint");
+    if ((end != 0 && end != 1) || !FinitePoint(position)) return SDL_SetError("Invalid river endpoint");
     const auto delta = position - Point(PointCount()-2+end);
-    if (Math::Length(delta) < .5) return SDL_SetError("Extend the river by at least 0.5 m");
+    if (std::hypot(delta.x, delta.z) < .5) return SDL_SetError("Extend the river by at least 0.5 m horizontally");
     for (const auto& bank : banks)
         if (bank.size() >= LakeDefinition::maxPoints) return SDL_SetError("River bank control point limit reached");
     for (int bank = 0; bank < 2; ++bank)
@@ -126,7 +127,7 @@ bool RiverDefinition::RemovePoint(int point)
     return true;
 }
 
-bool RiverDefinition::Read(std::istream& in)
+bool RiverDefinition::Read(std::istream& in, bool elevations)
 {
     if (!(in >> depth)) return false;
     for (auto& bank : banks)
@@ -135,7 +136,11 @@ bool RiverDefinition::Read(std::istream& in)
         if (!(in >> count) || count < 2 || count > LakeDefinition::maxPoints) return SDL_SetError("Invalid river bank size");
         bank.resize(count);
         for (auto& p : bank)
-            if (!(in >> p.position.x >> p.position.z >> p.incoming.x >> p.incoming.z >> p.outgoing.x >> p.outgoing.z)) return false;
+            for (auto* v : {&p.position, &p.incoming, &p.outgoing})
+            {
+                v->y = 0; // TERR 6/7 stored only X/Z.
+                if (!(in >> v->x) || (elevations && !(in >> v->y)) || !(in >> v->z)) return false;
+            }
     }
     return true;
 }
@@ -146,7 +151,7 @@ bool RiverDefinition::Write(std::ostream& out) const
     {
         out << ' ' << bank.size();
         for (const auto& p : bank)
-            out << ' ' << p.position.x << ' ' << p.position.z << ' ' << p.incoming.x << ' ' << p.incoming.z << ' ' << p.outgoing.x << ' ' << p.outgoing.z;
+            for (const auto v : {p.position, p.incoming, p.outgoing}) out << ' ' << v.x << ' ' << v.y << ' ' << v.z;
     }
     return bool(out);
 }
@@ -162,10 +167,11 @@ std::optional<std::vector<LakeSample>> RiverGeometry::Sample(const RiverDefiniti
         for (std::size_t i = 0; i < bank.size(); ++i)
         {
             const auto& a = bank[i];
-            if (!FlatFinite(a.position) || !FlatFinite(a.incoming) || !FlatFinite(a.outgoing)) return fail("River points must be finite and level");
+            if (!FinitePoint(a.position) || !FinitePoint(a.incoming) || !FinitePoint(a.outgoing)) return fail("River points must have finite coordinates");
             if (i+1 == bank.size()) continue;
             const auto& b = bank[i+1];
-            if (Math::Length(a.position-b.position) < .5) return fail("River bank points must be at least 0.5 m apart");
+            if (std::hypot(a.position.x-b.position.x, a.position.z-b.position.z) < .5)
+                return fail("River bank points must be at least 0.5 m apart horizontally");
             length += Math::Length(a.outgoing) + Math::Length(b.incoming) + Math::Length(b.position+b.incoming-a.position-a.outgoing);
         }
     }

@@ -39,6 +39,58 @@ void Seams(const TerrainChunk& river)
             Check(edges[std::minmax(point(rim[i-1].position),point(rim[i].position))]==1,"Water and bed do not share exact boundary edges");
     }
 }
+void Submerged(const Mesh& water, const Mesh& bed)
+{
+    Check(water.indices==bed.indices && water.vertices.size()==bed.vertices.size(),"Water/bed triangulation differs");
+    for (std::size_t i=0; i<water.vertices.size(); ++i)
+    {
+        const auto a=water.vertices[i].position, b=bed.vertices[i].position;
+        Check(a.x==b.x && a.z==b.z && b.y<=a.y+1e-9,"Bed pokes above sloping water");
+    }
+    for (std::size_t i=0; i<water.indices.size(); i+=3)
+    {
+        double depth=0;
+        for (int j=0;j<3;++j)
+        {
+            const auto v=water.indices[i+j]; depth+=water.vertices[v].position.y-bed.vertices[v].position.y;
+        }
+        Check(depth>1e-8,"Coplanar riverbed triangle after editing");
+    }
+    WorldCollision surface, floor; surface.AddMesh({std::make_shared<Mesh>(water)}); surface.Finish();
+    floor.AddMesh({std::make_shared<Mesh>(bed)}); floor.Finish();
+    // Probe between bank samples as well as along their triangulation diagonals.
+    for (double z=1;z<200;z+=1.75)
+    {
+        const auto top=surface.Raycast({0,100,z},{0,-1,0},500), bottom=floor.Raycast({0,100,z},{0,-1,0},500);
+        Check(top && bottom && bottom->position.y<top->position.y-.01,"Interior riverbed ridge reaches the surface");
+    }
+}
+void ElevationGeometry()
+{
+    auto river=RiverDefinition::Straight();
+    Check(river.MovePoint(5,{0,-20,200}),"Lower river end");
+    auto geometry=RiverGeometry::Build(river); Check(geometry.has_value(),"Build sloping river");
+    for (const auto& v:geometry->water->vertices)
+        Check(std::abs(v.position.y+v.position.z*.1)<1e-8,"Water ignored the river grade");
+    Submerged(*geometry->water,*geometry->bed);
+    const auto before=river;
+    Check(river.InsertPoint(0,0,.35)==1,"Insert elevated bank point");
+    for (int i=0;i<=100;++i)
+    {
+        const double t=i/100.0;
+        const auto p=t<=.35 ? river.Evaluate(0,0,t/.35) : river.Evaluate(0,1,(t-.35)/.65);
+        Check(Math::Length(p-before.Evaluate(0,0,t))<1e-9,"Insertion flattened the elevation curve");
+    }
+    Check(river.MovePoint(1,{-18,-3,70}) && river.Extend(1,{5,-30,300}),"Bend/extend elevated river");
+    geometry=RiverGeometry::Build(river); Check(geometry.has_value(),"Build edited elevated river");
+    Submerged(*geometry->water,*geometry->bed);
+    auto narrow=RiverDefinition::Straight(1,200);
+    Check(narrow.MovePoint(5,{0,-10,200}),"Slope narrow river");
+    geometry=RiverGeometry::Build(narrow); Check(geometry.has_value(),"Build narrow river without grid samples");
+    Submerged(*geometry->water,*geometry->bed);
+    Check(!river.Extend(1,river.Point(river.PointCount()-1)+Vector3{0,10,0}),"Vertical-only extension accepted");
+    Check(!river.MovePoint(0,{0,std::numeric_limits<double>::infinity(),0}),"Nonfinite river elevation accepted");
+}
 void Geometry()
 {
     auto river=RiverDefinition::Straight();
@@ -85,7 +137,13 @@ void EditingAndHistory(const std::filesystem::path& root)
     const auto properties=InspectProperties(world,state,false);
     Check(properties.river && properties.water && properties.editingWater,"River inspector missing edit state");
     EditSnapshot before(state); before.water=EditSnapshot::WaterEdit{0,*chunk->WaterSource()};
-    auto draft=*chunk->River(); Check(draft.InsertPoint(1,0,.6)>=0 && draft.Extend(1,{10,0,280}),"Draft shape");
+    const TransformTarget endpoint{SelectionKind::WaterPoint,0,5};
+    auto fields=Inspect(world,endpoint); Check(fields.CanEdit(1) && !fields.CanEdit(4),"River point Y inspector unavailable");
+    auto desired=fields.value; desired.position.y-=10;
+    Check(ApplyTransform(world,fields,1,desired),"Edit river elevation through inspector");
+    Check(chunk->River()->banks[0].back().position.y==-10 && chunk->River()->banks[1].back().position.y==-10,
+          "End handle did not raise/lower both banks");
+    auto draft=*chunk->River(); Check(draft.InsertPoint(1,0,.6)>=0 && draft.Extend(1,{10,-18,280}),"Draft shape");
     Check(chunk->SetRiver(draft),"Preview river");
     Check(chunk->Instance().mesh==mesh && chunk->Water().mesh==surface && chunk->WaterRevision()==revision,"Draft rebuilt geometry/dependencies");
     Check(!world.Save() && !WorldPackage::Cook(world,(root/"draft.bscworld").string()),"Saved/cooked unfinished draft");
@@ -96,6 +154,7 @@ void EditingAndHistory(const std::filesystem::path& root)
     Check(chunk->Instance().mesh==mesh,"Draft undo rebuilt geometry");
     Check(chunk->FinishWaterEdit() && chunk->Instance().mesh!=mesh && chunk->WaterRevision()!=revision,"Finish did not build");
     Seams(*chunk);
+    Submerged(*chunk->Water().mesh,*chunk->Instance().mesh);
     const auto committed=chunk->Instance().mesh;
     Check(chunk->BeginWaterEdit(),"Begin invalid draft");
     auto invalid=*chunk->River(); invalid.banks[0].front().position=invalid.banks[1].front().position;
@@ -114,6 +173,42 @@ void EditingAndHistory(const std::filesystem::path& root)
     WorldDocument loaded(AssetRoot::Project); Check(loaded.Open((root/"editing.wld").string().c_str()),"Reload river");
     Check(loaded.Terrain()[0]->River()==draft && loaded.Terrain()[0]->persistentId==id,"Persistence lost river");
     Seams(*loaded.Terrain()[0]);
+    Check(WorldPackage::Cook(loaded,(root/"sloped.bscworld").string()),"Cook sloping river");
+    WorldPackage::Reader package; Check(package.Open((root/"sloped.bscworld").string()),"Read sloping river package");
+    WorldCollision cooked;
+    for (std::size_t i=0;i<package.Index().cells.size();++i)
+    { MeshInstance mesh; Check(package.ReadCollision(i,mesh),"Read sloping collision"); cooked.AddMesh(mesh); }
+    cooked.Finish();
+    WorldCollision expected; expected.AddMesh(loaded.Terrain()[0]->Instance()); expected.Finish();
+    const auto location=loaded.Terrain()[0]->Water().transform.Point({0,100,120});
+    const auto a=cooked.Raycast(location,{0,-1,0},300), b=expected.Raycast(location,{0,-1,0},300);
+    Check(a && b && Math::Length(a->position-b->position)<1e-5,"Cooked sloping riverbed changed elevation");
+    auto* lake=loaded.PlaceLake(LakeDefinition::Circle()); Check(lake && lake->BeginWaterEdit(),"Place lake regression fixture");
+    Check(!Inspect(loaded,{SelectionKind::WaterPoint,1,0}).CanEdit(1),"Lake points no longer stay level");
+}
+void LegacyRivers(const std::filesystem::path& root)
+{
+    const auto flat=RiverDefinition::Straight();
+    std::ostringstream text; text<<std::setprecision(17)<<"river 0 12 0 0 \"\" "<<flat.depth;
+    for (const auto& bank:flat.banks)
+    {
+        text<<' '<<bank.size();
+        for (const auto& p:bank) for (auto v:{p.position,p.incoming,p.outgoing}) text<<' '<<v.x<<' '<<v.z;
+    }
+    const auto payload=text.str();
+    for (Uint32 version:{6u,7u})
+    {
+        const auto path=(root/("legacy-"+std::to_string(version)+".wld")).string();
+        auto* file=SDL_IOFromFile(path.c_str(),"wb"); Check(file,"Create legacy fixture");
+        Check(SDL_WriteIO(file,"BSCW",4)==4 && SDL_WriteU32LE(file,1) && SDL_WriteU32LE(file,1) &&
+              SDL_WriteIO(file,"TERR",4)==4 && SDL_WriteU32LE(file,version) && SDL_WriteU64LE(file,payload.size()) &&
+              SDL_WriteIO(file,payload.data(),payload.size())==payload.size(),"Write legacy fixture");
+        Check(SDL_CloseIO(file),"Close legacy fixture");
+        WorldDocument old(AssetRoot::Project); Check(old.Open(path.c_str()),"Load old level river");
+        Check(*old.Terrain()[0]->River()==flat && old.Terrain()[0]->GetTransform().position.y==12,"Legacy river elevation changed");
+        Check(old.Save(),"Upgrade legacy river");
+        WorldDocument upgraded(AssetRoot::Project); Check(upgraded.Open(path.c_str()) && *upgraded.Terrain()[0]->River()==flat,"Reload upgraded river");
+    }
 }
 void CookAndFill(const std::filesystem::path& root)
 {
@@ -131,10 +226,13 @@ void CookAndFill(const std::filesystem::path& root)
     Check(std::abs(Area(*fill->Instance().mesh)+5000-land)<1e-6,"Fill covered river basin");
     const auto fillMesh=fill->Instance().mesh;
     Check(river->BeginWaterEdit(),"Begin fill-linked river draft");
-    auto draft=*river->River(); Check(draft.Extend(1,{0,0,220}) && river->SetRiver(draft),"Preview extension");
+    auto draft=*river->River(); Check(draft.Extend(1,{0,12,220}) && river->SetRiver(draft),"Preview elevated extension");
     world.RefreshTerrainFills(); Check(fill->Instance().mesh==fillMesh,"Preview rebuilt surrounding terrain");
     Check(river->FinishWaterEdit(),"Finish extension"); world.RefreshTerrainFills();
     Check(std::abs(Area(*fill->Instance().mesh)+5500-land)<1e-6,"Fill did not follow extended banks");
+    for (const auto& sample:river->BuiltShoreline())
+        Check(std::ranges::any_of(fill->Instance().mesh->vertices,[&](const auto& v) { return Math::Length(v.position-sample.position)<1e-7; }),
+              "Surrounding terrain did not follow bank elevation");
     Check(WorldPackage::Cook(world,(root/"river.bscworld").string()),"Cook river");
     WorldPackage::Reader reader; Check(reader.Open((root/"river.bscworld").string()),"Read package");
     double waterArea=0; WorldCollision collision;
@@ -147,15 +245,17 @@ void CookAndFill(const std::filesystem::path& root)
         MeshInstance mesh; Check(reader.ReadCollision(i,mesh),"Read river collision"); collision.AddMesh(mesh);
     }
     Check(std::abs(waterArea-5500)<1e-6,"Cook omitted river water");
-    collision.Finish(); const auto floor=collision.Raycast({0,20,100},{0,-1,0},100);
-    Check(floor && floor->position.y < -2,"Water/fill blocked riverbed collision");
+    collision.Finish(); const auto floor=collision.Raycast({0,100,100},{0,-1,0},200);
+    WorldCollision water; water.AddMesh(river->Water()); water.Finish();
+    const auto surface=water.Raycast({0,100,100},{0,-1,0},200);
+    Check(floor && surface && floor->position.y < surface->position.y-1,"Water/fill blocked sloping riverbed collision");
 }
 }
 int main()
 {
     SDL_Time now; SDL_GetCurrentTime(&now);
     const auto root=std::filesystem::temp_directory_path()/("bigsky-rivers-"+std::to_string(now));
-    try { std::filesystem::create_directories(root); Geometry(); EditingAndHistory(root); CookAndFill(root);
+    try { std::filesystem::create_directories(root); Geometry(); ElevationGeometry(); EditingAndHistory(root); CookAndFill(root); LegacyRivers(root);
         std::filesystem::remove_all(root); std::cout<<"River tests passed\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<"\nFixture: "<<root<<'\n'; return 1; }
 }

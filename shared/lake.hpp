@@ -4,8 +4,8 @@
 #include <iosfwd>
 #include <optional>
 
-// A closed, horizontal cubic spline in the terrain placement's local XZ plane.
-// Explicit handles preserve the curve exactly when a new point is inserted.
+// Shared bank/shoreline control point. Lakes keep these in local XZ;
+// rivers also store elevation. Handles preserve the curve on insertion.
 struct LakePoint
 {
     Vector3 position, incoming, outgoing; // Handles are offsets from position.
@@ -48,6 +48,7 @@ struct LakeGeometry
     std::vector<LakeSample> shoreline; // Closed, including the repeated first sample.
     // Invalid/self-crossing edits leave the previous meshes intact.
     static std::optional<LakeGeometry> Build(const LakeDefinition& lake);
-    // Shared polygon validation, water triangulation and subdivided basin builder.
+    // Shared polygon validation and subdivided water/basin builder. River rim
+    // elevations define the surface; the bed is lowered relative to that surface.
     static std::optional<LakeGeometry> BuildShoreline(std::vector<LakeSample> rim, double depth);
 };

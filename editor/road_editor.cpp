@@ -205,7 +205,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     if (placement)
     {
         placement->yawOnly = target.YawOnly() || fields.levelOnly;
-        placement->horizontalTranslation = target.kind == SelectionKind::WaterPoint;
+        placement->horizontalTranslation = target.kind == SelectionKind::WaterPoint && fields.levelOnly;
     }
     if (placement && gizmo.settings.space == GizmoSpace::Local)
     {
@@ -2752,6 +2752,14 @@ bool RoadEditor::PickWaterControl(WorldDocument& world, const FreeCamera& camera
     overlay.Pick(picker, world, Selected(world), camera, scene);
     const auto hit = overlay.PickWater(picker, chunk, camera, scene);
     if (!hit) return false;
+    // A selected point's axis handles take precedence over the bank spline.
+    if (!doubleClick && !(SDL_GetModState() & SDL_KMOD_SHIFT) && target.kind == SelectionKind::WaterPoint &&
+        (hit->point < 0 || hit->point == target.point))
+        if (const auto placement = SelectedGizmoPlacement(world, camera))
+        {
+            ViewportPicker handles(camera, scene, mouse);
+            if (gizmo.PickAxis(handles, *placement)) return false;
+        }
     if (hit->point >= 0)
     {
         state.meshSelection = {SelectionKind::WaterPoint, target.index, hit->point};
@@ -2801,7 +2809,7 @@ void RoadEditor::MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, 
     pose.position = *position;
     auto water = dragStart->water->definition;
     auto local = chunk.Instance().transform.Unrotate(pose.position - chunk.GetTransform().position);
-    local.y = 0;
+    if (!chunk.River()) local.y = 0;
     if (riverExtendEnd >= 0)
     {
         auto& river = std::get<RiverDefinition>(water);

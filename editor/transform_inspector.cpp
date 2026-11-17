@@ -54,7 +54,7 @@ bool TransformFields::CanEdit(int field) const
     }
 
     if (field == geographicLocation) return true;
-    if (target.kind == SelectionKind::WaterPoint) return field == 0 || field == 2;
+    if (target.kind == SelectionKind::WaterPoint) return field < 3 && (field != 1 || !levelOnly);
     if (target.YawOnly() || levelOnly) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
 }
@@ -218,6 +218,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingWater() || target.point < 0 ||
             target.point >= WaterPointCount(*world.Terrain()[i]->WaterSource())) return {};
         fields.value.position = world.Terrain()[i]->Instance().transform.Point(WaterPoint(*world.Terrain()[i]->WaterSource(), target.point));
+        fields.levelOnly = !world.Terrain()[i]->River();
         break;
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
@@ -414,7 +415,7 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
         auto& chunk = *world.Terrain()[index];
         auto water = *chunk.WaterSource();
         auto position = chunk.Instance().transform.Unrotate(transform.position - chunk.GetTransform().position);
-        position.y = 0;
+        if (!chunk.River()) position.y = 0;
         return MoveWaterPoint(water, target.point, position) && chunk.SetWater(water);
     }
     return SDL_SetError("Invalid mesh selection");

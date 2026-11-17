@@ -264,6 +264,27 @@ void SplitApproaches()
           "Lower road interior crossing an upper endpoint escaped the clearance check");
 }
 
+void SlopingWater()
+{
+    WorldDocument world(AssetRoot::Project);
+    auto definition=RiverDefinition::Straight();
+    Check(definition.MovePoint(4,{0,20,0}),"Raise upstream river end");
+    auto* river=world.PlaceRiver(definition); Check(river,"Place sloping river");
+    auto bridge=Straight(world,{-50,8,150},{50,8,150});
+    Check(PlanOverpass(bridge,{0},{},world.Terrain()).has_value(),"Distant higher water incorrectly blocked bridge");
+    bridge=Straight(world,{-50,8,50},{50,8,50});
+    Check(!PlanOverpass(bridge,{0},{},world.Terrain()),"Local high water did not block bridge");
+    // Both end elevations are low; an interior rise must still be detected.
+    definition=RiverDefinition::Straight();
+    Check(definition.InsertPoint(0,0,.5)>=0 && definition.InsertPoint(1,0,.5)>=0 &&
+          definition.MovePoint(1,{-12.5,10,100}) && definition.MovePoint(4,{12.5,10,100}) && river->SetRiver(definition),
+          "Create interior river rise");
+    bridge=Straight(world,{-50,8,100},{50,8,100});
+    Check(!PlanOverpass(bridge,{0},{},world.Terrain()),"Interior river rise ignored by clearance");
+    bridge=Straight(world,{-50,15,100},{50,15,100});
+    Check(PlanOverpass(bridge,{0},{},world.Terrain()).has_value(),"Clear bridge over interior river rise rejected");
+}
+
 void PersistenceAndCooking(const std::filesystem::path& root)
 {
     WorldDocument world(AssetRoot::Project);
@@ -339,7 +360,7 @@ int main()
     try
     {
         std::filesystem::create_directories(root);
-        GeometryAndUpdates(); Planning(); SplitApproaches(); PersistenceAndCooking(root); LegacyRoad();
+        GeometryAndUpdates(); Planning(); SplitApproaches(); SlopingWater(); PersistenceAndCooking(root); LegacyRoad();
         std::filesystem::remove_all(root);
         std::cout << "Multi-element overpass tests passed\n"; return 0;
     }

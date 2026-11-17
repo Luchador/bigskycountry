@@ -4,7 +4,7 @@
 #include <array>
 #include <variant>
 
-// Two open cubic splines running from start to end, in a level local XZ plane.
+// Two open cubic splines running from start to end, including local elevation.
 // Banks can have different numbers of control points. End handles move both banks.
 struct RiverDefinition
 {
@@ -19,7 +19,7 @@ struct RiverDefinition
     bool Extend(int end, Vector3 position);
     int InsertPoint(int bank, int segment, double t); // Returns the new flattened control index.
     bool RemovePoint(int point);
-    bool Read(std::istream& in);
+    bool Read(std::istream& in, bool elevations = true);
     bool Write(std::ostream& out) const;
     bool operator==(const RiverDefinition&) const = default;
 private:

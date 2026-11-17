@@ -4,8 +4,11 @@
 #include <array>
 #include <cmath>
 #include <istream>
+#include <map>
 #include <numbers>
 #include <ostream>
+#include <span>
+#include <stdexcept>
 
 namespace
 {
@@ -18,6 +21,9 @@ namespace
     }
     double Distance(Vector3 p, Vector3 a, Vector3 b)
     {
+        // Basin depth is measured horizontally from the bank, independently
+        // of the river's elevation or grade.
+        p.y = a.y = b.y = 0;
         const auto d = b - a;
         const double length2 = Math::Dot(d, d);
         return Math::Length(p - (a + d * (length2 > 0 ? std::clamp(Math::Dot(p - a, d) / length2, 0.0, 1.0) : 0)));
@@ -45,20 +51,20 @@ namespace
             distance = std::min(distance, Distance(p, rim[i - 1].position, rim[i].position));
         return distance;
     }
-    std::shared_ptr<Mesh> MakeMesh(const CDT::Triangulation<double>& triangulation, bool bed,
+    using Triangle = std::array<Uint32, 3>;
+    std::shared_ptr<Mesh> MakeMesh(std::span<const Vector3> positions, std::span<const Triangle> triangles, bool bed,
                                    double depth, const std::vector<LakeSample>& rim)
     {
         auto mesh = std::make_shared<Mesh>();
-        for (const auto& p : triangulation.vertices)
+        for (auto position : positions)
         {
-            Vector3 position{p.x, 0, p.y};
-            if (bed) position.y = -std::min(depth, ShoreDistance(position, rim) * 0.25);
-            mesh->vertices.push_back({position, {}, {float(p.x / 4), float(p.y / 4)},
+            if (bed) position.y -= std::min(depth, ShoreDistance(position, rim) * 0.25);
+            mesh->vertices.push_back({position, {}, {float(position.x / 4), float(position.z / 4)},
                                       bed ? SDL_FColor{0.24f, 0.20f, 0.12f, 1} : SDL_FColor{1, 1, 1, 1}});
         }
-        for (const auto& triangle : triangulation.triangles)
+        for (const auto& triangle : triangles)
         {
-            auto a = triangle.vertices[0], b = triangle.vertices[1], c = triangle.vertices[2];
+            auto a = triangle[0], b = triangle[1], c = triangle[2];
             auto normal = Math::Cross(mesh->vertices[b].position - mesh->vertices[a].position,
                                       mesh->vertices[c].position - mesh->vertices[a].position);
             if (normal.y < 0) { std::swap(b, c); normal = normal * -1; }
@@ -69,6 +75,72 @@ namespace
         for (auto& vertex : mesh->vertices) vertex.normal = Math::Normalize(vertex.normal);
         mesh->UpdateBounds();
         return mesh;
+    }
+
+    double SurfaceHeight(Vector3 p, const CDT::Triangulation<double>& surface, const std::vector<LakeSample>& rim)
+    {
+        for (const auto& t : surface.triangles)
+        {
+            const auto a = rim[t.vertices[0]].position, b = rim[t.vertices[1]].position, c = rim[t.vertices[2]].position;
+            if (p.x < std::min({a.x,b.x,c.x}) - 1e-7 || p.x > std::max({a.x,b.x,c.x}) + 1e-7 ||
+                p.z < std::min({a.z,b.z,c.z}) - 1e-7 || p.z > std::max({a.z,b.z,c.z}) + 1e-7) continue;
+            const double area = Side(a,b,c);
+            if (std::abs(area) < 1e-12) continue;
+            const double u = Side(b,c,p)/area, v = Side(c,a,p)/area, w = 1-u-v;
+            if (u >= -1e-8 && v >= -1e-8 && w >= -1e-8) return a.y*u + b.y*v + c.y*w;
+        }
+        throw std::runtime_error("River surface sample lies outside the banks");
+    }
+
+    void MakeSurfaces(LakeGeometry& result, const CDT::Triangulation<double>& surface,
+                      const CDT::Triangulation<double>& refined, double depth)
+    {
+        const auto& rim = result.shoreline;
+        const auto rimCount = static_cast<Uint32>(rim.size()-1);
+        const bool level = std::ranges::all_of(rim, [&](const auto& sample) { return sample.position.y == rim.front().position.y; });
+        std::vector<Vector3> positions;
+        for (std::size_t i = 0; i < refined.vertices.size(); ++i)
+        {
+            const auto p = refined.vertices[i];
+            positions.push_back(i < rimCount ? rim[i].position :
+                Vector3{p.x, level ? rim.front().position.y : SurfaceHeight({p.x,0,p.y},surface,rim), p.y});
+        }
+        // A diagonal between two shoreline vertices must not become a ridge at
+        // water level across a narrow or newly extended part of the river.
+        std::map<std::pair<Uint32,Uint32>,Uint32> midpoints;
+        for (const auto& t : refined.triangles)
+            for (int i = 0; i < 3; ++i)
+            {
+                const Uint32 a = t.vertices[i], b = t.vertices[(i+1)%3];
+                if (a >= rimCount || b >= rimCount || (a+1)%rimCount == b || (b+1)%rimCount == a) continue;
+                const auto key = std::minmax(a,b);
+                if (midpoints.contains(key)) continue;
+                midpoints.emplace(key, static_cast<Uint32>(positions.size()));
+                positions.push_back((positions[a]+positions[b])*.5);
+            }
+        std::vector<Triangle> triangles;
+        for (const auto& t : refined.triangles)
+        {
+            std::vector<Uint32> ring;
+            for (int i = 0; i < 3; ++i)
+            {
+                const Uint32 a = t.vertices[i], b = t.vertices[(i+1)%3];
+                ring.push_back(a);
+                if (const auto it = midpoints.find(std::minmax(a,b)); it != midpoints.end()) ring.push_back(it->second);
+            }
+            if (ring.size() == 3 && std::ranges::any_of(ring, [&](auto i) { return i >= rimCount; }))
+                triangles.push_back({ring[0],ring[1],ring[2]});
+            else
+            {
+                const auto center = static_cast<Uint32>(positions.size());
+                positions.push_back((positions[t.vertices[0]]+positions[t.vertices[1]]+positions[t.vertices[2]])*(1.0/3));
+                for (std::size_t i = 0; i < ring.size(); ++i) triangles.push_back({ring[i],ring[(i+1)%ring.size()],center});
+            }
+        }
+        // Matching triangulation guarantees the bed stays below the surface
+        // over entire triangles, including bends and changes in grade.
+        result.water = MakeMesh(positions, triangles, false, depth, rim);
+        result.bed = MakeMesh(positions, triangles, true, depth, rim);
     }
 }
 
@@ -215,7 +287,8 @@ std::optional<LakeGeometry> LakeGeometry::BuildShoreline(std::vector<LakeSample>
     for (std::size_t i = 1; i < rim.size(); ++i)
     {
         const auto a = rim[i - 1].position, b = rim[i].position;
-        if (Math::Length(a - b) < 1e-6) return fail("Water boundary folds back on itself");
+        if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
+            std::hypot(a.x-b.x, a.z-b.z) < 1e-6) return fail("Water boundary folds back on itself");
         area += a.x * b.z - b.x * a.z;
         for (std::size_t j = i + 2; j < rim.size(); ++j)
         {
@@ -238,25 +311,17 @@ std::optional<LakeGeometry> LakeGeometry::BuildShoreline(std::vector<LakeSample>
         water.insertVertices(vertices);
         water.insertEdges(edges);
         water.eraseOuterTrianglesAndHoles();
-        result.water = MakeMesh(water, false, depth, rim);
         // Interior samples make a subdivided basin, including narrow areas where
         // a regular grid would miss the polygon altogether.
         const double spacing = std::max(5.0, std::max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) / 96);
         for (double z = bounds.min.z + spacing * 0.5; z < bounds.max.z; z += spacing)
             for (double x = bounds.min.x + spacing * 0.5; x < bounds.max.x; x += spacing)
                 if (Inside({x, 0, z}, rim) && ShoreDistance({x, 0, z}, rim) > 0.1) vertices.push_back({x, z});
-        if (vertices.size() == rimCount)
-            for (const auto& triangle : water.triangles)
-            {
-                Vector3 center{};
-                for (auto i : triangle.vertices) center = center + Vector3{water.vertices[i].x, 0, water.vertices[i].y} * (1.0 / 3);
-                vertices.push_back({center.x, center.z});
-            }
         CDT::Triangulation<double> bed;
         bed.insertVertices(vertices);
         bed.insertEdges(edges);
         bed.eraseOuterTrianglesAndHoles();
-        result.bed = MakeMesh(bed, true, depth, rim);
+        MakeSurfaces(result, water, bed, depth);
     }
     catch (const std::exception&)
     {

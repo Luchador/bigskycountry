@@ -31,7 +31,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 7;
+    constexpr Uint32 terrainVersion = 8;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -141,7 +141,10 @@ namespace
                 WaterDefinition water = kind == "river" ? WaterDefinition{RiverDefinition{}} : WaterDefinition{LakeDefinition{}};
                 std::string material;
                 if (!(in >> t.position.x >> t.position.y >> t.position.z >> t.rotation.y >> std::quoted(material)) ||
-                    (!material.empty() && !Material::ValidAssetPath(material)) || !std::visit([&](auto& source) { return source.Read(in); }, water))
+                    (!material.empty() && !Material::ValidAssetPath(material)) || !std::visit([&](auto& source) {
+                        if constexpr (std::is_same_v<std::decay_t<decltype(source)>, RiverDefinition>) return source.Read(in, version >= 8);
+                        else return source.Read(in);
+                    }, water))
                     return SDL_SetError("Invalid water body in TERR");
                 auto* chunk = world.PlaceWater(water, t);
                 if (!chunk) return false;

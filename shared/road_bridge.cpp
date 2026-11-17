@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <tuple>
 
 namespace
 {
@@ -130,6 +131,31 @@ namespace
             rim.push_back(water.Water().transform.Point(sample.position));
         if (rim.size() > 1 && rim.front() == rim.back()) rim.pop_back();
         return rim;
+    }
+    Rim ClipWaterToSpan(Rim polygon, Vector3 a, Vector3 b, Vector3 side)
+    {
+        // Clip each water triangle to the swept road rectangle in XZ. Keep Y
+        // interpolated on its triangle so clearance follows sloping rivers.
+        const Vector3 along{b.x-a.x,0,b.z-a.z};
+        for (const auto [axis, low, high] : {std::tuple{along,0.0,Math::Dot(along,along)},
+                                          std::tuple{side,-Math::Dot(side,side),Math::Dot(side,side)}})
+            for (bool lower : {true,false})
+            {
+                if (polygon.empty()) return {};
+                Rim clipped;
+                auto previous = polygon.back();
+                const auto distance = [&](Vector3 p) { const double d = Math::Dot(p-a,axis); return lower ? d-low : high-d; };
+                double before = distance(previous);
+                for (auto point : polygon)
+                {
+                    const double next = distance(point);
+                    if ((before >= 0) != (next >= 0)) clipped.push_back(previous+(point-previous)*(before/(before-next)));
+                    if (next >= 0) clipped.push_back(point);
+                    previous = point; before = next;
+                }
+                polygon = std::move(clipped);
+            }
+        return polygon;
     }
     void Face(Road::ColoredSurface& out, Vector3 a, Vector3 b, Vector3 c, SDL_FColor color)
     {
@@ -337,8 +363,9 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
         if (!water->HasWater() || !water->persistentId || !water->Water().mesh) continue;
         const auto rim = Shoreline(*water);
         if (rim.size() < 3) continue;
-        const double height = rim.front().y; // Water surfaces are horizontal.
         bool crosses = false;
+        double height = 0;
+        std::size_t samples = 0;
         for (const auto& path : upperPaths)
         {
             for (std::size_t i = 1; i < path.size(); ++i)
@@ -347,13 +374,24 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
                 const auto side = Math::Normalize(Vector3{-direction.z, 0, direction.x}) * ProfileRadius(upper);
                 // Check the full swept width, but only the part over water. A
                 // long straight segment can have lower ends over dry ground.
-                if (auto range = CoveredRange(a, b, side, rim))
+                if (CoveredRange(a, b, side, rim))
                 {
-                    crosses = true;
-                    for (double t : {range->first, range->second})
-                        if (DeckBaseHeight(upper, a + direction * t, direction) - height < settings.depth + 1)
-                            return fail("Raise the upper road or railroad before creating an overpass "
-                                        "(deck plus at least 1 m above the water surface)");
+                    const auto& mesh = *water->Water().mesh;
+                    for (std::size_t j = 0; j < mesh.indices.size(); j += 3)
+                    {
+                        Rim triangle;
+                        for (int k = 0; k < 3; ++k) triangle.push_back(water->Water().transform.Point(mesh.vertices[mesh.indices[j+k]].position));
+                        for (auto p : ClipWaterToSpan(std::move(triangle),a,b,side))
+                        {
+                            const double t = std::clamp(((p.x-a.x)*direction.x+(p.z-a.z)*direction.z) /
+                                                        (direction.x*direction.x+direction.z*direction.z),0.0,1.0);
+                            if (DeckBaseHeight(upper, a + direction * t, direction) - p.y < settings.depth + 1)
+                                return fail("Raise the upper road or railroad before creating an overpass "
+                                            "(deck plus at least 1 m above the water surface)");
+                            height += p.y; ++samples;
+                            crosses = true;
+                        }
+                    }
                 }
             }
         }
@@ -361,7 +399,7 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
         if (water->EditingWater()) return fail("Finish editing the river or lake before creating its overpass");
         if (!capsClear(rim)) return fail("Extend the overpass span so both abutments are beyond the river or lake banks");
         settings.lowerWaterBodies.insert(water->persistentId);
-        ground += height;
+        ground += height / samples;
         ++hits;
     }
     if (!hits) return fail("The selected span must cross above a road, railroad, river or lake");
