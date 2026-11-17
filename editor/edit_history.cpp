@@ -83,6 +83,12 @@ bool IsRoadGroup(const std::set<SceneKey>& keys)
     });
 }
 
+bool IsTerrainFillSelection(const std::set<SceneKey>& keys)
+{
+    return std::ranges::any_of(keys, [](SceneKey key) { return key.kind == SceneKind::Intersection; }) ||
+           std::ranges::count_if(keys, [](SceneKey key) { return key.kind == SceneKind::Road; }) >= 2;
+}
+
 void RoadEditorState::PickElement(SceneKey key, bool add, bool subtract)
 {
     if (subtract && !GeometrySelected(key)) return;

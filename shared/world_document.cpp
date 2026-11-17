@@ -429,6 +429,7 @@ bool WorldDocument::RemoveTerrain(std::size_t index)
         return SDL_SetError("Invalid terrain chunk index");
     }
     hierarchy.ReplaceRange(SceneKind::Terrain, static_cast<int>(index), 1, 0);
+    if (terrain[index]->Lake()) terrainLakeRevision = 0;
     terrain.erase(terrain.begin() + index);
     return true;
 }

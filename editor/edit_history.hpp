@@ -16,6 +16,9 @@
 #include <string>
 
 bool IsRoadGroup(const std::set<SceneKey>& keys);
+// Box selections may also contain lakes, terrain or props; only the roads and
+// intersections define the fill perimeter. Lakes are detected from the world.
+bool IsTerrainFillSelection(const std::set<SceneKey>& keys);
 
 // Editable tool state. Camera, view, hover and generated geometry stay out of history.
 struct RoadEditorState

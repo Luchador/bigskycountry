@@ -297,6 +297,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                 auto id = world.StableId({SceneKind::Terrain, int(i)});
                 for (int road : boundary->roads) link(id, {SceneKind::Road, std::uint64_t(road)});
                 for (int junction : boundary->intersections) link(id, {SceneKind::Intersection, std::uint64_t(junction)});
+                for (const auto& [lake, revision] : world.Terrain()[i]->sourceLakes) link(id, {SceneKind::Terrain, lake});
             }
         for (auto& e : manifest.entities) { auto& d = e.dependencies; std::sort(d.begin(), d.end()); d.erase(std::unique(d.begin(), d.end()), d.end()); }
         std::vector<Cell> packed; packed.reserve(cells.size());

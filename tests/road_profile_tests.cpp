@@ -166,6 +166,10 @@ void Persistence()
 }
 void InspectorAndHistory()
 {
+    Check(IsTerrainFillSelection({{SceneKind::Road,0}, {SceneKind::Road,1}, {SceneKind::Terrain,0}, {SceneKind::Object,0}}),
+          "Mixed road/lake box selection cannot fill terrain");
+    Check(!IsTerrainFillSelection({{SceneKind::Terrain,0}, {SceneKind::Object,0}}), "Lake/prop selection has no outer perimeter");
+    Check(!IsTerrainFillSelection({{SceneKind::Road,0}}), "Single-road F must keep the endpoint connection action");
     WorldDocument world;
     world.roads.push_back(Example());
     RoadEditorState state;

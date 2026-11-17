@@ -102,6 +102,7 @@ private:
     std::string WriteStableIds() const;
     std::uint64_t rampRevision = 0;
     std::uint64_t terrainRevision = 0;
+    std::uint64_t terrainLakeRevision = 0;
     std::uint64_t bridgeRevision = 0;
     std::size_t bridgeRoadCount = 0;
     std::uint64_t crossingRevision = 0;

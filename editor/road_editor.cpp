@@ -3061,7 +3061,7 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
         (!FinishLakeEditing(world) || !Save(world))) return;
     if (cmd.op == OutlineOp::FillTerrain)
     {
-        if ((state.RoadGroupSelected() || state.Target().kind == SelectionKind::Intersection) && state.SelectedRows() == cmd.items) FillSelection(world);
+        if (IsTerrainFillSelection(state.SelectedRows()) && state.SelectedRows() == cmd.items) FillSelection(world);
     }
     else if (cmd.op == OutlineOp::Remove && (cmd.target.kind == SceneKind::Object ||
              cmd.target.kind == SceneKind::Intersection || cmd.target.kind == SceneKind::Terrain))
@@ -3701,7 +3701,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         if (!event.key.repeat && drag == Drag::None)
         {
             if (!state.groupEndpoints.empty()) ConnectRoads(world);
-            else if (state.RoadGroupSelected() || state.Target().kind == SelectionKind::Intersection) FillSelection(world);
+            else if (IsTerrainFillSelection(state.SelectedRows())) FillSelection(world);
             else ConnectEndpoint(world);
         }
         return EditorEvent::Handled;

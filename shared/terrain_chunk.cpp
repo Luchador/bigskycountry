@@ -21,6 +21,7 @@ bool TerrainChunk::SetLake(const LakeDefinition& definition)
     SetMesh(std::move(geometry->bed));
     water = {std::move(geometry->water), Instance().transform};
     shoreline = std::move(geometry->shoreline);
+    LakeChanged();
     return true;
 }
 
@@ -44,6 +45,7 @@ bool TerrainChunk::FinishLakeEdit()
         SetMesh(std::move(geometry->bed));
         water = {std::move(geometry->water), Instance().transform};
         shoreline = std::move(geometry->shoreline);
+        LakeChanged();
     }
     CancelLakeEdit();
     return true;

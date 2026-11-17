@@ -72,7 +72,7 @@ namespace
             else if (std::abs(a.y - b.y) > 1e-7) verticalSteps.insert(i);
         }
 
-        bool OnRoad(Point p) const
+        bool Occupied(Point p) const
         {
             const auto inside = [&](const std::vector<Index>& polygon)
             {
@@ -137,7 +137,7 @@ namespace
                     }
                 }
             }
-            if (!outside && !outline.OnRoad(Center(cdt, cdt.triangles[start])))
+            if (!outside && !outline.Occupied(Center(cdt, cdt.triangles[start])))
                 pockets.push_back(std::move(region));
         }
         return pockets;
@@ -350,7 +350,8 @@ namespace
     }
 }
 
-std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links)
+std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links,
+                                           std::span<const std::vector<Vector3>> exclusions)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
     if (first == footprints.end() && links.empty()) return {};
@@ -411,6 +412,9 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
             outline.solidWalls.insert(outline.solidWalls.end(), slab.walls.begin(), slab.walls.end());
         }
     }
+    // Treat the lake as an occupied footprint, using its already-built shoreline.
+    // The same constrained edges then bound the land pocket's inner ring.
+    for (const auto& rim : exclusions) addRim(rim);
     for (const auto& link : links) outline.AddEdge(link[0], link[1]);
     if (outline.points.size() < 3) return {};
     try
