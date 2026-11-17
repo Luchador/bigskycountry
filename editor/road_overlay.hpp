@@ -34,7 +34,7 @@ class RoadOverlay
 {
 public:
     RoadOverlay();
-    void DrawWater(WorldRenderer& renderer, const TerrainChunk& lake, int point, const FreeCamera& camera, SDL_Rect scene) const;
+    void DrawWater(WorldRenderer& renderer, const TerrainChunk& water, const std::set<int>& points, const FreeCamera& camera, SDL_Rect scene) const;
     std::optional<WaterPick> PickWater(ViewportPicker& picker, const TerrainChunk& lake, const FreeCamera& camera, SDL_Rect scene) const;
     static std::optional<GizmoPlacement> PointPlacement(Vector3 point, const FreeCamera& camera, SDL_Rect scene);
     static Vector3 SplinePosition(const ViewportPicker& pick, SDL_Rect scene);

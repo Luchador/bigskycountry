@@ -179,6 +179,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/road_editor.cpp
     editor/selection_bounds.cpp
     editor/plan_selection.cpp
+    editor/viewport_selection.cpp
     editor/highway_ramp_tool.cpp
     editor/ramp_handles.cpp
     editor/road_intersection.cpp
@@ -273,6 +274,11 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyPlanSelectionTests tests/plan_selection_tests.cpp editor/plan_selection.cpp)
     target_link_libraries(BigSkyPlanSelectionTests PRIVATE BigSkyApplication)
     add_test(NAME plan_selection COMMAND BigSkyPlanSelectionTests)
+    add_executable(BigSkyViewportSelectionTests tests/viewport_selection_tests.cpp
+        editor/viewport_selection.cpp editor/selection_bounds.cpp editor/properties_inspector.cpp
+        editor/edit_history.cpp editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyViewportSelectionTests PRIVATE BigSkyApplication)
+    add_test(NAME viewport_selection COMMAND BigSkyViewportSelectionTests)
     add_executable(BigSkyRiverTests tests/river_tests.cpp
         editor/properties_inspector.cpp editor/edit_history.cpp
         editor/transform_inspector.cpp editor/road_group_transform.cpp)

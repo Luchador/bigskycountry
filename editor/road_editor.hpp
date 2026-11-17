@@ -94,7 +94,7 @@ private:
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world);
     bool DrawMeasurement(SDL_Renderer* renderer) const;
     void UpdateSelectionBox(SDL_FPoint pointer);
-    void FinishSelectionBox(WorldDocument& world);
+    void FinishSelectionBox(WorldDocument& world, const FreeCamera& camera);
     bool DrawSelectionBox(SDL_Renderer* renderer) const;
     bool DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const;
 #ifndef _WIN32
@@ -123,7 +123,7 @@ private:
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
-    bool PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick);
+    bool PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick, SDL_Keymod modifiers);
     void MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void BeginWaterEditing(WorldDocument& world);
     bool FinishWaterEditing(WorldDocument& world);
@@ -271,6 +271,7 @@ private:
         BoxSelectionMode mode;
         std::optional<SceneKey> clickTarget;
         bool moved = false;
+        bool perspective = false;
     };
     std::optional<SelectionBox> selectionBox;
     SDL_FPoint mouse{};

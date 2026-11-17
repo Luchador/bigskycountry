@@ -15,7 +15,13 @@ struct TransformTarget
     int index = -1;
     int point = -1;
     std::set<SceneKey> members; // Identifies the exact group, including for queued inspector edits.
-    std::set<int> additionalPoints; // Other control points on the active road.
+    std::set<int> additionalPoints; // Other control points on the active road, lake or river.
+    std::set<int> SelectedPoints() const
+    {
+        auto points = additionalPoints;
+        if (point >= 0) points.insert(point);
+        return points;
+    }
     bool YawOnly() const
     {
         return kind == SelectionKind::Intersection || kind == SelectionKind::Anchor ||

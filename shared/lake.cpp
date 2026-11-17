@@ -189,6 +189,19 @@ bool LakeDefinition::MovePoint(int index, Vector3 position)
     return true;
 }
 
+bool LakeDefinition::TranslatePoints(const std::set<int>& indices, Vector3 delta)
+{
+    delta.y = 0;
+    if (indices.empty()) return false;
+    for (int i : indices)
+        if (i < 0 || static_cast<std::size_t>(i) >= points.size() || !FlatFinite(points[i].position + delta))
+            return SDL_SetError("Invalid lake point translation");
+    if (delta == Vector3{}) return true;
+    for (int i : indices) points[i].position = points[i].position + delta;
+    if (indices.size() != points.size()) SmoothHandles();
+    return true;
+}
+
 bool LakeDefinition::InsertPoint(int segment, double t)
 {
     if (points.size() >= maxPoints || segment < 0 || static_cast<std::size_t>(segment) >= points.size() ||

@@ -586,3 +586,29 @@ EditHistory::Result EditHistory::Redo(WorldDocument& world, RoadEditorState& edi
     }
     return result;
 }
+
+void RoadEditorState::SelectWaterPoints(int terrainIndex, const std::set<int>& points)
+{
+    drawing = false;
+    SelectPoint(-1, -1);
+    if (points.empty()) meshSelection = {SelectionKind::Terrain, terrainIndex};
+    else
+    {
+        meshSelection = {SelectionKind::WaterPoint, terrainIndex, *points.begin(), {}, points};
+        meshSelection.additionalPoints.erase(meshSelection.point);
+    }
+}
+
+void RoadEditorState::PickWaterPoint(int terrainIndex, int pointIndex, bool add, bool subtract)
+{
+    auto points = meshSelection.kind == SelectionKind::WaterPoint && meshSelection.index == terrainIndex ?
+        meshSelection.SelectedPoints() : std::set<int>{};
+    if (subtract) points.erase(pointIndex);
+    else
+    {
+        // Clicking a selected point starts a group drag; clicking a new one replaces it.
+        if (!add && !points.contains(pointIndex)) points.clear();
+        points.insert(pointIndex);
+    }
+    SelectWaterPoints(terrainIndex, points);
+}

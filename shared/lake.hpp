@@ -3,6 +3,7 @@
 #include "mesh.hpp"
 #include <iosfwd>
 #include <optional>
+#include <set>
 
 // Shared bank/shoreline control point. Lakes keep these in local XZ;
 // rivers also store elevation. Handles preserve the curve on insertion.
@@ -21,6 +22,7 @@ struct LakeDefinition
     static LakeDefinition Circle(double diameter = 200);
     Vector3 Evaluate(int segment, double t) const;
     bool MovePoint(int index, Vector3 position);
+    bool TranslatePoints(const std::set<int>& indices, Vector3 delta);
     bool InsertPoint(int segment, double t);
     bool RemovePoint(int index);
     bool Read(std::istream& in);

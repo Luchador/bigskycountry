@@ -16,6 +16,7 @@ struct RiverDefinition
     int End(int point) const; // 0 = start handle, 1 = end handle, -1 = bank point.
     Vector3 Point(int point) const;
     bool MovePoint(int point, Vector3 position);
+    bool TranslatePoints(const std::set<int>& indices, Vector3 delta);
     bool Extend(int end, Vector3 position);
     int InsertPoint(int bank, int segment, double t); // Returns the new flattened control index.
     bool RemovePoint(int point);
@@ -39,3 +40,10 @@ Vector3 WaterPoint(const WaterDefinition& water, int point);
 bool MoveWaterPoint(WaterDefinition& water, int point, Vector3 position);
 int InsertWaterPoint(WaterDefinition& water, int bank, int segment, double t);
 bool RemoveWaterPoint(WaterDefinition& water, int point);
+
+// Resolve end handles to their bank points, avoiding double movement when both
+// an end handle and one of its bank points are selected.
+std::optional<std::set<int>> WaterBankPoints(const WaterDefinition& water, const std::set<int>& points);
+std::optional<Vector3> WaterSelectionCenter(const WaterDefinition& water, const std::set<int>& points);
+bool TranslateWaterPoints(WaterDefinition& water, const std::set<int>& points, Vector3 delta);
+bool RemoveWaterPoints(WaterDefinition& water, const std::set<int>& points);

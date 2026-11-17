@@ -1,3 +1,4 @@
+#include "viewport_selection.hpp"
 #include "world_package.hpp"
 #include "road_editor.hpp"
 #include "marker.hpp"
@@ -276,7 +277,7 @@ void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& worl
     const auto waterTarget = state.meshSelection;
     if ((waterTarget.kind == SelectionKind::Terrain || waterTarget.kind == SelectionKind::WaterPoint) &&
         !state.HasHiddenSelection(world.hierarchy) && world.Terrain().at(waterTarget.index)->EditingWater())
-        overlay.DrawWater(renderer, *world.Terrain().at(waterTarget.index), waterTarget.point, camera, scene);
+        overlay.DrawWater(renderer, *world.Terrain().at(waterTarget.index), waterTarget.SelectedPoints(), camera, scene);
     overlay.DrawIntersections(renderer, world, state, camera, scene);
     if (const Road* road = Selected(world); road && !world.hierarchy.EditorHidden({SceneKind::Road, state.selected}))
     {
@@ -1649,10 +1650,26 @@ void RoadEditor::UpdateSelectionBox(SDL_FPoint pointer)
     box.moved |= std::hypot(box.end.x - box.start.x, box.end.y - box.start.y) >= 4;
 }
 
-void RoadEditor::FinishSelectionBox(WorldDocument& world)
+void RoadEditor::FinishSelectionBox(WorldDocument& world, const FreeCamera& camera)
 {
     if (!selectionBox) return;
     const auto& box = *selectionBox;
+    if (box.perspective)
+    {
+        if (!box.moved) return;
+        const ViewportSelectionBox rectangle(camera, scene, box.start, box.end);
+        if (waterEdit)
+        {
+            const SceneKey key{SceneKind::Terrain, waterEdit->index};
+            const auto points = world.hierarchy.EditorHidden(key) ? std::set<int>{} :
+                SelectWaterBox(*world.Terrain().at(waterEdit->index), rectangle);
+            state.SelectWaterPoints(waterEdit->index, points);
+            gizmo.mode = GizmoMode::Translate;
+        }
+        else state.SelectRows(SelectViewportBox(world, rectangle));
+        status.clear();
+        return;
+    }
     if (!box.moved)
     {
         // Preserve point selections on Shift-clicking the active road's pavement.
@@ -2219,6 +2236,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     }
 
     if (menu.RoadNamesEnabled() && !roadNames.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
+    if (!planView && !DrawSelectionBox(renderer)) return false;
 
     const char* message = StatusText();
     if (*message && !Text(renderer, 12, 28, message, ink)) return false;
@@ -2740,7 +2758,7 @@ void RoadEditor::CancelWaterEditing(WorldDocument& world)
     UpdateWindowTitle();
 }
 
-bool RoadEditor::PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick)
+bool RoadEditor::PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick, SDL_Keymod modifiers)
 {
     if (!waterEdit) return false;
     const auto target = state.meshSelection;
@@ -2753,8 +2771,8 @@ bool RoadEditor::PickWaterControl(WorldDocument& world, const FreeCamera& camera
     const auto hit = overlay.PickWater(picker, chunk, camera, scene);
     if (!hit) return false;
     // A selected point's axis handles take precedence over the bank spline.
-    if (!doubleClick && !(SDL_GetModState() & SDL_KMOD_SHIFT) && target.kind == SelectionKind::WaterPoint &&
-        (hit->point < 0 || hit->point == target.point))
+    if (!doubleClick && !(modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) && target.kind == SelectionKind::WaterPoint &&
+        (hit->point < 0 || target.SelectedPoints().contains(hit->point)))
         if (const auto placement = SelectedGizmoPlacement(world, camera))
         {
             ViewportPicker handles(camera, scene, mouse);
@@ -2762,11 +2780,12 @@ bool RoadEditor::PickWaterControl(WorldDocument& world, const FreeCamera& camera
         }
     if (hit->point >= 0)
     {
-        state.meshSelection = {SelectionKind::WaterPoint, target.index, hit->point};
+        state.PickWaterPoint(target.index, hit->point, (modifiers & SDL_KMOD_SHIFT) != 0, (modifiers & SDL_KMOD_CTRL) != 0);
+        if (modifiers & SDL_KMOD_CTRL) return true;
         dragStart.emplace(state);
         dragStart->water = EditSnapshot::WaterEdit{target.index, *chunk.WaterSource()};
         dragStart->meshTransform = Inspect(world, state.meshSelection).value;
-        riverExtendEnd = chunk.River() && (SDL_GetModState() & SDL_KMOD_SHIFT) ? chunk.River()->End(hit->point) : -1;
+        riverExtendEnd = chunk.River() && (modifiers & SDL_KMOD_SHIFT) && state.meshSelection.additionalPoints.empty() ? chunk.River()->End(hit->point) : -1;
         anchorPress = mouse;
         drag = Drag::WaterPoint;
         gizmo.mode = GizmoMode::Translate;
@@ -2823,7 +2842,12 @@ void RoadEditor::MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, 
         if (!river.Extend(riverExtendEnd, local) || !chunk.SetWater(water)) { status = SDL_GetError(); return; }
         state.meshSelection.point = river.PointCount()-2+riverExtendEnd;
     }
-    else if (!::MoveWaterPoint(water, state.meshSelection.point, local) || !chunk.SetWater(water)) { status = SDL_GetError(); return; }
+    else
+    {
+        const auto offset = chunk.Instance().transform.Unrotate(pose.position - start.position);
+        if (!TranslateWaterPoints(water, dragStart->meshSelection.SelectedPoints(), offset) || !chunk.SetWater(water))
+        { status = SDL_GetError(); return; }
+    }
     status.clear();
     dragChanged = *chunk.WaterSource() != dragStart->water->definition;
 }
@@ -2995,7 +3019,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         auto water = *chunk.WaterSource();
         EditSnapshot before(state);
         before.water = EditSnapshot::WaterEdit{target.index, water};
-        if (!RemoveWaterPoint(water, target.point) || !chunk.SetWater(water)) { status = SDL_GetError(); return; }
+        if (!RemoveWaterPoints(water, target.SelectedPoints()) || !chunk.SetWater(water)) { status = SDL_GetError(); return; }
         state.SelectRows({{SceneKind::Terrain, target.index}});
         CommitTransform(world, std::move(before));
         return;
@@ -3428,8 +3452,13 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         }
         if (mesh)
         {
-            if (dragStart->water && pose == start)
-                world.Terrain()[state.meshSelection.index]->SetWater(dragStart->water->definition);
+            if (dragStart->water)
+            {
+                auto& chunk = *world.Terrain()[state.meshSelection.index];
+                auto water = dragStart->water->definition;
+                const auto delta = chunk.Instance().transform.Unrotate(pose.position - start.position);
+                if (!TranslateWaterPoints(water, dragStart->meshSelection.SelectedPoints(), delta) || !chunk.SetWater(water)) return;
+            }
             else if (!SetPlacementTransform(world, state.meshSelection, pose)) return;
         }
         else
@@ -4056,7 +4085,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
 #endif
     }
-    if (!planView && !DraggingGizmo() && drag != Drag::AnchorRoad && drag != Drag::WaterPoint && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
+    if (!planView && !DraggingGizmo() && drag != Drag::AnchorRoad && drag != Drag::WaterPoint && drag != Drag::BoxSelect && e.type != SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         return EditorEvent::Pass;
     }
@@ -4083,7 +4112,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             else
             {
-                if (!PickWaterControl(world, camera, e.button.clicks >= 2)) PickWorldRoad(world, camera, modifiers);
+                if ((modifiers & SDL_KMOD_SHIFT) && (modifiers & SDL_KMOD_CTRL))
+                {
+                    selectionBox = SelectionBox{mouse, mouse, BoxSelectionMode::Replace, {}, false, true};
+                    drag = Drag::BoxSelect;
+                    SDL_CaptureMouse(true);
+                }
+                else if (!PickWaterControl(world, camera, e.button.clicks >= 2, modifiers)) PickWorldRoad(world, camera, modifiers);
             }
         }
         else if (!planView)
@@ -4135,7 +4170,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             if (drag == Drag::BoxSelect)
             {
                 UpdateSelectionBox(pointer);
-                FinishSelectionBox(world);
+                FinishSelectionBox(world, camera);
             }
             else if (drag == Drag::WaterPoint) MoveWaterPoint(world, camera, pointer);
             else if (drag == Drag::AnchorRoad)

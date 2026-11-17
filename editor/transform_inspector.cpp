@@ -215,11 +215,14 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
         fields.value.rotation.y = world.intersections.at(target.index).yaw;
         break;
     case SelectionKind::WaterPoint:
-        if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingWater() || target.point < 0 ||
-            target.point >= WaterPointCount(*world.Terrain()[i]->WaterSource())) return {};
-        fields.value.position = world.Terrain()[i]->Instance().transform.Point(WaterPoint(*world.Terrain()[i]->WaterSource(), target.point));
+    {
+        if (i >= world.Terrain().size() || !world.Terrain()[i]->EditingWater()) return {};
+        const auto center = WaterSelectionCenter(*world.Terrain()[i]->WaterSource(), target.SelectedPoints());
+        if (!center) return {};
+        fields.value.position = world.Terrain()[i]->Instance().transform.Point(*center);
         fields.levelOnly = !world.Terrain()[i]->River();
         break;
+    }
     case SelectionKind::Terrain:
         if (i >= world.Terrain().size())
         {
@@ -414,9 +417,10 @@ bool SetPlacementTransform(WorldDocument& world, TransformTarget target, const O
     {
         auto& chunk = *world.Terrain()[index];
         auto water = *chunk.WaterSource();
-        auto position = chunk.Instance().transform.Unrotate(transform.position - chunk.GetTransform().position);
-        if (!chunk.River()) position.y = 0;
-        return MoveWaterPoint(water, target.point, position) && chunk.SetWater(water);
+        const auto center = WaterSelectionCenter(water, target.SelectedPoints());
+        if (!center) return SDL_SetError("Invalid water control point selection");
+        const auto position = chunk.Instance().transform.Unrotate(transform.position - chunk.GetTransform().position);
+        return TranslateWaterPoints(water, target.SelectedPoints(), position - *center) && chunk.SetWater(water);
     }
     return SDL_SetError("Invalid mesh selection");
 }

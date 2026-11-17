@@ -52,7 +52,13 @@ Bounds3 SelectionBounds(const WorldDocument& world, const RoadEditorState& state
     }
     if (state.meshSelection.kind == SelectionKind::WaterPoint)
     {
-        result.Include(Inspect(world, state.meshSelection).value.position);
+        const auto& target = state.meshSelection;
+        if (target.index < 0 || static_cast<std::size_t>(target.index) >= world.Terrain().size() ||
+            state.HasHiddenSelection(world.hierarchy)) return result;
+        const auto& chunk = *world.Terrain()[target.index];
+        if (const auto water = chunk.WaterSource())
+            if (const auto points = WaterBankPoints(*water, target.SelectedPoints()))
+                for (int point : *points) result.Include(chunk.Instance().transform.Point(WaterPoint(*water, point)));
         return result;
     }
     if (state.meshSelection.kind == SelectionKind::Anchor)

@@ -87,6 +87,28 @@ bool RiverDefinition::MovePoint(int point, Vector3 position)
     return true;
 }
 
+bool RiverDefinition::TranslatePoints(const std::set<int>& indices, Vector3 delta)
+{
+    if (indices.empty()) return false;
+    const int left = static_cast<int>(banks[0].size());
+    std::array<std::size_t, 2> counts{};
+    for (int i : indices)
+    {
+        if (i < 0 || i >= PointCount()-2 || !FinitePoint(Point(i) + delta))
+            return SDL_SetError("Invalid river point translation");
+        ++counts[i < left ? 0 : 1];
+    }
+    if (delta == Vector3{}) return true;
+    for (int i : indices)
+    {
+        auto& point = i < left ? banks[0][i] : banks[1][i-left];
+        point.position = point.position + delta;
+    }
+    for (int bank = 0; bank < 2; ++bank)
+        if (counts[bank] && counts[bank] != banks[bank].size()) SmoothHandles(bank);
+    return true;
+}
+
 bool RiverDefinition::Extend(int end, Vector3 position)
 {
     if ((end != 0 && end != 1) || !FinitePoint(position)) return SDL_SetError("Invalid river endpoint");
@@ -220,3 +242,50 @@ int InsertWaterPoint(WaterDefinition& water, int bank, int segment, double t)
 }
 bool RemoveWaterPoint(WaterDefinition& water, int point)
 { return std::visit([&](auto& source) { return source.RemovePoint(point); }, water); }
+
+std::optional<std::set<int>> WaterBankPoints(const WaterDefinition& water, const std::set<int>& points)
+{
+    if (points.empty()) return {};
+    std::set<int> result;
+    const auto* river = std::get_if<RiverDefinition>(&water);
+    for (int point : points)
+    {
+        if (point < 0 || point >= WaterPointCount(water)) return {};
+        const int end = river ? river->End(point) : -1;
+        if (end < 0) result.insert(point);
+        else
+        {
+            const int left = static_cast<int>(river->banks[0].size());
+            result.insert(end ? left-1 : 0);
+            result.insert(end ? river->PointCount()-3 : left);
+        }
+    }
+    return result;
+}
+
+std::optional<Vector3> WaterSelectionCenter(const WaterDefinition& water, const std::set<int>& points)
+{
+    const auto bankPoints = WaterBankPoints(water, points);
+    if (!bankPoints) return {};
+    Vector3 center{};
+    for (int point : *bankPoints) center = center + WaterPoint(water, point);
+    return center * (1.0 / bankPoints->size());
+}
+
+bool TranslateWaterPoints(WaterDefinition& water, const std::set<int>& points, Vector3 delta)
+{
+    const auto bankPoints = WaterBankPoints(water, points);
+    if (!bankPoints) return SDL_SetError("Invalid water control point selection");
+    return std::visit([&](auto& source) { return source.TranslatePoints(*bankPoints, delta); }, water);
+}
+
+bool RemoveWaterPoints(WaterDefinition& water, const std::set<int>& points)
+{
+    if (points.empty()) return false;
+    // Work on a copy: a failed minimum-point check must not partially delete a group.
+    auto edited = water;
+    for (auto it = points.rbegin(); it != points.rend(); ++it)
+        if (!RemoveWaterPoint(edited, *it)) return false;
+    water = std::move(edited);
+    return true;
+}

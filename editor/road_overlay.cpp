@@ -417,7 +417,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
     }
 }
 
-void RoadOverlay::DrawWater(WorldRenderer& renderer, const TerrainChunk& water, int point, const FreeCamera& camera, SDL_Rect scene) const
+void RoadOverlay::DrawWater(WorldRenderer& renderer, const TerrainChunk& water, const std::set<int>& points, const FreeCamera& camera, SDL_Rect scene) const
 {
     if (!water.HasWater() || ViewportFocalLength(scene) <= 0) return;
     const auto& frame = water.Instance().transform;
@@ -443,7 +443,7 @@ void RoadOverlay::DrawWater(WorldRenderer& renderer, const TerrainChunk& water, 
         {
             const bool end = water.River() && water.River()->End(i) >= 0;
             if (end) placement->metersPerPixel *= 1.5;
-            renderer.SubmitMesh(Marker(*placement), i == point ? EditorColors::orange : end ? EditorColors::laneGreen : EditorColors::blue);
+            renderer.SubmitMesh(Marker(*placement), points.contains(i) ? EditorColors::orange : end ? EditorColors::laneGreen : EditorColors::blue);
         }
 }
 

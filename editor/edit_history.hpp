@@ -51,6 +51,8 @@ struct RoadEditorState
     }
     void PickElement(SceneKey key, bool add, bool subtract);
     void SelectRows(const std::set<SceneKey>& keys);
+    void SelectWaterPoints(int terrainIndex, const std::set<int>& points);
+    void PickWaterPoint(int terrainIndex, int pointIndex, bool add, bool subtract);
     TransformTarget Target() const
     {
         if (RoadGroupSelected()) return {SelectionKind::RoadGroup, -1, -1, outlineSelection};
