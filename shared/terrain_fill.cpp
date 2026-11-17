@@ -34,6 +34,15 @@ namespace
         std::vector<Footprint> polygons;
         std::set<Index> verticalSteps;
         std::vector<std::array<Vector3, 4>> solidWalls;
+        std::span<const Segment> junctionSeams;
+
+        bool JunctionSealed(Point point, double low, double high) const
+        {
+            for (const auto& seam : junctionSeams)
+                if (std::hypot(seam[0].x - origin.x - point.x, seam[0].z - origin.z - point.y) <= 1e-6 &&
+                    low >= seam[0].y - 1e-6 && high <= seam[1].y + 1e-6) return true;
+            return false;
+        }
 
         bool Sealed(Point point, double low, double high) const
         {
@@ -233,7 +242,8 @@ namespace
                 const double height = steps.contains(i) ? RoadStyle::curbHeight : 0.0;
                 const double difference = out.positions[i].y - y;
                 return (difference >= -1e-6 && difference <= height + 1e-6) ||
-                       outline.Sealed(out.points[i], std::min(y, out.positions[i].y), std::max(y, out.positions[i].y));
+                       outline.Sealed(out.points[i], std::min(y, out.positions[i].y), std::max(y, out.positions[i].y)) ||
+                       outline.JunctionSealed(out.points[i], std::min(y, out.positions[i].y), std::max(y, out.positions[i].y));
             };
             if (!fits(seam.i, seam.rim[0].y) || !fits(seam.j, seam.rim[1].y)) return false;
         }
@@ -351,11 +361,12 @@ namespace
 }
 
 std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links,
-                                           std::span<const std::vector<Vector3>> exclusions)
+                                           std::span<const std::vector<Vector3>> exclusions, std::span<const Segment> junctionSeams)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
     if (first == footprints.end() && links.empty()) return {};
     Outline outline{first == footprints.end() ? links.front()[0] : (*first)->outline.front()};
+    outline.junctionSeams = junctionSeams;
     const auto addRim = [&](const std::vector<Vector3>& rim)
     {
         if (rim.size() < 3) return;

@@ -171,7 +171,7 @@ namespace RoadIO
         out << road.crossings.size() << '\n';
         for (const auto& crossing : road.crossings)
         {
-            if (!crossing.Valid() || road.style.railroad) { out.setstate(std::ios::failbit); return; }
+            if (!crossing.Valid()) { out.setstate(std::ios::failbit); return; }
             out << crossing.railroadId << ' ' << crossing.roadFraction << ' ' << crossing.railFraction << '\n';
         }
         out << road.points.size() << '\n';
@@ -269,7 +269,7 @@ namespace RoadIO
         if (version >= 18)
         {
             std::int64_t count = 0;
-            if (!(in >> count) || count < 0 || count > 100000 || (count && road.style.railroad))
+            if (!(in >> count) || count < 0 || count > 100000 || (count && road.style.railroad && version < 26))
             { in.setstate(std::ios::failbit); return road; }
             for (std::int64_t i = 0; i < count; ++i)
             {

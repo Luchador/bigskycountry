@@ -412,12 +412,13 @@ bool RailroadCrossingLink::Valid() const
 std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& railway)
 {
     std::vector<CrossingSite> result;
-    if (road.style.railroad || !railway.style.railroad || railway.id <= 0)
+    if (!railway.style.railroad || railway.id <= 0 || road.id == railway.id)
         return result;
     const auto a = Path(road), b = Path(railway);
     if (a.size() < 2 || b.size() < 2)
         return result;
     const auto sa = Stations(a), sb = Stations(b);
+    if (sa.back() <= epsilon || sb.back() <= epsilon) return result;
     for (size_t i = 1; i < a.size(); ++i)
         for (size_t j = 1; j < b.size(); ++j)
         {
@@ -441,7 +442,7 @@ std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& ra
 
 std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road& railway, const CrossingSite& site)
 {
-    if (road.HasOverpasses() || railway.HasOverpasses() || railway.trackSections.size() < 2)
+    if (road.style.railroad || road.HasOverpasses() || railway.HasOverpasses() || railway.trackSections.size() < 2)
         return {};
     const auto path = Path(road), rail = Path(railway);
     const auto s = Stations(path), rs = Stations(rail);
@@ -534,6 +535,66 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
     return result;
 }
 
+std::optional<std::vector<std::array<Vector3, 2>>> PlanRailroadJunction(
+    const Road& first, const Road& second, const CrossingSite& site)
+{
+    if (!first.style.railroad || !second.style.railroad || first.id == second.id ||
+        first.HasOverpasses() || second.HasOverpasses() || !site.link.Valid() ||
+        site.link.railroadId != second.id || first.trackSections.size() < 2 || second.trackSections.size() < 2 ||
+        first.outline.size() < 3 || second.outline.size() < 3) return {};
+    const auto frame = [](const Road& road, double fraction)
+    {
+        std::vector<Vector3> heads;
+        for (const auto& row : road.trackSections) heads.push_back(row.top);
+        const auto stations = Stations(heads);
+        const double at = fraction * stations.back();
+        const auto i = std::clamp<std::size_t>(std::upper_bound(stations.begin(), stations.end(), at) - stations.begin(),
+                                             1, heads.size() - 1);
+        const double run = stations[i] - stations[i - 1];
+        const double t = run > epsilon ? (at - stations[i - 1]) / run : 0;
+        return std::pair{heads[i - 1] + (heads[i] - heads[i - 1]) * t,
+                         Math::Normalize(Vector3{heads[i].x - heads[i - 1].x, 0, heads[i].z - heads[i - 1].z})};
+    };
+    const auto [a, forwardA] = frame(first, site.link.roadFraction);
+    const auto [b, forwardB] = frame(second, site.link.railFraction);
+    const double sine = std::abs(Cross(forwardA, forwardB));
+    // This first milestone does not raise or lower either track. Do not turn
+    // an elevated crossing or a parallel overlap into a false terrain seal.
+    if (std::abs(a.y - b.y) > .25 || sine < .01) return {};
+    const double reach = (first.style.railroad->ToeHalfWidth() + second.style.railroad->ToeHalfWidth() +
+                          2 * RoadStyle::stripWidth) / sine + 2;
+    using Edge = std::array<Vector3, 2>;
+    const auto nearbyEdges = [&](const Road& road)
+    {
+        std::vector<Edge> edges;
+        for (std::size_t i = 0; i < road.outline.size(); ++i)
+        {
+            const auto p = road.outline[i], q = road.outline[(i + 1) % road.outline.size()];
+            if (std::max(p.x, q.x) < site.position.x - reach || std::min(p.x, q.x) > site.position.x + reach ||
+                std::max(p.z, q.z) < site.position.z - reach || std::min(p.z, q.z) > site.position.z + reach) continue;
+            edges.push_back({p, q});
+        }
+        return edges;
+    };
+    const auto edgesA = nearbyEdges(first), edgesB = nearbyEdges(second);
+    std::vector<Edge> seams;
+    for (const auto& e : edgesA)
+        for (const auto& f : edgesB)
+        {
+            const auto u = e[1] - e[0], v = f[1] - f[0], delta = f[0] - e[0];
+            const double denominator = Cross(u, v);
+            if (std::abs(denominator) < epsilon) continue;
+            const double t = Cross(delta, v) / denominator, s = Cross(delta, u) / denominator;
+            if (t < -epsilon || t > 1 + epsilon || s < -epsilon || s > 1 + epsilon) continue;
+            auto p = e[0] + u * std::clamp(t, 0.0, 1.0), q = f[0] + v * std::clamp(s, 0.0, 1.0);
+            if (LengthXZ(p - site.position) > reach) continue;
+            q.x = p.x; q.z = p.z;
+            seams.push_back(p.y < q.y ? Edge{p, q} : Edge{q, p});
+        }
+    if (seams.empty()) return {};
+    return seams;
+}
+
 void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfile>& profiles)
 {
     for (const auto& profile : profiles)
@@ -597,6 +658,7 @@ void WorldDocument::RefreshRailroadCrossings(bool force)
     });
     for (auto& road : roads)
     {
+        if (road.style.railroad) continue; // Rail/rail links only affect dependent terrain fills.
         if (road.crossings.empty() && road.crossingProfiles.empty()) continue;
         CrossingSources sources{road.revision};
         for (const auto& link : road.crossings)

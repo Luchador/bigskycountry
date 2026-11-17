@@ -77,7 +77,32 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
         rim.reserve(lake->BuiltShoreline().size());
         for (const auto& sample : lake->BuiltShoreline()) rim.push_back(lake->Water().transform.Point(sample.position));
     }
-    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines));
+    std::vector<std::array<Vector3, 2>> junctionSeams;
+    for (int id : groundRoads)
+    {
+        const auto source = byId.find(id);
+        if (source == byId.end() || !source->second->style.railroad) continue;
+        const Road& road = *source->second;
+        std::map<int, std::vector<CrossingSite>> sites;
+        for (const auto& link : road.crossings)
+        {
+            const auto other = byId.find(link.railroadId);
+            if (other == byId.end() || !groundRoads.contains(link.railroadId)) continue;
+            const auto [found, inserted] = sites.try_emplace(link.railroadId);
+            if (inserted) found->second = FindRailroadCrossings(road, *other->second);
+            if (found->second.empty()) continue;
+            const auto score = [&](const CrossingSite& site)
+            {
+                return std::abs(site.link.roadFraction - link.roadFraction) +
+                       std::abs(site.link.railFraction - link.railFraction);
+            };
+            const auto best = std::min_element(found->second.begin(), found->second.end(),
+                                               [&](const auto& a, const auto& b) { return score(a) < score(b); });
+            if (auto seams = PlanRailroadJunction(road, *other->second, *best))
+                junctionSeams.insert(junctionSeams.end(), seams->begin(), seams->end());
+        }
+    }
+    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
     chunk.sourceWaterBodies = std::move(waterRevisions);

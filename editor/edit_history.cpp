@@ -395,7 +395,7 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
     {
         for (auto& road : world.roads)
         {
-            if (road.style.railroad || road.crossings.empty()) continue;
+            if (road.id == original.id || road.crossings.empty()) continue;
             const auto oldSites = FindRailroadCrossings(road, original);
             std::vector<RailroadCrossingLink> links;
             for (auto link : road.crossings)

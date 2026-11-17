@@ -814,11 +814,19 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         for (int r = 0; r < static_cast<int>(world.roads.size()); ++r)
         {
             const auto& road = world.roads[r];
-            if (road.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, r})) continue;
+            if (world.hierarchy.EditorHidden({SceneKind::Road, r})) continue;
             for (int t = 0; t < static_cast<int>(world.roads.size()); ++t)
             {
                 const auto& track = world.roads[t];
-                if ((r != clickedRoad && t != clickedRoad) || !track.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, t})) continue;
+                if (r == t || (r != clickedRoad && t != clickedRoad) || !track.style.railroad || world.hierarchy.EditorHidden({SceneKind::Road, t})) continue;
+                // Existing links may be owned by either railroad after a split.
+                // Otherwise use stable IDs to offer each new pair only once.
+                if (road.style.railroad)
+                {
+                    const bool owns = std::ranges::any_of(road.crossings, [&](const auto& link) { return link.railroadId == track.id; });
+                    const bool reverse = std::ranges::any_of(track.crossings, [&](const auto& link) { return link.railroadId == road.id; });
+                    if (!owns && (reverse || road.id > track.id)) continue;
+                }
                 const auto sites = FindRailroadCrossings(road, track);
                 for (const auto& site : sites)
                 {
@@ -833,7 +841,8 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
                         const auto match = std::min_element(sites.begin(), sites.end(), [&](const auto& a, const auto& b) { return score(a)<score(b); });
                         if (match->link == site.link) { existing = i; break; }
                     }
-                    if (existing < 0 && !PlanRailroadCrossing(road, track, site)) continue;
+                    if (existing < 0 && !(road.style.railroad ? PlanRailroadJunction(road, track, site).has_value() :
+                                                              PlanRailroadCrossing(road, track, site).has_value())) continue;
                     closestCrossing = distance;
                     crossingMenuTarget = CrossingMenuTarget{r, road.revision, site, existing};
                 }

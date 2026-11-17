@@ -8,7 +8,8 @@ struct Road;
 struct RoadGeometry;
 
 // Stable railway ID and normalized XZ stations select one crossing when a pair
-// of winding splines intersects more than once. Only this link is serialized.
+// of winding splines intersects more than once. The owner can also be a railroad.
+// Only this link is serialized; rail/rail links generate terrain seams only.
 struct RailroadCrossingLink
 {
     int railroadId = 0;
@@ -40,4 +41,8 @@ struct CrossingSite
 
 std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& railway);
 std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road& railway, const CrossingSite& site);
+// Vertical terrain seams at the intersecting embankment rims. Neither railway
+// mesh changes. Empty optional means the tracks are not an at-grade crossing.
+std::optional<std::vector<std::array<Vector3, 2>>> PlanRailroadJunction(
+    const Road& first, const Road& second, const CrossingSite& site);
 void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfile>& profiles);
