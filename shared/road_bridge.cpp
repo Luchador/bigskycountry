@@ -64,6 +64,12 @@ namespace
         if (t < -1e-9 || t > 1 + 1e-9 || s < -1e-9 || s > 1 + 1e-9) return {};
         return std::pair{std::clamp(t, 0.0, 1.0), std::clamp(s, 0.0, 1.0)};
     }
+    std::optional<std::size_t> PathEnd(std::size_t edge, std::size_t count, double t)
+    {
+        if (edge == 1 && t <= 1e-9) return 0;
+        if (edge + 1 == count && t >= 1 - 1e-9) return 1;
+        return {};
+    }
     bool Overlaps(const Rim& a, const Rim& b)
     {
         if (a.size() < 3 || b.size() < 3) return false;
@@ -292,6 +298,19 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
                     for (std::size_t j = 1; j < lowerPath.size(); ++j)
                         if (auto at = Crossing(path[i - 1], path[i], lowerPath[j - 1], lowerPath[j]))
                         {
+                            // Split roads can share an endpoint without an explicit
+                            // connector. That contact is an approach to the bridge,
+                            // not a lower crossing. Only ignore the endpoint hit:
+                            // the same road may curve back under the span elsewhere.
+                            const auto upperEnd = PathEnd(i, path.size(), at->first);
+                            const auto lowerEnd = PathEnd(j, lowerPath.size(), at->second);
+                            if (upperEnd && lowerEnd &&
+                                ((segment == 0 && *upperEnd == 0) ||
+                                 (std::size_t(segment + 2) == upper.points.size() && *upperEnd == 1)) &&
+                                upper.style.railroad.has_value() == lower.style.railroad.has_value() &&
+                                Math::Length(upper.points[segment + *upperEnd].position -
+                                    lower.points[*lowerEnd ? lower.points.size() - 1 : 0].position) <= 1e-6)
+                                continue;
                             const auto position = path[i - 1] + (path[i] - path[i - 1]) * at->first;
                             const double bottom = std::lerp(lowerPath[j - 1].y, lowerPath[j].y, at->second);
                             if (DeckBaseHeight(upper, position, path[i] - path[i - 1]) - bottom < settings.depth + 1)

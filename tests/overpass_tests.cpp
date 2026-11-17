@@ -193,6 +193,77 @@ void Planning()
     Check(PlanOverpass(upper, {0,1}, {}, world.Terrain()).has_value(), "Railroad bridge over water rejected");
 }
 
+void SplitApproaches()
+{
+    for (bool railway : {false, true})
+    {
+        WorldDocument world(AssetRoot::Project);
+        Populate(world);
+        if (railway)
+        {
+            world.roads[0].style.railroad.emplace();
+            world.roads[0].Rebuild();
+        }
+        // A bridge section split out of a curved alignment retains geometric
+        // endpoint joins, without connector sockets. Non-collinear sample chords
+        // at the joins used to misidentify both approaches as lower crossings.
+        auto left = Straight(world, {-220,12,-10}, {-120,12,0}, railway);
+        auto right = Straight(world, {120,12,0}, {220,12,10}, railway);
+        for (auto* road : {&left, &right})
+        {
+            road->style.curved = true;
+            for (auto& p : road->points) p.heading = 0;
+            road->Rebuild();
+        }
+        world.roads.push_back(std::move(left));
+        world.roads.push_back(std::move(right));
+        for (int direction = 0; direction < 2; ++direction)
+        {
+            const auto plan = PlanOverpass(world.roads[0], {0,1}, world.roads, world.Terrain());
+            Check(plan && plan->lowerRoads == std::set<int>{world.roads[1].id, world.roads[2].id} &&
+                  plan->lowerWaterBodies.size() == 1, "Shared approach endpoints blocked the overpass");
+            Check(!PlanOverpass(world.roads[0], {0,1}, std::span(world.roads).subspan(3)) &&
+                  std::string(SDL_GetError()).find("must cross above") != std::string::npos,
+                  "Approach joins alone counted as an overpass");
+            for (std::size_t i : {3,4})
+            {
+                auto& road = world.roads[i];
+                std::reverse(road.points.begin(), road.points.end());
+                for (auto& p : road.points) p.heading = *p.heading + std::acos(-1.0);
+                road.Rebuild();
+            }
+        }
+        // Matching XZ is insufficient: a separate endpoint just below the deck
+        // must still meet the minimum clearance, including railway rail heads.
+        world.roads[3].points.back().position.y -= .5;
+        world.roads[3].Rebuild();
+        Check(!PlanOverpass(world.roads[0], {0,1}, world.roads, world.Terrain()) &&
+              std::string(SDL_GetError()).find("Raise the upper") != std::string::npos,
+              "A vertically separate approach escaped the clearance check");
+    }
+
+    WorldDocument world(AssetRoot::Project);
+    Populate(world);
+    auto approach = Straight(world, {-120,12,0}, {-200,12,-20});
+    approach.points.push_back({{0,12,-20}});
+    approach.points.push_back({{0,12,20}});
+    approach.Rebuild();
+    world.roads.push_back(std::move(approach));
+    Check(!PlanOverpass(world.roads[0], {0,1}, world.roads, world.Terrain()) &&
+          std::string(SDL_GetError()).find("Raise the upper") != std::string::npos,
+          "Ignoring an endpoint also ignored the same road's interior crossing");
+    // A road terminating at an internal upper control point is not an end-to-end
+    // approach, even when that point is the boundary of the selected span.
+    world.roads.back() = Straight(world, {0,12,-40}, {0,12,0});
+    Check(!PlanOverpass(world.roads[0], {0}, world.roads, world.Terrain()) &&
+          std::string(SDL_GetError()).find("Raise the upper") != std::string::npos,
+          "Internal control-point contact escaped the clearance check");
+    world.roads.back() = Straight(world, {-120,12,-40}, {-120,12,40});
+    Check(!PlanOverpass(world.roads[0], {0,1}, world.roads, world.Terrain()) &&
+          std::string(SDL_GetError()).find("Raise the upper") != std::string::npos,
+          "Lower road interior crossing an upper endpoint escaped the clearance check");
+}
+
 void PersistenceAndCooking(const std::filesystem::path& root)
 {
     WorldDocument world(AssetRoot::Project);
@@ -268,7 +339,7 @@ int main()
     try
     {
         std::filesystem::create_directories(root);
-        GeometryAndUpdates(); Planning(); PersistenceAndCooking(root); LegacyRoad();
+        GeometryAndUpdates(); Planning(); SplitApproaches(); PersistenceAndCooking(root); LegacyRoad();
         std::filesystem::remove_all(root);
         std::cout << "Multi-element overpass tests passed\n"; return 0;
     }
