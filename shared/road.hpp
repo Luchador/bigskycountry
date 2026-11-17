@@ -276,6 +276,8 @@ struct Road : RoadGeometry
     std::vector<double> bridgeKnots;
     std::map<int, std::vector<Vector3>> bridgeGroundSources; // Derived lower-road rims, never saved.
     std::map<int, std::uint64_t> bridgeSourceRevisions;
+    std::map<std::uint64_t, std::vector<Vector3>> bridgeWaterSources; // Committed world-space shorelines.
+    std::map<std::uint64_t, std::uint64_t> bridgeWaterRevisions;
     bool HasProfileOverrides() const { return HasLaneOverrides() || HasShoulderOverrides() || HasDivisionOverrides(); }
     bool HasDivisionOverrides() const;
     double MaximumHalfSeparation() const;

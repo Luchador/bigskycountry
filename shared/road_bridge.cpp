@@ -64,6 +64,67 @@ namespace
         if (t < -1e-9 || t > 1 + 1e-9 || s < -1e-9 || s > 1 + 1e-9) return {};
         return std::pair{std::clamp(t, 0.0, 1.0), std::clamp(s, 0.0, 1.0)};
     }
+    bool Overlaps(const Rim& a, const Rim& b)
+    {
+        if (a.size() < 3 || b.size() < 3) return false;
+        Bounds3 boundsA, boundsB;
+        for (auto p : a) boundsA.Include(p);
+        for (auto p : b) boundsB.Include(p);
+        if (boundsA.max.x < boundsB.min.x || boundsB.max.x < boundsA.min.x ||
+            boundsA.max.z < boundsB.min.z || boundsB.max.z < boundsA.min.z) return false;
+        if (Inside(a.front(), b) || Inside(b.front(), a)) return true;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            for (std::size_t j = 0; j < b.size(); ++j)
+                if (Crossing(a[i], a[(i + 1) % a.size()], b[j], b[(j + 1) % b.size()])) return true;
+        return false;
+    }
+    std::optional<std::pair<double, double>> CoveredRange(Vector3 a, Vector3 b, Vector3 side, const Rim& rim)
+    {
+        const Rim strip{a - side, b - side, b + side, a + side};
+        if (!Overlaps(strip, rim)) return {};
+        const auto direction = b - a;
+        const double length = direction.x * direction.x + direction.z * direction.z;
+        if (length < 1e-16) return {};
+        double first = 1, last = 0;
+        const auto include = [&](Vector3 p) {
+            const double t = std::clamp(((p.x - a.x) * direction.x + (p.z - a.z) * direction.z) / length, 0.0, 1.0);
+            first = std::min(first, t);
+            last = std::max(last, t);
+        };
+        for (auto p : strip) if (Inside(p, rim)) include(p);
+        for (auto p : rim) if (Inside(p, strip)) include(p);
+        for (std::size_t i = 0; i < strip.size(); ++i)
+            for (std::size_t j = 0; j < rim.size(); ++j)
+                if (auto at = Crossing(strip[i], strip[(i + 1) % strip.size()], rim[j], rim[(j + 1) % rim.size()]))
+                    include(strip[i] + (strip[(i + 1) % strip.size()] - strip[i]) * at->first);
+        if (first > last) return {};
+        return std::pair{first, last};
+    }
+    Rim SpanRim(const Road& road, std::size_t first, std::size_t last)
+    {
+        Rim rim;
+        if (road.bridgeKnots.size() != road.points.size()) return rim;
+        const double start = road.bridgeKnots[first], end = road.bridgeKnots[last];
+        for (int side : {0, 1})
+        {
+            Rim edge;
+            for (const auto& p : road.bridgeRims[side])
+                if (p.distance >= start - 1e-8 && p.distance <= end + 1e-8)
+                    if (edge.empty() || edge.back() != p.position) edge.push_back(p.position);
+            if (side == 0) rim.insert(rim.end(), edge.begin(), edge.end());
+            else rim.insert(rim.end(), edge.rbegin(), edge.rend());
+        }
+        return rim;
+    }
+    Rim Shoreline(const TerrainChunk& water)
+    {
+        Rim rim;
+        rim.reserve(water.BuiltShoreline().size());
+        for (const auto& sample : water.BuiltShoreline())
+            rim.push_back(water.Water().transform.Point(sample.position));
+        if (rim.size() > 1 && rim.front() == rim.back()) rim.pop_back();
+        return rim;
+    }
     void Face(Road::ColoredSurface& out, Vector3 a, Vector3 b, Vector3 c, SDL_FColor color)
     {
         if (Math::Length(Math::Cross(b - a, c - a)) > 1e-10)
@@ -97,10 +158,10 @@ namespace
             }
         }
     }
-    double GroundHeight(Vector3 p, const std::map<int, Rim>& sources, double fallback)
+    double GroundHeight(Vector3 p, std::span<const Rim> sources, double fallback)
     {
         double best = std::numeric_limits<double>::infinity(), height = fallback;
-        for (const auto& [id, rim] : sources)
+        for (const auto& rim : sources)
             SampleGroundRim(p, rim, best, height);
         return height;
     }
@@ -137,7 +198,7 @@ namespace
         }
         return paths;
     }
-    Rim GroundRim(const Rim& top, const std::map<int, Rim>& sources, double fallback)
+    Rim GroundRim(const Rim& top, std::span<const Rim> sources, double fallback)
     {
         Rim result;
         for (std::size_t i = 0; i < top.size(); ++i)
@@ -151,7 +212,7 @@ namespace
                 cuts[t] = GroundHeight(a + (b - a) * t, sources, fallback);
             }
             // Ground guides and lower-road constraints share an exact height at every crossing.
-            for (const auto& [id, rim] : sources)
+            for (const auto& rim : sources)
                 for (std::size_t j = 0; j < rim.size(); ++j)
                     if (auto at = Crossing(a, b, rim[j], rim[(j + 1) % rim.size()]))
                         cuts[at->first] = std::lerp(rim[j].y, rim[(j + 1) % rim.size()].y, at->second);
@@ -170,7 +231,8 @@ namespace
 bool BridgeSettings::Valid() const
 {
     return std::isfinite(depth) && depth >= .1 && depth <= 10 && std::isfinite(groundHeight) &&
-           lowerRoads.size() <= 10000 && (lowerRoads.empty() || *lowerRoads.begin() > 0);
+           lowerRoads.size() <= 10000 && (lowerRoads.empty() || *lowerRoads.begin() > 0) &&
+           lowerWaterBodies.size() <= 10000 && (lowerWaterBodies.empty() || *lowerWaterBodies.begin() > 0);
 }
 bool Road::HasOverpasses() const
 {
@@ -180,7 +242,8 @@ bool Road::HasOverpasses() const
 }
 
 std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int>& segments,
-                                           std::span<const Road> roads)
+                                           std::span<const Road> roads,
+                                           std::span<const std::unique_ptr<TerrainChunk>> terrain)
 {
     const auto fail = [](const char* message) -> std::optional<BridgeSettings> {
         SDL_SetError("%s", message);
@@ -203,6 +266,19 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
     BridgeSettings settings;
     double ground = 0;
     int hits = 0;
+    const auto capsClear = [&](const Rim& rim) {
+        for (std::size_t p : {std::size_t(*segments.begin()), std::size_t(*segments.rbegin() + 1)})
+        {
+            const auto axis = upper.PointAxes(p)[0];
+            const auto left = Math::Normalize(Vector3{-axis.z, 0, axis.x});
+            const double width = ProfileRadius(upper);
+            const auto a = upper.points[p].position - left * width, b = upper.points[p].position + left * width;
+            if (Inside(a, rim) || Inside(b, rim) || Inside((a + b) * .5, rim)) return false;
+            for (std::size_t j = 0; j < rim.size(); ++j)
+                if (Crossing(a, b, rim[j], rim[(j + 1) % rim.size()])) return false;
+        }
+        return true;
+    };
     for (const auto& lower : roads)
     {
         if (lower.id == upper.id || lower.id <= 0 || lower.HasOverpasses() || lower.outline.size() < 3) continue;
@@ -231,22 +307,45 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
                         }
         }
         if (!crosses) continue;
-        for (std::size_t p : {std::size_t(*segments.begin()), std::size_t(*segments.rbegin() + 1)})
-        {
-            const auto axis = upper.PointAxes(p)[0];
-            const auto left = Math::Normalize(Vector3{-axis.z, 0, axis.x});
-            const double width = ProfileRadius(upper);
-            const auto a = upper.points[p].position - left * width, b = upper.points[p].position + left * width;
-            if (Inside(a, lower.outline) || Inside(b, lower.outline) || Inside((a + b) * .5, lower.outline))
-                return fail("Extend the overpass span so its abutments clear the lower road or railroad embankment");
-            for (std::size_t j = 0; j < lower.outline.size(); ++j)
-                if (Crossing(a, b, lower.outline[j], lower.outline[(j + 1) % lower.outline.size()]))
-                    return fail(
-                        "Extend the overpass span so its abutments clear the lower road or railroad embankment");
-        }
+        if (!capsClear(lower.outline))
+            return fail("Extend the overpass span so its abutments clear every lower road and railroad embankment");
         settings.lowerRoads.insert(lower.id);
     }
-    if (!hits) return fail("The selected span must cross above a road or railroad");
+    std::vector<std::span<const Vector3>> upperPaths;
+    for (int segment : segments) upperPaths.push_back(upper.SegmentSamples(segment));
+    for (const auto& water : terrain)
+    {
+        if (!water->HasWater() || !water->persistentId || !water->Water().mesh) continue;
+        const auto rim = Shoreline(*water);
+        if (rim.size() < 3) continue;
+        const double height = rim.front().y; // Water surfaces are horizontal.
+        bool crosses = false;
+        for (const auto& path : upperPaths)
+        {
+            for (std::size_t i = 1; i < path.size(); ++i)
+            {
+                const auto a = path[i - 1], b = path[i], direction = b - a;
+                const auto side = Math::Normalize(Vector3{-direction.z, 0, direction.x}) * ProfileRadius(upper);
+                // Check the full swept width, but only the part over water. A
+                // long straight segment can have lower ends over dry ground.
+                if (auto range = CoveredRange(a, b, side, rim))
+                {
+                    crosses = true;
+                    for (double t : {range->first, range->second})
+                        if (DeckBaseHeight(upper, a + direction * t, direction) - height < settings.depth + 1)
+                            return fail("Raise the upper road or railroad before creating an overpass "
+                                        "(deck plus at least 1 m above the water surface)");
+                }
+            }
+        }
+        if (!crosses) continue;
+        if (water->EditingWater()) return fail("Finish editing the river or lake before creating its overpass");
+        if (!capsClear(rim)) return fail("Extend the overpass span so both abutments are beyond the river or lake banks");
+        settings.lowerWaterBodies.insert(water->persistentId);
+        ground += height;
+        ++hits;
+    }
+    if (!hits) return fail("The selected span must cross above a road, railroad, river or lake");
     settings.groundHeight = ground / hits;
     return settings;
 }
@@ -256,26 +355,12 @@ void Road::BuildOverpasses()
     if (!HasOverpasses() || bridgeKnots.size() != points.size() || bridgeRims[0].empty() || bridgeRims[1].empty())
         return;
     const auto& topEdges = edgeTriangles;
-    const auto polygon = [&](std::size_t first, std::size_t last) {
-        Rim rim;
-        const double start = bridgeKnots[first], end = bridgeKnots[last];
-        for (int side : {0, 1})
-        {
-            Rim edge;
-            for (const auto& p : bridgeRims[side])
-                if (p.distance >= start - 1e-8 && p.distance <= end + 1e-8)
-                    if (edge.empty() || edge.back() != p.position) edge.push_back(p.position);
-            if (side == 0) rim.insert(rim.end(), edge.begin(), edge.end());
-            else rim.insert(rim.end(), edge.rbegin(), edge.rend());
-        }
-        return rim;
-    };
     for (std::size_t first = 0; first + 1 < points.size();)
     {
         std::size_t last = first + 1;
         while (last + 1 < points.size() && points[last].bridge == points[first].bridge)
             ++last;
-        auto rim = polygon(first, last);
+        auto rim = SpanRim(*this, first, last);
         if (rim.size() < 3)
         {
             first = last;
@@ -289,10 +374,17 @@ void Road::BuildOverpasses()
             continue;
         }
         const auto& bridge = *points[first].bridge;
-        std::map<int, Rim> sources;
+        std::vector<Rim> sources, shorelines;
         for (int id : bridge.lowerRoads)
             if (auto it = bridgeGroundSources.find(id); it != bridgeGroundSources.end())
-                sources.emplace(id, it->second);
+                sources.push_back(it->second);
+        const auto roadSources = sources.size();
+        for (auto id : bridge.lowerWaterBodies)
+            if (auto it = bridgeWaterSources.find(id); it != bridgeWaterSources.end())
+            {
+                sources.push_back(it->second);
+                shorelines.push_back(it->second);
+            }
         contact.outline = GroundRim(rim, sources, bridge.groundHeight);
         const Vector3 down{0, -bridge.depth, 0};
         const auto bottom = [&](const auto& triangles) {
@@ -319,7 +411,6 @@ void Road::BuildOverpasses()
             if ((onCap(a, first) && onCap(b, first)) || (onCap(a, last) && onCap(b, last))) continue;
             Wall(bridgeTriangles, {a, b, b + down, a + down}, true);
         }
-        const std::map<int, Rim> groundSeam{{0, contact.outline}};
         for (int end : {0, 1})
         {
             const bool continuation =
@@ -365,17 +456,17 @@ void Road::BuildOverpasses()
                 {
                     const auto topA = a + delta * *std::prev(it), topB = a + delta * *it;
                     auto lowA = topA, lowB = topB;
-                    lowA.y = GroundHeight(topA, groundSeam, bridge.groundHeight);
-                    lowB.y = GroundHeight(topB, groundSeam, bridge.groundHeight);
+                    lowA.y = GroundHeight(topA, contact.outline, bridge.groundHeight);
+                    lowB.y = GroundHeight(topB, contact.outline, bridge.groundHeight);
                     contact.walls.push_back({topA, topB, lowB, lowA});
                     Wall(bridgeTriangles, contact.walls.back(), true);
                 }
             }
         }
         std::vector<RoadGeometry> lowerGeometry;
-        for (const auto& [id, outline] : sources)
+        for (std::size_t i = 0; i < roadSources; ++i)
         {
-            lowerGeometry.emplace_back().outline = outline;
+            lowerGeometry.emplace_back().outline = sources[i];
         }
         std::vector<const RoadGeometry*> footprints;
         for (const auto& g : lowerGeometry)
@@ -385,7 +476,9 @@ void Road::BuildOverpasses()
             seams.push_back({contact.outline[i], contact.outline[(i + 1) % contact.outline.size()]});
         // This ground patch has one owner (the bridge). Adjacent fills exclude it,
         // so filling neighboring blocks cannot duplicate the terrain under the deck.
-        if (auto mesh = BuildTerrainFill(footprints, seams))
+        // The river/lake already owns its basin. Land ends exactly at the banks,
+        // leaving the channel open rather than laying a ground sheet over it.
+        if (auto mesh = BuildTerrainFill(footprints, seams, shorelines))
             for (std::size_t i = 0; i < mesh->indices.size(); i += 3)
             {
                 const auto a = mesh->vertices[mesh->indices[i]].position;
@@ -402,23 +495,33 @@ void Road::BuildOverpasses()
 
 void WorldDocument::RefreshOverpasses()
 {
-    if (bridgeRevision == RoadGeometry::latestRevision && bridgeRoadCount == roads.size()) return;
+    if (bridgeRevision == RoadGeometry::latestRevision && bridgeRoadCount == roads.size() &&
+        bridgeWaterRevision == TerrainChunk::LatestWaterRevision() && bridgeTerrainCount == terrain.size()) return;
     std::map<int, const Road*> byId;
+    std::map<std::uint64_t, const TerrainChunk*> waterById;
     std::vector<const Road*> bridges;
     for (const auto& road : roads)
     {
         byId.emplace(road.id, &road);
         if (road.HasOverpasses()) bridges.push_back(&road);
     }
+    for (const auto& water : terrain)
+        if (water->HasWater() && water->Water().mesh) waterById.emplace(water->persistentId, water.get());
     for (auto& road : roads)
     {
         std::map<int, std::uint64_t> revisions;
+        std::map<std::uint64_t, std::uint64_t> waterRevisions;
         for (const auto& point : road.points)
             if (point.bridge)
+            {
                 for (int id : point.bridge->lowerRoads)
                     if (auto it = byId.find(id);
                         it != byId.end() && it->second != &road && !it->second->HasOverpasses())
                         revisions.try_emplace(id, it->second->revision);
+                for (auto id : point.bridge->lowerWaterBodies)
+                    if (auto it = waterById.find(id); it != waterById.end())
+                        waterRevisions.try_emplace(id, it->second->WaterRevision());
+            }
         // A split is still one span while the two exposed ends meet. Re-evaluate
         // this after moves/deletion so an abandoned continuation cannot omit an abutment.
         std::array<bool, 2> continues{};
@@ -439,16 +542,23 @@ void WorldDocument::RefreshOverpasses()
                     }
                 }
             }
-        if (revisions != road.bridgeSourceRevisions || continues != road.bridgeNeighbors)
+        if (revisions != road.bridgeSourceRevisions || waterRevisions != road.bridgeWaterRevisions ||
+            continues != road.bridgeNeighbors)
         {
             // Unrelated edits do not copy large lower-road outlines or retriangulate ground.
             std::map<int, Rim> sources;
             for (const auto& [id, revision] : revisions)
                 sources.emplace(id, byId.at(id)->outline);
+            std::map<std::uint64_t, Rim> waterSources;
+            for (const auto& [id, revision] : waterRevisions)
+                waterSources.emplace(id, Shoreline(*waterById.at(id)));
             road.bridgeSourceRevisions = std::move(revisions);
-            if (sources != road.bridgeGroundSources || continues != road.bridgeNeighbors)
+            road.bridgeWaterRevisions = std::move(waterRevisions);
+            if (sources != road.bridgeGroundSources || waterSources != road.bridgeWaterSources ||
+                continues != road.bridgeNeighbors)
             {
                 road.bridgeGroundSources = std::move(sources);
+                road.bridgeWaterSources = std::move(waterSources);
                 road.bridgeNeighbors = continues;
                 road.Rebuild();
             }
@@ -456,4 +566,6 @@ void WorldDocument::RefreshOverpasses()
     }
     bridgeRevision = RoadGeometry::latestRevision;
     bridgeRoadCount = roads.size();
+    bridgeWaterRevision = TerrainChunk::LatestWaterRevision();
+    bridgeTerrainCount = terrain.size();
 }

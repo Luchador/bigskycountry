@@ -367,10 +367,15 @@ To extend either end of a road, select its endpoint alone, hold **Shift**, and d
 Raise the upper road or railroad to the desired height, then select the adjoining **segments** that
 will form the span. Right-click their cyan center spline (or pavement), then choose
 **Create → Overpass**. Its end control points define the abutments; keep those points
-beyond the full width of the lower road or railroad embankment, including transition
-strips. Use Ctrl+Q to add control points if necessary.
-A span must cross a road or railroad and have room beneath its 0.6 m default deck.
+beyond all of the lower roads, railroad embankments (including transition strips),
+and river or lake banks. Use Ctrl+Q to add control points if necessary.
+A span must cross a road, railroad, river or lake and have room beneath its 0.6 m default deck.
 The command never raises either spline automatically.
+
+For a highway over a river, railroad and road together, select the entire continuous
+run of highway segments covering all three and create **one** overpass. Every crossed
+element is detected automatically; the abutments are at the two outer ends, with no
+internal walls between the crossings. Water-only bridges use the same command.
 
 The road keeps its spline, lane/shoulder profiles, paint and pavement material. With
 bridge segments selected, the inspector's **Deck thickness (m)** field accepts 0.1–10 m.
@@ -382,19 +387,29 @@ those segments. Creation, removal and thickness edits support undo/redo.
 Concrete sides, an underside and end abutments are generated from the road geometry.
 Terrain fill uses the approach rims and ground seams beneath the span, instead of
 connecting ground to its elevated deck. The bridge owns a subdivided ground patch
-underneath, excluding lower-road footprints; adjoining F-created terrain chunks share
+underneath, excluding lower-road footprints and water channels; adjoining F-created terrain chunks share
 that boundary without overlapping the underpass patch. Changes to connected lower
-roads, bridge shape, lanes or shoulders rebuild the affected geometry. Splits and
-subdivision preserve the span and its lower-road dependencies. Matching split bridge
+roads, committed river/lake banks, bridge shape, lanes or shoulders rebuild the affected geometry. Splits and
+subdivision preserve the span and its dependencies. Matching split bridge
 ends omit internal abutments; moving them apart restores the exposed end walls.
 
-This milestone supports road-over-road, road-over-railroad and railroad-over-road spans. Separate a
+The ground meets the exact committed shoreline beneath the deck. Water surfaces and
+their existing terrain bottoms remain unchanged; no ground sheet is placed over the
+channel. Finish water edit mode before creating its bridge. Later bank edits rebuild
+the bridge ground when water edit mode is finished, not while dragging control points.
+River/lake clearance is measured above the water surface using the same minimum 1 m
+of clear space below the deck; choose a greater height if needed. To add water to an
+older span, remove its Overpass setting and recreate the full span with the water present.
+
+This milestone supports roads and railroads over multiple roads, railroads and water bodies. Separate a
 proposed span from ramps, intersections, at-grade railroad crossings and dead ends
 before converting it. Stacked bridges, piers, barriers, decorative
 details and material controls for the concrete
 and automatic ground patch are future work. That patch currently uses the default
 ground color; surrounding terrain retains its own material. Saved worlds store span
-settings and road IDs, never generated bridge meshes. Older worlds remain readable.
+settings and stable road/water IDs, never generated bridge meshes. `ROAD` version 25
+adds the water dependencies; older worlds remain readable. Recook the world after
+changing these spans to update streamed geometry and collision in the game.
 
 For road-over-railroad spans, the creation check measures clearance from the generated
 rail heads, including embankment height, ties, rails and banking, rather than from the

@@ -562,6 +562,7 @@ Road Road::NewSection() const
     result.divisionNeighbors = divisionNeighbors;
     result.bridgeNeighbors = bridgeNeighbors;
     result.bridgeGroundSources = bridgeGroundSources;
+    result.bridgeWaterSources = bridgeWaterSources;
     result.rotation = rotation;
     return result;
 }

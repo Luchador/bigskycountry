@@ -210,6 +210,8 @@ namespace RoadIO
             {
                 out << ' ' << p.bridge->depth << ' ' << p.bridge->groundHeight << ' ' << p.bridge->lowerRoads.size();
                 for (int id : p.bridge->lowerRoads) out << ' ' << id;
+                out << ' ' << p.bridge->lowerWaterBodies.size();
+                for (auto id : p.bridge->lowerWaterBodies) out << ' ' << id;
             }
             WriteDivision(out, p.segmentDivision);
             out << '\n';
@@ -350,6 +352,17 @@ namespace RoadIO
                         int id = 0;
                         if (!(in >> id) || id <= 0 || id == road.id || !span.lowerRoads.insert(id).second)
                         { in.setstate(std::ios::failbit); return road; }
+                    }
+                    if (version >= 25)
+                    {
+                        if (!(in >> sources) || sources < 0 || sources > 10000)
+                        { in.setstate(std::ios::failbit); return road; }
+                        for (std::int64_t j = 0; j < sources; ++j)
+                        {
+                            std::uint64_t id = 0;
+                            if (!(in >> id) || id == 0 || !span.lowerWaterBodies.insert(id).second)
+                            { in.setstate(std::ios::failbit); return road; }
+                        }
                     }
                     if (!span.Valid()) { in.setstate(std::ios::failbit); return road; }
                 }

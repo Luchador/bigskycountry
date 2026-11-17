@@ -106,7 +106,9 @@ private:
     std::uint64_t terrainRevision = 0;
     std::uint64_t terrainWaterRevision = 0;
     std::uint64_t bridgeRevision = 0;
+    std::uint64_t bridgeWaterRevision = 0;
     std::size_t bridgeRoadCount = 0;
+    std::size_t bridgeTerrainCount = 0;
     std::uint64_t crossingRevision = 0;
     struct CrossingSources
     {

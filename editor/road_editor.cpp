@@ -620,7 +620,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
             for (int i = target.segment - 1; i >= 0 && road.points[i].bridge; --i) segments.insert(i);
             for (int i = target.segment + 1; i + 1 < static_cast<int>(road.points.size()) && road.points[i].bridge; ++i) segments.insert(i);
         }
-        auto settings = remove ? std::optional<BridgeSettings>{} : PlanOverpass(road, segments, world.roads);
+        auto settings = remove ? std::optional<BridgeSettings>{} : PlanOverpass(road, segments, world.roads, world.Terrain());
         if (!remove && !settings)
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Create Overpass", SDL_GetError(), frame);

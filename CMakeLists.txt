@@ -281,4 +281,9 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyTerrainFillTests tests/terrain_fill_tests.cpp)
     target_link_libraries(BigSkyTerrainFillTests PRIVATE BigSkyApplication)
     add_test(NAME terrain_fill COMMAND BigSkyTerrainFillTests)
+    add_executable(BigSkyOverpassTests tests/overpass_tests.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyOverpassTests PRIVATE BigSkyApplication)
+    add_test(NAME overpasses COMMAND BigSkyOverpassTests)
 endif()
