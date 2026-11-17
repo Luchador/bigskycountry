@@ -1675,10 +1675,17 @@ bool RoadEditor::DrawSelectionBox(SDL_Renderer* renderer) const
 
 bool RoadEditor::DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const
 {
-    if (!dragStart) return true;
+    const Road* roadPreview = drag == Drag::AnchorRoad ? PreviewRoad() : nullptr;
+    if (!dragStart && !roadPreview) return true;
 
     char label[96];
-    if (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate))
+    if (roadPreview)
+    {
+        // Rebuild already measured the preview spline, including its curve and
+        // Ctrl-snapped endpoint. Reuse that length without resampling each frame.
+        SDL_snprintf(label, sizeof(label), "Length: %.2f m", roadPreview->SplineLengthMeters());
+    }
+    else if (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate))
     {
         const double angle = drag == Drag::Rotate && dragStart->roadGroup ? -appliedAngle : appliedAngle;
         const double degrees = angle / Math::DegreesToRadians(1.0);
