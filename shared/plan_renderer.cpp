@@ -2,6 +2,7 @@
 #include "project_settings.hpp"
 #include "terrain_chunk.hpp"
 #include "view_geometry.hpp"
+#include "spatial_index.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -216,12 +217,9 @@ void PlanRenderer::Road(const RoadGeometry& road, RoadLayer layer)
 void PlanRenderer::Terrain(const TerrainChunk& chunk)
 {
     const auto& instance = chunk.Lake() ? chunk.Water() : chunk.Instance();
-    if ((!chunk.boundary && !chunk.Lake()) || !instance.mesh) return;
+    if (!instance.mesh) return;
     auto& c = *impl;
-    Bounds3 worldBounds;
-    const auto& bounds = instance.mesh->bounds;
-    for (double x : {bounds.min.x, bounds.max.x})
-        for (double z : {bounds.min.z, bounds.max.z}) worldBounds.Include(instance.transform.Point({x, bounds.min.y, z}));
+    const auto worldBounds = WorldBounds(instance.mesh->bounds, instance.transform);
     if (!c.Visible(worldBounds)) return;
     auto& entry = c.terrain[&chunk];
     if (entry.mesh.lock() != instance.mesh || entry.transform != instance.transform)

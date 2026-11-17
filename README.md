@@ -272,6 +272,10 @@ In the road inspector, enter one or more comma-separated **Road names**, such as
 
 Press **R** to switch between the 3D and top-down views. In the top-down viewport, press **N** to start or resume a road draft.
 
+In the top-down view, **left-drag** away from a control point or transform handle to draw a selection box. Releasing selects whole roads (including railroads), intersections, terrain/lakes, objects, and static meshes whose projected geometry touches the box, at any elevation. Drag in any direction; **Shift** adds to the selection and **Ctrl** removes from it. **Esc** cancels without changing the previous selection. Hidden folder contents are excluded. A click without dragging still picks a single item, and an empty click clears the selection. Road creation and control-point dragging keep their existing gestures.
+
+Objects and static meshes have lightweight bounding footprints in the top-down view, highlighted orange when selected. Imported terrain is also visible and selectable. Box selection updates the Scene Outliner without changing or saving world geometry; intersection tests run only on release.
+
 The top-down view retains road, intersection, road-bounded terrain, rail, and tie geometry in GPU buffers on the Direct3D 12/Vulkan renderer. Panning and zooming update camera uniforms instead of reprojecting and uploading every triangle. Geometry edits invalidate the affected batches; offscreen surfaces are culled before submission, and railroad detail distance still applies. Draft previews and road-name layouts are reused until their inputs change. Other SDL renderers use cached CPU geometry, with projection/clipping repeated only when geometry or the view changes. Cached geometry is released when leaving the top-down view.
 
 ### At-grade railroad crossings

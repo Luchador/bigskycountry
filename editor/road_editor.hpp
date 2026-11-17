@@ -19,6 +19,7 @@
 #include "road_overlay.hpp"
 #include "road_names.hpp"
 #include "plan_renderer.hpp"
+#include "plan_selection.hpp"
 #include "road_intersection.hpp"
 #include "highway_ramp_tool.hpp"
 #include "viewport_picker.hpp"
@@ -68,7 +69,8 @@ private:
         AnchorRoad,
         Gizmo,
         DuplicateObject,
-        LakePoint
+        LakePoint,
+        BoxSelect
     };
     using Action = RoadAction;
 #ifndef _WIN32
@@ -91,6 +93,9 @@ private:
     SDL_FPoint Handle(const Road& road, int index) const;
     bool RenderPlan(SDL_Renderer* renderer, const WorldDocument& world);
     bool DrawMeasurement(SDL_Renderer* renderer) const;
+    void UpdateSelectionBox(SDL_FPoint pointer);
+    void FinishSelectionBox(WorldDocument& world);
+    bool DrawSelectionBox(SDL_Renderer* renderer) const;
     bool DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const;
 #ifndef _WIN32
     bool RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocument& world, const PropertiesInspector& properties);
@@ -259,6 +264,14 @@ private:
     Drag drag = Drag::None;
     Vector3 measureStart{}, measureEnd{}; // World-space endpoints while Drag::Measure is active.
     Vector3 planDragStart{};
+    struct SelectionBox
+    {
+        SDL_FPoint start, end;
+        BoxSelectionMode mode;
+        std::optional<SceneKey> clickTarget;
+        bool moved = false;
+    };
+    std::optional<SelectionBox> selectionBox;
     SDL_FPoint mouse{};
     SDL_FPoint anchorPress{};
     std::optional<Road> anchorRoad; // Preview only until the left button is released.

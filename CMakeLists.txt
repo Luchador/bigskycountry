@@ -177,6 +177,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/scene_outliner.cpp
     editor/road_editor.cpp
     editor/selection_bounds.cpp
+    editor/plan_selection.cpp
     editor/highway_ramp_tool.cpp
     editor/ramp_handles.cpp
     editor/road_intersection.cpp
@@ -268,4 +269,7 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyMeshMaterialTests tests/mesh_material_tests.cpp)
     target_link_libraries(BigSkyMeshMaterialTests PRIVATE BigSkyApplication)
     add_test(NAME mesh_materials COMMAND BigSkyMeshMaterialTests)
+    add_executable(BigSkyPlanSelectionTests tests/plan_selection_tests.cpp editor/plan_selection.cpp)
+    target_link_libraries(BigSkyPlanSelectionTests PRIVATE BigSkyApplication)
+    add_test(NAME plan_selection COMMAND BigSkyPlanSelectionTests)
 endif()

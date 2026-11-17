@@ -1368,24 +1368,19 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
         status.clear();
         return;
     }
-    if (shift || subtract)
-    {
-        if (const auto key = PlanElementAt(world, pos))
-        {
-            if (key->kind != SceneKind::Road || key->index != state.selected || state.point < 0)
-                state.PickElement(*key, shift, subtract);
-        }
-        return;
-    }
-    for (int i = static_cast<int>(world.roads.size()) - 1; i >= 0; --i)
+    for (int i = static_cast<int>(world.roads.size()) - 1; !shift && !subtract && i >= 0; --i)
     {
         if (pickPoint(i))
         {
             return;
         }
     }
-    if (const auto key = PlanElementAt(world, pos)) state.SelectRows({*key});
-    else state.SelectPoint(-1, -1);
+    // Controls keep their editing gestures. Everywhere else, distinguish a click
+    // from a marquee only after the pointer has moved a few screen pixels.
+    selectionBox = SelectionBox{cursor, cursor, subtract ? BoxSelectionMode::Subtract :
+        shift ? BoxSelectionMode::Add : BoxSelectionMode::Replace, PlanElementAt(world, pos)};
+    drag = Drag::BoxSelect;
+    SDL_CaptureMouse(true);
 }
 
 std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Vector3 pos) const
@@ -1398,6 +1393,14 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
             return SceneKey{SceneKind::Intersection, id};
         }
     }
+    const double margin = 3 / scale;
+    const PlanSelectionRect meshPick(pos - Vector3{margin, 0, margin}, pos + Vector3{margin, 0, margin});
+    for (int i = static_cast<int>(world.Objects().size()) - 1; i >= 0; --i)
+        if (!world.hierarchy.EditorHidden({SceneKind::Object, i}) && PlanMeshIntersects(world.Objects()[i]->Instance(), meshPick))
+            return SceneKey{SceneKind::Object, i};
+    for (int i = static_cast<int>(world.meshes.size()) - 1; i >= 0; --i)
+        if (!world.hierarchy.EditorHidden({SceneKind::Mesh, i}) && PlanMeshIntersects(world.meshes[i], meshPick))
+            return SceneKey{SceneKind::Mesh, i};
     const auto hitSurface = [&](const auto& surface)
     {
         return std::any_of(surface.begin(), surface.end(), [&](const auto& t)
@@ -1427,6 +1430,13 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
         {
             return SceneKey{SceneKind::Road, i};
         }
+    }
+    const PlanSelectionRect terrainPick(pos, pos);
+    for (int i = static_cast<int>(world.Terrain().size()) - 1; i >= 0; --i)
+    {
+        const auto& chunk = *world.Terrain()[i];
+        if (!world.hierarchy.EditorHidden({SceneKind::Terrain, i}) &&
+            PlanMeshIntersects(chunk.Lake() ? chunk.Water() : chunk.Instance(), terrainPick)) return SceneKey{SceneKind::Terrain, i};
     }
     return {};
 }
@@ -1524,7 +1534,12 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
 void RoadEditor::Motion(WorldDocument& world, const SDL_MouseMotionEvent& motion)
 {
     mouse = {motion.x, motion.y};
-    if (drag == Drag::Measure)
+    if (drag == Drag::BoxSelect)
+    {
+        if (motion.state & SDL_BUTTON_LMASK) UpdateSelectionBox(mouse);
+        else Release(world); // Lost capture: cancel instead of committing an accidental selection.
+    }
+    else if (drag == Drag::Measure)
     {
         if (!(motion.state & SDL_BUTTON_MMASK))
         {
@@ -1594,7 +1609,8 @@ void RoadEditor::RotatePlanPoint(Road& road)
 
 void RoadEditor::Release(WorldDocument& world)
 {
-    if (drag == Drag::LakePoint) SDL_CaptureMouse(false);
+    if (drag == Drag::LakePoint || drag == Drag::BoxSelect) SDL_CaptureMouse(false);
+    selectionBox.reset();
     if (rampDrag) FinishRampControl(world, false);
     if (dragStart && dragChanged)
     {
@@ -1611,6 +1627,48 @@ void RoadEditor::Release(WorldDocument& world)
     dragStart.reset();
     dragChanged = false;
     drag = Drag::None;
+}
+
+void RoadEditor::UpdateSelectionBox(SDL_FPoint pointer)
+{
+    if (!selectionBox) return;
+    auto& box = *selectionBox;
+    box.end = {std::clamp(pointer.x, 0.f, float(std::max(0, scene.w - 1))),
+               std::clamp(pointer.y, 0.f, float(std::max(0, scene.h - 1)))};
+    box.moved |= std::hypot(box.end.x - box.start.x, box.end.y - box.start.y) >= 4;
+}
+
+void RoadEditor::FinishSelectionBox(WorldDocument& world)
+{
+    if (!selectionBox) return;
+    const auto& box = *selectionBox;
+    if (!box.moved)
+    {
+        // Preserve point selections on Shift-clicking the active road's pavement.
+        if (box.mode != BoxSelectionMode::Replace && box.clickTarget == SceneKey{SceneKind::Road, state.selected} && state.point >= 0) return;
+        if (!box.clickTarget && box.mode != BoxSelectionMode::Replace) return;
+    }
+    const auto hits = box.moved ? SelectPlanBox(world, {ToWorld(box.start.x, box.start.y), ToWorld(box.end.x, box.end.y)}) :
+        box.clickTarget ? std::set<SceneKey>{*box.clickTarget} : std::set<SceneKey>{};
+    if (hits.empty() && box.mode != BoxSelectionMode::Replace) return;
+    state.SelectRows(CombineBoxSelection(state.SelectedRows(), hits, box.mode));
+    status.clear();
+}
+
+bool RoadEditor::DrawSelectionBox(SDL_Renderer* renderer) const
+{
+    if (!selectionBox || !selectionBox->moved) return true;
+    const auto& box = *selectionBox;
+    const SDL_FRect rect{std::min(box.start.x, box.end.x), std::min(box.start.y, box.end.y),
+                        std::abs(box.end.x - box.start.x), std::abs(box.end.y - box.start.y)};
+    const auto color = EditorColors::ToBytes(EditorColors::amber);
+    SDL_BlendMode previous;
+    if (!SDL_GetRenderDrawBlendMode(renderer, &previous)) return false;
+    const bool drawn = SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) &&
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 28) && SDL_RenderFillRect(renderer, &rect) &&
+        EditorTheme::SetColor(renderer, color) && SDL_RenderRect(renderer, &rect);
+    const bool restored = SDL_SetRenderDrawBlendMode(renderer, previous);
+    return drawn && restored;
 }
 
 bool RoadEditor::DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) const
@@ -1779,7 +1837,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
     {
         if (!GeometrySelected({SceneKind::Terrain, i}) || world.hierarchy.EditorHidden({SceneKind::Terrain, i})) continue;
         const auto& chunk = world.Terrain()[i];
-        if (!chunk->boundary || !chunk->Instance().mesh) continue;
+        if (!chunk->Instance().mesh) continue;
         if (!EditorTheme::SetColor(renderer, EditorColors::ToBytes(EditorColors::orange))) return false;
         for (const auto& edge : chunk->Outline())
         {
@@ -1807,6 +1865,24 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
         return Fill(renderer, {p.x-r-1, p.y-r-1, 2*r+2, 2*r+2}, EditorTheme::border) &&
                Fill(renderer, {p.x-r, p.y-r, 2*r, 2*r}, color);
     };
+    // Lightweight top-down footprints also make placed meshes discoverable in
+    // this view without expanding or uploading their triangles every frame.
+    const auto selectedRows = state.SelectedRows();
+    const PlanSelectionRect visible(ToWorld(0, 0), ToWorld(float(scene.w), float(scene.h)));
+    const auto footprint = [&](SceneKey key, const MeshInstance& instance) {
+        if (world.hierarchy.EditorHidden(key)) return true;
+        const auto bounds = PlanMeshBounds(instance);
+        if (!visible.Intersects(bounds)) return true;
+        const auto a = ToScreen(bounds.min), b = ToScreen(bounds.max);
+        const float width = std::max(4.f, std::abs(b.x - a.x)), height = std::max(4.f, std::abs(b.y - a.y));
+        const SDL_FRect rect{(a.x + b.x - width) * .5f, (a.y + b.y - height) * .5f, width, height};
+        const auto color = selectedRows.contains(key) ? EditorColors::ToBytes(EditorColors::orange) : muted;
+        return EditorTheme::SetColor(renderer, color) && SDL_RenderRect(renderer, &rect);
+    };
+    for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
+        if (!footprint({SceneKind::Object, i}, world.Objects()[i]->Instance())) return false;
+    for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
+        if (!footprint({SceneKind::Mesh, i}, world.meshes[i])) return false;
     const bool group = state.RoadGroupSelected();
     for (const auto& [id, item] : world.intersections)
     {
@@ -1905,7 +1981,7 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
         return false;
     }
 
-    return drag != Drag::Measure || DrawMeasurement(renderer);
+    return (drag != Drag::Measure || DrawMeasurement(renderer)) && DrawSelectionBox(renderer);
 }
 
 #ifndef _WIN32
@@ -2219,11 +2295,7 @@ void RoadEditor::ChangeView(WorldDocument& world, FreeCamera& camera)
         {
             center = Inspect(world, state.Target()).value.position;
         }
-        else if (world.roads.empty())
-        {
-            BeginDraft(world);
-        }
-        else if (!Selected(world))
+        else if (!world.roads.empty() && !Selected(world))
         {
             center = world.roads.front().points.front().position;
         }
@@ -3358,6 +3430,16 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     // Input can change the selection, tool, projection or scene under a stationary cursor.
     // Recheck once after the event queue is drained, even if several events arrived.
     lastHoverPoint = {-1, -1};
+    if (drag == Drag::BoxSelect && SDL_GetWindowFromEvent(&event) == window)
+    {
+        if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP)
+        {
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) Release(world);
+            return EditorEvent::Handled;
+        }
+        if (event.type == SDL_EVENT_WINDOW_RESIZED || event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+            event.type == SDL_EVENT_WINDOW_HIDDEN) Release(world);
+    }
 #ifndef _WIN32
     if (!draggedAsset.empty() && browser.MeshWindow().Window() &&
         (event.type == SDL_EVENT_MOUSE_MOTION || (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)))
@@ -3999,7 +4081,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                             drag == Drag::Pan ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
         if (e.button.button == button)
         {
-            if (drag == Drag::LakePoint) MoveLakePoint(world, camera, pointer);
+            if (drag == Drag::BoxSelect)
+            {
+                UpdateSelectionBox(pointer);
+                FinishSelectionBox(world);
+            }
+            else if (drag == Drag::LakePoint) MoveLakePoint(world, camera, pointer);
             else if (drag == Drag::AnchorRoad)
             {
                 UpdateAnchorRoad(camera, pointer);
