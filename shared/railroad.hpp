@@ -6,6 +6,15 @@
 struct RoadGeometry;
 struct Road;
 
+// The toe of a single turnout follows a stable knot on another railroad.
+// Direction is relative to the host's authored spline, not train travel.
+struct RailroadSwitchLink
+{
+    int station = 0, direction = 1;
+    bool Valid() const { return station > 0 && (direction == -1 || direction == 1); }
+    bool operator==(const RailroadSwitchLink&) const = default;
+};
+
 struct RailroadSettings
 {
     static constexpr double gauge = 1.435; // Between the inner faces of the rail heads.

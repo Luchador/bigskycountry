@@ -189,7 +189,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
             return {};
         }
         const RoadPoint& point = road->points[state.point];
-        if (point.ramp || point.connectorTarget) return {};
+        if (point.ramp || point.railSwitch || point.connectorTarget) return {};
         auto placement = RoadOverlay::PointPlacement(point.position + road->GuideOffset(), camera, scene);
         if (placement && gizmo.settings.space == GizmoSpace::Local)
         {
@@ -560,6 +560,33 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         CreateRamp(command, world);
         return;
     }
+    if (command >= EditorCommand::CreateRailSwitchLeft && command <= EditorCommand::CreateRailSwitchRightReverse)
+    {
+        if (!roadMenuTarget) return;
+        auto& target = *roadMenuTarget;
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size()) ||
+            world.roads[target.index].revision != target.revision) return;
+        auto& plan = target.switches[static_cast<int>(command)-static_cast<int>(EditorCommand::CreateRailSwitchLeft)];
+        if (!plan || !(plan->branch.id = world.AllocateRoadId())) return;
+        const int hostId = world.roads[target.index].id;
+        const int folder = world.hierarchy.Parent({SceneKind::Road, target.index});
+        EditSnapshot before(state);
+        before.connectedRoadPoints.emplace(hostId, world.roads[target.index].points);
+        world.roads[target.index].points = std::move(plan->hostPoints);
+        world.roads[target.index].Rebuild();
+        world.roads.push_back(std::move(plan->branch));
+        const int index = static_cast<int>(world.roads.size())-1;
+        if (folder) world.hierarchy.Move({{SceneKind::Road,index}}, folder);
+        state.drawing = false;
+        state.SelectPoint(index, 1);
+        world.RefreshRampConnections(true);
+        EditSnapshot after(state, &world.roads.back());
+        after.roadFolder = folder;
+        after.connectedRoadPoints.emplace(hostId, world.roads[target.index].points);
+        outliner.Invalidate();
+        if (history.Record(index, std::move(before), std::move(after))) Save(world);
+        return;
+    }
     if (command == EditorCommand::CreateRoad || command == EditorCommand::CreateRailroad)
     {
         const bool railroad = command == EditorCommand::CreateRailroad;
@@ -851,6 +878,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         }
     }
     std::optional<RampMenuOptions> ramps;
+    std::optional<std::array<bool,4>> switches;
     std::optional<bool> flattenEnabled;
     std::optional<SplitMenuOptions> split;
     std::optional<bool> deadEnd, overpass;
@@ -887,6 +915,21 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         if (const auto at = LocateRoadHit(road, hit, position))
         {
             roadMenuTarget->insertion = PlanRoadIntersection(road, *at);
+            if (road.style.railroad)
+            {
+                switches.emplace();
+                const int existingStation = at->t == 0 || at->t == 1 ? road.points[at->segment + (at->t == 1)].rampStation : 0;
+                bool occupied = false;
+                if (existingStation)
+                    for (const auto& item : world.roads) for (const auto& point : item.points)
+                        occupied |= point.railSwitch && point.railSwitch->station == existingStation;
+                for (int i=0;i<4 && !occupied;++i)
+                {
+                    roadMenuTarget->switches[i] = PlanRailroadSwitch(road, at->segment, at->t, i%2 ? -1 : 1,
+                                                                     i<2 ? 1 : -1, existingStation ? existingStation : world.NextRampStationId());
+                    (*switches)[i] = roadMenuTarget->switches[i].has_value();
+                }
+            }
             if (hit.kind != RoadPickKind::Point)
             {
                 roadMenuTarget->segment = at->segment;
@@ -897,7 +940,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches))
     {
         RunCommand(*command, world, camera);
     }
@@ -1457,7 +1500,7 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
 
 void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 {
-    if (state.point >= 0 && (road.points[state.point].ramp || road.points[state.point].connectorTarget)) return;
+    if (state.point >= 0 && (road.points[state.point].ramp || road.points[state.point].railSwitch || road.points[state.point].connectorTarget)) return;
     dragStart.emplace(state, &road);
     drag = kind;
     const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
@@ -2495,7 +2538,7 @@ void RoadEditor::ConnectRoads(WorldDocument& world)
     {
         if (r < 0 || r >= static_cast<int>(world.roads.size()) || world.hierarchy.EditorHidden({SceneKind::Road, r})) return false;
         const Road& road = world.roads[r];
-        return !road.style.railroad && road.points.size() >= 2 &&
+        return road.points.size() >= 2 &&
                (p == 0 || p + 1 == static_cast<int>(road.points.size())) && !road.points[p].Joined();
     };
     if (index == otherIndex || !available(index, point) || !available(otherIndex, otherPoint))
@@ -2517,6 +2560,8 @@ void RoadEditor::ConnectRoads(WorldDocument& world)
     }
     Road& road = world.roads[index];
     Road& source = world.roads[otherIndex];
+    if (road.style.railroad.has_value() != source.style.railroad.has_value())
+    { status = "Connect two roads or two railroads of the same type"; return; }
     const bool first = point == 0;
     const Vector3 destination = source.points[otherPoint].position;
     const bool weld = Math::Length(destination - road.points[point].position) < Road::minPointSpacing;

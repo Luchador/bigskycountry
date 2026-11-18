@@ -220,7 +220,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
                 return {};
             }
             const auto axes = road.PointAxes(target.point, false);
-            fields.roadBound = road.points[target.point].ramp.has_value() || road.points[target.point].connectorTarget != 0;
+            fields.roadBound = road.points[target.point].ramp.has_value() || road.points[target.point].railSwitch.has_value() || road.points[target.point].connectorTarget != 0;
             fields.value.rotation.x = road.points[target.point].roll;
             fields.value.position = road.points[target.point].position;
             fields.value.rotation.y = std::atan2(axes[2].x, axes[2].z);
@@ -317,7 +317,7 @@ std::optional<double> FlattenElevation(const Road& road, int segment)
     const int last = static_cast<int>(road.points.size()) - 1;
     const auto& a = road.points[segment];
     const auto& b = road.points[segment + 1];
-    const auto fixed = [](const RoadPoint& point) { return point.anchor || point.ramp || point.connectorTarget; };
+    const auto fixed = [](const RoadPoint& point) { return point.anchor || point.ramp || point.railSwitch || point.connectorTarget; };
     if (fixed(a) && fixed(b) && a.position.y != b.position.y) return {};
 
     bool changed = a.position.y != b.position.y;
@@ -329,7 +329,7 @@ std::optional<double> FlattenElevation(const Road& road, int segment)
         if (road.style.curved && std::abs(road.Tangent(i).y) > 1e-12)
         {
             // A linked ramp or connector receives its tangent from the source road.
-            if (point.ramp || point.connectorTarget) return {};
+            if (point.ramp || point.railSwitch || point.connectorTarget) return {};
             changed = true;
         }
         if (!road.style.curved && point.anchor && point.heading && road.skewEnds[i == 0 ? 0 : 1] &&
@@ -377,7 +377,7 @@ void FlattenRoadSegment(Road& road, int segment, double elevation)
             const Vector3 tangent = tangents[end];
             const double run = std::hypot(tangent.x, tangent.z);
             handle *= ratio * run;
-            if (handle == 0 || point.ramp || point.connectorTarget) continue;
+            if (handle == 0 || point.ramp || point.railSwitch || point.connectorTarget) continue;
             const Vector3 flat{tangent.x / run, 0, tangent.z / run};
             // Keep automatic headings whenever moving the points already yields the desired tangent.
             if (Math::Length(road.Tangent(i) - flat) > 1e-12)

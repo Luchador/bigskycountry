@@ -85,6 +85,7 @@ add_library(BigSkyApplication STATIC
     shared/highway_ramp.cpp
     shared/railroad_crossing.cpp
     shared/railroad.cpp
+    shared/railroad_switch.cpp
     shared/road.cpp
     shared/road_bridge.cpp
     shared/road_stripes.cpp
@@ -297,6 +298,11 @@ if(BIGSKY_BUILD_TESTS)
         editor/transform_inspector.cpp editor/road_group_transform.cpp)
     target_link_libraries(BigSkyOverpassTests PRIVATE BigSkyApplication)
     add_test(NAME overpasses COMMAND BigSkyOverpassTests)
+    add_executable(BigSkyRailroadSwitchTests tests/railroad_switch_tests.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyRailroadSwitchTests PRIVATE BigSkyApplication)
+    add_test(NAME railroad_switches COMMAND BigSkyRailroadSwitchTests)
     add_executable(BigSkyRailroadJunctionTests tests/railroad_junction_tests.cpp
         editor/properties_inspector.cpp editor/edit_history.cpp
         editor/transform_inspector.cpp editor/road_group_transform.cpp)

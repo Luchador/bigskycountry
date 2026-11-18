@@ -1,4 +1,5 @@
 #include "highway_ramp.hpp"
+#include "railroad_switch.hpp"
 #include "world_document.hpp"
 #include "mesh.hpp"
 #include <algorithm>
@@ -28,6 +29,7 @@ int WorldDocument::NextRampStationId() const
         {
             last = std::max(last, p.rampStation);
             if (p.ramp) last = std::max(last, p.ramp->station);
+            if (p.railSwitch) last = std::max(last, p.railSwitch->station);
         }
     return last < std::numeric_limits<int>::max() ? last + 1 : 0;
 }
@@ -35,6 +37,7 @@ int WorldDocument::NextRampStationId() const
 void WorldDocument::RefreshRampConnections(bool force)
 {
     if (!force && rampRevision == RoadGeometry::latestRevision) return;
+    AlignRailroadSwitches();
     struct Socket { const Road* road; std::size_t point; };
     std::map<int, Socket> sockets;
     std::map<int, size_t> stations;
@@ -120,8 +123,14 @@ void WorldDocument::RefreshRampConnections(bool force)
             const auto it = sockets.find(end->connectorTarget);
             if (!end->connectorTarget || it == sockets.end()) continue;
             const auto [source, i] = it->second;
-            if (end->position == source->points[i].position) continue;
-            end->position = source->points[i].position;
+            auto position = source->points[i].position;
+            if (road.style.railroad && source->style.railroad)
+            {
+                const auto frame = RailroadSwitchFrame(*source, i, 1);
+                position = frame.origin-frame.y*(road.style.railroad->height+RailroadSettings::tieHeight+RailroadSettings::railHeight);
+            }
+            if (end->position == position) continue;
+            end->position = position;
             moved.insert(road.id);
         }
     }
@@ -148,7 +157,13 @@ void WorldDocument::RefreshRampConnections(bool force)
             const auto [source, i] = it->second;
             const double direction = (e == 0) == (i == 0) ? -1.0 : 1.0;
             const Vector3 tangent = source->Tangent(i) * direction;
-            const auto& position = source->points[i].position;
+            auto position = source->points[i].position;
+            if (road.style.railroad && source->style.railroad)
+            {
+                const auto track = RailroadSwitchFrame(*source, i, 1);
+                position = track.origin-track.y*(road.style.railroad->height+RailroadSettings::tieHeight+RailroadSettings::railHeight);
+                if (road.rotation != source->rotation) { road.rotation = source->rotation; changed = true; }
+            }
             const double heading = std::atan2(tangent.z, tangent.x);
             const double pitch = std::atan2(tangent.y, std::hypot(tangent.x, tangent.z));
             // Match the actual cross-section of the source, including whole-road bank.
@@ -171,5 +186,6 @@ void WorldDocument::RefreshRampConnections(bool force)
         }
         if (changed) road.Rebuild();
     }
+    RefreshRailroadSwitches();
     rampRevision = RoadGeometry::latestRevision;
 }

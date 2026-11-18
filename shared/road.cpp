@@ -390,10 +390,10 @@ Vector3 Road::Tangent(std::size_t index) const
         return ManualTangent(point);
     }
 
-    if (style.curved && points.size() == 2 && !point.ramp && !point.anchor)
+    if (style.curved && points.size() == 2 && !point.ramp && !point.railSwitch && !point.anchor)
     {
         const auto& joined = points[1 - index];
-        if (joined.ramp && joined.heading)
+        if ((joined.ramp || joined.railSwitch) && joined.heading)
         {
             // Mirror the known join tangent about the chord. A newly placed branch then
             // follows a single bend all the way to its free end as the user moves it.

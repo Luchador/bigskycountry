@@ -281,18 +281,39 @@ bool WorldDocument::ValidConnections() const
     for (const auto& road : roads)
         for (const auto& p : road.points)
             if (p.rampStation && !stations.insert(p.rampStation).second) return SDL_SetError("Duplicate highway ramp station");
+    std::map<int, const Road*> stationOwners, socketOwners;
+    for (const auto& road : roads) for (const auto& p : road.points)
+    {
+        if (p.rampStation) stationOwners[p.rampStation] = &road;
+        if (p.connectorSocket) socketOwners[p.connectorSocket] = &road;
+    }
+    std::set<int> switchStations;
+    std::map<int, std::set<int>> switchParents;
     std::set<IntersectionAnchor> occupied;
     for (const Road& road : roads)
     {
         if (road.points.size() < 2) return SDL_SetError("Road needs two endpoints");
-        if (road.style.railroad && std::ranges::any_of(road.points, [](const RoadPoint& p) { return p.Joined() || p.rampStation; }))
+        if (road.style.railroad && std::ranges::any_of(road.points, [](const RoadPoint& p) { return p.anchor || p.ramp; }))
             return SDL_SetError("Railroad control points cannot have highway or junction links");
+        for (const auto& p : road.points)
+        {
+            if (!p.railSwitch) continue;
+            const auto source = stationOwners.find(p.railSwitch->station);
+            if (!road.style.railroad || !p.railSwitch->Valid() || p.anchor || p.ramp || p.connectorSocket || p.connectorTarget ||
+                (&p != &road.points.front() && &p != &road.points.back()) || source == stationOwners.end() ||
+                !source->second->style.railroad || source->second == &road || !switchStations.insert(p.railSwitch->station).second)
+                return SDL_SetError("Invalid railroad switch connection");
+            switchParents[road.id].insert(source->second->id);
+        }
         for (const RoadPoint* point : {&road.points.front(), &road.points.back()})
         {
             if (point->connectorSocket && !sockets.insert(point->connectorSocket).second)
                 return SDL_SetError("Duplicate road connector socket");
             if (point->connectorTarget && !targets.insert(point->connectorTarget).second)
                 return SDL_SetError("Duplicate road connector attachment");
+            if (point->connectorTarget && socketOwners.contains(point->connectorTarget) &&
+                road.style.railroad.has_value() != socketOwners.at(point->connectorTarget)->style.railroad.has_value())
+                return SDL_SetError("Cannot connect a road endpoint directly to a railroad");
             if (point->ramp)
             {
                 const auto& link = *point->ramp;
@@ -305,6 +326,18 @@ bool WorldDocument::ValidConnections() const
             if (!ref.Valid() || it == intersections.end() || !it->second.HasAnchor(ref.side) || !occupied.insert(ref).second ||
                 !(Math::Length(point->position - it->second.AnchorPosition(ref.side)) <= 1e-8))
                 return SDL_SetError("Invalid road connection to intersection %d, side %d", ref.intersectionId, ref.side);
+        }
+    }
+    for (const auto& [id, parents] : switchParents)
+    {
+        auto pending = parents;
+        std::set<int> visited;
+        while (!pending.empty())
+        {
+            const int next = *pending.begin(); pending.erase(pending.begin());
+            if (next == id) return SDL_SetError("Cyclic railroad switch connection");
+            if (visited.insert(next).second && switchParents.contains(next))
+                pending.insert(switchParents.at(next).begin(), switchParents.at(next).end());
         }
     }
     if (sockets != targets) return SDL_SetError("Missing road connector endpoint");

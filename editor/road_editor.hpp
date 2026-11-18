@@ -22,6 +22,7 @@
 #include "plan_selection.hpp"
 #include "road_intersection.hpp"
 #include "highway_ramp_tool.hpp"
+#include "railroad_switch.hpp"
 #include "viewport_picker.hpp"
 #include "transform_gizmo.hpp"
 #include "editor_menu.hpp"
@@ -189,6 +190,7 @@ private:
         std::uint64_t revision;
         std::optional<RoadIntersectionInsertion> insertion;
         std::optional<RampPlan> exitRamp, entranceRamp;
+        std::array<std::optional<RailroadSwitchPlan>, 4> switches;
         int segment = -1;
         int point = -1;
     };

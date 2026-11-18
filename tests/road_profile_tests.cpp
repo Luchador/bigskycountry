@@ -158,7 +158,7 @@ void Persistence()
     for (int i = 0; std::getline(modern, line); ++i)
     {
         if (i == 1) line.resize(line.size() - 4); // Two absent neighbor overrides.
-        if (i >= 5) line.resize(line.size() - 2); // One absent point override.
+        if (i >= 5) line.resize(line.size() - 4); // Absent division override and railroad switch link.
         old << line << '\n';
     }
     const auto imported = RoadIO::ReadRoad(old, 23);

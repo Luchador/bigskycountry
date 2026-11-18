@@ -1,5 +1,6 @@
 #include "world_document.hpp"
 #include "terrain_fill.hpp"
+#include "railroad_switch.hpp"
 #include "spatial_index.hpp"
 
 #include <algorithm>
@@ -122,6 +123,18 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                 junctionSeams.insert(junctionSeams.end(), seams->begin(), seams->end());
         }
     }
+    std::map<int,const Road*> switchHosts;
+    for (int id : groundRoads)
+        if (const auto road=byId.find(id);road!=byId.end() && road->second->style.railroad)
+            for (const auto& p : road->second->points) if (p.rampStation) switchHosts[p.rampStation]=road->second;
+    for (int id : groundRoads)
+        if (const auto road=byId.find(id);road!=byId.end() && road->second->style.railroad)
+            for (const auto& p : road->second->points)
+                if (p.railSwitch && switchHosts.contains(p.railSwitch->station))
+                {
+                    auto seams=RailroadSwitchTerrainSeams(*switchHosts.at(p.railSwitch->station),*road->second);
+                    junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
+                }
     chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);

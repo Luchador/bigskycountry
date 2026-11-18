@@ -286,6 +286,7 @@ bool Cook(WorldDocument& world, const std::string& file)
             {
                 if (p.anchor) link(id, {SceneKind::Intersection, std::uint64_t(p.anchor->intersectionId)});
                 if (p.ramp && stations.contains(p.ramp->station)) link(id, stations.at(p.ramp->station));
+                if (p.railSwitch && stations.contains(p.railSwitch->station)) link(id, stations.at(p.railSwitch->station));
                 if (p.connectorTarget && sockets.contains(p.connectorTarget)) link(id, sockets.at(p.connectorTarget));
                 if (p.bridge)
                 {

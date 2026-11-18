@@ -213,7 +213,12 @@ namespace RoadIO
                 out << ' ' << p.bridge->lowerWaterBodies.size();
                 for (auto id : p.bridge->lowerWaterBodies) out << ' ' << id;
             }
+            if (p.railSwitch && (!p.railSwitch->Valid() || !road.style.railroad || p.anchor || p.ramp ||
+                p.connectorSocket || p.connectorTarget || (&p != &road.points.front() && &p != &road.points.back())))
+            { out.setstate(std::ios::failbit); return; }
             WriteDivision(out, p.segmentDivision);
+            out << ' ' << p.railSwitch.has_value();
+            if (p.railSwitch) out << ' ' << p.railSwitch->station << ' ' << p.railSwitch->direction;
             out << '\n';
         }
     }
@@ -368,6 +373,18 @@ namespace RoadIO
                 }
             }
             if (version >= 24) ReadDivision(in, p.segmentDivision);
+            if (version >= 27)
+            {
+                bool linked = false;
+                if (!(in >> linked)) return road;
+                if (linked)
+                {
+                    auto& link = p.railSwitch.emplace();
+                    in >> link.station >> link.direction;
+                    if (!link.Valid() || !road.style.railroad || p.anchor || p.ramp || p.connectorSocket ||
+                        p.connectorTarget || (i != 0 && i + 1 != count)) in.setstate(std::ios::failbit);
+                }
+            }
             if (!ValidDivision(p.segmentDivision, p.segmentLanes ? p.segmentLanes : road.style.GetLaneCount(), road.style)) in.setstate(std::ios::failbit);
             if (!ValidShoulders(p.segmentShoulders, road.style.railroad.has_value())) in.setstate(std::ios::failbit);
             if (p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||

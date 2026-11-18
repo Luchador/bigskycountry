@@ -140,8 +140,9 @@ struct RoadPoint
     // Bézier handle lengths as fractions of the adjacent chords.
     double incomingHandle = 1.0 / 3.0;
     double outgoingHandle = 1.0 / 3.0;
-    int rampStation = 0;
+    int rampStation = 0; // Stable attachment knot shared by highway ramps and railroad switches.
     std::optional<RampLink> ramp; // First endpoint exits the highway, last endpoint enters it.
+    std::optional<RailroadSwitchLink> railSwitch;
     int connectorSocket = 0; // Identifies the source endpoint of a road/ramp join.
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
@@ -150,7 +151,7 @@ struct RoadPoint
     std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
     std::optional<RoadDivision> segmentDivision; // Outgoing segment; empty inherits the road default.
     std::optional<BridgeSettings> bridge; // Outgoing segment, independent of pavement/lane settings.
-    bool Joined() const { return anchor || ramp || connectorSocket || connectorTarget; }
+    bool Joined() const { return anchor || ramp || railSwitch || connectorSocket || connectorTarget; }
 };
 
 struct RoadGeometry

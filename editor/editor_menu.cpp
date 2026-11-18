@@ -6,6 +6,7 @@
 #include <iterator>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -44,6 +45,10 @@ namespace
     constexpr MenuItem flatten{BSC_FLATTEN_SEGMENT, L"&Flatten Segment"};
     constexpr MenuItem splitRoad{BSC_SPLIT_ROAD, L"&Split Road"};
     constexpr MenuItem splitRailroad{BSC_SPLIT_ROAD, L"&Split Railroad"};
+    constexpr MenuItem switchItems[] = {{BSC_RAIL_SWITCH_LEFT, L"Left Railroad Switch"},
+        {BSC_RAIL_SWITCH_RIGHT, L"Right Railroad Switch"},
+        {BSC_RAIL_SWITCH_LEFT_REVERSE, L"Left Railroad Switch (Reverse)"},
+        {BSC_RAIL_SWITCH_RIGHT_REVERSE, L"Right Railroad Switch (Reverse)"}};
     constexpr MenuItem rampItems[] = {{BSC_CREATE_EXIT_RAMP, L"Create E&xit Ramp"}, {BSC_CREATE_ENTRANCE_RAMP, L"Create &Entrance Ramp"}};
 
     void MenuBackground(HMENU menu, SDL_Color color)
@@ -415,10 +420,16 @@ namespace
                                          {"Dead End", EditorCommand::CreateDeadEnd}};
     constexpr BarAction rampItems[] = {{"Create Exit Ramp", EditorCommand::CreateExitRamp},
                                        {"Create Entrance Ramp", EditorCommand::CreateEntranceRamp}};
-    std::span<const BarAction> ViewportActions(bool rampMenu, bool deadEnd)
+    constexpr BarAction switchItems[] = {{"Left Railroad Switch", EditorCommand::CreateRailSwitchLeft},
+        {"Right Railroad Switch", EditorCommand::CreateRailSwitchRight},
+        {"Left Railroad Switch (Reverse)", EditorCommand::CreateRailSwitchLeftReverse},
+        {"Right Railroad Switch (Reverse)", EditorCommand::CreateRailSwitchRightReverse}};
+    std::vector<BarAction> ViewportActions(bool rampMenu, bool deadEnd, bool switches)
     {
-        if (rampMenu) return rampItems;
-        return std::span<const BarAction>{createItems}.first(std::size(createItems) - (deadEnd ? 0 : 1));
+        if (rampMenu) return {std::begin(rampItems), std::end(rampItems)};
+        std::vector<BarAction> items(std::begin(createItems), std::end(createItems) - (deadEnd ? 0 : 1));
+        if (switches) items.insert(items.end(), std::begin(switchItems), std::end(switchItems));
+        return items;
     }
     constexpr float itemHeight = 26;
 }
@@ -471,7 +482,7 @@ std::optional<MaterialAction> EditorMenu::OpenMaterialMenu(SDL_Window* window, i
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass, std::optional<std::array<bool,4>> switches)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -502,6 +513,12 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     else
     {
         ready = AddSubmenu(root, create, createItems);
+        if (ready && switches)
+            for (std::size_t i=0;i<std::size(switchItems);++i)
+            {
+                ready &= Insert(GetSubMenu(root, 0), switchItems[i]);
+                if (!(*switches)[i]) EnableMenuItem(GetSubMenu(root, 0), switchItems[i].id, MF_BYCOMMAND | MF_GRAYED);
+            }
         if (ready && overpass) ready = Insert(GetSubMenu(root, 0), *overpass ? removeOverpass : overpassItem);
         if (ready && deadEnd)
         {
@@ -543,6 +560,10 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_RAIL_SWITCH_LEFT) return EditorCommand::CreateRailSwitchLeft;
+    if (choice == BSC_RAIL_SWITCH_RIGHT) return EditorCommand::CreateRailSwitchRight;
+    if (choice == BSC_RAIL_SWITCH_LEFT_REVERSE) return EditorCommand::CreateRailSwitchLeftReverse;
+    if (choice == BSC_RAIL_SWITCH_RIGHT_REVERSE) return EditorCommand::CreateRailSwitchRightReverse;
     if (choice == BSC_OVERPASS) return EditorCommand::ToggleOverpass;
     if (choice == BSC_CREATE_DEAD_END) return EditorCommand::CreateDeadEnd;
     if (choice == BSC_SPLIT_ROAD) return EditorCommand::SplitRoad;
@@ -574,6 +595,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         popup = Popup::Ramp;
         return {};
     }
+    switchOptions = switches;
     intersectionEnabled = canCreateIntersection;
     deadEndEnabled = deadEnd;
     overpassState = overpass;
@@ -585,7 +607,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     roadActionFocused = false;
     const float rootHeight = itemHeight * (roadActionEnabled ? 2 : 1);
     rootItem = {0, 0, roadActionEnabled ? 152.0f : 104.0f, itemHeight};
-    submenu = {0, 0, 232, itemHeight * static_cast<float>(ViewportActions(false, deadEnd.has_value()).size())};
+    submenu = {0, 0, 288, itemHeight * static_cast<float>(ViewportActions(false, deadEnd.has_value(), switches.has_value()).size())};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
     roadActionItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
@@ -614,6 +636,8 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
 #ifndef _WIN32
 bool EditorMenu::Enabled(EditorCommand command) const
 {
+    if (command >= EditorCommand::CreateRailSwitchLeft && command <= EditorCommand::CreateRailSwitchRightReverse)
+        return switchOptions && (*switchOptions)[static_cast<int>(command)-static_cast<int>(EditorCommand::CreateRailSwitchLeft)];
     if (command == EditorCommand::ToggleOverpass) return overpassState.has_value();
     if (command == EditorCommand::CreateDeadEnd) return deadEndEnabled.value_or(false);
     if (command == EditorCommand::CreateExitRamp) return rampOptions.exit;
@@ -731,7 +755,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         return false;
     }
     const bool rampMenu = popup == Popup::Ramp;
-    const auto items = ViewportActions(rampMenu, deadEndEnabled.has_value());
+    const auto items = ViewportActions(rampMenu, deadEndEnabled.has_value(), switchOptions.has_value());
     const int count = static_cast<int>(items.size());
     switch (event.type)
     {
@@ -852,7 +876,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     }
     if (popup != Popup::Create)
     {
-        const auto items = ViewportActions(popup == Popup::Ramp, deadEndEnabled.has_value());
+        const auto items = ViewportActions(popup == Popup::Ramp, deadEndEnabled.has_value(), switchOptions.has_value());
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {

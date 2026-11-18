@@ -103,6 +103,11 @@ private:
     bool ReadStableIds(const std::string& payload);
     std::string WriteStableIds() const;
     std::uint64_t rampRevision = 0;
+    // Only source revisions, never copies of generated turnout meshes.
+    std::map<int, std::uint64_t> switchSources;
+    std::set<std::pair<int,int>> switchLinks;
+    void AlignRailroadSwitches();
+    void RefreshRailroadSwitches();
     std::uint64_t terrainRevision = 0;
     std::uint64_t terrainWaterRevision = 0;
     std::uint64_t bridgeRevision = 0;

@@ -2,10 +2,11 @@
 
 #include <SDL3/SDL.h>
 #include <optional>
+#include <array>
 #include "material_action.hpp"
 
 enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
-                           CreateExitRamp, CreateEntranceRamp, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
+                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass };
 struct RampMenuOptions { bool exit, entrance; };
 struct SplitMenuOptions { bool enabled, railroad; };
 enum class OutlineOp;
@@ -19,7 +20,7 @@ public:
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,
-                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<SplitMenuOptions> split = {}, std::optional<bool> deadEnd = {}, std::optional<bool> overpass = {});
+                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<SplitMenuOptions> split = {}, std::optional<bool> deadEnd = {}, std::optional<bool> overpass = {}, std::optional<std::array<bool, 4>> switches = {});
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);
@@ -51,6 +52,7 @@ private:
     void* viewMenu = nullptr;
 #else
     RampMenuOptions rampOptions{};
+    std::optional<std::array<bool,4>> switchOptions;
     bool intersectionEnabled = true;
     std::optional<bool> deadEndEnabled, overpassState;
     bool crossingAvailable = false, crossingExists = false;

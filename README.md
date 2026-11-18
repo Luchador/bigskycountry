@@ -447,3 +447,11 @@ removal, saving and undo/redo use the shared road bridge system. Split off any
 at-grade road/rail crossing before converting a railway span. `ROAD` version 23
 permits bridge records on railroads, using the same fields as version 22; older
 ordinary roads and railroads still load.
+
+### Railroad single switches
+
+Right-click a railroad spline or control point and open **Create → Left Railroad Switch** or **Right Railroad Switch**. Left and right are viewed toward the railroad's last control point; the **(Reverse)** choices face toward its first point. A single switch adds one branch to the existing through track. The branch starts about 50 m long, with an 8 m lateral offset and a tangent-matched Bézier curve. Its rails retain the 1.435 m standard gauge. The turnout shares ballast and extended sleepers with the main track.
+
+Select the branch and move, subdivide, or Shift-drag its free control points as with other railroads. Moving the free point changes the turnout's length and angle. The joined toe follows its host's position, tangent, and rail-head height; move that host control point to relocate the switch. A switch is physically bidirectional, so the same turnout works for converging and diverging tracks. Select free endpoints on two railroads with Shift and press **F** to join them. Road-to-rail endpoint joins remain disallowed.
+
+Switches inherit the host's embankment and material settings and outliner folder. Their stable connections survive save/load, undo/redo, subdivision, and railroad splits. Deleting the host detaches the branch; deleting the branch restores the ordinary main track. Select the joined railroads around a closed area and press **F** to fill terrain. Cooked worlds include the turnout meshes, collision, shared sleepers, and streaming dependencies. This adds fixed turnout geometry and connectivity; animated switch blades and train route control are not implemented yet.

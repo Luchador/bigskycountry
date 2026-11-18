@@ -250,7 +250,10 @@ bool EditHistory::SplitRoad(WorldDocument& world, RoadEditorState& editor, int i
             if (road.points.size() < 2) continue;
             for (bool exit : {true, false})
             {
-                const auto& link = (exit ? road.points.front() : road.points.back()).ramp;
+                const auto& end = exit ? road.points.front() : road.points.back();
+                if (end.railSwitch && end.railSwitch->station == station)
+                    (end.railSwitch->direction > 0 ? rightSides : leftSides).insert(0);
+                const auto& link = end.ramp;
                 if (!link || link->station != station) continue;
                 const double direction = std::abs(link->offset) > 1e-8 ? link->offset :
                     (exit ? -1.0 : 1.0) * source.style.TravelDirection(link->side);
@@ -274,6 +277,11 @@ bool EditHistory::SplitRoad(WorldDocument& world, RoadEditorState& editor, int i
         bool changed = false;
         for (auto& p : points)
         {
+            if (p.railSwitch && p.railSwitch->station == station && p.railSwitch->direction > 0 && rightStation != station)
+            {
+                p.railSwitch->station = rightStation;
+                changed = true;
+            }
             if (p.ramp && p.ramp->station == station && rightSides.contains(p.ramp->side) && rightStation != station)
             {
                 p.ramp->station = rightStation;
@@ -382,11 +390,13 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
         {
             for (auto& p : ramp.points)
             {
+                const bool loseSwitch = p.railSwitch && removedStations.contains(p.railSwitch->station);
                 const bool loseRamp = p.ramp && removedStations.contains(p.ramp->station);
                 const bool loseJoin = removedJoins.contains(collectJoin(p));
-                if (!loseRamp && !loseJoin) continue;
+                if (!loseRamp && !loseJoin && !loseSwitch) continue;
                 before.connectedRoadPoints.try_emplace(ramp.id, ramp.points);
                 if (loseRamp) p.ramp.reset();
+                if (loseSwitch) p.railSwitch.reset();
                 if (loseJoin) p.connectorSocket = p.connectorTarget = 0;
                 disconnected[ramp.id] = ramp.points;
             }
