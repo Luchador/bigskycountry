@@ -119,6 +119,47 @@ std::optional<double> ParseTransformValue(std::string_view text)
     return value;
 }
 
+std::optional<double> ParseTransformExpression(std::string_view text)
+{
+    const auto skipSpace = [&]
+    {
+        const auto first = text.find_first_not_of(" \t\r\n");
+        text.remove_prefix(first == text.npos ? text.size() : first);
+    };
+    const auto number = [&]() -> std::optional<double>
+    {
+        skipSpace();
+        if (text.empty()) return {};
+        double sign = 1;
+        if (text.front() == '+' || text.front() == '-')
+        {
+            if (text.front() == '-') sign = -1;
+            text.remove_prefix(1);
+            skipSpace();
+        }
+        if (text.empty() || text.front() == '+' || text.front() == '-') return {};
+        double value;
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (result.ec != std::errc{} || !std::isfinite(value)) return {};
+        text.remove_prefix(static_cast<std::size_t>(result.ptr - text.data()));
+        return sign * value;
+    };
+    auto value = number();
+    if (!value) return {};
+    for (;;)
+    {
+        skipSpace();
+        if (text.empty()) return value;
+        const char op = text.front();
+        if (op != '+' && op != '-') return {};
+        text.remove_prefix(1);
+        const auto term = number();
+        if (!term) return {};
+        *value += op == '+' ? *term : -*term;
+        if (!std::isfinite(*value)) return {};
+    }
+}
+
 std::optional<ObjectTransform> TransformFields::Parse(int field, std::string_view text) const
 {
     if (!CanEdit(field)) return {};
@@ -128,8 +169,8 @@ std::optional<ObjectTransform> TransformFields::Parse(int field, std::string_vie
         const auto comma = text.find(',');
         if (comma != text.npos)
         {
-            const auto lat = ParseTransformValue(text.substr(0, comma));
-            const auto lon = ParseTransformValue(text.substr(comma + 1));
+            const auto lat = ParseTransformExpression(text.substr(0, comma));
+            const auto lon = ParseTransformExpression(text.substr(comma + 1));
             if (lat && lon)
             {
                 if (const auto p = GeographicCoordinates{*lat, *lon}.ToWorld(value.position.y))
@@ -142,10 +183,10 @@ std::optional<ObjectTransform> TransformFields::Parse(int field, std::string_vie
         SDL_SetError("Use latitude, longitude in decimal degrees (latitude between the poles, longitude -180 to 180)");
         return {};
     }
-    const auto number = ParseTransformValue(text);
+    const auto number = field < 6 ? ParseTransformExpression(text) : ParseTransformValue(text);
     if (!number)
     {
-        SDL_SetError("Enter a finite number");
+        SDL_SetError("%s", field < 6 ? "Enter a finite number or addition/subtraction expression, such as 100+25-5" : "Enter a finite number");
         return {};
     }
     if (*number != DisplayValue(field))

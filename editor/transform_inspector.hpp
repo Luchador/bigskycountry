@@ -68,3 +68,5 @@ bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int activ
                          Vector3 destination, double minSpacing = Road::minPointSpacing);
 bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int field, const ObjectTransform& desired);
 std::optional<double> ParseTransformValue(std::string_view text);
+// Addition/subtraction of signed decimal numbers; exponent signs belong to the number.
+std::optional<double> ParseTransformExpression(std::string_view text);

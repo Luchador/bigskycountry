@@ -1252,10 +1252,13 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     const bool subtract = (modifiers & SDL_KMOD_CTRL) != 0;
     if (state.drawing)
     {
-        if (state.draft->points.empty() || Math::Length(pos - state.draft->points.back().position) > 0.05)
+        const auto& points = state.draft->points;
+        const auto end = points.empty() ? pos : points.back().position + gizmo.settings.SnapPlanarOffset(pos - points.back().position);
+        const double minSpacing = gizmo.settings.snapEnabled ? std::min(Road::minPointSpacing, gizmo.settings.StepMeters() * 0.5) : Road::minPointSpacing;
+        if (points.empty() || ValidRoadSpan(*state.draft, points.back().position, end, minSpacing))
         {
             EditSnapshot before(state);
-            state.draft->points.push_back({pos, {}});
+            state.draft->points.push_back({end, {}});
             Commit(world, -1, std::move(before));
         }
         return;
@@ -1494,7 +1497,7 @@ void RoadEditor::MovePoint(Road& road, Vector3 position)
         return;
     }
     // Allow the smallest snapped step while retaining the free-drag spacing guard.
-    const double minSpacing = drag == Drag::Gizmo && gizmo.settings.snapEnabled
+    const double minSpacing = (drag == Drag::Gizmo || extensionSource) && gizmo.settings.snapEnabled
         ? std::min(Road::minPointSpacing, gizmo.settings.StepMeters() * 0.5) : Road::minPointSpacing;
     if (!extensionSource)
     {
@@ -1592,7 +1595,8 @@ void RoadEditor::UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer)
     {
         const int source = extensionSource.value_or(state.point);
         if (pos != planDragStart) selectOnlyOnClick = false;
-        MovePoint(world.roads[state.selected], originalPoints[source].position + (pos - planDragStart));
+        const auto offset = extensionSource ? gizmo.settings.SnapPlanarOffset(pos - planDragStart) : pos - planDragStart;
+        MovePoint(world.roads[state.selected], originalPoints[source].position + offset);
     }
     else RotatePlanPoint(world.roads[state.selected]);
 }
@@ -1835,7 +1839,8 @@ bool RoadEditor::RenderPlan(SDL_Renderer* renderer, const WorldDocument& world)
     {
         const auto& draft = *state.draft;
         const bool append = drag != Drag::Measure && mouse.x >= 0 && mouse.x < scene.w && mouse.y >= 0 && mouse.y < scene.h;
-        const Vector3 end = append ? ToWorld(mouse.x, mouse.y) : Vector3{};
+        const Vector3 end = append ? draft.points.back().position +
+            gizmo.settings.SnapPlanarOffset(ToWorld(mouse.x, mouse.y) - draft.points.back().position) : Vector3{};
         // Draft knots are authored without rebuilding the road. Compare their
         // small input list, not generated triangles, including undo/style edits.
         if (!planDraft || planDraft->style != draft.style || planDraft->paintMarkings != draft.paintMarkings ||
@@ -2408,15 +2413,17 @@ void RoadEditor::UpdateAnchorRoad(const FreeCamera& camera, SDL_FPoint pointer)
     const Vector3 origin = road.points.front().position;
     auto end = planView ? std::optional{origin + Vector3{delta.x / scale, 0, -delta.y / scale}}
                         : DragAtElevation(camera, scene, origin, delta);
-    if (!end || !ValidRoadSpan(road, origin, *end)) return;
+    if (!end) return;
+    const Vector3 offset = *end - origin;
+    std::optional<double> heading;
     if (snapRotation)
     {
-        const Vector3 offset = *end - origin;
         const double outward = *road.points.front().heading;
-        const double angle = outward + DragAngle::Snap(std::atan2(offset.z, offset.x) - outward, true);
-        const double radius = std::hypot(offset.x, offset.z);
-        *end = origin + Vector3{std::cos(angle) * radius, 0, std::sin(angle) * radius};
+        heading = outward + DragAngle::Snap(std::atan2(offset.z, offset.x) - outward, true);
     }
+    *end = origin + gizmo.settings.SnapPlanarOffset(offset, heading);
+    const double minSpacing = gizmo.settings.snapEnabled ? std::min(Road::minPointSpacing, gizmo.settings.StepMeters() * 0.5) : Road::minPointSpacing;
+    if (!ValidRoadSpan(road, origin, *end, minSpacing)) return;
     if (road.points.size() == 1 || road.points.back().position != *end)
     {
         road.points.resize(2);
@@ -3782,6 +3789,20 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         return EditorEvent::Handled;
     }
+    // Shift stays held while extending a road; it must not block changing the grid step.
+    if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
+        !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+        (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET))
+    {
+        if (!event.key.repeat)
+        {
+            gizmo.settings.ChangeStep(event.key.key == SDLK_RIGHTBRACKET ? 1 : -1);
+            if (DraggingGizmo() && gizmo.mode == GizmoMode::Translate) MoveGizmo(world, camera, mouse);
+            else if (drag == Drag::AnchorRoad) UpdateAnchorRoad(camera, mouse);
+            else if (drag == Drag::Move && extensionSource) UpdatePlanDrag(world, mouse);
+        }
+        return EditorEvent::Handled;
+    }
     if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
         !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
     {
@@ -3798,18 +3819,6 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         {
             state.anchorSelection.reset();
             status.clear();
-            return EditorEvent::Handled;
-        }
-        if (event.key.key == SDLK_LEFTBRACKET || event.key.key == SDLK_RIGHTBRACKET)
-        {
-            if (!event.key.repeat)
-            {
-                gizmo.settings.ChangeStep(event.key.key == SDLK_RIGHTBRACKET ? 1 : -1);
-                if (DraggingGizmo() && gizmo.mode == GizmoMode::Translate)
-                {
-                    MoveGizmo(world, camera, mouse);
-                }
-            }
             return EditorEvent::Handled;
         }
         if (!planView && (event.key.key == SDLK_COMMA || event.key.key == SDLK_PERIOD))

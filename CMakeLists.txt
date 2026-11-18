@@ -263,6 +263,11 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyWorldStreamingTests tests/world_streaming_tests.cpp)
     target_link_libraries(BigSkyWorldStreamingTests PRIVATE BigSkyApplication)
     add_test(NAME world_streaming COMMAND BigSkyWorldStreamingTests)
+    add_executable(BigSkyTransformInputTests tests/transform_input_tests.cpp
+        editor/transform_settings.cpp editor/transform_inspector.cpp editor/road_group_transform.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp)
+    target_link_libraries(BigSkyTransformInputTests PRIVATE BigSkyApplication)
+    add_test(NAME transform_input COMMAND BigSkyTransformInputTests)
     add_executable(BigSkyRoadProfileTests tests/road_profile_tests.cpp
         editor/properties_inspector.cpp editor/edit_history.cpp
         editor/transform_inspector.cpp editor/road_group_transform.cpp)

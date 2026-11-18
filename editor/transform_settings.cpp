@@ -29,6 +29,16 @@ double TransformSettings::SnapDistance(double meters) const
     return snapEnabled ? std::round(meters / StepMeters()) * StepMeters() : meters;
 }
 
+Vector3 TransformSettings::SnapPlanarOffset(Vector3 offset, std::optional<double> heading) const
+{
+    if (heading)
+    {
+        const double distance = SnapDistance(std::hypot(offset.x, offset.z));
+        return {std::cos(*heading) * distance, 0, std::sin(*heading) * distance};
+    }
+    return {SnapDistance(offset.x), 0, SnapDistance(offset.z)};
+}
+
 SDL_Surface* LoadTransformIcon(TransformIcon icon)
 {
     constexpr std::array names{"btn_transform_global.png", "btn_transform_local.png",

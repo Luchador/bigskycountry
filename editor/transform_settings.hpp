@@ -1,7 +1,9 @@
 #pragma once
 
+#include "math.hpp"
 #include <SDL3/SDL_surface.h>
 #include <array>
+#include <optional>
 
 enum class GizmoSpace { World, Local };
 enum class TransformIcon { World, Local, SnapOff, SnapOn };
@@ -22,6 +24,9 @@ public:
     double StepMeters() const;
     const char* StepLabel() const;
     double SnapDistance(double meters) const;
+    // Relative to the source point. A constrained heading snaps distance along
+    // that heading instead of moving the endpoint off its chosen angle.
+    Vector3 SnapPlanarOffset(Vector3 offset, std::optional<double> heading = {}) const;
     bool operator==(const TransformSettings&) const = default;
 
 private:
