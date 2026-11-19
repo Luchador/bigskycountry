@@ -418,14 +418,27 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
                 if (oldSites.empty()) { if (!replacements.empty()) links.push_back(link); continue; }
                 const auto old = std::min_element(oldSites.begin(), oldSites.end(), [&](const auto& a, const auto& b) { return score(a)<score(b); });
                 std::optional<CrossingSite> nearest;
+                std::vector<CrossingSite> matches;
                 double distance = 0.1;
                 for (const auto& piece : replacements)
                     for (const auto& site : FindRailroadCrossings(road, piece))
                     {
                         const double d = std::hypot(site.position.x-old->position.x, site.position.z-old->position.z);
+                        if (d < 0.1) matches.push_back(site);
                         if (d < distance) { nearest = site; distance = d; }
                     }
-                if (nearest) links.push_back(nearest->link);
+                if (nearest)
+                {
+                    if (road.style.railroad)
+                    {
+                        // A cut through the crossing leaves two target endpoints
+                        // at the same site. Both embankment rims bound the land.
+                        for (const auto& site : matches)
+                            if (std::hypot(site.position.x-nearest->position.x, site.position.z-nearest->position.z) < 1e-6 &&
+                                std::ranges::find(links, site.link) == links.end()) links.push_back(site.link);
+                    }
+                    else links.push_back(nearest->link); // Road/rail crossings own one concrete slab.
+                }
             }
             if (links == road.crossings) continue;
             before.connectedCrossings.emplace(road.id, road.crossings);

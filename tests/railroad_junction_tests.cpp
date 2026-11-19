@@ -68,7 +68,7 @@ void Filled(const TerrainChunk* fill)
         const auto a = mesh.vertices[mesh.indices[i]].position, b = mesh.vertices[mesh.indices[i+1]].position,
                    c = mesh.vertices[mesh.indices[i+2]].position;
         const auto n = Math::Cross(b - a, c - a);
-        if (std::abs(n.y) < 1e-8 && Math::Length(n) > 1e-5) seam = true;
+        if (std::abs(n.y) < Math::Length(n) * 1e-6 && Math::Length(n) > 1e-5) seam = true;
     }
     Check(seam, "Railroad fill omitted the vertical sealing faces");
 }
@@ -170,6 +170,68 @@ void SkewAndGrades()
     Check(roadSites.size() == 1 && PlanRailroadCrossing(a,b,roadSites[0]).has_value(), "Road/rail slab planning regressed");
 }
 
+void SplitAtCrossing(const std::filesystem::path& root)
+{
+    int fixture = 0;
+    for (bool splitOwner : {false, true})
+    for (bool reverse : {false, true})
+    for (double angle : {0.0, 0.37})
+    {
+        WorldDocument world(AssetRoot::Project);
+        const auto path = (root / ("split-crossing-" + std::to_string(++fixture) + ".wld")).string();
+        Check(world.Open(path.c_str()), "Open crossing split fixture");
+        const auto boundary = Populate(world, {500000,20,-300000});
+        for (auto& road : world.roads)
+        {
+            for (auto& point : road.points)
+            {
+                const auto p = point.position - Vector3{500000,20,-300000};
+                point.position = Vector3{500000,20,-300000} +
+                                 Vector3{p.x*std::cos(angle)-p.z*std::sin(angle),p.y,
+                                         p.x*std::sin(angle)+p.z*std::cos(angle)};
+            }
+            if (reverse) std::ranges::reverse(road.points);
+            road.Rebuild();
+        }
+        Connect(world);
+        auto* fill = world.PlaceTerrainFill(boundary); Filled(fill);
+        const int index = splitOwner ? 0 : 1;
+        // Split precisely at the junction, not just somewhere along its railroad.
+        const double fraction = splitOwner != reverse ? .8125 : .1875;
+        Check(world.roads[index].InsertStation(0, fraction, world.NextRampStationId()),
+              "Insert knot at railroad crossing");
+        RoadEditorState state; state.SelectPoint(index,1); EditHistory history;
+        Check(history.SplitRoad(world,state,index,1), "Split at railroad crossing");
+        world.UpdateIntersections(); Filled(fill);
+        Check(history.Undo(world,state) == EditHistory::Result::MapChanged, "Undo crossing split");
+        world.UpdateIntersections(); Filled(fill);
+        Check(history.Redo(world,state) == EditHistory::Result::MapChanged, "Redo crossing split");
+        world.UpdateIntersections(); Filled(fill);
+        if (!splitOwner)
+        {
+            Check(world.roads[0].crossings.size() == 2, "Crossing did not retain both split railroad pieces");
+            // Earlier editors kept just one target, sometimes the half outside
+            // the land pocket. Recover its adjoining selected piece on load.
+            const int outsideId = world.roads[reverse ? 2 : 1].id;
+            std::erase_if(world.roads[0].crossings, [&](const auto& link) { return link.railroadId != outsideId; });
+            world.roads[0].Rebuild();
+            world.RefreshTerrainFills(); Filled(fill);
+            const auto unchanged = fill->Instance().mesh;
+            world.UpdateIntersections(); world.RefreshTerrainFills();
+            Check(fill->Instance().mesh == unchanged, "Unchanged split crossing rebuilt terrain");
+            auto& continuation = world.roads[reverse ? 1 : 2];
+            for (auto& p : continuation.points) p.position.y += 2;
+            continuation.Rebuild(); world.RefreshTerrainFills();
+            Check(!fill->Instance().mesh, "Disconnected raised railroad retained a crossing seal");
+            for (auto& p : continuation.points) p.position.y -= 2;
+            continuation.Rebuild(); world.RefreshTerrainFills(); Filled(fill);
+        }
+        Check(world.Save(), "Save railroad crossing at split");
+        WorldDocument loaded(AssetRoot::Project); Check(loaded.Open(path.c_str()), "Reload railroad crossing at split");
+        Filled(loaded.Terrain()[0].get());
+    }
+}
+
 void Persistence(const std::filesystem::path& root)
 {
     const auto source = (root / "rail-junction.wld").string(), cooked = (root / "rail-junction.bscworld").string();
@@ -206,7 +268,7 @@ int main()
     try
     {
         std::filesystem::create_directories(root);
-        Geometry(); HistoryAndSplits(); SkewAndGrades(); Persistence(root);
+        Geometry(); HistoryAndSplits(); SkewAndGrades(); SplitAtCrossing(root); Persistence(root);
         std::filesystem::remove_all(root); std::cout << "Railroad junction tests passed\n"; return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << "\nFixture: " << root << '\n'; return 1; }

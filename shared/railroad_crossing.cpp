@@ -427,9 +427,15 @@ std::vector<CrossingSite> FindRailroadCrossings(const Road& road, const Road& ra
             if (std::abs(cross) < 1e-8)
                 continue;
             const auto delta = b[j - 1] - a[i - 1];
-            const double t = Cross(delta, v) / cross, s = Cross(delta, u) / cross;
-            if (t < 0 || t > 1 || s < 0 || s > 1)
+            double t = Cross(delta, v) / cross, s = Cross(delta, u) / cross;
+            // A split at a crossing can put the intersection a rounding error
+            // beyond either new endpoint, especially at large world coordinates.
+            // Measure the allowance in meters, not a fraction of a long span.
+            const double tTolerance = 1e-6 / LengthXZ(u), sTolerance = 1e-6 / LengthXZ(v);
+            if (t < -tTolerance || t > 1 + tTolerance || s < -sTolerance || s > 1 + sTolerance)
                 continue;
+            t = std::clamp(t, 0.0, 1.0);
+            s = std::clamp(s, 0.0, 1.0);
             CrossingSite site{{railway.id, (sa[i - 1] + (sa[i] - sa[i - 1]) * t) / sa.back(),
                                (sb[j - 1] + (sb[j] - sb[j - 1]) * s) / sb.back()},
                               a[i - 1] + u * t};

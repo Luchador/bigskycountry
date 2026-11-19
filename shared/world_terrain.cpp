@@ -4,7 +4,33 @@
 #include "spatial_index.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+
+namespace
+{
+    // Old splits retained the crossing link on only one half. An adjoining,
+    // selected railroad with the same endpoint is also part of that crossing.
+    // Keep this local to the linked site; nearby unconnected tracks must not
+    // become terrain seals just because their footprints overlap in plan view.
+    std::vector<const Road*> CrossingPieces(const Road& source, Vector3 site,
+                                            std::span<const Road* const> railroads)
+    {
+        std::vector<const Road*> result{&source};
+        if (source.points.size() < 2) return result;
+        for (const auto* end : {&source.points.front(), &source.points.back()})
+        {
+            if (std::hypot(end->position.x-site.x, end->position.z-site.z) > 1e-6) continue;
+            for (const auto* road : railroads)
+            {
+                if (road->points.size() < 2 || std::ranges::find(result, road) != result.end()) continue;
+                if (Math::Length(road->points.front().position-end->position) < 1e-6 ||
+                    Math::Length(road->points.back().position-end->position) < 1e-6) result.push_back(road);
+            }
+        }
+        return result;
+    }
+}
 
 int WorldDocument::AllocateRoadId()
 {
@@ -99,28 +125,41 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
         for (const auto& sample : lake->BuiltShoreline()) rim.push_back(lake->Water().transform.Point(sample.position));
     }
     std::vector<std::array<Vector3, 2>> junctionSeams;
+    std::vector<const Road*> railroads;
     for (int id : groundRoads)
+        if (const auto road = byId.find(id); road != byId.end() && road->second->style.railroad)
+            railroads.push_back(road->second);
+    std::map<std::pair<int,int>, std::vector<CrossingSite>> crossingSites;
+    const auto sitesFor = [&](const Road& a, const Road& b) -> const std::vector<CrossingSite>&
     {
-        const auto source = byId.find(id);
-        if (source == byId.end() || !source->second->style.railroad) continue;
-        const Road& road = *source->second;
-        std::map<int, std::vector<CrossingSite>> sites;
+        const auto [found, inserted] = crossingSites.try_emplace(std::pair{a.id,b.id});
+        if (inserted) found->second = FindRailroadCrossings(a,b);
+        return found->second;
+    };
+    for (const auto* source : railroads)
+    {
+        const Road& road = *source;
         for (const auto& link : road.crossings)
         {
             const auto other = byId.find(link.railroadId);
-            if (other == byId.end() || !groundRoads.contains(link.railroadId)) continue;
-            const auto [found, inserted] = sites.try_emplace(link.railroadId);
-            if (inserted) found->second = FindRailroadCrossings(road, *other->second);
-            if (found->second.empty()) continue;
+            if (other == byId.end() || !other->second->style.railroad || !groundRoads.contains(link.railroadId)) continue;
+            const auto& sites = sitesFor(road,*other->second);
+            if (sites.empty()) continue;
             const auto score = [&](const CrossingSite& site)
             {
                 return std::abs(site.link.roadFraction - link.roadFraction) +
                        std::abs(site.link.railFraction - link.railFraction);
             };
-            const auto best = std::min_element(found->second.begin(), found->second.end(),
+            const auto best = std::min_element(sites.begin(), sites.end(),
                                                [&](const auto& a, const auto& b) { return score(a) < score(b); });
-            if (auto seams = PlanRailroadJunction(road, *other->second, *best))
-                junctionSeams.insert(junctionSeams.end(), seams->begin(), seams->end());
+            const auto firstPieces = CrossingPieces(road,best->position,railroads);
+            const auto secondPieces = CrossingPieces(*other->second,best->position,railroads);
+            for (const auto* a : firstPieces)
+                for (const auto* b : secondPieces)
+                    for (const auto& site : sitesFor(*a,*b))
+                        if (std::hypot(site.position.x-best->position.x, site.position.z-best->position.z) < 1e-6)
+                            if (auto seams = PlanRailroadJunction(*a,*b,site))
+                                junctionSeams.insert(junctionSeams.end(), seams->begin(), seams->end());
         }
     }
     std::map<int,const Road*> switchHosts;
