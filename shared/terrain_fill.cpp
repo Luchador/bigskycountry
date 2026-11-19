@@ -15,6 +15,7 @@ namespace
     using Triangulation = CDT::Triangulation<double>;
     using Segment = std::array<Vector3, 2>;
     constexpr double topologyResolution = 1e-7; // Meters in the local XZ projection.
+    constexpr std::size_t noSource = std::numeric_limits<std::size_t>::max();
 
     double Turn(Point a, Point b, Point c)
     {
@@ -29,7 +30,8 @@ namespace
         std::vector<Point> points;
         std::vector<Vector3> positions;
         std::map<std::pair<double, double>, Index> lookup;
-        std::map<Edge, Segment> segments;
+        struct RimEdge { Segment ends; std::vector<std::size_t> sources; };
+        std::map<Edge, RimEdge> segments;
         struct Footprint { std::vector<Index> rim; std::vector<std::vector<Index>> holes; };
         std::vector<Footprint> polygons;
         std::set<Index> verticalSteps;
@@ -74,10 +76,15 @@ namespace
             return it->second;
         }
 
-        void AddEdge(Vector3 a, Vector3 b)
+        void AddEdge(Vector3 a, Vector3 b, std::size_t source = noSource)
         {
             const Index i = AddPoint(a), j = AddPoint(b);
-            if (i != j) segments.try_emplace(Edge(i, j), i < j ? Segment{a, b} : Segment{b, a});
+            if (i != j)
+            {
+                auto& edge = segments.try_emplace(Edge(i, j), RimEdge{i < j ? Segment{a, b} : Segment{b, a}, {}}).first->second;
+                if (source != noSource && std::ranges::find(edge.sources, source) == edge.sources.end())
+                    edge.sources.push_back(source);
+            }
             else if (std::abs(a.y - b.y) > 1e-7) verticalSteps.insert(i);
         }
 
@@ -104,7 +111,7 @@ namespace
         Vector3 PositionOn(Edge source, Point p) const
         {
             const Point a = points[source.v1()], b = points[source.v2()];
-            const auto& ends = segments.at(source);
+            const auto& ends = segments.at(source).ends;
             if (p.x == a.x && p.y == a.y) return ends[0];
             if (p.x == b.x && p.y == b.y) return ends[1];
             const double dx = b.x - a.x, dz = b.y - a.y;
@@ -167,6 +174,7 @@ namespace
         std::vector<Vector3> positions;
         std::vector<Edge> boundary;
         std::vector<Seam> seams;
+        std::set<std::size_t> sources;
 
         Index AddRimVertex(Index coarseIndex, Point point, Vector3 position)
         {
@@ -195,6 +203,16 @@ namespace
                 const Index a = t.vertices[side], b = t.vertices[(side + 1) % 3];
                 Edge source(a, b);
                 if (!coarse.fixedEdges.count(source)) continue;
+                // CDT can split and overlap constraints. Keep every original
+                // owner even when one geometric edge is shared by two sources.
+                const auto addSources = [&](Edge edge)
+                {
+                    if (const auto it = outline.segments.find(edge); it != outline.segments.end())
+                        out.sources.insert(it->second.sources.begin(), it->second.sources.end());
+                };
+                addSources(source);
+                if (const auto split = coarse.pieceToOriginals.find(source); split != coarse.pieceToOriginals.end())
+                    for (const auto& original : split->second) addSources(original);
                 if (!outline.segments.contains(source))
                 {
                     // A crossing or a collinear mouth vertex split the original constraint.
@@ -361,14 +379,15 @@ namespace
 }
 
 std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links,
-                                           std::span<const std::vector<Vector3>> exclusions, std::span<const Segment> junctionSeams)
+                                           std::span<const std::vector<Vector3>> exclusions, std::span<const Segment> junctionSeams,
+                                           TerrainFillScope scope)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
     const auto shore = std::find_if(exclusions.begin(), exclusions.end(), [](const auto& rim) { return rim.size() >= 3; });
     if (first == footprints.end() && links.empty() && shore == exclusions.end()) return {};
     Outline outline{first != footprints.end() ? (*first)->outline.front() : !links.empty() ? links.front()[0] : shore->front()};
     outline.junctionSeams = junctionSeams;
-    const auto addRim = [&](const std::vector<Vector3>& rim)
+    const auto addRim = [&](const std::vector<Vector3>& rim, std::size_t source = noSource)
     {
         if (rim.size() < 3) return;
         auto& polygon = outline.polygons.emplace_back().rim;
@@ -376,7 +395,7 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
         for (Vector3 p : rim)
         {
             polygon.push_back(outline.AddPoint(p));
-            outline.AddEdge(previous, p);
+            outline.AddEdge(previous, p, source);
             previous = p;
         }
         // A narrower road's curb can end against a wider road's pavement.
@@ -394,11 +413,12 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
                 outline.verticalSteps.insert(polygon[outer]);
         }
     };
-    for (const RoadGeometry* footprint : footprints)
+    for (std::size_t source = 0; source < footprints.size(); ++source)
     {
+        const RoadGeometry* footprint = footprints[source];
         if (footprint->groundFootprints.empty())
         {
-            addRim(footprint->outline);
+            addRim(footprint->outline, source);
             if (footprint->outline.size() >= 3)
                 for (const auto& hole : footprint->holes)
                 {
@@ -408,24 +428,25 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
                     for (auto point : hole)
                     {
                         indices.push_back(outline.AddPoint(point));
-                        outline.AddEdge(previous, point);
+                        outline.AddEdge(previous, point, source);
                         previous = point;
                     }
                 }
         }
         else for (const auto& contact : footprint->groundFootprints)
         {
-            addRim(contact.outline);
+            addRim(contact.outline, source);
             outline.solidWalls.insert(outline.solidWalls.end(), contact.walls.begin(), contact.walls.end());
         }
         for (const auto& slab : footprint->crossingSlabs)
         {
-            addRim(slab.outline);
+            addRim(slab.outline, source);
             outline.solidWalls.insert(outline.solidWalls.end(), slab.walls.begin(), slab.walls.end());
         }
     }
     // Water occupies its committed shoreline footprint. These exact edges can
     // bound either an inner hole or the outside of an adjoining land pocket.
+    // Automatically discovered water holes are not additional selected roads.
     for (const auto& rim : exclusions) addRim(rim);
     for (const auto& link : links) outline.AddEdge(link[0], link[1]);
     if (outline.points.size() < 3) return {};
@@ -438,11 +459,31 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
         coarse.insertEdges(edges);
         coarse.eraseSuperTriangle();
         auto mesh = std::make_shared<Mesh>();
-        for (const auto& region : LandPockets(coarse, outline))
+        const auto regions = LandPockets(coarse, outline);
+        std::vector<Pocket> pockets(regions.size());
+        std::vector<bool> valid(regions.size());
+        for (std::size_t i = 0; i < regions.size(); ++i)
+            valid[i] = CollectRim(pockets[i], coarse, outline, regions[i]);
+        for (std::size_t i = 0; i < regions.size(); ++i)
         {
-            Pocket pocket;
-            if (!CollectRim(pocket, coarse, outline, region)) continue;
-            SampleInterior(pocket, coarse, outline, region);
+            if (!valid[i]) continue;
+            auto& pocket = pockets[i];
+            if (scope == TerrainFillScope::SelectedBoundary && !pocket.sources.empty())
+            {
+                // Long selected roads may cross again outside the intended
+                // block. Prefer pockets using the fuller boundary, while keeping
+                // independent blocks and equally supported pockets. Do this only
+                // after seal validation: an invalid loop cannot suppress land.
+                bool incidental = false;
+                for (std::size_t j = 0; j < pockets.size() && !incidental; ++j)
+                {
+                    const auto& other = pockets[j].sources;
+                    incidental = valid[j] && other.size() > pocket.sources.size() &&
+                        std::includes(other.begin(), other.end(), pocket.sources.begin(), pocket.sources.end());
+                }
+                if (incidental) continue;
+            }
+            SampleInterior(pocket, coarse, outline, regions[i]);
             AppendPocket(*mesh, pocket);
         }
         for (auto& vertex : mesh->vertices) vertex.normal = Math::Normalize(vertex.normal);

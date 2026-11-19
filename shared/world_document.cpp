@@ -31,7 +31,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 8;
+    constexpr Uint32 terrainVersion = 9;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -124,10 +124,12 @@ namespace
             if (kind == "fill")
             {
                 TerrainBoundary boundary;
+                boundary.filterIncidentalPockets = false;
                 std::string material;
                 if (!(in >> std::quoted(material)) || (!material.empty() && !Material::ValidAssetPath(material)) ||
                     !ReadIds(in, boundary.roads) || !ReadIds(in, boundary.intersections) ||
-                    (version >= 7 && !ReadIds(in, boundary.waterBodies)) || boundary.Empty())
+                    (version >= 7 && !ReadIds(in, boundary.waterBodies)) ||
+                    (version >= 9 && !(in >> boundary.filterIncidentalPockets)) || boundary.Empty())
                     return SDL_SetError("Invalid terrain boundary in TERR");
                 auto* chunk = world.PlaceTerrainFill(std::move(boundary), true);
                 if (!chunk) return false;
@@ -824,7 +826,7 @@ bool WorldDocument::Save()
             }
             terrainData << ' ' << chunk->boundary->waterBodies.size();
             for (auto id : chunk->boundary->waterBodies) terrainData << ' ' << id;
-            terrainData << '\n';
+            terrainData << ' ' << chunk->boundary->filterIncidentalPockets << '\n';
             continue;
         }
         const auto& mesh = chunk->Instance().mesh;

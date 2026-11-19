@@ -1,9 +1,11 @@
 #include "terrain_fill.hpp"
 #include "world_package.hpp"
 #include "world_collision.hpp"
+#include "road_io.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace
@@ -21,6 +23,80 @@ double Area(const Mesh& mesh)
         area += std::abs(Math::Cross(b - a, c - a).y) * .5;
     }
     return area;
+}
+
+RoadGeometry Rectangle(double left, double bottom, double right, double top)
+{
+    RoadGeometry geometry;
+    geometry.outline = {{left,0,bottom}, {right,0,bottom}, {right,0,top}, {left,0,top}};
+    return geometry;
+}
+
+bool Covers(const Mesh& mesh, Vector3 point)
+{
+    for (std::size_t i = 0; i < mesh.indices.size(); i += 3)
+    {
+        const auto a = mesh.vertices[mesh.indices[i]].position, b = mesh.vertices[mesh.indices[i+1]].position,
+                   c = mesh.vertices[mesh.indices[i+2]].position;
+        if (std::abs(Math::Cross(b-a,c-a).y) < 1e-10) continue;
+        const std::array turns{Math::Cross(b-a,point-a).y, Math::Cross(c-b,point-b).y, Math::Cross(a-c,point-c).y};
+        if (*std::min_element(turns.begin(), turns.end()) >= -1e-8 ||
+            *std::max_element(turns.begin(), turns.end()) <= 1e-8) return true;
+    }
+    return false;
+}
+
+void IncidentalPockets()
+{
+    // Scandia's layout: two tracks cross; a road crosses both tracks before
+    // curving around the block. Selecting the whole perimeter also encloses
+    // land on the far side of the east/west track, using only three sources.
+    auto west = Rectangle(-2,-100,0,40), north = Rectangle(-10,30,110,32),
+         east = Rectangle(100,20,102,40), track = Rectangle(-10,0,110,2);
+    RoadGeometry curve;
+    curve.outline = {{-10,0,-82}, {40,0,-82}, {70,0,18}, {110,0,18},
+                     {110,0,22}, {70,0,22}, {40,0,-78}, {-10,0,-78}};
+    std::array<const RoadGeometry*,5> perimeter{&west,&north,&east,&track,&curve};
+    const auto selected = BuildTerrainFill(perimeter, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(selected && Covers(*selected, {10,0,10}), "Selected perimeter did not fill the intended block");
+    Check(!Covers(*selected, {10,0,-10}), "Selected perimeter also filled an incidental crossing pocket");
+    const auto all = BuildTerrainFill(perimeter, {});
+    Check(all && Covers(*all, {10,0,10}) && Covers(*all, {10,0,-10}), "Geometry helpers lost all-pocket filling");
+    const std::array<const RoadGeometry*,3> smallBoundary{&west,&track,&curve};
+    const auto separate = BuildTerrainFill(smallBoundary, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(separate && Covers(*separate, {10,0,-10}), "Incidental pocket cannot be filled separately");
+    Check(Area(*separate) > Area(*selected), "Fixture must reject the larger incidental pocket, not pick by area");
+    Check(std::abs(Area(*all)-Area(*separate)-Area(*selected)) < 1e-6, "Pocket filtering changed the retained land area");
+    std::reverse(perimeter.begin(),perimeter.end());
+    const auto reversed = BuildTerrainFill(perimeter, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(reversed && std::abs(Area(*reversed)-Area(*selected)) < 1e-6 && !Covers(*reversed,{10,0,-10}),
+          "Selection order changed the chosen pocket");
+
+    // An unsealed larger source set must not suppress a valid smaller loop.
+    for (auto& p : north.outline) p.y = 5;
+    const auto unsealed = BuildTerrainFill(perimeter, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(unsealed && Covers(*unsealed,{10,0,-10}) && !Covers(*unsealed,{10,0,10}),
+          "Invalid elevation seams suppressed a valid pocket");
+}
+
+void MultipleBlocks()
+{
+    auto west = Rectangle(-2,-10,0,110), middle = Rectangle(50,-10,52,110),
+         east = Rectangle(100,-10,102,110), north = Rectangle(-10,100,110,102),
+         south = Rectangle(-10,-2,110,0);
+    const std::array<const RoadGeometry*,5> perimeter{&west,&middle,&east,&north,&south};
+    const auto fill = BuildTerrainFill(perimeter, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(fill && Covers(*fill,{25,0,50}) && Covers(*fill,{75,0,50}) && std::abs(Area(*fill)-9800) < 1e-6,
+          "Independent adjacent blocks no longer fill together");
+
+    // Multiple pieces from one road (e.g. bridge ground contacts) still have
+    // one owner. Equal source sets do not arbitrarily discard either block.
+    RoadGeometry sides;
+    for (const auto* side : {&west,&middle,&east}) sides.groundFootprints.emplace_back().outline = side->outline;
+    const std::array<const RoadGeometry*,3> equalPerimeter{&sides,&north,&south};
+    const auto equal = BuildTerrainFill(equalPerimeter, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(equal && Covers(*equal,{25,0,50}) && Covers(*equal,{75,0,50}) && std::abs(Area(*equal)-9800) < 1e-6,
+          "Pockets sharing the same sources lost one of their blocks");
 }
 
 std::vector<Vector3> Rim(const TerrainChunk& lake)
@@ -78,6 +154,41 @@ TerrainBoundary Perimeter(WorldDocument& world, Vector3 origin = {})
         road.Rebuild(); boundary.roads.insert(road.id); world.roads.push_back(std::move(road));
     }
     return boundary;
+}
+
+void LegacyFill(const std::filesystem::path& root)
+{
+    WorldDocument source(AssetRoot::Project);
+    const auto boundary = Perimeter(source);
+    const auto reference = source.PlaceTerrainFill(boundary);
+    Check(reference && reference->Instance().mesh, "Build legacy fill reference");
+    std::ostringstream roads, terrain;
+    for (const auto& road : source.roads) RoadIO::WriteRoad(roads,road);
+    terrain << "fill \"\" " << boundary.roads.size();
+    for (int id : boundary.roads) terrain << ' ' << id;
+    terrain << " 0 0\n"; // TERR v8: no pocket-selection flag.
+    const auto path = (root / "legacy-fill.wld").string();
+    auto* file = SDL_IOFromFile(path.c_str(), "wb"); Check(file, "Create legacy world");
+    const auto section = [&](const char* tag, Uint32 version, const std::string& payload)
+    {
+        return SDL_WriteIO(file,tag,4) == 4 && SDL_WriteU32LE(file,version) && SDL_WriteU64LE(file,payload.size()) &&
+               SDL_WriteIO(file,payload.data(),payload.size()) == payload.size();
+    };
+    const bool written = SDL_WriteIO(file,"BSCW",4) == 4 && SDL_WriteU32LE(file,1) && SDL_WriteU32LE(file,2) &&
+                         section("ROAD",RoadIO::currentVersion,roads.str()) && section("TERR",8,terrain.str());
+    const bool closed = SDL_CloseIO(file); Check(written && closed, "Write legacy world");
+    WorldDocument loaded(AssetRoot::Project); Check(loaded.Open(path.c_str()), "Open TERR v8");
+    const auto& old = loaded.Terrain().front();
+    Check(old->boundary && !old->boundary->filterIncidentalPockets && old->boundary->SameSources(boundary),
+          "Legacy fill coverage or source matching changed");
+    Check(old->Instance().mesh && std::abs(Area(*old->Instance().mesh)-Area(*reference->Instance().mesh)) < 1e-6,
+          "Legacy fill geometry changed");
+    auto* added = loaded.PlaceTerrainFill(Perimeter(loaded, {500,0,0}));
+    Check(added && added->boundary->filterIncidentalPockets, "New fill did not enable pocket filtering");
+    Check(loaded.Save(), "Save old and new fill modes");
+    WorldDocument reopened(AssetRoot::Project); Check(reopened.Open(path.c_str()), "Reload TERR v9");
+    Check(reopened.Terrain().size() == 2 && !reopened.Terrain()[0]->boundary->filterIncidentalPockets &&
+          reopened.Terrain()[1]->boundary->filterIncidentalPockets, "Fill modes were not preserved by save/reload");
 }
 
 void GeometryAndUpdates()
@@ -164,6 +275,7 @@ void PersistenceAndCooking(const std::filesystem::path& root)
     Check(world.Save(), "Save world");
     WorldDocument loaded(AssetRoot::Project); Check(loaded.Open(source.c_str()), "Reload fill before lake");
     Check(loaded.Terrain()[0]->persistentId == fillId && loaded.Terrain()[1]->persistentId == lakeId, "Stable IDs changed");
+    Check(loaded.Terrain()[0]->boundary->filterIncidentalPockets, "New fill mode lost on reload");
     Sealed(*loaded.Terrain()[0]->Instance().mesh, *loaded.Terrain()[1]);
     Check(WorldPackage::Cook(loaded, cooked), "Cook lake fill");
     WorldPackage::Reader reader; Check(reader.Open(cooked), "Open cooked world");
@@ -198,8 +310,8 @@ int main()
     try
     {
         std::filesystem::create_directories(root);
-        GeometryAndUpdates(); PersistenceAndCooking(root);
-        std::filesystem::remove_all(root); std::cout << "Lake terrain fill tests passed\n"; return 0;
+        IncidentalPockets(); MultipleBlocks(); LegacyFill(root); GeometryAndUpdates(); PersistenceAndCooking(root);
+        std::filesystem::remove_all(root); std::cout << "Terrain fill tests passed\n"; return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << "\nFixture: " << root << '\n'; return 1; }
 }

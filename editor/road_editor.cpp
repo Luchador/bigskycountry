@@ -2504,7 +2504,8 @@ void RoadEditor::FillSelection(WorldDocument& world)
     }
     for (std::size_t i = 0; i < world.Terrain().size(); ++i)
     {
-        if (world.Terrain()[i]->boundary == boundary)
+        const auto& existing = world.Terrain()[i]->boundary;
+        if (existing && existing->SameSources(boundary))
         {
             state.SelectRows({{SceneKind::Terrain, static_cast<int>(i)}});
             status = "Selected existing terrain fill";

@@ -174,7 +174,8 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                     auto seams=RailroadSwitchTerrainSeams(*switchHosts.at(p.railSwitch->station),*road->second);
                     junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
                 }
-    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams));
+    const auto scope = boundary.filterIncidentalPockets ? TerrainFillScope::SelectedBoundary : TerrainFillScope::AllPockets;
+    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
     chunk.sourceWaterBodies = std::move(waterRevisions);

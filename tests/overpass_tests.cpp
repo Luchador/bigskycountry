@@ -335,20 +335,20 @@ void PersistenceAndCooking(const std::filesystem::path& root)
 
 void LegacyRoad()
 {
-    WorldDocument world;
-    auto road = Straight(world, {-100,12,0}, {100,12,0});
     const BridgeSettings settings{.625, 123.25, {101,102}, {}};
-    road.points[0].bridge = settings;
-    std::ostringstream saved; saved << std::setprecision(17); RoadIO::WriteRoad(saved, road);
-    std::string legacy = saved.str();
-    const std::string record = " 0.625 123.25 2 101 102 0";
-    const auto at = legacy.find(record);
-    Check(at != std::string::npos, "Find bridge record");
-    // ROAD v24 ends the bridge record after the lower-road IDs; no water count.
-    legacy.erase(at + record.size() - 2, 2);
-    std::istringstream input(legacy);
+    // Freeze a genuine ROAD v24 record. Deriving it from today's writer left
+    // newer railroad-switch fields in the fixture and shifted the next point.
+    std::istringstream input(R"(2 0 0 0 2 0 4 0 0 "surfaces/roads/M_Asphalt01.bmat" 0 "" 0 0
+0 0 0 0 0 0 0 0 0 0 0
+1 1 ""
+0
+2
+-100 12 0 0 0 0 0 0 0.333333 0.333333 0 0 0 0 0 1 0 0 0 0 0 1 0.625 123.25 2 101 102 0
+100 12 0 0 0 0 0 0 0.333333 0.333333 0 0 0 0 0 1 0 0 0 0 0 0 0
+)");
     const auto loaded = RoadIO::ReadRoad(input, 24);
-    Check(bool(input) && loaded.points.size() == 2 && loaded.points[0].bridge == settings,
+    Check(bool(input) && loaded.points.size() == 2 && loaded.points[0].bridge == settings &&
+          loaded.points[1].position == Vector3{100,12,0},
           "Older road/rail bridges no longer load");
 }
 }
