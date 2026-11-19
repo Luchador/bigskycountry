@@ -99,6 +99,35 @@ void MultipleBlocks()
           "Pockets sharing the same sources lost one of their blocks");
 }
 
+void SupportingFootprints()
+{
+    // A bridge bounds the requested block on its right. Long lower tracks on
+    // its left also enclose land with the bridge and with each other farther out.
+    auto bridge = Rectangle(-110,100,110,102), east = Rectangle(100,-10,102,110),
+         south = Rectangle(-10,-2,110,0), west = Rectangle(-2,-10,0,110),
+         leftTrack = Rectangle(-100,-110,-98,110), rightTrack = Rectangle(-52,-110,-50,110),
+         bottomTrack = Rectangle(-110,-100,-40,-98), crossTrack = Rectangle(-110,-50,-40,-48);
+    const std::array<const RoadGeometry*,8> footprints{&bridge,&east,&south,&west,&leftTrack,&rightTrack,&bottomTrack,&crossTrack};
+    const std::array<const RoadGeometry*,4> supporting{&leftTrack,&rightTrack,&bottomTrack,&crossTrack};
+    const auto fill = BuildTerrainFill(footprints, {}, {}, {}, TerrainFillScope::SelectedBoundary, supporting);
+    Check(fill && std::abs(Area(*fill)-10000) < 1e-6 && Covers(*fill,{50,0,50}),
+          "Supporting overpass footprints displaced the requested block");
+    Check(!Covers(*fill,{-75,0,50}) && !Covers(*fill,{-75,0,-75}),
+          "Inferred lower tracks created unwanted terrain pockets");
+    const auto explicitSelection = BuildTerrainFill(footprints, {}, {}, {}, TerrainFillScope::SelectedBoundary);
+    Check(explicitSelection && Covers(*explicitSelection,{-75,0,50}) && Covers(*explicitSelection,{-75,0,-75}),
+          "Explicitly selected tracks cannot fill their own blocks");
+    const auto all = BuildTerrainFill(footprints, {}, {}, {}, TerrainFillScope::AllPockets, supporting);
+    Check(all && std::abs(Area(*all)-Area(*explicitSelection)) < 1e-6, "Legacy/helper all-pocket filling changed");
+
+    // A remote loop formed entirely by inferred elements must not be used as
+    // a fallback when the user's perimeter has an open end.
+    east.outline = Rectangle(100,10,102,90).outline;
+    bridge.outline = Rectangle(-10,100,110,102).outline;
+    Check(!BuildTerrainFill(footprints, {}, {}, {}, TerrainFillScope::SelectedBoundary, supporting),
+          "Open selected boundary fell back to an unrelated supporting loop");
+}
+
 std::vector<Vector3> Rim(const TerrainChunk& lake)
 {
     std::vector<Vector3> result;
@@ -310,7 +339,7 @@ int main()
     try
     {
         std::filesystem::create_directories(root);
-        IncidentalPockets(); MultipleBlocks(); LegacyFill(root); GeometryAndUpdates(); PersistenceAndCooking(root);
+        IncidentalPockets(); MultipleBlocks(); SupportingFootprints(); LegacyFill(root); GeometryAndUpdates(); PersistenceAndCooking(root);
         std::filesystem::remove_all(root); std::cout << "Terrain fill tests passed\n"; return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << "\nFixture: " << root << '\n'; return 1; }

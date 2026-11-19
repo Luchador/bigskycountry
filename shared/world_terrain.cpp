@@ -45,6 +45,7 @@ int WorldDocument::AllocateRoadId()
 void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, const Road*>& byId)
 {
     std::vector<const RoadGeometry*> footprints;
+    std::vector<const RoadGeometry*> supportingFootprints;
     std::vector<std::uint64_t> revisions;
     std::vector<std::array<Vector3, 2>> links;
     const auto& boundary = *chunk.boundary;
@@ -63,6 +64,10 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
         }
         const Road& road = *it->second;
         footprints.push_back(&road);
+        // An overpass needs its lower elements for ground seams and exclusions.
+        // Their full lengths may enclose other land far from the selected block;
+        // only explicitly selected elements should contribute to pocket choice.
+        if (!boundary.roads.contains(id)) supportingFootprints.push_back(&road);
         revisions.push_back(road.revision);
         if (road.points.size() < 2) continue;
         for (const RoadPoint* end : {&road.points.front(), &road.points.back()})
@@ -175,7 +180,7 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                     junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
                 }
     const auto scope = boundary.filterIncidentalPockets ? TerrainFillScope::SelectedBoundary : TerrainFillScope::AllPockets;
-    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope));
+    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
     chunk.sourceWaterBodies = std::move(waterRevisions);

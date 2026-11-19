@@ -380,7 +380,7 @@ namespace
 
 std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const> footprints, std::span<const Segment> links,
                                            std::span<const std::vector<Vector3>> exclusions, std::span<const Segment> junctionSeams,
-                                           TerrainFillScope scope)
+                                           TerrainFillScope scope, std::span<const RoadGeometry* const> supportingFootprints)
 {
     const auto first = std::find_if(footprints.begin(), footprints.end(), [](const auto* g){ return g->outline.size() >= 3; });
     const auto shore = std::find_if(exclusions.begin(), exclusions.end(), [](const auto& rim) { return rim.size() >= 3; });
@@ -416,9 +416,10 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
     for (std::size_t source = 0; source < footprints.size(); ++source)
     {
         const RoadGeometry* footprint = footprints[source];
+        const auto owner = std::ranges::find(supportingFootprints, footprint) == supportingFootprints.end() ? source : noSource;
         if (footprint->groundFootprints.empty())
         {
-            addRim(footprint->outline, source);
+            addRim(footprint->outline, owner);
             if (footprint->outline.size() >= 3)
                 for (const auto& hole : footprint->holes)
                 {
@@ -428,19 +429,19 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
                     for (auto point : hole)
                     {
                         indices.push_back(outline.AddPoint(point));
-                        outline.AddEdge(previous, point, source);
+                        outline.AddEdge(previous, point, owner);
                         previous = point;
                     }
                 }
         }
         else for (const auto& contact : footprint->groundFootprints)
         {
-            addRim(contact.outline, source);
+            addRim(contact.outline, owner);
             outline.solidWalls.insert(outline.solidWalls.end(), contact.walls.begin(), contact.walls.end());
         }
         for (const auto& slab : footprint->crossingSlabs)
         {
-            addRim(slab.outline, source);
+            addRim(slab.outline, owner);
             outline.solidWalls.insert(outline.solidWalls.end(), slab.walls.begin(), slab.walls.end());
         }
     }
@@ -468,6 +469,9 @@ std::shared_ptr<const Mesh> BuildTerrainFill(std::span<const RoadGeometry* const
         {
             if (!valid[i]) continue;
             auto& pocket = pockets[i];
+            // A closed loop made entirely from inferred bridge dependencies is
+            // not part of the requested perimeter, even if no other loop seals.
+            if (scope == TerrainFillScope::SelectedBoundary && !supportingFootprints.empty() && pocket.sources.empty()) continue;
             if (scope == TerrainFillScope::SelectedBoundary && !pocket.sources.empty())
             {
                 // Long selected roads may cross again outside the intended

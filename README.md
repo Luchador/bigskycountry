@@ -131,6 +131,8 @@ The new end follows the other road's endpoint and cross-section when it moves. O
 
 New terrain fills prefer the full selected boundary. If long roads or railroads cross again outside the intended block and enclose another pocket using only a strict subset of that block's boundary elements, that incidental pocket is skipped. Select just its own boundaries to fill it separately. Independent blocks with different boundary sets can still fill together; equal boundary sets are kept. Water holes, exact boundary seams, and bridge-owned ground patches retain their existing behavior.
 
+Roads and railroads automatically included beneath a selected overpass provide ground seams and exclusions, but do not count as explicitly selected boundaries when choosing those pockets. This prevents their distant crossings from creating extra fills alongside the intended block. Select the lower roads or tracks explicitly when you want them to define another terrain area.
+
 `TERR` version 9 records this choice as a trailing boolean on each `fill` record, so new fills keep the same behavior after editing, undo/redo, saving, and reopening. Existing fills from older files keep their original coverage. To correct an older fill that covers unwanted extra areas, delete that terrain chunk and recreate it from the boundary selection. Recook the world to update streamed terrain.
 
 ### Moving roads and intersections together
