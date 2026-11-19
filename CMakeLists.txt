@@ -269,6 +269,9 @@ if(BIGSKY_BUILD_TESTS)
         editor/properties_inspector.cpp editor/edit_history.cpp)
     target_link_libraries(BigSkyTransformInputTests PRIVATE BigSkyApplication)
     add_test(NAME transform_input COMMAND BigSkyTransformInputTests)
+    add_executable(BigSkyRampTests tests/ramp_tests.cpp editor/highway_ramp_tool.cpp)
+    target_link_libraries(BigSkyRampTests PRIVATE BigSkyApplication)
+    add_test(NAME ramps COMMAND BigSkyRampTests)
     add_executable(BigSkyRoadProfileTests tests/road_profile_tests.cpp
         editor/properties_inspector.cpp editor/edit_history.cpp
         editor/transform_inspector.cpp editor/road_group_transform.cpp)

@@ -186,6 +186,32 @@ void WorldDocument::RefreshRampConnections(bool force)
         }
         if (changed) road.Rebuild();
     }
+    // Resolve the branch first: its spline is independent of the highway shoulder.
+    // Then trim only the mainline shoulder around the actual branch footprint.
+    // Cache authored-derived contours, never repeatedly clip an already cut mesh.
+    std::map<size_t, std::vector<RampShoulderCut>> shoulderCuts;
+    for (const auto& ramp : roads)
+    {
+        if (!ramp.style.oneWay || ramp.points.size() < 2) continue;
+        for (const auto* end : {&ramp.points.front(), &ramp.points.back()})
+        {
+            if (!end->ramp) continue;
+            const auto& link = *end->ramp;
+            const auto host = stations.find(link.station);
+            if (host == stations.end() || roads[host->second].MaximumShoulderWidth(link.side > 0) == 0) continue;
+            shoulderCuts[host->second].push_back({link.station, link.side, ramp.outline});
+        }
+    }
+    for (size_t i = 0; i < roads.size(); ++i)
+    {
+        auto& host = roads[i];
+        const auto found = shoulderCuts.find(i);
+        if (found == shoulderCuts.end() && host.rampShoulderCuts.empty()) continue;
+        auto current = found == shoulderCuts.end() ? std::vector<RampShoulderCut>{} : std::move(found->second);
+        if (current == host.rampShoulderCuts) continue;
+        host.rampShoulderCuts = std::move(current);
+        host.Rebuild();
+    }
     RefreshRailroadSwitches();
     rampRevision = RoadGeometry::latestRevision;
 }

@@ -241,6 +241,14 @@ struct RampLane
     bool operator==(const RampLane&) const = default;
 };
 
+// Runtime footprint of an attached ramp; shoulders yield to it after the taper.
+struct RampShoulderCut
+{
+    int station, side;
+    std::vector<Vector3> outline;
+    bool operator==(const RampShoulderCut&) const = default;
+};
+
 struct RampSeam
 {
     Vector3 center, forward;
@@ -326,6 +334,7 @@ struct Road : RoadGeometry
     bool InsertStation(int segment, double t, int stationId);
     // Derived from attached ramp ends. Each seam uses the actual highway surface frame.
     std::vector<RampLane> rampLanes;
+    std::vector<RampShoulderCut> rampShoulderCuts; // Derived, never serialized.
     std::map<std::pair<int, int>, RampSeam> rampSeams; // (station ID, side)
     std::array<std::optional<RoadMouthFrame>, 2> rampCaps{};
     std::array<bool, 2> skewEnds{}; // Derived from the linked intersection, including unpaved junctions.

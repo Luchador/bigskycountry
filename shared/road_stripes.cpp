@@ -1,9 +1,11 @@
 #include "road.hpp"
 #include "road_paint.hpp"
+#include "mesh.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <limits>
 
 namespace
 {
@@ -319,17 +321,84 @@ namespace
         size_t firstGuide = 0;
         double Fraction(double d) const { return std::clamp((d - tip) / (gore - tip), 0.0, 1.0); }
 
-        TaperProfile Profile(double shoulder, double clearance) const
+        TaperProfile Profile(double clearance) const
         {
-            const double inner = shoulder + clearance + lane.innerPavement - lane.halfTravel;
+            const double inner = clearance + lane.innerPavement - lane.halfTravel;
             const double width = 2.0 * lane.halfTravel;
             // A monotone outward shift keeps both edges advancing after the lane has opened.
             return {inner, width, std::min(inner + width, 2.0 * inner)};
         }
     };
 
+    struct ShoulderOpening
+    {
+        const Taper* taper;
+        std::vector<Vector3> outline; // In the host road's mesh frame.
+        Vector3 lo, hi;
+
+        bool Reaches(Vector3 a, Vector3 b, double width) const
+        {
+            return hi.x >= std::min(a.x, b.x) - width && lo.x <= std::max(a.x, b.x) + width &&
+                   hi.z >= std::min(a.z, b.z) - width && lo.z <= std::max(a.z, b.z) + width;
+        }
+    };
+
+    double CrossXZ(Vector3 a, Vector3 b) { return a.x * b.z - a.z * b.x; }
+
+    // Add samples only where a branch can reach the shoulder. Long, straight
+    // highways otherwise have no stations between their authored control points.
+    std::vector<double> SampleShoulderOpenings(const std::vector<CrossSection>& stations,
+                                const std::vector<ShoulderOpening>& openings, double width)
+    {
+        std::vector<double> sampled;
+        if (openings.empty() || stations.empty()) return sampled;
+        for (size_t i = 1; i < stations.size(); ++i)
+        {
+            const auto& a = stations[i - 1];
+            const auto& b = stations[i];
+            const auto delta = b.center - a.center;
+            const double run2 = delta.x * delta.x + delta.z * delta.z;
+            std::vector<double> cuts;
+            if (run2 > 1e-12)
+            {
+                const double run = std::sqrt(run2);
+                for (const auto& opening : openings)
+                {
+                    if (!opening.Reaches(a.center, b.center, width * std::max(Math::Length(a.lateral), Math::Length(b.lateral)))) continue;
+                    double lo = 1, hi = 0, acrossLo = std::numeric_limits<double>::max(), acrossHi = -acrossLo;
+                    for (const auto& point : opening.outline)
+                    {
+                        const auto v = point - a.center;
+                        const double t = (v.x * delta.x + v.z * delta.z) / run2;
+                        lo = std::min(lo, t); hi = std::max(hi, t);
+                        const double across = CrossXZ(delta, v) / run;
+                        acrossLo = std::min(acrossLo, across); acrossHi = std::max(acrossHi, across);
+                    }
+                    if (acrossLo > width || acrossHi < -width) continue;
+                    lo = std::clamp(lo, 0.0, 1.0); hi = std::clamp(hi, 0.0, 1.0);
+                    if (hi <= lo) continue;
+                    const int steps = std::max(1, static_cast<int>(std::ceil((hi - lo) * run / 0.5)));
+                    for (int j = 0; j <= steps; ++j)
+                    {
+                        const double t = std::lerp(lo, hi, double(j) / steps);
+                        if (t > 0 && t < 1) cuts.push_back(t);
+                    }
+                }
+            }
+            std::ranges::sort(cuts);
+            double previous = 0;
+            for (double t : cuts)
+            {
+                if (t - previous < 1e-9) continue;
+                sampled.push_back(std::lerp(a.distance, b.distance, t));
+                previous = t;
+            }
+        }
+        return sampled;
+    }
+
     template<typename Visit>
-    void VisitTaperSpans(const std::vector<CrossSection>& stations, const std::vector<Taper>& tapers, Visit visit)
+    void VisitTaperSpans(const std::vector<CrossSection>& stations, const std::vector<Taper>& tapers, const std::vector<double>& shoulderSamples, Visit visit)
     {
         for (size_t i = 1; i < stations.size(); ++i)
         {
@@ -337,6 +406,8 @@ namespace
             const auto& b = stations[i];
             if (tapers.empty()) { visit(a, b, nullptr, a, b); continue; }
             std::vector<double> cuts;
+            for (double d : shoulderSamples)
+                if (d > a.distance && d < b.distance) cuts.push_back(d);
             for (const auto& taper : tapers)
             {
                 // Resolve the curved width independently of host spline knots and paint dashes.
@@ -605,6 +676,50 @@ namespace
         const auto medianAt = [&](const CrossSection& s) { return variable ? path.profile->Mix(s.distance,
             [](const RoadStyle& style) { return style.HalfMedianWidth(); }) : halfMedian; };
 
+        std::vector<ShoulderOpening> openings;
+        const auto frame = ObjectTransform{road.points.front().position, road.rotation}.ToMeshTransform();
+        for (const auto& cut : road.rampShoulderCuts)
+        {
+            if (cut.side != side || cut.outline.empty() || road.MaximumShoulderWidth(side > 0) == 0) continue;
+            const auto taper = std::ranges::find_if(tapers, [&](const Taper& t) { return t.lane.station == cut.station; });
+            if (taper == tapers.end()) continue;
+            auto& opening = openings.emplace_back(ShoulderOpening{&*taper, cut.outline, {}, {}});
+            if (road.rotation != Vector3{})
+                for (auto& p : opening.outline) p = frame.Unrotate(p - frame.origin);
+            opening.lo = opening.hi = opening.outline.front();
+            for (const auto& p : opening.outline)
+            {
+                opening.lo.x = std::min(opening.lo.x, p.x); opening.lo.z = std::min(opening.lo.z, p.z);
+                opening.hi.x = std::max(opening.hi.x, p.x); opening.hi.z = std::max(opening.hi.z, p.z);
+            }
+        }
+        const auto shoulderEdge = [&](const CrossSection& s)
+        {
+            const double travel = travelAt(s);
+            double edge = pavementAt(s);
+            for (const auto& opening : openings)
+            {
+                const auto& taper = *opening.taper;
+                // The taper itself supplies the shared pavement. Beyond its seam,
+                // reserve the same clear gore between the branch and mainline rims.
+                if ((s.distance - taper.gore) * (taper.gore - taper.tip) < -1e-8) continue;
+                if (!opening.Reaches(s.center, s.center, edge * Math::Length(s.lateral))) continue;
+                for (size_t i = 0; i < opening.outline.size(); ++i)
+                {
+                    const auto p = opening.outline[i];
+                    const auto segment = opening.outline[(i + 1) % opening.outline.size()] - p;
+                    const double denominator = CrossXZ(s.lateral, segment);
+                    if (std::abs(denominator) < 1e-10) continue;
+                    const double u = CrossXZ(p - s.center, s.lateral) / denominator;
+                    if (u < -1e-8 || u > 1 + 1e-8) continue;
+                    const double offset = CrossXZ(p - s.center, segment) / denominator;
+                    if (offset < travel - 1e-6) continue;
+                    edge = std::min(edge, std::max(travel, offset - goreWidth - road.style.EdgeWidth()));
+                }
+            }
+            return edge;
+        };
+
         // Split the asphalt at the yellow line and, on graded bends, along the other lane boundaries.
         std::vector<double> pavementCuts;
         if (!variable && road.style.IsDivided()) pavementCuts.push_back(halfGap);
@@ -644,6 +759,7 @@ namespace
             station.lateral = station.lateral * side;
             stations.push_back(station);
         });
+        const auto shoulderSamples = SampleShoulderOpenings(stations, openings, pavement + road.style.EdgeWidth());
 
         if (lanes >= 2 && !variable)
         {
@@ -676,27 +792,29 @@ namespace
         };
         std::vector<Vector3> boundary;
         EdgeProfile lastRim{};
-        VisitTaperSpans(stations, tapers, [&](const CrossSection& a, const CrossSection& b, const Taper* taper,
+        VisitTaperSpans(stations, tapers, shoulderSamples, [&](const CrossSection& a, const CrossSection& b, const Taper* taper,
                                               const CrossSection& spanStart, const CrossSection& spanEnd)
         {
             const double fa = taper ? taper->Fraction(a.distance) : 0;
             const double fb = taper ? taper->Fraction(b.distance) : 0;
             // Leave a painted nose between the two edge lines even on highways without shoulders.
             const double clearance = taper ? goreWidth + road.style.EdgeWidth() + taper->lane.edgeWidth : 0;
-            const double pa = pavementAt(a), pb = pavementAt(b);
             const double ta = travelAt(a), tb = travelAt(b);
-            const TaperProfile shapeA = taper ? taper->Profile(pa - ta, clearance) : TaperProfile{};
-            const TaperProfile shapeB = taper ? taper->Profile(pb - tb, clearance) : TaperProfile{};
+            const double shoulderA = pavementAt(a) - ta, shoulderB = pavementAt(b) - tb;
+            const double pa = taper ? ta : shoulderEdge(a), pb = taper ? tb : shoulderEdge(b);
+            const TaperProfile shapeA = taper ? taper->Profile(clearance) : TaperProfile{};
+            const TaperProfile shapeB = taper ? taper->Profile(clearance) : TaperProfile{};
             const double outerA = ta + shapeA.Outer(fa), outerB = tb + shapeB.Outer(fb);
             const double innerA = ta + shapeA.Inner(fa, laneWidth), innerB = tb + shapeB.Inner(fb, laneWidth);
             const auto edgeWidthAt = [&](double f, double outer, double shoulder)
             {
-                const double blend = f * f * (3.0 - 2.0 * f);
+                // The auxiliary lane consumes the highway shoulder as it opens.
+                const double blend = shapeA.Opening(f);
                 const double rampShoulder = taper ? taper->lane.outerPavement - taper->lane.halfTravel : shoulder;
                 return outer + std::lerp(shoulder, rampShoulder, blend);
             };
-            const double wa = taper ? edgeWidthAt(fa, outerA, pa - ta) : pa;
-            const double wb = taper ? edgeWidthAt(fb, outerB, pb - tb) : pb;
+            const double wa = taper ? edgeWidthAt(fa, outerA, shoulderA) : pa;
+            const double wb = taper ? edgeWidthAt(fb, outerB, shoulderB) : pb;
             if (taper)
             {
                 for (int lane = 0; lane < taper->lane.laneCount; ++lane)
@@ -712,11 +830,11 @@ namespace
                 const auto& end = fa == 1 ? a : b;
                 const auto& lane = taper->lane;
                 const double extra = clearance + lane.innerPavement;
-                const double offset = pavementAt(end) + extra;
+                const double offset = travelAt(end) + extra;
                 // Differentiate the swept center of the departing lane, including grade,
                 // the turn of the highway's cross section, and the taper's lateral slope.
                 const double spanLength = spanEnd.distance - spanStart.distance;
-                const Vector3 along = (spanEnd.At(pavementAt(spanEnd) + extra) - spanStart.At(pavementAt(spanStart) + extra)) * (1.0 / spanLength)
+                const Vector3 along = (spanEnd.At(travelAt(spanEnd) + extra) - spanStart.At(travelAt(spanStart) + extra)) * (1.0 / spanLength)
                                     + end.lateral * ((fa == 1 ? shapeA : shapeB).endSlope / (taper->gore - taper->tip));
                 const int direction = road.style.TravelDirection(side);
                 const double speed = Math::Length(along);
