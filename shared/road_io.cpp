@@ -162,10 +162,13 @@ namespace RoadIO
             { out.setstate(std::ios::failbit); return; }
         for (const auto& end : road.shoulderNeighbors)
             if (!ValidShoulders(end, road.style.railroad.has_value())) { out.setstate(std::ios::failbit); return; }
+        for (double length : road.profileNeighborLengths)
+            if (!std::isfinite(length) || length < 0) { out.setstate(std::ios::failbit); return; }
         out << road.rotation.x << ' ' << road.rotation.y << ' ' << road.rotation.z
             << ' ' << road.laneNeighbors[0] << ' ' << road.laneNeighbors[1];
         for (const auto& end : road.shoulderNeighbors) out << ' ' << end[0] << ' ' << end[1];
         for (const auto& end : road.divisionNeighbors) WriteDivision(out, end);
+        for (double length : road.profileNeighborLengths) out << ' ' << length;
         out << '\n';
         out << road.id << ' ' << road.paintMarkings << ' ' << std::quoted(road.NameList()) << '\n';
         out << road.crossings.size() << '\n';
@@ -256,6 +259,12 @@ namespace RoadIO
                 if (!ValidDivision(road.divisionNeighbors[i], road.laneNeighbors[i] ? road.laneNeighbors[i] : road.style.GetLaneCount(), road.style))
                     in.setstate(std::ios::failbit);
             }
+        }
+        if (version >= 28)
+        {
+            for (double& length : road.profileNeighborLengths)
+                if (!(in >> length) || !std::isfinite(length) || length < 0)
+                { in.setstate(std::ios::failbit); return road; }
         }
         if (version >= 8 && (!(in >> road.id) || road.id < 0))
         {

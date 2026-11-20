@@ -104,6 +104,7 @@ struct RoadProperties
         laneNeighbors = road.laneNeighbors;
         shoulderNeighbors = road.shoulderNeighbors;
         divisionNeighbors = road.divisionNeighbors;
+        profileNeighborLengths = road.profileNeighborLengths;
         for (const auto& point : road.points)
         {
             segmentLanes.push_back(point.segmentLanes);
@@ -120,6 +121,7 @@ struct RoadProperties
     std::array<std::array<int, 2>, 2> shoulderNeighbors{};
     std::vector<std::optional<RoadDivision>> segmentDivisions;
     std::array<std::optional<RoadDivision>, 2> divisionNeighbors{};
+    std::array<double, 2> profileNeighborLengths{};
     bool operator==(const RoadProperties&) const = default;
     void Apply(Road& road) const;
 };

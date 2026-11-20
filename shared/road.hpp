@@ -271,6 +271,9 @@ struct Road : RoadGeometry
     std::array<int, 2> laneNeighbors{}; // Lane context retained at free ends when a taper is split into separate roads.
     std::array<std::array<int, 2>, 2> shoulderNeighbors{}; // First/last end, then left/right, using the same override codes.
     std::array<std::optional<RoadDivision>, 2> divisionNeighbors{};
+    // Length of the removed neighbor at a split, so both halves keep the same taper.
+    // Zero means legacy/unspecified context; use the surviving segment's length.
+    std::array<double, 2> profileNeighborLengths{};
     int SegmentLaneCount(std::size_t segment) const;
     int MaximumLaneCount() const;
     double MaximumHalfTravelWidth() const;
@@ -307,6 +310,7 @@ struct Road : RoadGeometry
     ProfileBlend SegmentSurfaceBlend(std::size_t segment, double fraction) const;
     LaneBlend SegmentLaneBlend(std::size_t segment, double fraction) const;
     ProfileBlend SegmentShoulderBlend(std::size_t segment, double fraction, bool left) const;
+    double ProfileTransitionMix(std::size_t segment, double fraction, bool before) const;
     Vector3 rotation{}; // Radians about X, Y, Z. The first control point is the road pivot.
     std::vector<RoadPoint> points;
     std::vector<RailroadCrossingLink> crossings;
@@ -354,6 +358,8 @@ struct Road : RoadGeometry
     void Rebuild();
 
 private:
+    double ProfileSegmentLength(int segment) const;
+    std::vector<double> profileLengths; // Rebuilt once; physical distance along each surfaced segment.
     double RampFrameBlendLength() const { return 2.0 * (style.LeftWidth() + style.RightWidth()); }
     std::vector<std::string> names;
     std::array<std::optional<RoadMouth>, 2> mouths;

@@ -58,6 +58,8 @@ All framing integers are unsigned and little-endian. The file begins with the fo
 
 Terrain placements use the separate `TERR` section described below. The current editor preserves unrecognized sections byte-for-byte when saving road edits. It rejects unsupported versions of the container and known sections.
 
+`ROAD` version 28 adds two nonnegative neighbor lengths after the division-neighbor data. These preserve the physical length of a taper when a road is split; zero uses the surviving segment's length for legacy context. Adjacent edited segments now share one smooth transition between their midpoints, measured along the spline, for lane count, division, and shoulders. Pavement, paint, median, and terrain boundaries use that same transition. Older worlds load automatically; recook the world to update the game's stored geometry.
+
 ### Static mesh assets
 
 Put a self-contained glTF 2.0 binary under `assets/models/`. Model references use paths relative to that directory. The editor reads the project GLB and the game reads its staged copy in `cooked/models/`. The importer reads the active scene, applies node transforms, and converts glTF coordinates to the engine's Y-up world. It supports indexed and unindexed triangle lists, strips and fans, including interleaved vertex data. It retains normals and the first UV set. The current opaque pass draws material base color multiplied by vertex color. Texture sampling, animation, skinning, sparse accessors, and compressed primitives are outside this import path.

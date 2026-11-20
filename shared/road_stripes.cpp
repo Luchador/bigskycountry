@@ -1242,6 +1242,9 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
             profile.knots.push_back(path.distances[std::min(sample > firstSample ? sample - firstSample : 0, path.distances.size() - 1)]);
         profile.knots.front() = 0;
         profile.knots.back() = path.distances.back();
+        profileLengths.reserve(points.size() - 1);
+        for (std::size_t i = 1; i < profile.knots.size(); ++i)
+            profileLengths.push_back(profile.knots[i] - profile.knots[i - 1]);
     }
     const int laneCount = variable ? MaximumLaneCount() : style.GetLaneCount();
     if (laneCount >= 2 && !variable) laneCenterlines.resize(laneCount);

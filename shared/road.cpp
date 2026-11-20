@@ -192,6 +192,35 @@ void Road::SetDivision(const RoadDivision& division)
     divisionNeighbors = {};
 }
 
+double Road::ProfileSegmentLength(int segment) const
+{
+    const int count = static_cast<int>(points.size()) - 1;
+    if (count <= 0) return 0;
+    if (segment < 0 || segment >= count)
+    {
+        const int end = segment < 0 ? 0 : 1;
+        if (profileNeighborLengths[end] > 0) return profileNeighborLengths[end];
+        segment = end == 0 ? 0 : count - 1;
+    }
+    if (static_cast<std::size_t>(segment) < profileLengths.size()) return profileLengths[segment];
+    // During sampling only the blend's profile IDs are needed. Final geometry
+    // uses the measured spline lengths, cached before BuildSurface emits it.
+    return Math::Length(points[segment + 1].position - points[segment].position);
+}
+
+double Road::ProfileTransitionMix(std::size_t segment, double fraction, bool before) const
+{
+    const double own = ProfileSegmentLength(static_cast<int>(segment));
+    const double neighbor = ProfileSegmentLength(static_cast<int>(segment) + (before ? -1 : 1));
+    const double total = own + neighbor;
+    // One quintic ease from the preceding segment's midpoint to the following
+    // midpoint. Do not stop and restart the ease at the shared control point.
+    const double u = std::clamp(total > 1e-9 ?
+        (before ? neighbor + 2 * fraction * own : (2 * fraction - 1) * own) / total :
+        fraction + (before ? 0.5 : -0.5), 0.0, 1.0);
+    return u * u * u * (u * (u * 6 - 15) + 10);
+}
+
 Road::ProfileBlend Road::SegmentSurfaceBlend(std::size_t segment, double fraction) const
 {
     const int own = static_cast<int>(segment) + 1;
@@ -204,8 +233,8 @@ Road::ProfileBlend Road::SegmentSurfaceBlend(std::size_t segment, double fractio
     const auto ease = [](double u) { return u * u * u * (u * (u * 6 - 15) + 10); };
     const double t = std::clamp(fraction, 0.0, 1.0);
     if (!edited(segment)) return {before, after, ease(t)};
-    if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
-    if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
+    if (t < 0.5 && before != own) return {before, own, ProfileTransitionMix(segment, t, true)};
+    if (t >= 0.5 && after != own) return {own, after, ProfileTransitionMix(segment, t, false)};
     return {own, own, 0};
 }
 
@@ -227,8 +256,8 @@ namespace
                           segment + 2 == points.size() && neighbors[1] && !points.back().Joined() ? neighbors[1] : own;
         if (!value(points[segment])) return {before, after, ease(t)};
         // Different edited segments share a taper across their adjoining halves.
-        if (t < 0.5 && before != own) return {before, own, 0.5 + 0.5 * ease(t * 2)};
-        if (t >= 0.5 && after != own) return {own, after, 0.5 * ease(t * 2 - 1)};
+        if (t < 0.5 && before != own) return {before, own, road.ProfileTransitionMix(segment, t, true)};
+        if (t >= 0.5 && after != own) return {own, after, road.ProfileTransitionMix(segment, t, false)};
         return {own, own, 0};
     }
 }
@@ -560,6 +589,7 @@ Road Road::NewSection() const
     result.laneNeighbors = laneNeighbors;
     result.shoulderNeighbors = shoulderNeighbors;
     result.divisionNeighbors = divisionNeighbors;
+    result.profileNeighborLengths = profileNeighborLengths;
     result.bridgeNeighbors = bridgeNeighbors;
     result.bridgeGroundSources = bridgeGroundSources;
     result.bridgeWaterSources = bridgeWaterSources;
@@ -577,6 +607,8 @@ Road Road::Section(std::size_t first, std::size_t last) const
                                 last + 1 < points.size() ? points[last].segmentShoulders : shoulderNeighbors[1]};
     result.divisionNeighbors = {first > 0 ? points[first - 1].segmentDivision : divisionNeighbors[0],
                                 last + 1 < points.size() ? points[last].segmentDivision : divisionNeighbors[1]};
+    result.profileNeighborLengths = {first > 0 ? ProfileSegmentLength(static_cast<int>(first) - 1) : profileNeighborLengths[0],
+                                     last + 1 < points.size() ? ProfileSegmentLength(static_cast<int>(last)) : profileNeighborLengths[1]};
     result.bridgeNeighbors = {first > 0 ? points[first - 1].bridge.has_value() : bridgeNeighbors[0],
                               last + 1 < points.size() ? points[last].bridge.has_value() : bridgeNeighbors[1]};
     // An automatic tangent at a cut may depend on the neighbor we just removed.
@@ -862,6 +894,7 @@ void Road::Rebuild()
     centerline.clear();
     splineLengthMeters = 0.0;
     pointSamples.clear();
+    profileLengths.clear();
     pavementTriangles.clear();
     railroadSegments.clear();
     trackSections.clear();

@@ -157,12 +157,91 @@ void Persistence()
     std::string line;
     for (int i = 0; std::getline(modern, line); ++i)
     {
-        if (i == 1) line.resize(line.size() - 4); // Two absent neighbor overrides.
+        if (i == 1) line.resize(line.size() - 8); // Absent division overrides and split lengths.
         if (i >= 5) line.resize(line.size() - 4); // Absent division override and railroad switch link.
         old << line << '\n';
     }
     const auto imported = RoadIO::ReadRoad(old, 23);
     Check(bool(old) && imported.points == legacy.points && !imported.HasDivisionOverrides(), "Legacy road compatibility");
+}
+void ContinuousTransitions()
+{
+    // Like the US 36 widening: two explicitly edited, unequal-length segments
+    // change both lane count and separation at their shared control point.
+    for (bool reverse : {false, true})
+    {
+        Road road;
+        road.style.curved = false;
+        road.style.SetLaneCount(4);
+        for (double x : {0.0, 200.0, 303.0, 384.0, 584.0}) road.points.push_back({{x, 0, 0}});
+        for (int i = 0; i < 4; ++i)
+        {
+            const bool wide = (i >= 2) != reverse;
+            road.SetSegmentLaneCounts({i}, wide ? 4 : 2);
+            road.SetSegmentDivision({i}, {wide, 13, RoadMedian::Grass});
+            road.SetSegmentShoulders({i}, true, wide);
+        }
+        road.Rebuild();
+        const double begin = 251.5, end = 343.5;
+        const auto width = [&](std::size_t segment, double t) { return Mix(road, segment, t, false); };
+        const auto shoulder = [&](std::size_t segment, double t) {
+            const auto b = road.SegmentShoulderBlend(segment, t, true);
+            return std::lerp(double(b.from), double(b.to), b.mix);
+        };
+        for (double x = begin; x <= end; x += 0.25)
+        {
+            const double u = (x - begin) / (end - begin);
+            const double ease = u * u * u * (u * (u * 6 - 15) + 10);
+            const double mix = reverse ? 1 - ease : ease;
+            const std::size_t segment = x < 303 ? 1 : 2;
+            const double t = x < 303 ? (x - 200) / 103 : (x - 303) / 81;
+            Check(std::abs(width(segment, t) - std::lerp(5.0, 16.5, mix)) < 1e-8,
+                  "Widening stops and restarts at the control point");
+            Check(std::abs(shoulder(segment, t) - mix) < 1e-8, "Shoulder taper has a separate midpoint ease");
+        }
+        constexpr double step = 0.01;
+        const double middle = width(2, 0);
+        const double incoming = (middle - width(1, 1 - step / 103)) / step;
+        const double outgoing = (width(2, step / 81) - middle) / step;
+        Check(std::abs(incoming) > 0.1 && std::abs(incoming - outgoing) < 1e-4,
+              "Unequal segment lengths break the pavement tangent");
+
+        // Cutting at the control point and reloading must preserve both sides.
+        for (bool second : {false, true})
+        {
+            auto cut = second ? road.Section(2, 4) : road.Section(0, 2);
+            std::stringstream saved;
+            saved << std::setprecision(17);
+            RoadIO::WriteRoad(saved, cut);
+            auto loaded = RoadIO::ReadRoad(saved);
+            Check(bool(saved) && loaded.profileNeighborLengths == cut.profileNeighborLengths,
+                  "Split taper length context did not survive save/load");
+            loaded.Rebuild();
+            const std::size_t segment = second ? 0 : 1;
+            for (double t : {0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0})
+                Check(std::abs(Mix(loaded, segment, t, false) - width(second ? 2 : 1, t)) < 1e-8,
+                      "Splitting an unequal-length taper changed its width");
+        }
+        auto bad = road;
+        bad.profileNeighborLengths[0] = -1;
+        std::stringstream invalid;
+        RoadIO::WriteRoad(invalid, bad);
+        Check(!invalid, "Invalid split taper length was serialized");
+        // Version 27 has no split lengths and must still load normally.
+        std::stringstream modern;
+        RoadIO::WriteRoad(modern, road);
+        std::stringstream old;
+        std::string line;
+        for (int i = 0; std::getline(modern, line); ++i)
+        {
+            if (i == 1) line.resize(line.size() - 4);
+            old << line << '\n';
+        }
+        auto legacy = RoadIO::ReadRoad(old, 27);
+        Check(bool(old) && legacy.profileNeighborLengths == std::array<double, 2>{}, "Version 27 taper compatibility");
+        legacy.Rebuild();
+        Check(std::abs(Mix(legacy, 2, 0, false) - middle) < 1e-8, "Legacy road did not receive smooth taper");
+    }
 }
 void InspectorAndHistory()
 {
@@ -210,6 +289,6 @@ void InspectorAndHistory()
 }
 int main()
 {
-    try { Geometry(); Persistence(); InspectorAndHistory(); std::cout << "Road profile tests passed\n"; }
+    try { Geometry(); Persistence(); ContinuousTransitions(); InspectorAndHistory(); std::cout << "Road profile tests passed\n"; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

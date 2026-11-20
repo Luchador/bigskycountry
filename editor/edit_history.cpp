@@ -183,10 +183,11 @@ void RoadProperties::Apply(Road& road) const
     if (road.NameList() != names) road.SetNameList(names);
     road.style.material = style.material;
     bool profileChanged = road.laneNeighbors != laneNeighbors || road.shoulderNeighbors != shoulderNeighbors ||
-                          road.divisionNeighbors != divisionNeighbors;
+                          road.divisionNeighbors != divisionNeighbors || road.profileNeighborLengths != profileNeighborLengths;
     road.laneNeighbors = laneNeighbors;
     road.shoulderNeighbors = shoulderNeighbors;
     road.divisionNeighbors = divisionNeighbors;
+    road.profileNeighborLengths = profileNeighborLengths;
     for (std::size_t i = 0; i < std::min(road.points.size(), segmentLanes.size()); ++i)
     {
         profileChanged |= road.points[i].segmentLanes != segmentLanes[i];
