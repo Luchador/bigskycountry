@@ -72,9 +72,9 @@ void CatalogAndSky()
 }
 
 std::vector<Uint8> Capture(SDL_Renderer* renderer, Stars& stars, const CameraView& camera,
-                           double time, int width, int height)
+                           double time, int width, int height, SDL_Color background = {0,0,0,255})
 {
-    Check(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) && SDL_RenderClear(renderer), SDL_GetError());
+    Check(SDL_SetRenderDrawColor(renderer, background.r, background.g, background.b, background.a) && SDL_RenderClear(renderer), SDL_GetError());
     Check(stars.Draw(renderer, camera, time, Sun::Direction(time).y, {0,0,width,height}), SDL_GetError());
     auto* raw = SDL_RenderReadPixels(renderer, nullptr);
     Check(raw != nullptr, SDL_GetError());
@@ -116,6 +116,12 @@ void Render(bool gpu, const char* screenshot)
         const auto night = Capture(renderer, stars, camera, 0, 800, 600);
         const auto lit = [](const auto& data) { return std::count_if(data.begin(), data.end(), [](auto c) { return c > 0; }); };
         Check(lit(night) > 500, "Night sky has no visible stars");
+        // An opaque RGB sprite with black padding must add light, not cover the sky.
+        const auto twilight = Capture(renderer, stars, camera, 0, 800, 600, {17,29,43,255});
+        const int background[]{17,29,43};
+        for (size_t i = 0; i < night.size(); ++i)
+            Check(std::abs(int(twilight[i]) - std::min(255, int(night[i]) + background[i % 3])) <= 1,
+                  "Star sprite darkened or covered the background");
         Check(Capture(renderer, stars, camera, 0, 800, 600) == night, "Cached star frame changed");
         camera.LookAt({10000,200,3000}, {10000,200.5,3001});
         Check(Capture(renderer, stars, camera, 0, 800, 600) == night, "Stars have camera translation parallax");

@@ -389,7 +389,14 @@ invisible at 5° above it, beginning to appear before sunset and disappearing
 shortly after sunrise. Stars below the horizon are hidden, and those close to it
 fade into the haze. Sky rotation stays continuous across midnight.
 
-The GPU path uploads the star catalog once and draws instanced soft points; a
+The star sprite is **`assets/textures/world/star.tga`**, shared by all stars.
+Use a white shape on black: additive blending makes black invisible without
+requiring an alpha channel, and the catalog supplies each star's tint and brightness.
+An optional source alpha channel is also supported. After changing the image,
+rebuild and restart the game/editor; the build automatically recooks the texture.
+No world recook is needed. Both GPU and SDL rendering use the same sprite.
+
+The GPU path uploads the star catalog once and draws instanced textured quads; a
 cached SDL geometry path supports other renderers. Stars draw behind the sun,
 moon and world geometry and are unaffected by world streaming or camera translation.
 The prepared catalog is linked into both executables, so no world recook or

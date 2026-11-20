@@ -1,6 +1,8 @@
 #include "stars.hpp"
 #include "camera_view.hpp"
 #include "sky_location.hpp"
+#include "texture_loader.hpp"
+#include "dds_texture.hpp"
 
 #include <algorithm>
 #include <array>
@@ -77,6 +79,8 @@ struct Stars::Impl
     SDL_GPUDevice* device = nullptr;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
     SDL_GPUBuffer* buffer = nullptr;
+    SDL_GPUSampler* sampler = nullptr;
+    SDL_GPUTexture* gpuSprite = nullptr;
     SDL_Texture* target = nullptr;
     SDL_Texture* sprite = nullptr;
     bool gpu = false, cached = false;
@@ -91,6 +95,8 @@ struct Stars::Impl
     {
         SDL_DestroyTexture(target);
         SDL_DestroyTexture(sprite);
+        if (gpuSprite) SDL_ReleaseGPUTexture(device, gpuSprite);
+        if (sampler) SDL_ReleaseGPUSampler(device, sampler);
         if (buffer) SDL_ReleaseGPUBuffer(device, buffer);
         if (pipeline) SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     }
@@ -105,19 +111,21 @@ Stars::~Stars() = default;
 
 bool Stars::Impl::PrepareSprite()
 {
-    constexpr int size = 64;
-    auto* surface = SDL_CreateSurface(size, size, SDL_PIXELFORMAT_RGBA32);
-    if (!surface) return false;
-    for (int y = 0; y < size; ++y) for (int x = 0; x < size; ++x)
+    // Shared by every star and both rendering paths. Additive blending makes
+    // black texels invisible, including RGB images without an alpha channel.
+    if (gpu)
     {
-        const double u = 2.0 * (x + 0.5) / size - 1, v = 2.0 * (y + 0.5) / size - 1;
-        const double coverage = std::max(0.0, (std::exp(-5 * (u*u + v*v)) - std::exp(-5.0)) / (1 - std::exp(-5.0)));
-        auto* pixel = static_cast<Uint8*>(surface->pixels) + y * surface->pitch + x * 4;
-        pixel[0] = pixel[1] = pixel[2] = 255;
-        pixel[3] = static_cast<Uint8>(std::lround(255 * coverage));
+        // Submit the upload ourselves: SDL's texture upload stays in its pending
+        // command buffer, so a separate GPU star pass cannot sample it yet.
+        const std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
+            DdsTexture::LoadColorSurface("world/star.tga"), SDL_DestroySurface);
+        DdsTexture image;
+        // Preserve the sprite's display RGB, matching SDL's additive SDR path.
+        if (!surface || !image.FromImage(surface.get(), DdsTexture::Format::Packed)) return false;
+        gpuSprite = image.Upload(device);
+        return gpuSprite != nullptr;
     }
-    sprite = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_DestroySurface(surface);
+    sprite = TextureLoader::Load(renderer, "world/star.tga");
     return sprite && SDL_SetTextureBlendMode(sprite, SDL_BLENDMODE_ADD) &&
            SDL_SetTextureScaleMode(sprite, SDL_SCALEMODE_LINEAR);
 }
@@ -160,6 +168,7 @@ bool Stars::Impl::PrepareGPU()
         info.stage = stage;
         info.entrypoint = entry;
         info.num_uniform_buffers = stage == SDL_GPU_SHADERSTAGE_VERTEX ? 1 : 0;
+        info.num_samplers = stage == SDL_GPU_SHADERSTAGE_FRAGMENT ? 1 : 0;
         const bool vulkan = SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_SPIRV;
         info.format = vulkan ? SDL_GPU_SHADERFORMAT_SPIRV : SDL_GPU_SHADERFORMAT_DXIL;
         const auto bytes = vulkan ? spirv : dxil;
@@ -195,6 +204,13 @@ bool Stars::Impl::PrepareGPU()
     SDL_ReleaseGPUShader(device, vs);
     SDL_ReleaseGPUShader(device, ps);
     if (!pipeline) return false;
+
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = samplerInfo.address_mode_v = samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sampler = SDL_CreateGPUSampler(device, &samplerInfo);
+    if (!sampler) return false;
 
     constexpr Uint32 bytes = static_cast<Uint32>(sizeof(catalog));
     const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_VERTEX, bytes, 0};
@@ -265,6 +281,8 @@ bool Stars::Impl::DrawGPU(const CameraView& camera, const StarSky::Frame& frame,
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
     const SDL_GPUBufferBinding binding{buffer, 0};
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+    const SDL_GPUTextureSamplerBinding spriteBinding{gpuSprite, sampler};
+    SDL_BindGPUFragmentSamplers(pass, 0, &spriteBinding, 1);
     SDL_DrawGPUPrimitives(pass, 6, static_cast<Uint32>(std::size(catalog)), 0, 0);
     SDL_EndGPURenderPass(pass);
     return SDL_SubmitGPUCommandBuffer(commands);
@@ -292,7 +310,7 @@ bool Stars::Draw(SDL_Renderer* renderer, const CameraView& camera, double minute
 #endif
     }
     if (c.renderer != renderer) return SDL_SetError("Star field cannot be shared between renderers");
-    if (!c.gpu && !c.sprite && !c.PrepareSprite()) return false;
+    if (!c.sprite && !c.gpuSprite && !c.PrepareSprite()) return false;
     const bool changed = !c.cached || minutes != c.lastMinutes || fade != c.lastFade ||
         camera.Right() != c.lastRight || camera.Up() != c.lastUp || camera.Forward() != c.lastForward ||
         viewport.w != c.lastViewport.w || viewport.h != c.lastViewport.h;

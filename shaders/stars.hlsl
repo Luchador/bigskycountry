@@ -15,7 +15,7 @@ struct StarInput
 struct StarPixel
 {
     float4 position : SV_Position;
-    float2 disc : TEXCOORD0;
+    float2 uv : TEXCOORD0;
     float3 color : TEXCOORD1;
 };
 
@@ -26,7 +26,8 @@ StarPixel VSMain(StarInput star, uint vertex : SV_VertexID)
         float2(-1,-1), float2(1,1), float2(-1,1)
     };
     StarPixel output;
-    output.disc = corners[vertex];
+    float2 corner = corners[vertex];
+    output.uv = float2(corner.x, -corner.y) * 0.5 + 0.5;
     float3 direction = star.directionMagnitude.xyz;
     float depth = dot(viewForward.xyz, direction);
     float altitude = dot(horizonUp.xyz, direction);
@@ -41,13 +42,16 @@ StarPixel VSMain(StarInput star, uint vertex : SV_VertexID)
     float radius = (1.5 + 2.0 * sqrt(star.colorBrightness.a)) * horizonUp.w;
     float2 center = float2(dot(viewRight.xyz, direction) * viewRight.w,
                            dot(viewUp.xyz, direction) * viewUp.w);
-    output.position = float4(center + output.disc * radius * pixelSize.xy * depth, 0.5 * depth, depth);
+    output.position = float4(center + corner * radius * pixelSize.xy * depth, 0.5 * depth, depth);
     return output;
 }
 
+Texture2D<float4> starTexture : register(t0, space2);
+SamplerState starSampler : register(s0, space2);
+
 float4 PSMain(StarPixel input) : SV_Target0
 {
-    float r2 = dot(input.disc, input.disc);
-    float coverage = saturate((exp(-5.0 * r2) - 0.006737947) / 0.993262053);
-    return float4(input.color * coverage, 1);
+    float4 texel = starTexture.Sample(starSampler, input.uv);
+    // Additive RGB: black is invisible; an optional alpha channel is respected.
+    return float4(input.color * texel.rgb * texel.a, 1);
 }
