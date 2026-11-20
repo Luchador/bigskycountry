@@ -1,0 +1,3 @@
+#pragma once
+inline constexpr char editorGeometrySignature[] = "@geometry_cache_signature@";
+inline constexpr char8_t editorGeometryDirectory[] = u8R"(@CMAKE_CURRENT_BINARY_DIR@/editor-cache)";

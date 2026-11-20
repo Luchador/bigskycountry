@@ -19,10 +19,13 @@ struct TerrainBoundary
     bool operator==(const TerrainBoundary&) const = default;
 };
 
+class EditorGeometryCache;
+
 // Imported chunks are rigid placements. Generated chunks share world coordinates with their rim.
 class TerrainChunk : private MeshPlacement
 {
 public:
+    explicit TerrainChunk(std::shared_ptr<EditorGeometryCache> cache = {}) : geometryCache(std::move(cache)) {}
     using MeshPlacement::persistentId;
     using MeshPlacement::GetTransform;
     using MeshPlacement::Instance;
@@ -90,6 +93,7 @@ public:
     }
 
 private:
+    std::shared_ptr<EditorGeometryCache> geometryCache;
     void WaterChanged() { waterRevision = ++latestWaterRevision; }
     inline static std::uint64_t latestWaterRevision = 0;
     std::uint64_t waterRevision = 0;

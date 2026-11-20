@@ -324,7 +324,8 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
     {
         const auto location = mode == ApplicationMode::Editor ? AssetRoot::Project : AssetRoot::Cooked;
         if (!g_ProjectSettings.Load(location)) SDL_Log("Project Settings: %s", SDL_GetError());
-        WorldDocument world(location);
+        auto geometryCache = mode == ApplicationMode::Editor ? EditorGeometryCache::CreateDefault() : nullptr;
+        WorldDocument world(location, geometryCache);
         CookedWorld cooked;
         success = world.OpenPath(worldFile);
         if (success && mode == ApplicationMode::Game && cooked.Load(world))
@@ -335,6 +336,13 @@ int RunApplication(ApplicationMode mode, const char* worldFile, EditorTool* road
             SDL_ClearError();
             const std::string source = world.Path();
             success = world.Open(source.c_str());
+            if (success && geometryCache)
+            {
+                const auto& s = geometryCache->Stats();
+                SDL_Log("Editor geometry cache: %llu reused, %llu generated, %llu stored, %llu cache errors",
+                    static_cast<unsigned long long>(s.hits), static_cast<unsigned long long>(s.misses),
+                    static_cast<unsigned long long>(s.writes), static_cast<unsigned long long>(s.errors));
+            }
         }
         success = success && (!roadTool || roadTool->Initialize(window, world.models)) &&
                   RunWindowLoop(window, renderer, mode, world, roadTool, cooked);

@@ -5,6 +5,7 @@
 #include "scene_hierarchy.hpp"
 #include "bscobject.hpp"
 #include "terrain_chunk.hpp"
+#include "editor_geometry_cache.hpp"
 
 #include <array>
 #include <cstdint>
@@ -23,7 +24,9 @@ struct EntityId
 class WorldDocument
 {
 public:
-    explicit WorldDocument(AssetRoot location = AssetRoot::Cooked) : models(location) {}
+    explicit WorldDocument(AssetRoot location = AssetRoot::Cooked,
+                           std::shared_ptr<EditorGeometryCache> cache = {})
+        : models(location), geometryCache(std::move(cache)) {}
     SceneHierarchy hierarchy;
     bool Contains(SceneKey key) const;
     const std::string& Path() const { return path; }
@@ -96,6 +99,7 @@ public:
     std::uint64_t AllocatePlacementId();
 
 private:
+    std::shared_ptr<EditorGeometryCache> geometryCache; // Editor opt-in; never saved or required by the game/cooker.
     std::map<int, IntersectionSurface> junctions; // Derived from the current road ends; never serialized.
     bool ValidConnections() const;
     int lastRoadId = 0, lastIntersectionId = 0;

@@ -180,7 +180,9 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                     junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
                 }
     const auto scope = boundary.filterIncidentalPockets ? TerrainFillScope::SelectedBoundary : TerrainFillScope::AllPockets;
-    chunk.SetMesh(BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints));
+    chunk.SetMesh(geometryCache
+        ? geometryCache->Fill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints)
+        : BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
     chunk.sourceWaterBodies = std::move(waterRevisions);

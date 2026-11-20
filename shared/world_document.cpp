@@ -444,7 +444,7 @@ TerrainChunk* WorldDocument::PlaceLake(const LakeDefinition& lake, const ObjectT
 
 TerrainChunk* WorldDocument::PlaceWater(const WaterDefinition& water, const ObjectTransform& transform)
 {
-    auto chunk = std::make_unique<TerrainChunk>();
+    auto chunk = std::make_unique<TerrainChunk>(geometryCache);
     if (!chunk->SetWater(water) || !chunk->SetTransform(transform)) return nullptr;
     if (!(chunk->persistentId = AllocatePlacementId())) return nullptr;
     return terrain.emplace_back(std::move(chunk)).get();
@@ -524,7 +524,7 @@ bool WorldDocument::OpenPath(const char* documentPath)
 
 bool WorldDocument::Open(const char* documentPath)
 {
-    WorldDocument loaded(models.Location());
+    WorldDocument loaded(models.Location(), geometryCache);
     if (!loaded.OpenPath(documentPath)) return false;
     loaded.runtimePathOnly = false;
 

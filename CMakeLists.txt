@@ -97,6 +97,7 @@ add_library(BigSkyApplication STATIC
     shared/world_cook.cpp
     shared/cooked_world.cpp
     shared/terrain_fill.cpp
+    shared/editor_geometry_cache.cpp
     shared/terrain_chunk.cpp
     shared/lake.cpp
     shared/river.cpp
@@ -137,6 +138,7 @@ target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
 target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 find_package(Threads REQUIRED)
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static PRIVATE meshoptimizer Threads::Threads)
+include(cmake/editor_geometry_cache.cmake)
 include(cmake/shaders.cmake)
 
 add_executable(BigSkyWorldCooker tools/world_cooker.cpp)
@@ -332,4 +334,7 @@ if(BIGSKY_BUILD_TESTS)
         editor/transform_inspector.cpp editor/road_group_transform.cpp)
     target_link_libraries(BigSkyRiverFillTests PRIVATE BigSkyApplication)
     add_test(NAME river_fill COMMAND BigSkyRiverFillTests)
+    add_executable(BigSkyEditorGeometryCacheTests tests/editor_geometry_cache_tests.cpp)
+    target_link_libraries(BigSkyEditorGeometryCacheTests PRIVATE BigSkyApplication)
+    add_test(NAME editor_geometry_cache COMMAND BigSkyEditorGeometryCacheTests)
 endif()

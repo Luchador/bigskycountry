@@ -1,4 +1,5 @@
 #include "terrain_chunk.hpp"
+#include "editor_geometry_cache.hpp"
 
 #include <algorithm>
 #include <map>
@@ -16,7 +17,7 @@ bool TerrainChunk::SetLake(const LakeDefinition& definition)
         return true;
     }
     if (lake == definition) return true;
-    auto geometry = LakeGeometry::Build(definition);
+    auto geometry = geometryCache ? geometryCache->Lake(definition) : LakeGeometry::Build(definition);
     if (!geometry) return false;
     lake = definition;
     SetMesh(std::move(geometry->bed));
@@ -40,7 +41,7 @@ bool TerrainChunk::FinishLakeEdit()
     if (!lakeDraft) return true;
     if (lakeDraft != lake)
     {
-        auto geometry = LakeGeometry::Build(*lakeDraft);
+        auto geometry = geometryCache ? geometryCache->Lake(*lakeDraft) : LakeGeometry::Build(*lakeDraft);
         if (!geometry) return false;
         lake = std::move(lakeDraft);
         SetMesh(std::move(geometry->bed));
@@ -80,7 +81,7 @@ bool TerrainChunk::SetRiver(const RiverDefinition& definition)
         return true;
     }
     if (river == definition) return true;
-    auto geometry = RiverGeometry::Build(definition);
+    auto geometry = geometryCache ? geometryCache->River(definition) : RiverGeometry::Build(definition);
     if (!geometry) return false;
     river = definition;
     SetMesh(std::move(geometry->bed));
@@ -104,7 +105,7 @@ bool TerrainChunk::FinishWaterEdit()
     if (!riverDraft) return FinishLakeEdit();
     if (riverDraft != river)
     {
-        auto geometry = RiverGeometry::Build(*riverDraft);
+        auto geometry = geometryCache ? geometryCache->River(*riverDraft) : RiverGeometry::Build(*riverDraft);
         if (!geometry) return false;
         river = std::move(riverDraft);
         SetMesh(std::move(geometry->bed));
