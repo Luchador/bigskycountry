@@ -70,29 +70,32 @@ namespace
         else SolidQuad(surface, d, c, b, a, color);
     }
 
-    void BedBand(RoadGeometry& mesh, const Section& a, const Section& b, ProfilePoint left, ProfilePoint right)
+    void BedBand(RoadGeometry& mesh, const Section& a, const Section& b, ProfilePoint left, ProfilePoint right, double expandA, double expandB)
     {
         const auto vertex = [](const Section& s, ProfilePoint p)
         {
             return RoadGeometry::PavementVertex{s.Point(p.lateral, p.height),
                     {static_cast<float>(p.lateral / 4), static_cast<float>(s.distance / 4)}};
         };
-        const auto v0 = vertex(a, left), v1 = vertex(a, right), v2 = vertex(b, right), v3 = vertex(b, left);
+        const auto expand = [](ProfilePoint p, double width) { p.lateral += p.lateral < 0 ? -width : width; return p; };
+        const auto v0 = vertex(a, expand(left, expandA)), v1 = vertex(a, expand(right, expandA)),
+                   v2 = vertex(b, expand(right, expandB)), v3 = vertex(b, expand(left, expandB));
         mesh.pavementTriangles.push_back({v0, v1, v2});
         mesh.pavementTriangles.push_back({v0, v2, v3});
     }
 
     void Transition(RoadGeometry& mesh, const Section& a, const Section& b, double toe, double rise, int side,
-                    const std::string& material)
+                    const std::string& material, double expandA, double expandB)
     {
-        const auto vertex = [&](const Section& s, bool outer)
+        const auto vertex = [&](const Section& s, bool outer, double expand)
         {
-            const double offset = side * (toe + (outer ? RoadStyle::stripWidth : 0.0));
+            const double offset = side * (toe + expand + (outer ? RoadStyle::stripWidth : 0.0));
             return RoadGeometry::TransitionVertex{s.Point(offset, outer ? 0.0 : rise),
                        outer ? RoadEdgeColor::transitionOuter : RoadEdgeColor::transitionInner,
                        {static_cast<float>(offset / 4), static_cast<float>(s.distance / 4)}};
         };
-        const auto v0 = vertex(a, side < 0), v1 = vertex(a, side > 0), v2 = vertex(b, side > 0), v3 = vertex(b, side < 0);
+        const auto v0 = vertex(a, side < 0, expandA), v1 = vertex(a, side > 0, expandA),
+                   v2 = vertex(b, side > 0, expandB), v3 = vertex(b, side < 0, expandB);
         auto& triangles = mesh.transitionStrips[material];
         triangles.push_back({v0, v1, v2});
         triangles.push_back({v0, v2, v3});
@@ -132,7 +135,13 @@ bool RoadGeometry::RailroadSegment::WithinDistance(Vector3 eye, double meters) c
 
 bool RailroadSettings::Valid() const
 {
-    return std::isfinite(width) && width >= tieLength && std::isfinite(height) && height >= 0;
+    return tracks >= 1 && tracks <= maxTracks && std::isfinite(width) && width >= tieLength && std::isfinite(height) && height >= 0;
+}
+
+double RailroadTieRun::Radius() const
+{
+    return Math::Length(last.origin - first.origin) * 0.5 + RailroadSettings::tieLength *
+        std::max({1.0, Math::Length(first.z), Math::Length(last.z)});
 }
 
 MeshTransform RailroadTieRun::At(int index) const
@@ -145,7 +154,9 @@ MeshTransform RailroadTieRun::At(int index) const
     const auto up = first.y * (1 - t) + last.y * t;
     MeshTransform reference = first;
     reference.y = up;
-    return TrackFrame(first.origin + (last.origin - first.origin) * t, forward, reference);
+    auto result = TrackFrame(first.origin + (last.origin - first.origin) * t, forward, reference);
+    result.z = result.z * std::lerp(Math::Length(first.z), Math::Length(last.z), t);
+    return result;
 }
 
 const std::shared_ptr<const Mesh>& RailroadTieMesh()
@@ -195,8 +206,52 @@ void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const
     }
     if (sections.size() < 2) return;
 
+    // Insert exact profile midpoints so a change of track correspondence cannot
+    // occur inside one rail span. Keep tie stationing on the original spline.
+    std::vector<double> knots;
+    std::size_t cursor = 0;
+    for (auto sample : controlSamples)
+    {
+        while (cursor + 1 < sections.size() && sections[cursor + 1].sampleIndex <= sample) ++cursor;
+        knots.push_back(sections[cursor].distance);
+    }
+    const auto location = [&](double distance)
+    {
+        const auto next = std::upper_bound(knots.begin(), knots.end(), distance);
+        const auto segment = std::clamp<std::size_t>(next - knots.begin(), 1, knots.size() - 1) - 1;
+        const double length = knots[segment + 1] - knots[segment];
+        return std::pair{segment, length > 0 ? (distance - knots[segment]) / length : 0.0};
+    };
+    const auto blendAt = [&](double distance)
+    {
+        const auto [segment, t] = location(distance);
+        return mesh.SegmentLaneBlend(segment, t);
+    };
+    const auto countAt = [&](double distance)
+    {
+        const auto blend = blendAt(distance);
+        return std::lerp(double(blend.from), double(blend.to), blend.mix);
+    };
+    const auto expansion = [&](double distance) { return (countAt(distance) - 1) * RailroadSettings::trackSpacing * 0.5; };
+    if (mesh.HasLaneOverrides())
+    {
+        const auto original = sections;
+        for (std::size_t k = 1; k < knots.size(); ++k)
+        {
+            const double at = (knots[k - 1] + knots[k]) * 0.5;
+            const auto found = std::lower_bound(original.begin(), original.end(), at,
+                [](const Section& s, double d) { return s.distance < d; });
+            if (found == original.begin() || found == original.end() || std::abs(found->distance - at) < 1e-8) continue;
+            const auto& a = *(found - 1); const auto& b = *found;
+            const double t = (at - a.distance) / (b.distance - a.distance);
+            sections.push_back({TrackFrame(a.axes.origin * (1 - t) + b.axes.origin * t,
+                Math::Normalize(a.axes.x * (1 - t) + b.axes.x * t), frame), at, a.sampleIndex});
+        }
+        std::ranges::sort(sections, {}, &Section::distance);
+    }
+
     const double crown = settings.width / 2, height = settings.height, run = height * 2;
-    const double toe = settings.ToeHalfWidth(), toeHeight = transition ? std::min(0.035, height * 0.1) : 0;
+    const double toe = settings.ToeHalfWidth(1), toeHeight = transition ? std::min(0.035, height * 0.1) : 0;
     std::vector<ProfilePoint> bed;
     // A smoothstep slope meets the crest and the toe with level tangents.
     constexpr int intervals = 6;
@@ -219,20 +274,15 @@ void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const
     {
         // Reuse the road bridge builder with the railway's actual toe/transition
         // rim. Track geometry and sleeper stationing are independent of bridges.
-        std::size_t section = 0;
-        for (const auto sample : controlSamples)
-        {
-            while (section + 1 < sections.size() && sections[section + 1].sampleIndex <= sample) ++section;
-            mesh.bridgeKnots.push_back(sections[section].distance);
-        }
+        mesh.bridgeKnots = knots;
         for (const auto& s : sections)
             for (int side : {-1, 1})
-                mesh.bridgeRims[side > 0].push_back({s.distance, s.Point(side * outerWidth, 0)});
+                mesh.bridgeRims[side > 0].push_back({s.distance, s.Point(side * (outerWidth + expansion(s.distance)), 0)});
     }
     for (const auto& s : sections)
         mesh.trackSections.push_back({s.Point(0, railBase + RailroadSettings::railHeight), s.axes.z});
-    for (const auto& s : sections) mesh.outline.push_back(s.Point(-outerWidth, 0));
-    for (auto it = sections.rbegin(); it != sections.rend(); ++it) mesh.outline.push_back(it->Point(outerWidth, 0));
+    for (const auto& s : sections) mesh.outline.push_back(s.Point(-outerWidth - expansion(s.distance), 0));
+    for (auto it = sections.rbegin(); it != sections.rend(); ++it) mesh.outline.push_back(it->Point(outerWidth + expansion(it->distance), 0));
 
     for (bool first : {true, false})
     {
@@ -242,11 +292,14 @@ void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const
         const bool bridgeEnd = mesh.points[first ? 0 : mesh.points.size() - 2].bridge.has_value();
         if (height > 0 && !bridgeEnd)
         {
-            for (std::size_t i = 1; i < bed.size(); ++i) EndFace(mesh.edgeTriangles, end, bed[i - 1], bed[i], 0, ballast, first);
+            auto expanded = bed;
+            const double extra = expansion(end.distance);
+            for (auto& p : expanded) p.lateral += p.lateral < 0 ? -extra : extra;
+            for (std::size_t i = 1; i < expanded.size(); ++i) EndFace(mesh.edgeTriangles, end, expanded[i - 1], expanded[i], 0, ballast, first);
             if (transition)
             {
-                EndFace(mesh.edgeTriangles, end, {-outerWidth, 0}, bed.front(), 0, ballast, first);
-                EndFace(mesh.edgeTriangles, end, bed.back(), {outerWidth, 0}, 0, ballast, first);
+                EndFace(mesh.edgeTriangles, end, {-outerWidth - extra, 0}, expanded.front(), 0, ballast, first);
+                EndFace(mesh.edgeTriangles, end, expanded.back(), {outerWidth + extra, 0}, 0, ballast, first);
             }
         }
     }
@@ -257,7 +310,7 @@ void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const
         {
             const auto cap = [&](double width, double low, double high)
             {
-                EndFace(rails, end, {center - width / 2, railBase + high}, {center + width / 2, railBase + high}, railBase + low, steel, first);
+                EndFace(rails, end, {center - width / 2, RailroadSettings::tieHeight + high}, {center + width / 2, RailroadSettings::tieHeight + high}, RailroadSettings::tieHeight + low, steel, first);
             };
             cap(footWidth, 0, footHeight);
             cap(webWidth, footHeight, headBottom);
@@ -265,47 +318,119 @@ void BuildRailroad(Road& mesh, const RailroadSettings& settings, std::span<const
         }
     };
 
-    // The first center sits half a spacing from the start. Carry stationing
-    // across all spline spans so adding a control point cannot restart the ties.
-    std::size_t segment = 0;
-    double tieStation = RailroadSettings::tieSpacing / 2;
+    // Offset each track, then orient its cross section along that track's own
+    // tangent. This preserves standard gauge through a fan, rather than shearing
+    // two rails sideways in the common embankment frame.
+    std::vector<Vector3> sideRates(sections.size()), upRates(sections.size());
+    for (std::size_t i = 0; i < sections.size(); ++i)
+    {
+        const auto lo = i ? i - 1 : i, hi = std::min(i + 1, sections.size() - 1);
+        const double length = sections[hi].distance - sections[lo].distance;
+        if (length > 0)
+        {
+            sideRates[i] = (sections[hi].axes.z - sections[lo].axes.z) * (1 / length);
+            upRates[i] = (sections[hi].axes.y - sections[lo].axes.y) * (1 / length);
+        }
+    }
+    const auto offset = [&](double at, Road::LaneBlend blend, int track)
+    {
+        const int count = std::max(blend.from, blend.to);
+        const auto position = [&](int n)
+        {
+            const int index = count > 1 ? static_cast<int>(std::lround(double(track) * (n - 1) / (count - 1))) : 0;
+            return (index - (n - 1) * 0.5) * RailroadSettings::trackSpacing;
+        };
+        const double t = blend.from != blend.to ? std::clamp((countAt(at) - blend.from) / (blend.to - blend.from), 0.0, 1.0) : 0;
+        return std::lerp(position(blend.from), position(blend.to), t);
+    };
+    const auto trackSection = [&](std::size_t i, Road::LaneBlend blend, int track)
+    {
+        const auto& s = sections[i];
+        const double lateral = offset(s.distance, blend, track);
+        const double lo = std::max(0.0, s.distance - 0.001), hi = std::min(sections.back().distance, s.distance + 0.001);
+        const double slope = hi > lo ? (offset(hi, blend, track) - offset(lo, blend, track)) / (hi - lo) : 0;
+        const auto forward = Math::Normalize(s.axes.x + sideRates[i] * lateral + s.axes.z * slope + upRates[i] * height);
+        return Section{TrackFrame(s.Point(lateral, height), forward, frame), s.distance, s.sampleIndex};
+    };
+    const auto interpolate = [&](const Section& a, const Section& b, double at)
+    {
+        const double t = (at - a.distance) / (b.distance - a.distance);
+        return TrackFrame(a.axes.origin * (1 - t) + b.axes.origin * t,
+            Math::Normalize(a.axes.x * (1 - t) + b.axes.x * t), frame);
+    };
+    std::size_t previous = knots.size();
     for (std::size_t i = 1; i < sections.size(); ++i)
     {
-        const auto& a = sections[i - 1];
-        const auto& b = sections[i];
-        const auto previous = segment;
-        while (segment + 2 < controlSamples.size() && b.sampleIndex > controlSamples[segment + 1]) ++segment;
-        if (i == 1 || previous != segment)
-        {
-            auto& detail = mesh.railroadSegments.emplace_back();
-            detail.AddTrackSample(a.Point(0, railBase));
-        }
+        const auto& a = sections[i - 1]; const auto& b = sections[i];
+        const auto [segment, fraction] = location((a.distance + b.distance) * 0.5);
+        if (previous != segment) { mesh.railroadSegments.emplace_back(); previous = segment; }
         auto& detail = mesh.railroadSegments.back();
-        detail.AddTrackSample(b.Point(0, railBase));
-        if (i == 1) railCaps(detail.rails, a, true);
-        if (i + 1 == sections.size()) railCaps(detail.rails, b, false);
-
-        for (std::size_t j = 1; j < bed.size(); ++j) BedBand(mesh, a, b, bed[j - 1], bed[j]);
-        for (int side : {-1, 1})
+        const double ea = expansion(a.distance), eb = expansion(b.distance);
+        for (std::size_t j = 1; j < bed.size(); ++j) BedBand(mesh, a, b, bed[j - 1], bed[j], ea, eb);
+        if (transition) for (int side : {-1, 1}) Transition(mesh, a, b, toe, toeHeight, side, material, ea, eb);
+        const auto blend = mesh.SegmentLaneBlend(segment, fraction);
+        const int count = std::max(blend.from, blend.to);
+        std::vector<std::pair<Section, Section>> tracks;
+        for (int track = 0; track < count; ++track)
         {
-            Rail(detail.rails, a, b, side * railCenter, railBase);
-            if (transition) Transition(mesh, a, b, toe, toeHeight, side, material);
+            const auto ta = trackSection(i - 1, blend, track), tb = trackSection(i, blend, track);
+            if (!tracks.empty() && Math::Length(ta.axes.origin - tracks.back().first.axes.origin) < 1e-8 &&
+                Math::Length(tb.axes.origin - tracks.back().second.axes.origin) < 1e-8) continue;
+            tracks.emplace_back(ta, tb);
+            detail.AddTrackSample(ta.axes.origin); detail.AddTrackSample(tb.axes.origin);
+            for (int side : {-1, 1}) Rail(detail.rails, ta, tb, side * railCenter, RailroadSettings::tieHeight);
+            if (i == 1) railCaps(detail.rails, ta, true);
+            if (i + 1 == sections.size()) railCaps(detail.rails, tb, false);
+            const double top = RailroadSettings::tieHeight + RailroadSettings::railHeight;
+            mesh.trackSpans.push_back({TrackSection{ta.Point(0, top), ta.axes.z}, TrackSection{tb.Point(0, top), tb.axes.z}});
         }
-        const auto tieAt = [&](double distance)
-        {
-            const double t = (distance - a.distance) / (b.distance - a.distance);
-            auto forward = Math::Normalize(a.axes.x * (1 - t) + b.axes.x * t);
-            if (forward == Vector3{}) forward = Math::Normalize(b.axes.origin - a.axes.origin);
-            const auto center = a.Point(0, height) * (1 - t) + b.Point(0, height) * t;
-            return TrackFrame(center, forward, frame);
-        };
+        // At a merge, overlapping sleepers become a shared timber. Farther out
+        // each track has its own ties. Batch consecutive equal groups as before.
+        std::map<std::pair<int, int>, std::size_t> runs;
+        double at = RailroadSettings::tieSpacing * (std::ceil((a.distance - RailroadSettings::tieSpacing * 0.5) /
+            RailroadSettings::tieSpacing - 1e-9) + 0.5);
         const double limit = std::min(b.distance, sections.back().distance - tieWidth / 2);
-        while (tieStation <= limit)
+        if (blend.from == blend.to)
         {
-            const double remaining = std::floor((limit - tieStation) / RailroadSettings::tieSpacing);
-            const int count = 1 + static_cast<int>(std::min<double>(remaining, RailroadTieRun::capacity - 1));
-            detail.ties.push_back({tieAt(tieStation), tieAt(tieStation + (count - 1) * RailroadSettings::tieSpacing), count});
-            tieStation += count * RailroadSettings::tieSpacing;
+            // Long, constant-count spans remain O(instanced runs), not O(ties).
+            const int countTies = std::max(0, static_cast<int>(std::ceil((limit - at - 1e-9) / RailroadSettings::tieSpacing)));
+            for (const auto& track : tracks)
+                for (int first = 0; first < countTies; first += RailroadTieRun::capacity)
+                {
+                    const int count = std::min(RailroadTieRun::capacity, countTies - first);
+                    detail.ties.push_back({interpolate(track.first, track.second, at + first * RailroadSettings::tieSpacing),
+                        interpolate(track.first, track.second, at + (first + count - 1) * RailroadSettings::tieSpacing), count});
+                }
+            continue;
+        }
+        for (; at < limit - 1e-9; at += RailroadSettings::tieSpacing)
+        {
+            for (int first = 0; first < static_cast<int>(tracks.size());)
+            {
+                int last = first;
+                auto tf = interpolate(tracks[first].first, tracks[first].second, at);
+                auto end = tf;
+                while (last + 1 < static_cast<int>(tracks.size()))
+                {
+                    const auto next = interpolate(tracks[last + 1].first, tracks[last + 1].second, at);
+                    if (Math::Length(next.origin - end.origin) >= RailroadSettings::tieLength + 0.1) break;
+                    end = next; ++last;
+                }
+                if (last != first)
+                {
+                    const double distance = Math::Length(end.origin - tf.origin);
+                    const auto forward = Math::Normalize(tf.x + end.x);
+                    tf = TrackFrame((tf.origin + end.origin) * 0.5, forward, frame);
+                    tf.z = tf.z * (1 + distance / RailroadSettings::tieLength);
+                }
+                const auto key = std::pair{first, last};
+                const auto run = runs.find(key);
+                if (run != runs.end() && detail.ties[run->second].count < RailroadTieRun::capacity &&
+                    std::abs(Math::Length(detail.ties[run->second].last.z) - Math::Length(tf.z)) < 1e-8)
+                { auto& r = detail.ties[run->second]; r.last = tf; ++r.count; }
+                else { runs[key] = detail.ties.size(); detail.ties.push_back({tf, tf, 1}); }
+                first = last + 1;
+            }
         }
     }
 }

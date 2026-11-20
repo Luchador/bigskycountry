@@ -27,6 +27,7 @@ struct TrackSection
 struct CrossingProfile
 {
     std::vector<TrackSection> rows;
+    std::vector<std::array<TrackSection, 2>> tracks; // Actual rail sweeps through a multi-track slab.
     double levelWidth = 0, approach = 0;
     std::size_t slabFirst = 0, slabLast = 0; // Inclusive rows bounding the concrete pad.
     double slabDepth = 0;                    // Solid sides extend below the unchanged embankment toes.

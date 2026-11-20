@@ -137,7 +137,9 @@ namespace RoadIO
             in.setstate(std::ios::failbit);
             return;
         }
-        style.SetLaneCount(lanes);
+        if (style.railroad && version >= 29 && (lanes < 1 || lanes > RailroadSettings::maxTracks))
+            in.setstate(std::ios::failbit);
+        style.SetLaneCount(style.railroad && version < 29 ? 1 : lanes);
         // Older files stored unused division fields and allowed odd lanes or sub-minimum gaps.
         style.SetDivided(divided);
         style.SetDividedGap(gap);
@@ -155,7 +157,7 @@ namespace RoadIO
             return;
         }
         for (int count : road.laneNeighbors)
-            if (count < 0 || count > RoadStyle::maxLanes || (count && road.style.railroad))
+            if (count < 0 || count > RoadStyle::maxLanes || (road.style.railroad && count > RailroadSettings::maxTracks))
             { out.setstate(std::ios::failbit); return; }
         for (int i = 0; i < 2; ++i)
             if (!ValidDivision(road.divisionNeighbors[i], road.laneNeighbors[i] ? road.laneNeighbors[i] : road.style.GetLaneCount(), road.style))
@@ -184,7 +186,7 @@ namespace RoadIO
                 !ValidShoulders(p.segmentShoulders, road.style.railroad.has_value()) ||
                 (p.bridge && (!p.bridge->Valid() || p.bridge->lowerRoads.contains(road.id))) ||
                 p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
-                (p.segmentLanes && road.style.railroad) ||
+                (road.style.railroad && p.segmentLanes > RailroadSettings::maxTracks) ||
                 !ValidDivision(p.segmentDivision, p.segmentLanes ? p.segmentLanes : road.style.GetLaneCount(), road.style) ||
                 !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
                 (p.deadEndLength > 0 && !road.CanDeadEnd(static_cast<int>(&p - road.points.data()))))
@@ -221,7 +223,7 @@ namespace RoadIO
             { out.setstate(std::ios::failbit); return; }
             WriteDivision(out, p.segmentDivision);
             out << ' ' << p.railSwitch.has_value();
-            if (p.railSwitch) out << ' ' << p.railSwitch->station << ' ' << p.railSwitch->direction;
+            if (p.railSwitch) out << ' ' << p.railSwitch->station << ' ' << p.railSwitch->direction << ' ' << p.railSwitch->trackSide;
             out << '\n';
         }
     }
@@ -240,7 +242,7 @@ namespace RoadIO
         {
             in >> road.laneNeighbors[0] >> road.laneNeighbors[1];
             for (int count : road.laneNeighbors)
-                if (count < 0 || count > RoadStyle::maxLanes || (count && (road.style.railroad || (version < 24 && road.style.IsDivided() && count % 2))))
+                if (count < 0 || count > RoadStyle::maxLanes || (count && ((road.style.railroad && (version < 29 || count > RailroadSettings::maxTracks)) || (version < 24 && road.style.IsDivided() && count % 2))))
                     in.setstate(std::ios::failbit);
         }
         if (version >= 21)
@@ -390,6 +392,7 @@ namespace RoadIO
                 {
                     auto& link = p.railSwitch.emplace();
                     in >> link.station >> link.direction;
+                    if (version >= 29) in >> link.trackSide;
                     if (!link.Valid() || !road.style.railroad || p.anchor || p.ramp || p.connectorSocket ||
                         p.connectorTarget || (i != 0 && i + 1 != count)) in.setstate(std::ios::failbit);
                 }
@@ -397,7 +400,7 @@ namespace RoadIO
             if (!ValidDivision(p.segmentDivision, p.segmentLanes ? p.segmentLanes : road.style.GetLaneCount(), road.style)) in.setstate(std::ios::failbit);
             if (!ValidShoulders(p.segmentShoulders, road.style.railroad.has_value())) in.setstate(std::ios::failbit);
             if (p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
-                (p.segmentLanes && road.style.railroad)) in.setstate(std::ios::failbit);
+                (road.style.railroad && (p.segmentLanes > RailroadSettings::maxTracks || (version < 29 && p.segmentLanes)))) in.setstate(std::ios::failbit);
             if (!std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
                 (p.deadEndLength > 0 && (count < 2 || (i != 0 && i + 1 != count) || road.style.railroad || p.Joined() || p.rampStation)))
                 in.setstate(std::ios::failbit);

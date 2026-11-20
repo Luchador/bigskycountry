@@ -11,12 +11,15 @@ struct Road;
 struct RailroadSwitchLink
 {
     int station = 0, direction = 1;
-    bool Valid() const { return station > 0 && (direction == -1 || direction == 1); }
+    int trackSide = 0; // -1/+1: outer track in travel direction; 0: nearest center (legacy links).
+    bool Valid() const { return station > 0 && (direction == -1 || direction == 1) && trackSide >= -1 && trackSide <= 1; }
     bool operator==(const RailroadSwitchLink&) const = default;
 };
 
 struct RailroadSettings
 {
+    static constexpr int maxTracks = 8;
+    static constexpr double trackSpacing = 4.0; // Center to center, in game meters.
     static constexpr double gauge = 1.435; // Between the inner faces of the rail heads.
     static constexpr double headWidth = 0.075;
     static constexpr double flangeClearance = 0.06; // Game crossing groove, on the gauge side.
@@ -28,7 +31,9 @@ struct RailroadSettings
     static constexpr double railHeight = 0.17;
     double width = 4.0;   // Flat top of the embankment, in meters.
     double height = 0.75; // Above the authored spline at the toe.
-    double ToeHalfWidth() const { return width * 0.5 + height * 2; }
+    int tracks = 1;
+    double CrestWidth(double count) const { return width + (count - 1) * trackSpacing; }
+    double ToeHalfWidth(int count = 0) const { return CrestWidth(count ? count : tracks) * 0.5 + height * 2; }
     bool Valid() const;
     bool operator==(const RailroadSettings&) const = default;
 };
@@ -40,7 +45,7 @@ struct RailroadTieRun
     MeshTransform first, last;
     int count;
     Vector3 Center() const { return (first.origin + last.origin) * 0.5; }
-    double Radius() const { return Math::Length(last.origin - first.origin) * 0.5 + RailroadSettings::tieLength; }
+    double Radius() const;
     MeshTransform At(int index) const;
 };
 

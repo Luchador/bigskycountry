@@ -304,6 +304,11 @@ if(BIGSKY_BUILD_TESTS)
         editor/transform_inspector.cpp editor/road_group_transform.cpp)
     target_link_libraries(BigSkyOverpassTests PRIVATE BigSkyApplication)
     add_test(NAME overpasses COMMAND BigSkyOverpassTests)
+    add_executable(BigSkyRailroadTracksTests tests/railroad_tracks_tests.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp)
+    target_link_libraries(BigSkyRailroadTracksTests PRIVATE BigSkyApplication)
+    add_test(NAME railroad_tracks COMMAND BigSkyRailroadTracksTests)
     add_executable(BigSkyRailroadSwitchTests tests/railroad_switch_tests.cpp
         editor/properties_inspector.cpp editor/edit_history.cpp
         editor/transform_inspector.cpp editor/road_group_transform.cpp)

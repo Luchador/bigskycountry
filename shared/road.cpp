@@ -95,7 +95,7 @@ RoadStyle Road::EndpointStyle(bool first) const
 
 bool Road::SetSegmentLaneCounts(const std::set<int>& segments, int count)
 {
-    if (style.railroad || count < 1 || count > RoadStyle::maxLanes ||
+    if (count < 1 || count > (style.railroad ? RailroadSettings::maxTracks : RoadStyle::maxLanes) ||
         segments.empty() || *segments.begin() < 0 || static_cast<std::size_t>(*segments.rbegin()) + 1 >= points.size()) return false;
     for (int i : segments) if (count % 2 && SegmentStyle(i).IsDivided()) return false;
     bool changed = false;
@@ -345,11 +345,12 @@ bool RampLink::Valid() const
 
 int RoadStyle::GetLaneCount() const
 {
-    return lanes;
+    return railroad ? railroad->tracks : lanes;
 }
 
 void RoadStyle::SetLaneCount(int count)
 {
+    if (railroad) { railroad->tracks = std::clamp(count, 1, RailroadSettings::maxTracks); return; }
     lanes = std::clamp(count, 1, maxLanes);
     if (!CanDivide()) divided = false;
 }
@@ -379,11 +380,13 @@ bool RoadStyle::HasCenterTurnLane() const
 
 double RoadStyle::LeftWidth() const
 {
+    if (railroad) return railroad->ToeHalfWidth();
     return HalfSeparation() + lanes * TravelLaneWidth() * 0.5 + (leftShoulder ? shoulderWidth : 0.0);
 }
 
 double RoadStyle::RightWidth() const
 {
+    if (railroad) return railroad->ToeHalfWidth();
     return HalfSeparation() + lanes * TravelLaneWidth() * 0.5 + (rightShoulder ? shoulderWidth : 0.0);
 }
 
@@ -856,14 +859,16 @@ void RoadGeometry::UpdateBounds()
         includeSurface(segment.rails);
         // Tie centers interpolate between the end frames, and each tie fits
         // within this much padding in any orientation.
-        constexpr double pad = RailroadSettings::tieLength;
-        constexpr Vector3 padding{pad, pad, pad};
         for (const auto& run : segment.ties)
+        {
+            const double pad = RailroadSettings::tieLength * std::max({1.0, Math::Length(run.first.z), Math::Length(run.last.z)});
+            const Vector3 padding{pad, pad, pad};
             for (Vector3 p : {run.first.origin, run.last.origin})
             {
                 bounds.Include(p - padding);
                 bounds.Include(p + padding);
             }
+        }
     }
 }
 
@@ -898,6 +903,7 @@ void Road::Rebuild()
     pavementTriangles.clear();
     railroadSegments.clear();
     trackSections.clear();
+    trackSpans.clear();
     crossingSlabs.clear();
     groundFootprints.clear();
     bridgeTriangles.clear();
@@ -938,6 +944,9 @@ void Road::Rebuild()
         const auto early = SegmentSurfaceBlend(i - 1, 0.25), late = SegmentSurfaceBlend(i - 1, 0.75);
         bool profileTransition = !style.railroad &&
             (SurfaceStyle(early.from) != SurfaceStyle(early.to) || SurfaceStyle(late.from) != SurfaceStyle(late.to));
+        if (style.railroad)
+            profileTransition = SurfaceStyle(early.from).GetLaneCount() != SurfaceStyle(early.to).GetLaneCount() ||
+                                SurfaceStyle(late.from).GetLaneCount() != SurfaceStyle(late.to).GetLaneCount();
         for (bool left : {false, true})
         {
             const auto a = SegmentShoulderBlend(i - 1, 0.25, left), b = SegmentShoulderBlend(i - 1, 0.75, left);
@@ -1002,6 +1011,13 @@ void Road::Rebuild()
     const MeshTransform frame = ObjectTransform{points.front().position, rotation}.ToMeshTransform();
     if (style.railroad)
     {
+        for (std::size_t i = 1; i < pointSamples.size(); ++i)
+        {
+            double length = 0;
+            for (std::size_t j = pointSamples[i - 1] + 1; j <= pointSamples[i]; ++j)
+                length += Math::Length(centerline[j] - centerline[j - 1]);
+            profileLengths.push_back(length);
+        }
         BuildRailroad(*this, *style.railroad, centerline, tangents, pointSamples, frame, style.edge == RoadEdge::Transition,
                       style.transitionMaterial);
         BuildOverpasses();

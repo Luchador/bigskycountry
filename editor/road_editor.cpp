@@ -40,7 +40,7 @@ namespace
     SDL_FRect MaterialSlotRect(const PropertiesInspector& properties, bool strip = false)
     {
         if (properties.page == PropertiesPage::Railroad)
-            return {12, strip ? 248.0f : 190.0f, 194, 54};
+            return {12, strip ? 301.0f : 243.0f, 194, 54};
         const float y = (properties.AllDivided() ? 514.0f : 406.0f) +
                         LaneOptionsHeight(properties);
         return {12, y + (strip ? 58 : 0), 194, 54};
@@ -346,11 +346,13 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
     if (properties.page == PropertiesPage::Railroad)
     {
         const auto& bed = *properties.style.railroad;
-        return {{Action::NarrowerEmbankment, {12, 60, 32, 25}, "-", false, bed.width > RailroadSettings::tieLength},
-                {Action::WiderEmbankment, {174, 60, 32, 25}, "+"},
-                {Action::LowerEmbankment, {12, 113, 32, 25}, "-", false, bed.height > 0},
-                {Action::RaiseEmbankment, {174, 113, 32, 25}, "+"},
-                {Action::ToggleEmbankmentTransition, {12, 149, 194, 28}, "Transition strip", properties.style.edge == RoadEdge::Transition}};
+        return {{Action::Fewer, {12, 60, 32, 25}, "-", false, properties.CanStepLanes(false)},
+                {Action::More, {174, 60, 32, 25}, "+", false, properties.CanStepLanes(true)},
+                {Action::NarrowerEmbankment, {12, 113, 32, 25}, "-", false, bed.width > RailroadSettings::tieLength},
+                {Action::WiderEmbankment, {174, 113, 32, 25}, "+"},
+                {Action::LowerEmbankment, {12, 166, 32, 25}, "-", false, bed.height > 0},
+                {Action::RaiseEmbankment, {174, 166, 32, 25}, "+"},
+                {Action::ToggleEmbankmentTransition, {12, 202, 194, 28}, "Transition strip", properties.style.edge == RoadEdge::Transition}};
     }
     if (properties.page == PropertiesPage::Intersection)
     {
@@ -1207,7 +1209,7 @@ void RoadEditor::ChangeStyle(Action action, WorldDocument& world)
 {
     const auto p = InspectProperties(world, state, EditingDraft());
     if (p.page != PropertiesPage::Road && p.page != PropertiesPage::Railroad) return;
-    const bool lanes = !p.style.railroad && (action == Action::More || action == Action::Fewer);
+    const bool lanes = (action == Action::More || action == Action::Fewer);
     const bool shoulder = !p.style.railroad && (action == Action::Left || action == Action::Right);
     const bool division = !p.style.railroad && (action == Action::Divide || action == Action::NarrowerGap ||
         action == Action::WiderGap || action == Action::ConcreteMedian || action == Action::GrassMedian);
@@ -2148,10 +2150,12 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     if (properties.page == PropertiesPage::Railroad)
     {
         const auto& bed = *style.railroad;
-        return Text(renderer, 12, 43, "Embankment width (m)", muted) &&
-               SDL_RenderDebugTextFormat(renderer, 77, 68, "%.2f", bed.width) &&
-               Text(renderer, 12, 96, "Embankment height (m)", muted) &&
-               SDL_RenderDebugTextFormat(renderer, 77, 121, "%.2f", bed.height);
+        return Text(renderer, 12, 43, properties.segmentSelection ? "Segment tracks" : "Tracks (total)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 77, 68, properties.minLanes == properties.maxLanes ? "%d" : "Mixed", properties.minLanes) &&
+               Text(renderer, 12, 96, "Base bed width (m)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 77, 121, "%.2f", bed.width) &&
+               Text(renderer, 12, 149, "Embankment height (m)", muted) &&
+               SDL_RenderDebugTextFormat(renderer, 77, 174, "%.2f", bed.height);
     }
     if (properties.page == PropertiesPage::Intersection)
     {

@@ -18,7 +18,7 @@ namespace
         if (road.style.railroad)
         {
             const auto& bed = *road.style.railroad;
-            const double outer = bed.ToeHalfWidth() +
+            const double outer = bed.ToeHalfWidth(road.MaximumLaneCount()) +
                 (road.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
             // End-cap tests must reach the raised crest as well as wide/banked toes.
             return std::hypot(outer, bed.height) + 1;
@@ -36,7 +36,7 @@ namespace
         if (Math::Length(side) < 1e-8) side = frame.z - forward * Math::Dot(frame.z, forward);
         side = Math::Normalize(side);
         const auto up = Math::Cross(side, forward);
-        const double width = bed.ToeHalfWidth() +
+        const double width = bed.ToeHalfWidth(road.MaximumLaneCount()) +
             (road.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
         // A banked railway's lower toe can be below its center spline. Use a
         // conservative envelope of the full bed, never the higher rail heads.
@@ -213,13 +213,10 @@ namespace
             constexpr double inner = RailroadSettings::gauge / 2;
             constexpr double outer = inner + RailroadSettings::headWidth;
             std::vector<Rim> paths;
-            for (double offset : {0.0, -inner, inner, -outer, outer})
-            {
-                auto& path = paths.emplace_back();
-                path.reserve(lower.trackSections.size());
-                for (const auto& section : lower.trackSections)
-                    path.push_back(section.top + section.side * offset);
-            }
+            for (const auto& span : lower.trackSpans)
+                for (double offset : {0.0, -inner, inner, -outer, outer})
+                    paths.push_back({span[0].top + span[0].side * offset,
+                                     span[1].top + span[1].side * offset});
             return paths;
         }
         std::vector<Rim> paths(1);

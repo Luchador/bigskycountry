@@ -16,7 +16,7 @@ int PropertiesInspector::StepLanes(bool increase) const
 {
     int count = increase ? maxLanes + 1 : minLanes - 1;
     if (anyDivided && count % 2 != 0) count += increase ? 1 : -1;
-    return std::clamp(count, anyDivided ? 2 : 1, RoadStyle::maxLanes);
+    return std::clamp(count, anyDivided ? 2 : 1, style.railroad ? RailroadSettings::maxTracks : RoadStyle::maxLanes);
 }
 
 double PropertiesInspector::StepGap(bool increase) const
@@ -31,6 +31,8 @@ void PropertiesInspector::ApplyRoadStyle(RoadStyle& destination, RoadAction acti
         auto& bed = *destination.railroad;
         switch (action)
         {
+        case RoadAction::Fewer:
+        case RoadAction::More: destination.SetLaneCount(StepLanes(action == RoadAction::More)); break;
         case RoadAction::NarrowerEmbankment: bed.width = std::max(RailroadSettings::tieLength, bed.width - 0.5); break;
         case RoadAction::WiderEmbankment: bed.width += 0.5; break;
         case RoadAction::LowerEmbankment: bed.height = std::max(0.0, bed.height - 0.25); break;
@@ -163,7 +165,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         }
         auto first = road ? road->style : state.defaults;
         const bool selectedSegments = road && !editingDraft && !group && state.point < 0 && !state.segments.empty();
-        result.segmentSelection = selectedSegments && !first.railroad;
+        result.segmentSelection = selectedSegments;
         if (selectedSegments)
         {
             for (int segment : state.segments)
@@ -179,6 +181,17 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         {
             result.page = PropertiesPage::Railroad;
             result.style = first;
+            result.minLanes = result.maxLanes = first.GetLaneCount();
+            result.canDivide = false;
+            bool firstTrack = true;
+            for (std::size_t i = 0; road && i + 1 < road->points.size(); ++i)
+            {
+                if (selectedSegments && !state.segments.contains(static_cast<int>(i))) continue;
+                const int count = road->SegmentLaneCount(i);
+                if (firstTrack) { result.minLanes = result.maxLanes = count; firstTrack = false; }
+                result.minLanes = std::min(result.minLanes, count);
+                result.maxLanes = std::max(result.maxLanes, count);
+            }
             result.materialSlot = true;
             result.material = first.material;
             char title[72];

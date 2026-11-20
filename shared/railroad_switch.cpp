@@ -151,9 +151,9 @@ namespace
     {
         std::optional<Vector3> result;
         double nearest=RailroadSettings::tieLength*1.1;
-        for (std::size_t i=1;i<other.trackSections.size();++i)
+        for (const auto& span : other.trackSpans)
         {
-            const auto a=other.trackSections[i-1].top,b=other.trackSections[i].top;
+            const auto a=span[0].top,b=span[1].top;
             const double da=Math::Dot(a-sleeper.origin,sleeper.x),db=Math::Dot(b-sleeper.origin,sleeper.x);
             if ((da<0)==(db<0) || std::abs(da-db)<1e-10) continue;
             const auto p=a+(b-a)*(da/(da-db))-sleeper.y*headRise;
@@ -210,9 +210,9 @@ namespace
     {
         std::vector<Cutter> cuts;
         const double center=(RailroadSettings::gauge+RailroadSettings::headWidth)*.5;
-        for (std::size_t i=1;i<host.trackSections.size();++i)
+        for (const auto& span : host.trackSpans)
         {
-            const auto& a=host.trackSections[i-1]; const auto& b=host.trackSections[i];
+            const auto& a=span[0]; const auto& b=span[1];
             auto along=Math::Normalize(b.top-a.top);
             auto across=Math::Normalize(a.side+b.side);
             auto up=Math::Normalize(Math::Cross(across,along));
@@ -246,6 +246,35 @@ MeshTransform RailroadSwitchFrame(const Road& road, std::size_t point, int direc
     return {road.points[point].position+up*(road.style.railroad->height+headRise),forward,up,side};
 }
 
+namespace
+{
+    MeshTransform SwitchTrackFrame(const Road& road, std::size_t point, int direction, int side)
+    {
+        auto result = RailroadSwitchFrame(road, point, direction);
+        const auto center = result;
+        bool found = false;
+        double best = 0;
+        for (const auto& span : road.trackSpans)
+        {
+            const double a = Math::Dot(span[0].top - center.origin, center.x);
+            const double b = Math::Dot(span[1].top - center.origin, center.x);
+            if (std::min(a,b) > 1e-7 || std::max(a,b) < -1e-7 || std::abs(b-a) < 1e-10) continue;
+            const double t = std::clamp(-a/(b-a),0.0,1.0);
+            const auto p = span[0].top + (span[1].top - span[0].top)*t;
+            if (Math::Length(p-center.origin) > road.style.railroad->CrestWidth(road.MaximumLaneCount())) continue;
+            const double lateral = Math::Dot(p-center.origin,center.z);
+            const double score = side ? side*lateral : -std::abs(lateral);
+            if (found && score <= best) continue;
+            best = score; found = true;
+            result.z = Math::Normalize(span[0].side*(1-t) + span[1].side*t)*static_cast<double>(direction);
+            result.x = Math::Normalize(Math::Cross(center.y,result.z));
+            result.y = Math::Cross(result.z,result.x);
+            result.origin = p;
+        }
+        return result;
+    }
+}
+
 std::optional<RailroadSwitchPlan> PlanRailroadSwitch(const Road& host, int segment, double t,
                                                     int side, int direction, int station)
 {
@@ -259,12 +288,15 @@ std::optional<RailroadSwitchPlan> PlanRailroadSwitch(const Road& host, int segme
     Road staged=host.NewSection(); staged.points=host.points;
     if (!staged.InsertStation(segment,t,station)) return {};
     const auto knot=std::find_if(staged.points.begin(),staged.points.end(),[&](const auto& p){return p.rampStation==station;});
-    const auto frame=RailroadSwitchFrame(staged,static_cast<std::size_t>(knot-staged.points.begin()),direction);
+    staged.Rebuild();
+    const auto frame=SwitchTrackFrame(staged,static_cast<std::size_t>(knot-staged.points.begin()),direction,side);
     if (frame.z==Vector3{}) return {};
     Road branch=host.NewSection();
     branch.style.curved=true; branch.paintMarkings=false;
-    branch.points={{knot->position},{knot->position+frame.x*50.0+frame.z*(side*8.0)}};
-    branch.points.front().railSwitch=RailroadSwitchLink{station,direction};
+    branch.SetLaneCount(1);
+    const auto origin=frame.origin-frame.y*(branch.style.railroad->height+headRise);
+    branch.points={{origin},{origin+frame.x*50.0+frame.z*(side*8.0)}};
+    branch.points.front().railSwitch=RailroadSwitchLink{station,direction,side};
     SetDirection(branch.points.front(),frame.x);
     branch.Rebuild();
     return RailroadSwitchPlan{std::move(staged.points),std::move(branch)};
@@ -297,7 +329,7 @@ void WorldDocument::AlignRailroadSwitches()
                 const auto source=stations.find(point.railSwitch->station);
                 if (source==stations.end() || source->second.road==index) continue;
                 align(source->second.road);
-                const auto frame=RailroadSwitchFrame(roads[source->second.road],source->second.point,point.railSwitch->direction);
+                const auto frame=SwitchTrackFrame(roads[source->second.road],source->second.point,point.railSwitch->direction,point.railSwitch->trackSide);
                 auto before=point;
                 point.position=frame.origin-frame.y*(road.style.railroad->height+headRise);
                 SetDirection(point,frame.x*(first ? 1.0 : -1.0));
@@ -408,7 +440,7 @@ std::vector<std::array<Vector3, 2>> RailroadSwitchTerrainSeams(const Road& host,
                 if (!end.railSwitch) continue;
                 if (std::ranges::none_of(host.points,[&](const auto& knot){return knot.rampStation==end.railSwitch->station;})) continue;
                 const double reach=Math::Length(branch.points[first ? 1 : k-1].position-end.position)+
-                                   host.style.railroad->ToeHalfWidth()+branch.style.railroad->ToeHalfWidth();
+                                   host.style.railroad->ToeHalfWidth(host.MaximumLaneCount())+branch.style.railroad->ToeHalfWidth(branch.MaximumLaneCount());
                 near |= std::hypot(p.x-end.position.x,p.z-end.position.z)<=reach;
             }
             if (!near) continue;

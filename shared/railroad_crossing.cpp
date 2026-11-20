@@ -323,8 +323,92 @@ namespace
         Triangulate(Quad(a, b, c, d), emit);
     }
 
+    void BuildMultiTrackSlab(RoadGeometry& road, const CrossingProfile& profile)
+    {
+        constexpr SDL_FColor concrete{.56f, .55f, .52f, 1}, recess{.14f, .14f, .14f, 1};
+        const double inner = RailroadSettings::gauge / 2 - RailroadSettings::flangeClearance;
+        const double outer = RailroadSettings::gauge / 2 + RailroadSettings::headWidth + RailroadSettings::outerClearance;
+        const Vector3 depth{0,profile.slabDepth,0}, groove{0,RailroadSettings::grooveDepth,0};
+        std::vector<Polygon> cells, grooves;
+        for (std::size_t i=profile.slabFirst+1;i<=profile.slabLast;++i)
+            cells.push_back(Band{profile.rows[i-1],profile.rows[i],-profile.levelWidth,profile.levelWidth,1,1,false}.Footprint());
+        for (const auto& track : profile.tracks)
+            for (int side : {-1,1})
+            {
+                auto q = Band{track[0],track[1],side<0 ? -outer : inner,side<0 ? -inner : outer,1,1,true}.Footprint();
+                if (std::ranges::any_of(cells,[&](const auto& cell){return Overlap(cell,q);})) grooves.push_back(std::move(q));
+            }
+        auto& surface = road.edgeTriangles;
+        const auto emit = [&](const Polygon& p, Vector3 drop, SDL_FColor color)
+        {
+            Triangulate(p,[&](const auto& tri)
+            {
+                surface.push_back({RoadGeometry::EdgeVertex{tri[0].position-drop,color},
+                                   RoadGeometry::EdgeVertex{tri[1].position-drop,color},
+                                   RoadGeometry::EdgeVertex{tri[2].position-drop,color}});
+            });
+        };
+        for (const auto& cell : cells)
+        {
+            // Split into planes first, so a skewed/graded slab stays coplanar
+            // with its approaching road. Each groove is cut only out of concrete.
+            Triangulate(cell,[&](const auto& tri)
+            {
+                std::vector<Polygon> pending{{tri.begin(),tri.end()}};
+                for (const auto& cut : grooves)
+                {
+                    std::vector<Polygon> next;
+                    for (const auto& piece : pending)
+                    {
+                        auto inside=Partition(piece,cut,next);
+                        emit(inside,groove,recess);
+                    }
+                    pending=std::move(next);
+                }
+                for (const auto& piece : pending) emit(piece,{},concrete);
+            });
+            auto underside=cell;
+            std::reverse(underside.begin(),underside.end());
+            emit(underside,depth,concrete);
+        }
+        // Side walls of the actual rail slots, clipped to the concrete pad.
+        for (const auto& cut : grooves)
+            for (const auto edge : {std::pair{0,3},std::pair{2,1}})
+            {
+                const auto a=cut[edge.first].position,b=cut[edge.second].position;
+                std::vector<double> cuts{0,1};
+                for (const auto& cell : cells)
+                    for (std::size_t j=0;j<cell.size();++j)
+                        Intersections(a,b,cell[j].position,cell[(j+1)%cell.size()].position,cuts);
+                std::ranges::sort(cuts);
+                for (std::size_t j=1;j<cuts.size();++j)
+                {
+                    const auto mid=a+(b-a)*((cuts[j-1]+cuts[j])*.5);
+                    if (!std::ranges::any_of(cells,[&](const auto& cell){return Inside(mid,cell);})) continue;
+                    const auto p=a+(b-a)*cuts[j-1],q=a+(b-a)*cuts[j];
+                    SolidQuad(surface,p,p-groove,q-groove,q,recess);
+                }
+            }
+        auto& slab=road.crossingSlabs.emplace_back();
+        const auto point=[&](std::size_t i,double offset){return profile.rows[i].top+profile.rows[i].side*offset;};
+        for (std::size_t i=profile.slabFirst;i<=profile.slabLast;++i) slab.outline.push_back(point(i,profile.levelWidth));
+        for (std::size_t i=profile.slabLast+1;i>profile.slabFirst;--i) slab.outline.push_back(point(i-1,-profile.levelWidth));
+        CutOutline(slab.outline,grooves,[&](Vector3 p,Vector3 middle)
+        {
+            return std::ranges::any_of(grooves,[&](const auto& cut){return Inside(middle,cut);}) ? p-groove : p;
+        });
+        for (std::size_t i=0;i<slab.outline.size();++i)
+        {
+            const auto a=slab.outline[i],b=slab.outline[(i+1)%slab.outline.size()];
+            if (LengthXZ(b-a)<1e-8) continue;
+            SolidQuad(surface,a,a-depth,b-depth,b,concrete);
+            slab.walls.push_back({a,b,b-depth,a-depth});
+        }
+    }
+
     void BuildSlab(RoadGeometry& road, const CrossingProfile& profile)
     {
+        if (!profile.tracks.empty()) { BuildMultiTrackSlab(road,profile); return; }
         constexpr SDL_FColor concrete{.56f, .55f, .52f, 1}, recess{.14f, .14f, .14f, 1};
         const double inner = RailroadSettings::gauge / 2 - RailroadSettings::flangeClearance;
         const double outer =
@@ -471,7 +555,7 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
     if (sine < 0.25)
         return {}; // Nearly parallel tracks need a different junction layout.
     const auto& settings = *railway.style.railroad;
-    const double toe = settings.width / 2 + settings.height * 2 +
+    const double toe = settings.ToeHalfWidth(railway.MaximumLaneCount()) +
                        (railway.style.edge == RoadEdge::Transition ? RoadStyle::stripWidth : 0);
     const double level = toe + 0.5;
     const double width = road.MaximumHalfTravelWidth() + road.MaximumHalfSeparation() + road.style.EdgeWidth() +
@@ -522,6 +606,19 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
         if (cuts[i] == center + core)
             result.slabLast = result.rows.size() - 1;
     }
+    if (railway.MaximumLaneCount() > 1)
+    {
+        Bounds3 bounds;
+        for (std::size_t i=result.slabFirst;i<=result.slabLast;++i)
+            for (int side : {-1,1}) bounds.Include(result.rows[i].top+result.rows[i].side*(side*level));
+        constexpr double pad=RailroadSettings::gauge*.5+RailroadSettings::headWidth+RailroadSettings::outerClearance;
+        for (const auto& span : railway.trackSpans)
+            if (std::max(span[0].top.x,span[1].top.x)+pad>=bounds.min.x &&
+                std::min(span[0].top.x,span[1].top.x)-pad<=bounds.max.x &&
+                std::max(span[0].top.z,span[1].top.z)+pad>=bounds.min.z &&
+                std::min(span[0].top.z,span[1].top.z)-pad<=bounds.max.z)
+                result.tracks.push_back(span);
+    }
     // A tight curve can fold a wide approach ribbon back across itself. Leave
     // that layout unmodified instead of emitting overlapping crossing cells.
     for (size_t i = 1; i < result.rows.size(); ++i)
@@ -567,7 +664,7 @@ std::optional<std::vector<std::array<Vector3, 2>>> PlanRailroadJunction(
     // This first milestone does not raise or lower either track. Do not turn
     // an elevated crossing or a parallel overlap into a false terrain seal.
     if (std::abs(a.y - b.y) > .25 || sine < .01) return {};
-    const double reach = (first.style.railroad->ToeHalfWidth() + second.style.railroad->ToeHalfWidth() +
+    const double reach = (first.style.railroad->ToeHalfWidth(first.MaximumLaneCount()) + second.style.railroad->ToeHalfWidth(second.MaximumLaneCount()) +
                           2 * RoadStyle::stripWidth) / sine + 2;
     using Edge = std::array<Vector3, 2>;
     const auto nearbyEdges = [&](const Road& road)

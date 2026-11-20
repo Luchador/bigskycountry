@@ -460,7 +460,7 @@ struct WindowsPanels::Impl
         const int stripHeight = lastInspector && lastInspector->properties.HasTransitionSlot() ? 41 : 0;
         const int endHeight = lastInspector && lastInspector->properties.HasRoadDetail() ? 36 : 0;
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight + endHeight :
-                           page == PropertiesPage::Railroad ? 211 + stripHeight + endHeight :
+                           page == PropertiesPage::Railroad ? 231 + stripHeight + endHeight :
                            page == PropertiesPage::Marker ? 267 :
                            page == PropertiesPage::Intersection ? (lastInspector && lastInspector->properties.yIntersection ? 275 : 232) : page == PropertiesPage::Terrain ? 211 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
@@ -977,6 +977,8 @@ struct WindowsPanels::Impl
             case IDC_PAINT_MARKINGS: PostAction(RoadAction::TogglePaintMarkings); return;
             case IDC_FINISH: PostAction(RoadAction::Finish); SetFocus(frame); return;
             case IDC_CANCEL_DRAFT: PostAction(RoadAction::Cancel); SetFocus(frame); return;
+            case IDC_TRACKS_LESS: PostAction(RoadAction::Fewer); return;
+            case IDC_TRACKS_MORE: PostAction(RoadAction::More); return;
             case IDC_BED_WIDTH_LESS: PostAction(RoadAction::NarrowerEmbankment); return;
             case IDC_BED_WIDTH_MORE: PostAction(RoadAction::WiderEmbankment); return;
             case IDC_BED_HEIGHT_LESS: PostAction(RoadAction::LowerEmbankment); return;
@@ -1080,7 +1082,12 @@ struct WindowsPanels::Impl
                 ShowWindow(GetDlgItem(road, id), roadPage ? SW_SHOWNA : SW_HIDE);
             for (int id = IDC_BED_WIDTH_LABEL; id <= IDC_BED_TRANSITION; ++id)
                 ShowWindow(GetDlgItem(road, id), railroad ? SW_SHOWNA : SW_HIDE);
-            const auto slot = DialogSize(road, 7, railroad ? 211 : ROAD_PANEL_HEIGHT);
+            for (int id : {IDC_TRACKS_LABEL, IDC_TRACKS_LESS, IDC_TRACKS_VALUE, IDC_TRACKS_MORE})
+                ShowWindow(GetDlgItem(road, id), railroad ? SW_SHOWNA : SW_HIDE);
+            const auto materialAt = DialogSize(road, 7, railroad ? 169 : 149);
+            SetWindowPos(GetDlgItem(road, IDC_ROAD_MATERIAL), nullptr, materialAt.cx, materialAt.cy - scroll, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            const auto slot = DialogSize(road, 7, railroad ? 231 : ROAD_PANEL_HEIGHT);
             SetWindowPos(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, slot.cx, slot.cy - scroll, 0, 0,
                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
@@ -1099,7 +1106,7 @@ struct WindowsPanels::Impl
         }
         if (pageChanged || stripChanged || refreshDeadEnd)
         {
-            const int top = (railroad ? 211 : ROAD_PANEL_HEIGHT) + (properties.HasTransitionSlot() ? 41 : 0);
+            const int top = (railroad ? 231 : ROAD_PANEL_HEIGHT) + (properties.HasTransitionSlot() ? 41 : 0);
             for (int id : {IDC_DEAD_END_LABEL, IDC_DEAD_END_LENGTH, IDC_DEAD_END_HINT})
             {
                 const auto at = DialogSize(road, id == IDC_DEAD_END_LENGTH ? 103 : 7,
@@ -1129,6 +1136,11 @@ struct WindowsPanels::Impl
         if (railroad)
         {
             const auto& bed = *style.railroad;
+            SetDlgItemTextW(road, IDC_TRACKS_LABEL, properties.segmentSelection ? L"Segment tracks" : L"Tracks");
+            if (properties.minLanes == properties.maxLanes) SetDlgItemInt(road, IDC_TRACKS_VALUE, properties.minLanes, FALSE);
+            else SetDlgItemTextW(road, IDC_TRACKS_VALUE, L"Mixed");
+            EnableWindow(GetDlgItem(road, IDC_TRACKS_LESS), properties.CanStepLanes(false));
+            EnableWindow(GetDlgItem(road, IDC_TRACKS_MORE), properties.CanStepLanes(true));
             wchar_t value[48];
             swprintf(value, 48, L"%.2f", bed.width);
             SetDlgItemTextW(road, IDC_BED_WIDTH_VALUE, value);

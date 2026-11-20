@@ -147,7 +147,7 @@ struct RoadPoint
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
     double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
-    int segmentLanes = 0; // Outgoing segment override. Zero inherits the road and can taper to edited neighbors.
+    int segmentLanes = 0; // Outgoing lane/railroad track count. Zero inherits and tapers to edited neighbors.
     std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
     std::optional<RoadDivision> segmentDivision; // Outgoing segment; empty inherits the road default.
     std::optional<BridgeSettings> bridge; // Outgoing segment, independent of pavement/lane settings.
@@ -211,7 +211,9 @@ struct RoadGeometry
         Vector3 lower, upper; // Bounds of the sampled track centerline.
     };
     std::vector<RailroadSegment> railroadSegments;
-    std::vector<TrackSection> trackSections; // Exact rail-head sweep stations for grade crossings.
+    std::vector<TrackSection> trackSections; // Center guide at rail-head elevation for crossing slabs.
+    // Individual track spans, including merging/diverging paths. Used for bridge clearance.
+    std::vector<std::array<TrackSection, 2>> trackSpans;
     std::vector<Triangle> whiteStripes;
     std::vector<Triangle> yellowStripes;
 };
