@@ -271,8 +271,14 @@ namespace
                     return false;
                 }
                 if (roadTool ? roadTool->VisibilityStatisticsEnabled() : gameVisibilityStats)
-                    if (!(cooked.Ready() ? cooked.DrawStatistics(renderer) : visibility.DrawStatistics(renderer, g_ProjectSettings.ViewDistance())) ||
-                        !worldRenderer.DrawCacheStatistics(renderer)) return false;
+                {
+                    // Game diagnostics stack below the 56-pixel controls/status
+                    // bar. Keep the editor's existing overlay positions.
+                    const float statisticsY = game ? 122.f : -1.f;
+                    if (!(cooked.Ready() ? cooked.DrawStatistics(renderer, statisticsY) :
+                        visibility.DrawStatistics(renderer, g_ProjectSettings.ViewDistance(), statisticsY)) ||
+                        !worldRenderer.DrawCacheStatistics(renderer, game ? 64.f : 36.f)) return false;
+                }
             }
 
             if (game && !game->DrawHUD(renderer)) return false;

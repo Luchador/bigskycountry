@@ -53,7 +53,7 @@ public:
     std::size_t PreparedVertices() const { return preparedVertices; }
     std::size_t UploadedBytes() const { return uploadedBytes; }
     std::size_t ReadyBuffers() const;
-    bool DrawCacheStatistics(SDL_Renderer* target) const;
+    bool DrawCacheStatistics(SDL_Renderer* target, float y = 36) const;
     std::size_t TextureBytes() const { return materialCache.Bytes(); }
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,

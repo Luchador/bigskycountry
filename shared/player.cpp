@@ -1,11 +1,13 @@
 #include "player.hpp"
 #include "car.hpp"
 #include "character.hpp"
+#include "cooked_world.hpp"
 #include "game_world.hpp"
 #include "test_pawn_meshes.hpp"
 
 #include <array>
 #include <cmath>
+#include <limits>
 
 Character* Player::Body() const
 {
@@ -19,6 +21,7 @@ bool Player::Spawn(Vector3 feet, double yaw)
     spawn = {feet, {0,yaw,0}};
     body->Teleport(spawn);
     character = world.Add(std::move(body));
+    recoveryPawn = 0;
     return controller.Possess(character);
 }
 
@@ -54,7 +57,6 @@ bool Player::Interact()
     {
         auto* vehicle = NearbyVehicle();
         if (!vehicle || !controller.Possess(vehicle->Handle())) return false;
-        vehicleEntry = vehicle->GetTransform();
         body->SetSeated(true);
         AfterStep();
         return true;
@@ -107,26 +109,52 @@ void Player::EnsurePossession()
     }
 }
 
-void Player::AfterStep()
+bool Player::AfterStep(const CookedWorld* streaming)
 {
     EnsurePossession();
     auto* body = Body();
-    if (!body) return;
-    if (auto* vehicle = dynamic_cast<Vehicle*>(controller.Controlled()))
+    auto* active = controller.Controlled();
+    if (!body || !active) return false;
+    const auto pose = active->GetTransform();
+    if (recoveryPawn != active->Handle())
+    {
+        recoveryPawn = active->Handle();
+        lastSupported = pose;
+    }
+    bool supported = false;
+    double verticalSpeed = 0;
+    if (const auto* car = dynamic_cast<const Car*>(active))
+    {
+        supported = car->IsGrounded();
+        verticalSpeed = car->Velocity().y;
+    }
+    else if (active == body)
+    {
+        supported = body->IsGrounded();
+        verticalSpeed = body->Velocity().y;
+    }
+    bool recovered = false;
+    if (supported) lastSupported = pose;
+    // Elevation relative to spawn says nothing about whether a pawn fell out
+    // of the world. Follow its latest support, and allow long falls when there
+    // is still a landing surface below. This query runs only after a 100 m fall;
+    // GameSession already waits for nearby streamed collision before stepping.
+    else if (verticalSpeed < -1.0 && pose.position.y < lastSupported.position.y - 100.0 &&
+             !world.collision.Ground(pose.position, 0, std::numeric_limits<double>::infinity()) &&
+             (!streaming || !streaming->MayHaveGroundBelow(pose.position)))
+    {
+        if (active == body) body->SetSeated(false); // Clear character fall velocity.
+        active->Teleport(lastSupported); // Car::Teleport also clears rigid-body velocity.
+        notice = "Recovered after falling outside the world.";
+        recovered = true;
+    }
+    if (auto* vehicle = dynamic_cast<Vehicle*>(active))
     {
         auto transform = vehicle->GetTransform();
         transform.position = vehicle->Instance().transform.Point(vehicle->SeatPosition());
         body->SetTransform(transform);
     }
-    // Recover the test session after falling off the currently authored world.
-    if (auto* active = controller.Controlled(); active && active->GetTransform().position.y < spawn.position.y - 100.0)
-    {
-        if (dynamic_cast<Vehicle*>(active)) active->Teleport(vehicleEntry);
-        controller.Release();
-        body->SetSeated(false);
-        body->Teleport(spawn);
-        controller.Possess(character);
-    }
+    return recovered;
 }
 
 bool Player::HidePawn(PawnHandle handle) const

@@ -8,6 +8,8 @@ Use **W/S** to accelerate or brake/reverse, **A/D** to steer, **Space** for the 
 
 `CarHandling` in `shared/car.hpp` holds mass, center of mass, speed limits, braking, grip, suspension, steering, and roll assistance. `Vehicle::acceleration` controls drive acceleration. Distances are engine meters, speeds are meters per second, and angles are radians. Physics advances inside the existing 60 Hz game step, with smaller substeps for suspension stability and fast impacts. `shared/rigid_body.*` supplies reusable force, torque, integration, and collision-impulse code.
 
+Walking or driving below the original spawn elevation does not reset the player. After an unsupported fall of more than 100 m with no landing surface below, recovery returns the controlled pawn to its most recent supported position and clears its velocity. Drivers stay in their cars. Streamed-world bounds protect landing areas whose collision is not loaded yet; after recovery, physics waits for collision at the return location. The game controls/status bar is at the top of the viewport, with **F3** diagnostics below it.
+
 ## Material textures
 
 New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor wrap it along the road spline. U repeats once across each travel lane. V starts at the first control point and repeats every 5 m of 3D centerline length, including elevation changes. The pattern continues onto the shoulders. Markings, curbs, and medians use their own colors.

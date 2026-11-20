@@ -86,11 +86,11 @@ std::span<const SceneKey> WorldVisibility::Query(const WorldDocument& world, con
     return visible;
 }
 
-bool WorldVisibility::DrawStatistics(SDL_Renderer* renderer, double distance) const
+bool WorldVisibility::DrawStatistics(SDL_Renderer* renderer, double distance, float y) const
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
-    const float y = std::max(48.f, float(viewport.h) - 168.f);
+    if (y < 0) y = std::max(48.f, float(viewport.h) - 168.f);
     const SDL_FRect box{8, y, std::min(520.f, float(viewport.w) - 16), 100};
     const auto& s = index.Stats();
     return SDL_SetRenderDrawColor(renderer, 24, 26, 30, 255) && SDL_RenderFillRect(renderer, &box) &&

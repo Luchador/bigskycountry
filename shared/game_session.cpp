@@ -184,7 +184,15 @@ void GameSession::Update(double seconds)
     {
         world.Step(fixedStep);
         document.TickObjects(static_cast<float>(fixedStep));
-        player.AfterStep();
+        if (player.AfterStep(streaming))
+        {
+            // The saved support can be in a cell that was unloaded during the
+            // fall. Do not spend the rest of this frame stepping through it.
+            accumulator = 0;
+            if (streaming) collisionReady = false;
+            player.controller.ConsumePresses();
+            break;
+        }
         player.controller.ConsumePresses();
         accumulator = std::max(0.0, accumulator - fixedStep);
     }
@@ -231,7 +239,7 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer) const
     else if (status.empty()) status = "Escape: release mouse   F1: debug camera";
     if (streaming && (!started || !collisionReady))
         status = streaming->Error().empty() ? "Loading nearby collision..." : "Collision unavailable. Recook the world and restart.";
-    const float y = std::max(0.0f, float(viewport.h) - 56.0f);
+    constexpr float y = 0;
     const SDL_FRect background{0,y,float(viewport.w),56};
     return SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
            SDL_RenderFillRect(renderer, &background) &&

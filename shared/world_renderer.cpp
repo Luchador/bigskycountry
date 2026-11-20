@@ -10,19 +10,19 @@
 #include <cmath>
 #include <limits>
 
-bool WorldRenderer::DrawCacheStatistics(SDL_Renderer* target) const
+bool WorldRenderer::DrawCacheStatistics(SDL_Renderer* target, float y) const
 {
     const auto& settings = g_ProjectSettings.Streaming();
     constexpr double mib = StreamingSettings::MiB;
     const auto geometry = ResidentBytes(), textures = TextureBytes();
-    const SDL_FRect box{8, 36, 735, 50};
+    const SDL_FRect box{8, y, 735, 50};
     return SDL_SetRenderDrawColor(target, 24, 26, 30, 255) && SDL_RenderFillRect(target, &box) &&
         SDL_SetRenderDrawColor(target, 230, 232, 235, 255) &&
-        SDL_RenderDebugTextFormat(target, 16, 44, "Render cache %.1f/%.0f MiB | Textures %.1f/%.0f MiB (%zu shared)",
+        SDL_RenderDebugTextFormat(target, 16, y + 8, "Render cache %.1f/%.0f MiB | Textures %.1f/%.0f MiB (%zu shared)",
             geometry / mib, settings.geometryBytes / mib, textures / mib, settings.assetBytes / (2 * mib), TextureCount()) &&
-        SDL_RenderDebugText(target, 16, 58, geometry > settings.geometryBytes || textures > settings.assetBytes / 2 ?
+        SDL_RenderDebugText(target, 16, y + 22, geometry > settings.geometryBytes || textures > settings.assetBytes / 2 ?
             "Budget pressure: active resources pinned" : "Warm render resources retained within memory budgets") &&
-        SDL_RenderDebugTextFormat(target, 16, 72, "Prepared %zu tris | Uploaded %.2f MiB this frame | %zu ready buffers",
+        SDL_RenderDebugTextFormat(target, 16, y + 36, "Prepared %zu tris | Uploaded %.2f MiB this frame | %zu ready buffers",
             preparedVertices / 3, uploadedBytes / mib, ReadyBuffers());
 }
 

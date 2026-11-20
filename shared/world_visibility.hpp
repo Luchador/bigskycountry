@@ -14,7 +14,7 @@ public:
     void Synchronize(const WorldDocument& world);
     std::span<const SceneKey> Query(const WorldDocument& world, const CameraView& camera,
                                   const WorldRenderer& renderer, double distance, bool editor);
-    bool DrawStatistics(SDL_Renderer* renderer, double distance) const;
+    bool DrawStatistics(SDL_Renderer* renderer, double distance, float y = -1) const;
     const SpatialIndex& Index() const { return index; }
 
 private:

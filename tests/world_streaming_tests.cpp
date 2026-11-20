@@ -92,6 +92,10 @@ void Residency(Fixture &f)
     WorldCollision collision;
     Check(stream.LoadPath(f.source), "Open package without authored geometry");
     Check(stream.Stats().geometryBytes == 0 && collision.ChunkCount() == 0, "Catalog eagerly loaded the world");
+    Check(stream.MayHaveGroundBelow({256, 3000, 100}), "Unloaded landing terrain was treated as empty space");
+    Check(stream.MayHaveGroundBelow({-2, 3000, -2}), "Landing check missed pawn footprint at cell edge");
+    Check(!stream.MayHaveGroundBelow({256, -1, 100}), "Ground above pawn blocked out-of-world recovery");
+    Check(!stream.MayHaveGroundBelow({100000, 3000, 100}), "Empty space reported a landing surface");
     const Vector3 home{256, 0, 100}, away{10500, 3, 100};
     Check(!stream.CollisionReady(home), "Missing collision reported ready");
     Pump(stream, collision, home, {home}, 600, defaults,

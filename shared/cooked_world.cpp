@@ -633,6 +633,24 @@ bool CookedWorld::CollisionReady(Vector3 position, double radius) const
         if (!s.instanceColliders.contains(key.index)) return false;
     return true;
 }
+bool CookedWorld::MayHaveGroundBelow(Vector3 position) const
+{
+    if (!Ready()) return false;
+    const auto below = [&](const Bounds3& bounds)
+    {
+        // Include the pawn's footprint, not just its center. A false positive
+        // merely postpones recovery until it falls below these bounds.
+        return !bounds.Empty() && bounds.min.y <= position.y &&
+               position.x >= bounds.min.x - 3 && position.x <= bounds.max.x + 3 &&
+               position.z >= bounds.min.z - 3 && position.z <= bounds.max.z + 3;
+    };
+    // Nearby collision is protected by CollisionReady, but a high airborne
+    // pawn can be far above its landing cell. Missing residency is not a hole.
+    for (const auto& cell : impl->reader.Index().cells) if (below(cell.bounds)) return true;
+    for (const auto& entity : impl->reader.Index().entities)
+        if (!entity.model.empty() && below(entity.bounds)) return true;
+    return false;
+}
 void CookedWorld::Submit(WorldRenderer &renderer, const CameraView &camera, double radius)
 {
     if (!Ready()) return;
@@ -661,12 +679,12 @@ void CookedWorld::SubmitLabels(WorldRenderer &renderer, const CameraView &camera
     for (const auto &[i, instance] : impl->instances)
         if (instance.marker) instance.marker->SubmitLabel(renderer, camera);
 }
-bool CookedWorld::DrawStatistics(SDL_Renderer *renderer) const
+bool CookedWorld::DrawStatistics(SDL_Renderer *renderer, float y) const
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
     const auto &s = Stats();
-    const float y = std::max(48.f, float(viewport.h) - 185.f);
+    if (y < 0) y = std::max(48.f, float(viewport.h) - 185.f);
     const SDL_FRect box{8, y, std::min(650.f, float(viewport.w) - 16), 118};
     constexpr double mb = StreamingSettings::MiB;
     return SDL_SetRenderDrawColor(renderer, 24, 26, 30, 255) && SDL_RenderFillRect(renderer, &box) &&

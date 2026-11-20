@@ -26,7 +26,9 @@ class CookedWorld
     const std::vector<WorldPackage::Spawn> &Spawns() const;
     void Submit(WorldRenderer &renderer, const CameraView &camera, double radius);
     void SubmitLabels(WorldRenderer &renderer, const CameraView &camera);
-    bool DrawStatistics(SDL_Renderer *renderer) const;
+    bool DrawStatistics(SDL_Renderer *renderer, float y = -1) const;
+    // Conservative metadata check, including collision not yet resident.
+    bool MayHaveGroundBelow(Vector3 position) const;
     const std::string &Error() const;
     struct Statistics
     {
