@@ -57,6 +57,8 @@ function(bigsky_shader filename profile entry stem dxil_name spirv_name)
 endfunction()
 
 bigsky_shader(sun.frag.hlsl ps_6_0 main sun sunDxil sunSpirv)
+bigsky_shader(stars.hlsl vs_6_0 VSMain stars_vert stars_vert_dxil stars_vert_spirv)
+bigsky_shader(stars.hlsl ps_6_0 PSMain stars_frag stars_frag_dxil stars_frag_spirv)
 bigsky_shader(world.hlsl vs_6_0 VSMain world_vert world_vert_dxil world_vert_spirv)
 bigsky_shader(world.hlsl ps_6_0 PSMain world_frag world_frag_dxil world_frag_spirv)
 bigsky_shader(world.hlsl ps_6_0 WireframePS wireframe_frag wireframe_frag_dxil wireframe_frag_spirv)

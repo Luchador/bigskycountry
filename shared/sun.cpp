@@ -1,5 +1,6 @@
 #include "sun.hpp"
 #include "sky_disc.hpp"
+#include "sky_location.hpp"
 #include "texture_loader.hpp"
 
 #include <algorithm>
@@ -8,10 +9,7 @@
 
 namespace
 {
-    constexpr double latitude = Math::DegreesToRadians(38.0);
-    constexpr double longitudeDegrees = -95.0;
-    constexpr double utcOffsetHours = -5.0; // Central Daylight Time on August 1.
-    constexpr int dayOfYear = 213; // August 1 of a non-leap year, repeated every game day.
+    constexpr double latitude = Math::DegreesToRadians(SkyLocation::latitudeDegrees);
     constexpr double angularDiameter = Math::DegreesToRadians(3.0);
 
     // NOAA's approximate refraction correction, in arcseconds, for a geometric elevation in degrees.
@@ -43,12 +41,12 @@ namespace
 Vector3 Sun::Direction(double minutes)
 {
     // NOAA General Solar Position Calculations: https://gml.noaa.gov/grad/solcalc/solareqns.PDF
-    constexpr double gamma = 2.0 * std::numbers::pi * (dayOfYear - 1) / 365.0;
+    constexpr double gamma = 2.0 * std::numbers::pi * (SkyLocation::dayOfYear - 1) / 365.0;
     static const double equationOfTime = 229.18 * (0.000075 + 0.001868 * std::cos(gamma) - 0.032077 * std::sin(gamma) - 0.014615 * std::cos(2 * gamma) - 0.040849 * std::sin(2 * gamma));
     static const double declination = 0.006918 - 0.399912 * std::cos(gamma) + 0.070257 * std::sin(gamma)
         - 0.006758 * std::cos(2 * gamma) + 0.000907 * std::sin(2 * gamma)
         - 0.002697 * std::cos(3 * gamma) + 0.001480 * std::sin(3 * gamma);
-    const double solarMinutes = minutes + equationOfTime + 4.0 * longitudeDegrees - 60.0 * utcOffsetHours;
+    const double solarMinutes = minutes + equationOfTime + 4.0 * SkyLocation::longitudeDegrees - 60.0 * SkyLocation::utcOffsetHours;
     const double hourAngle = Math::DegreesToRadians(solarMinutes / 4.0 - 180.0);
     const double meridian = std::cos(declination) * std::cos(hourAngle);
     const double east = -std::cos(declination) * std::sin(hourAngle);

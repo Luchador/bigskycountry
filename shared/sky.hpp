@@ -2,6 +2,7 @@
 
 #include "moon.hpp"
 #include "sun.hpp"
+#include "stars.hpp"
 #include "world_lighting.hpp"
 #include "world_fog.hpp"
 #include <SDL3/SDL.h>
@@ -34,6 +35,7 @@ public:
 private:
     Sun sun;
     Moon moon;
+    Stars stars;
     void UpdateGrid();
     void BuildGradient(const CameraView& camera, int width, int height);
     SkyEnvironment environment{};

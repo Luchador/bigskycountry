@@ -378,6 +378,26 @@ The grid button immediately left of the globe/cube toggles translation snapping.
 
 Use **,** to move sky time 30 minutes earlier and **.** to move it 30 minutes later.
 
+The game and 3D editor render 8,920 stars from **HYG v4.1**, limited to apparent
+visual magnitude **6.5 or brighter**, excluding the Sun. Positions use the catalog's
+J2000 coordinates; brightness follows apparent magnitude with SDR compression,
+and colors are approximated from B-V (40 missing color indices use neutral white).
+Stars share the sun's repeating August 1 sky at 38° N, 95° W (CDT); this is the
+existing fixed sky location, not yet a position-dependent observer or calendar.
+They fade smoothly from full visibility with the sun 6° below the horizon to
+invisible at 5° above it, beginning to appear before sunset and disappearing
+shortly after sunrise. Stars below the horizon are hidden, and those close to it
+fade into the haze. Sky rotation stays continuous across midnight.
+
+The GPU path uploads the star catalog once and draws instanced soft points; a
+cached SDL geometry path supports other renderers. Stars draw behind the sun,
+moon and world geometry and are unaffected by world streaming or camera translation.
+The prepared catalog is linked into both executables, so no world recook or
+runtime download is needed. `tools/cook_stars.py /path/to/hygdata_v41.csv` reproduces
+`shared/data/hyg_v41_stars.inc`; normal builds do not require Python for stars.
+Attribution, data license and source checksum are in `licenses/HYG.txt`, copied
+with the full CC BY-SA 4.0 text to the build's `licenses/` directory.
+
 The handles use three instances of `editor/arrow.glb` or `editor/rotation_gizmo.glb`.
 
 In the top-down road view, hold the **middle mouse button** and drag to measure straight-line distance in the XZ plane. The ruler shows meters and disappears when you release the button. You can measure while laying out a draft.

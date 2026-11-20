@@ -108,6 +108,7 @@ add_library(BigSkyApplication STATIC
     shared/sky_disc.cpp
     shared/moon.cpp
     shared/sky.cpp
+    shared/stars.cpp
     shared/solar_aureole.cpp
     shared/sun.cpp
     shared/sun_shader.cpp
@@ -238,6 +239,8 @@ set_property(SOURCE shared/asset_paths.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     "BIGSKY_COOKED_RELATIVE=u8\"$<PATH:RELATIVE_PATH,${cooked_root},$<TARGET_FILE_DIR:BigSkyCountry>>/\"")
 add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:BigSkyCountry>/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/licenses/HYG.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/HYG.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/licenses/CC-BY-SA-4.0.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/CC-BY-SA-4.0.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${meshoptimizer_SOURCE_DIR}/LICENSE.md" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/meshoptimizer.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${ttf2mesh_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/ttf2mesh.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${asset_root}/fonts/OpenSans-LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/OpenSans.txt"
@@ -255,6 +258,10 @@ add_dependencies(BigSkyCountryEditor BigSkyAssets BigSkyWorldCooker)
 option(BIGSKY_BUILD_TESTS "Build engine regression tests" OFF)
 if(BIGSKY_BUILD_TESTS)
     enable_testing()
+    add_executable(BigSkyStarsTests tests/stars_tests.cpp)
+    target_link_libraries(BigSkyStarsTests PRIVATE BigSkyApplication)
+    add_test(NAME stars COMMAND BigSkyStarsTests)
+    set_tests_properties(stars PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
     add_executable(BigSkyPlayerRecoveryTests tests/player_recovery_tests.cpp)
     target_link_libraries(BigSkyPlayerRecoveryTests PRIVATE BigSkyApplication)
     add_test(NAME player_recovery COMMAND BigSkyPlayerRecoveryTests)
