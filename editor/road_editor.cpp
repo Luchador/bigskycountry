@@ -3856,6 +3856,12 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     if (ViewportFocused() && event.type == SDL_EVENT_KEY_DOWN &&
         !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
     {
+        if (event.key.key == SDLK_SPACE && waterEdit && !SDL_GetWindowRelativeMouseMode(window))
+        {
+            if (!event.key.repeat && drag == Drag::None)
+                state.SelectWaterPoints(waterEdit->index, {});
+            return EditorEvent::Handled;
+        }
         if (event.key.key == SDLK_Z && !SDL_GetWindowRelativeMouseMode(window))
         {
             if (!event.key.repeat)
