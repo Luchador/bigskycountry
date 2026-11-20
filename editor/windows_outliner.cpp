@@ -468,6 +468,10 @@ INT_PTR CALLBACK WindowsOutliner::Dialog(HWND hwnd, UINT msg, WPARAM w, LPARAM l
     {
         switch (LOWORD(w))
         {
+        case IDC_FOLDER_COLLAPSE:
+            s.Queue({OutlineOp::CollapseAll});
+            SetFocus(s.list);
+            return TRUE;
         case IDC_FOLDER_NEW:
             s.Name(true);
             return TRUE;

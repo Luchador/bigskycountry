@@ -21,6 +21,7 @@ enum class OutlineOp
 {
     Select,
     Expand,
+    CollapseAll,
     Create,
     Rename,
     HideChildren,

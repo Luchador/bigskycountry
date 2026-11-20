@@ -357,7 +357,14 @@ void SdlOutliner::Pointer(SDL_Window* window, const SDL_Event& e, SDL_FPoint p, 
     }
     if (p.y < 25)
     {
-        if (p.x >= width - 52 && Folder(m))
+        if (p.x >= 4 && p.x < 76 && p.y >= 3 && p.y < 22)
+        {
+            cmd = OutlineCommand{OutlineOp::CollapseAll};
+            scroll = 0;
+            anchor.reset();
+            previousClick.reset();
+        }
+        else if (p.x >= width - 52 && Folder(m))
         {
             cmd = OutlineCommand{OutlineOp::Remove, *m.Selection().begin()};
         }
@@ -431,7 +438,8 @@ bool SdlOutliner::Draw(SDL_Renderer* r, const SceneOutliner& m, int width, int h
 {
     constexpr auto ink = EditorTheme::text, muted = EditorTheme::secondary;
     if (!Fill(r, 0, 0, width, height, EditorTheme::list) || !Fill(r, 0, 0, width, 25, EditorTheme::header) ||
-        !Text(r, 7, 8, "Outliner", ink) || !Text(r, width - 198, 8, "New folder", ink) ||
+        !Fill(r, 4, 3, 72, 19, EditorTheme::button) || !Text(r, 8, 8, "Collapse", ink) ||
+        !Text(r, width - 198, 8, "New folder", ink) ||
         !Text(r, width - 108, 8, "Rename", Folder(m) ? ink : muted) ||
         !Text(r, width - 51, 8, "Delete", Folder(m) ? ink : muted))
     {

@@ -321,6 +321,17 @@ bool SceneOutliner::Apply(const OutlineCommand& cmd, WorldDocument& world, RoadE
         state.SelectRows(cmd.items);
         return false;
     }
+    if (cmd.op == OutlineOp::CollapseAll)
+    {
+        // Synchronize selection first so a newly selected descendant does not
+        // immediately reopen its parents. Keep the world root expanded.
+        Update(world, state);
+        collapsed.clear();
+        for (const auto& [folderId, folder] : world.hierarchy.Folders())
+            collapsed.insert(folderId);
+        dirty = true;
+        return false;
+    }
     if (cmd.target.kind != SceneKind::World && cmd.target.kind != SceneKind::Folder)
     {
         return false;
