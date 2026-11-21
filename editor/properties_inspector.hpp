@@ -55,6 +55,7 @@ struct PropertiesInspector
     bool materialSlot = false, invincible = false;
     bool water = false, river = false, editingWater = false;
     bool stopLine = false;
+    bool canAlignApproaches = false, alignedApproaches = false;
     double radius = 0;
     bool yIntersection = false, island = false;
     double intersectionSize = 60;

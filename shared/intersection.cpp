@@ -225,9 +225,8 @@ namespace
 
     ApproachFrame Frame(const IntersectionLayout& layout, int side)
     {
-        const Vector3 nominal = Intersection::Directions(layout.yaw, layout.shape)[side];
         const Vector3 forward = Intersection::Directions(layout.yaw + layout.skew[side], layout.shape)[side];
-        return {layout.center + nominal * layout.AnchorDistance(), forward, Math::Cross(forward, up)};
+        return {layout.AnchorPosition(side), forward, Math::Cross(forward, up)};
     }
 
     struct Corner
@@ -485,9 +484,18 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(doub
 
 std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions() const
 {
-    auto anchors = Directions(yaw, shape);
-    for (auto& anchor : anchors) anchor = position + anchor * AnchorDistance();
+    std::array<Vector3, IntersectionAnchor::sideCount> anchors;
+    for (int side = 0; side < IntersectionAnchor::sideCount; ++side) anchors[side] = AnchorPosition(side);
     return anchors;
+}
+
+bool Intersection::ValidAlignment() const
+{
+    if (shape != IntersectionShape::Standard) return alignedApproaches.none();
+    for (int pair = 0; pair < 2; ++pair)
+        if (alignedApproaches.test(pair) && skew[pair] != skew[pair + 2]) return false;
+    // Two centered through roads must cross, rather than occupy the same line.
+    return !alignedApproaches.all() || std::abs(Math::Cross(ApproachDirection(0), ApproachDirection(1)).y) > 1e-6;
 }
 
 IntersectionApproach IntersectionApproach::FromRoad(const Road& road, bool first, bool paintStopLine)
@@ -538,7 +546,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
 
     // Intersect the true-width edge lines, then find the two tangencies of
     // their circular fillet. Each mouth clears both of its adjoining corners.
-    // Authoring anchors stay fixed; rendered cuts are normal to the approach.
+    // Rendered cuts are normal to the approach, including aligned anchor pairs.
     for (int i = 0; i < sides; ++i)
     {
         if (!layout.arms[i] || layout.shape == IntersectionShape::Y) continue;

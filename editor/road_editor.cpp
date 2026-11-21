@@ -180,7 +180,8 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     {
         if (gizmo.mode != GizmoMode::Rotate) return {};
         const auto& junction = world.intersections.at(target.index);
-        auto placement = RoadOverlay::PointPlacement(junction.AnchorPosition(target.point), camera, scene);
+        const auto pivot = junction.AlignsOpposite(target.point) ? junction.position : junction.AnchorPosition(target.point);
+        auto placement = RoadOverlay::PointPlacement(pivot, camera, scene);
         if (placement) placement->yawOnly = true;
         return placement;
     }
@@ -381,7 +382,12 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
         return buttons;
     }
     if (properties.page == PropertiesPage::Anchor)
-        return {{Action::ToggleStopLine, {12, 73, 194, 28}, "Stop line", properties.stopLine}};
+    {
+        std::vector<Button> buttons{{Action::ToggleStopLine, {12, 73, 194, 28}, "Stop line", properties.stopLine}};
+        if (properties.canAlignApproaches)
+            buttons.push_back({Action::ToggleAlignedApproaches, {12, 110, 194, 44}, "Align opposite\napproaches", properties.alignedApproaches});
+        return buttons;
+    }
     if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
         return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
     if (properties.page != PropertiesPage::Road) return {};
@@ -1280,6 +1286,20 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         else item.cornerRadius = std::max(0.0, item.cornerRadius + (action == Action::LargerRadius ? 1.0 : -1.0));
         after.junction = EditSnapshot::Junction{target.index, item};
         if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        return;
+    }
+    case Action::ToggleAlignedApproaches:
+    {
+        const auto target = state.Target();
+        if (target.kind != SelectionKind::Anchor) return;
+        const auto& junction = world.intersections.at(target.index);
+        if (junction.shape != IntersectionShape::Standard) return;
+        EditSnapshot before(state);
+        before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
+        if (!before.roadGroup->SetApproach(world, target.index, target.point, junction.skew.at(target.point),
+                                           !junction.AlignsOpposite(target.point)))
+        { status = SDL_GetError(); return; }
+        CommitTransform(world, std::move(before));
         return;
     }
     case Action::ToggleInvincible:
@@ -2260,7 +2280,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
 
     for (const Button& b : Buttons(properties))
     {
-        if (b.action == Action::ToggleEmbankmentTransition || b.action == Action::ToggleStopLine || b.action == Action::TogglePaintMarkings ||
+        if (b.action == Action::ToggleEmbankmentTransition || b.action == Action::ToggleStopLine || b.action == Action::ToggleAlignedApproaches || b.action == Action::TogglePaintMarkings ||
             b.action == Action::Left || b.action == Action::Right || b.action == Action::Divide)
         {
             const SDL_FRect box{b.rect.x + 2, b.rect.y + 6, 16, 16};
@@ -3655,27 +3675,9 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
         const double initial = start.skew.at(target.point);
         const double angle = std::clamp(DragAngle::Snap(initial + *amount, snapRotation),
                                         -Intersection::maxSkew, Intersection::maxSkew);
-        auto& junction = world.intersections.at(target.index);
-        if (angle == junction.skew[target.point]) return;
-        junction.skew[target.point] = angle;
-        const IntersectionAnchor ref{target.index, target.point};
-        std::set<int> changed;
-        for (const auto& [index, pose] : dragStart->roadGroup->roads)
-        {
-            Road& road = world.roads[index];
-            const int i = AttachedPoint(road, ref);
-            if (i < 0) continue;
-            auto& end = road.points[i];
-            end = pose.points[i];
-            if (angle != initial)
-            {
-                const auto dir = junction.ApproachDirection(ref.side) * (i == 0 ? 1.0 : -1.0);
-                end.heading = std::atan2(dir.z, dir.x);
-                end.pitch = 0;
-            }
-            changed.insert(index);
-        }
-        world.UpdateIntersections(changed);
+        if (angle == world.intersections.at(target.index).skew[target.point]) return;
+        if (!dragStart->roadGroup->SetApproach(world, target.index, target.point, angle, start.AlignsOpposite(target.point)))
+        { status = SDL_GetError(); return; }
         appliedAngle = angle - initial;
         dragChanged = angle != initial;
         return;

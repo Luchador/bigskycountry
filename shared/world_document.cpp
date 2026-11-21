@@ -27,7 +27,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 7;
+    constexpr Uint32 intersectionVersion = 8;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -241,6 +241,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         layout.paint = item.paint;
         layout.yaw = item.yaw;
         layout.skew = item.skew;
+        layout.alignedApproaches = item.alignedApproaches;
         layout.shape = item.shape;
         layout.size = item.size;
         layout.island = item.island;
@@ -248,7 +249,7 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         {
             if (!ends[i] || !item.HasAnchor(i)) continue;
             const auto [road, end] = *ends[i];
-            skewEnds[road][end] = item.skew[i] != 0;
+            skewEnds[road][end] = item.skew[i] != 0 || item.AlignsOpposite(i);
             ++connectedArms; // A loop occupies a separate anchor at each end.
             layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
@@ -685,6 +686,13 @@ bool WorldDocument::Open(const char* documentPath)
                         return SDL_SetError("Invalid intersection shape/size in INTS");
                     item.shape = static_cast<IntersectionShape>(shape);
                 }
+                if (section.version >= 8)
+                {
+                    unsigned mask;
+                    if (!(data >> mask) || mask > 3) return SDL_SetError("Invalid intersection alignment mask in INTS");
+                    item.alignedApproaches = decltype(item.alignedApproaches){mask};
+                    if (!item.ValidAlignment()) return SDL_SetError("Invalid aligned intersection approaches in INTS");
+                }
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -800,7 +808,7 @@ bool WorldDocument::Save()
     {
         const auto p = item.position;
         if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
-            !Material::ValidAssetPath(item.material) || static_cast<unsigned>(item.paint) > 2 ||
+            !Material::ValidAssetPath(item.material) || static_cast<unsigned>(item.paint) > 2 || !item.ValidAlignment() ||
             static_cast<unsigned>(item.shape) > 1 || !std::isfinite(item.size) || item.size < Intersection::minSize || item.size > Intersection::maxSize ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
                           << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough))
@@ -808,7 +816,7 @@ bool WorldDocument::Save()
         for (double angle : item.skew)
             if (!std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew || !(junctionData << ' ' << angle))
                 return SDL_SetError("Cannot save invalid intersection anchor skew");
-        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << '\n';
+        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << ' ' << item.alignedApproaches.to_ulong() << '\n';
     }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))

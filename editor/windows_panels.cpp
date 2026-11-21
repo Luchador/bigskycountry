@@ -988,6 +988,7 @@ struct WindowsPanels::Impl
             case IDC_RADIUS_LESS: PostAction(RoadAction::SmallerRadius); return;
             case IDC_RADIUS_MORE: PostAction(RoadAction::LargerRadius); return;
             case IDC_STOP_LINE: PostAction(RoadAction::ToggleStopLine); return;
+            case IDC_ALIGNED_APPROACHES: PostAction(RoadAction::ToggleAlignedApproaches); return;
             case IDC_INVINCIBLE: PostAction(RoadAction::ToggleInvincible); return;
             case IDC_LAKE_EDIT: PostAction(RoadAction::EditWater); SetFocus(frame); return;
             case IDC_LAKE_FINISH: PostAction(RoadAction::FinishWater); SetFocus(frame); return;
@@ -1068,6 +1069,8 @@ struct WindowsPanels::Impl
         for (int id : {IDC_INTERSECTION_PAINT_LABEL, IDC_INTERSECTION_PAINT})
             ShowWindow(GetDlgItem(road, id), junction && !yJunction ? SW_SHOWNA : SW_HIDE);
         CheckDlgButton(road, IDC_INTERSECTION_ISLAND, properties.island ? BST_CHECKED : BST_UNCHECKED);
+        ShowWindow(GetDlgItem(road, IDC_ALIGNED_APPROACHES), properties.page == PropertiesPage::Anchor && properties.canAlignApproaches ? SW_SHOWNA : SW_HIDE);
+        CheckDlgButton(road, IDC_ALIGNED_APPROACHES, properties.alignedApproaches ? BST_CHECKED : BST_UNCHECKED);
         if (GetFocus() != GetDlgItem(road, IDC_INTERSECTION_SIZE)) RestoreField(IDC_INTERSECTION_SIZE);
         LayoutInspectorScroll();
         if (pageChanged)

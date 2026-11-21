@@ -18,6 +18,8 @@ struct RoadGroupPose
 
     static RoadGroupPose Capture(const WorldDocument& world, const std::set<SceneKey>& selection);
     void Restore(WorldDocument& world) const;
+    // Stage both anchor positions and their attached road ends as one edit.
+    bool SetApproach(WorldDocument& world, int junction, int side, double skew, bool alignOpposite) const;
     bool Transform(WorldDocument& world, const std::set<SceneKey>& selection, Vector3 pivot,
                    Vector3 offset, Vector3 axis, double angle) const;
 };

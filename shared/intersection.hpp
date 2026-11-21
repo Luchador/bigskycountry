@@ -21,6 +21,7 @@ struct Intersection
     bool pavedThrough = false; // Keep pavement between opposite arms of an intersection inserted in a road.
     static constexpr double maxSkew = Math::DegreesToRadians(45.0);
     std::array<double, IntersectionAnchor::sideCount> skew{}; // Per-anchor yaw relative to its nominal outward axis.
+    std::bitset<2> alignedApproaches{}; // +X/-X and +Z/-Z share a straight line through the center.
     IntersectionShape shape = IntersectionShape::Standard;
     double size = 60.0; // Y: center to each anchor, in meters; lane widths are not scaled.
     bool island = true;
@@ -29,7 +30,12 @@ struct Intersection
     double AnchorDistance() const { return shape == IntersectionShape::Y ? size : anchorDistance; }
     Vector3 ApproachDirection(int side) const { return Directions(yaw + skew.at(side), shape).at(side); }
     static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw, IntersectionShape shape = IntersectionShape::Standard);
-    Vector3 AnchorPosition(int side) const { return position + Directions(yaw, shape).at(side) * AnchorDistance(); }
+    bool AlignsOpposite(int side) const { return shape == IntersectionShape::Standard && HasAnchor(side) && alignedApproaches.test(side % 2); }
+    bool ValidAlignment() const;
+    Vector3 AnchorPosition(int side) const
+    {
+        return position + Directions(yaw + (AlignsOpposite(side) ? skew.at(side) : 0), shape).at(side) * AnchorDistance();
+    }
     std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;
 
     bool operator==(const Intersection&) const = default;
@@ -60,10 +66,16 @@ struct IntersectionLayout
     IntersectionPaint paint = IntersectionPaint::Standard;
     double yaw = 0;
     std::array<double, IntersectionAnchor::sideCount> skew{};
+    std::bitset<2> alignedApproaches{}; // +X/-X and +Z/-Z share a straight line through the center.
     IntersectionShape shape = IntersectionShape::Standard;
     double size = 60.0;
     bool island = true;
     double AnchorDistance() const { return shape == IntersectionShape::Y ? size : Intersection::anchorDistance; }
+    Vector3 AnchorPosition(int side) const
+    {
+        const bool aligned = shape == IntersectionShape::Standard && alignedApproaches.test(side % 2);
+        return center + Intersection::Directions(yaw + (aligned ? skew.at(side) : 0), shape).at(side) * AnchorDistance();
+    }
     bool operator==(const IntersectionLayout&) const = default;
 };
 
@@ -73,7 +85,7 @@ struct IntersectionSurface
     // Anchor distance plus the rendered mouth's advance along its skewed approach.
     std::array<double, IntersectionAnchor::sideCount> setbacks{};
     RoadGeometry geometry;
-    // A true-width cut perpendicular to the skewed road, beyond the fixed anchor.
+    // A true-width cut perpendicular to the skewed road, beyond its authoring anchor.
     RoadMouth Mouth(int side) const;
     void Build(const IntersectionLayout& input);
 };

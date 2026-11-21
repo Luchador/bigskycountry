@@ -344,7 +344,10 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Intersection " + std::to_string(target.index);
         result.detail = world.intersections.at(target.index).shape == IntersectionShape::Y ?
             (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : names.at(target.point);
-        result.stopLine = world.intersections.at(target.index).stopLines.test(target.point);
+        const auto& junction = world.intersections.at(target.index);
+        result.stopLine = junction.stopLines.test(target.point);
+        result.canAlignApproaches = junction.shape == IntersectionShape::Standard;
+        result.alignedApproaches = junction.AlignsOpposite(target.point);
     }
     else if (target.kind == SelectionKind::Terrain || target.kind == SelectionKind::WaterPoint)
     {

@@ -101,3 +101,56 @@ bool RoadGroupPose::Transform(WorldDocument& world, const std::set<SceneKey>& se
     next.Restore(world);
     return true;
 }
+
+bool RoadGroupPose::SetApproach(WorldDocument& world, int id, int side, double skew, bool alignOpposite) const
+{
+    const auto found = junctions.find(id);
+    if (found == junctions.end() || !found->second.HasAnchor(side) || !std::isfinite(skew) ||
+        std::abs(skew) > Intersection::maxSkew || (alignOpposite && found->second.shape != IntersectionShape::Standard))
+        return SDL_SetError("Invalid intersection approach");
+    RoadGroupPose next = *this;
+    const auto& original = found->second;
+    auto& junction = next.junctions.at(id);
+    junction.alignedApproaches.set(side % 2, alignOpposite);
+    junction.skew[side] = skew;
+    if (alignOpposite) junction.skew[(side + 2) % IntersectionAnchor::sideCount] = skew;
+    if (!junction.ValidAlignment()) return SDL_SetError("Aligned crossroads cannot be parallel");
+    for (auto& [index, pose] : next.roads)
+    {
+        for (int end = 0; end < 2; ++end)
+        {
+            const int pointIndex = end == 0 ? 0 : static_cast<int>(pose.points.size()) - 1;
+            auto& point = pose.points[pointIndex];
+            if (!point.anchor || point.anchor->intersectionId != id) continue;
+            const int arm = point.anchor->side;
+            if (junction.AnchorPosition(arm) == original.AnchorPosition(arm) &&
+                junction.ApproachDirection(arm) == original.ApproachDirection(arm) &&
+                junction.AlignsOpposite(arm) == original.AlignsOpposite(arm)) continue;
+            point.position = junction.AnchorPosition(arm);
+            const auto outward = junction.ApproachDirection(arm);
+            const auto tangent = outward * (end == 0 ? 1.0 : -1.0);
+            point.heading = std::atan2(tangent.z, tangent.x);
+            point.pitch = 0;
+        }
+    }
+    // Validate the final pair together (one looping road can occupy both arms).
+    // Ordinary independent skew keeps its existing behavior.
+    if (alignOpposite || original.AlignsOpposite(side))
+    {
+        for (const auto& [index, pose] : next.roads)
+        {
+            for (int end = 0; end < 2; ++end)
+            {
+                const int pointIndex = end == 0 ? 0 : static_cast<int>(pose.points.size()) - 1;
+                const auto& point = pose.points[pointIndex];
+                if (!point.anchor || point.anchor->intersectionId != id || point.anchor->side % 2 != side % 2) continue;
+                const auto neighbor = pose.points[end == 0 ? 1 : pointIndex - 1].position;
+                if (!ValidRoadSpan(world.roads.at(index), point.position, neighbor) ||
+                    Math::Dot(neighbor - point.position, junction.ApproachDirection(point.anchor->side)) < Road::minPointSpacing)
+                    return SDL_SetError("Move the adjoining road control point farther out before aligning or rotating this approach");
+            }
+        }
+    }
+    next.Restore(world);
+    return true;
+}
