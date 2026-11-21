@@ -424,11 +424,14 @@ namespace
         {"Right Railroad Switch", EditorCommand::CreateRailSwitchRight},
         {"Left Railroad Switch (Reverse)", EditorCommand::CreateRailSwitchLeftReverse},
         {"Right Railroad Switch (Reverse)", EditorCommand::CreateRailSwitchRightReverse}};
-    std::vector<BarAction> ViewportActions(bool rampMenu, bool deadEnd, bool switches)
+    std::vector<BarAction> ViewportActions(bool rampMenu, bool deadEnd, bool switches, CurveMenuOptions curves)
     {
-        if (rampMenu) return {std::begin(rampItems), std::end(rampItems)};
-        std::vector<BarAction> items(std::begin(createItems), std::end(createItems) - (deadEnd ? 0 : 1));
-        if (switches) items.insert(items.end(), std::begin(switchItems), std::end(switchItems));
+        std::vector<BarAction> items = rampMenu ? std::vector<BarAction>(std::begin(rampItems), std::end(rampItems)) :
+            std::vector<BarAction>(std::begin(createItems), std::end(createItems) - (deadEnd ? 0 : 1));
+        if (!rampMenu && switches) items.insert(items.end(), std::begin(switchItems), std::end(switchItems));
+        if (curves.start) items.push_back({"Start Curved Connector",EditorCommand::StartCurvedConnector});
+        if (curves.finish) items.push_back({"Finish Curved Connector Here",EditorCommand::FinishCurvedConnector});
+        if (curves.cancel) items.push_back({"Cancel Curved Connector",EditorCommand::CancelCurvedConnector});
         return items;
     }
     constexpr float itemHeight = 26;
@@ -482,7 +485,7 @@ std::optional<MaterialAction> EditorMenu::OpenMaterialMenu(SDL_Window* window, i
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass, std::optional<std::array<bool,4>> switches)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass, std::optional<std::array<bool,4>> switches, CurveMenuOptions curves)
 {
 #ifdef _WIN32
     SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -550,6 +553,13 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         }
         if (ready && !canCreateIntersection) EnableMenuItem(GetSubMenu(root, 0), BSC_CREATE_INTERSECTION, MF_BYCOMMAND | MF_GRAYED);
     }
+    constexpr MenuItem curveStart{BSC_CURVE_START, L"Start Curved Connector"};
+    constexpr MenuItem curveFinish{BSC_CURVE_FINISH, L"Finish Curved Connector Here"};
+    constexpr MenuItem curveCancel{BSC_CURVE_CANCEL, L"Cancel Curved Connector"};
+    HMENU curveMenu = ramps ? root : GetSubMenu(root, 0);
+    if (ready && curves.start) ready = Insert(curveMenu, curveStart);
+    if (ready && curves.finish) ready = Insert(curveMenu, curveFinish);
+    if (ready && curves.cancel) ready = Insert(curveMenu, curveCancel);
     if (ready && ClientToScreen(hwnd, &at))
     {
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
@@ -560,6 +570,9 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return EditorCommand::CreateRoad;
     }
+    if (choice == BSC_CURVE_START) return EditorCommand::StartCurvedConnector;
+    if (choice == BSC_CURVE_FINISH) return EditorCommand::FinishCurvedConnector;
+    if (choice == BSC_CURVE_CANCEL) return EditorCommand::CancelCurvedConnector;
     if (choice == BSC_RAIL_SWITCH_LEFT) return EditorCommand::CreateRailSwitchLeft;
     if (choice == BSC_RAIL_SWITCH_RIGHT) return EditorCommand::CreateRailSwitchRight;
     if (choice == BSC_RAIL_SWITCH_LEFT_REVERSE) return EditorCommand::CreateRailSwitchLeftReverse;
@@ -585,10 +598,11 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     {
         return std::clamp(start, 0.0f, std::max(0.0f, limit - extent));
     };
+    curveOptions = curves;
     if (ramps)
     {
         rampOptions = *ramps;
-        submenu = {0, 0, 184, itemHeight * std::size(rampItems)};
+        submenu = {0, 0, 288, itemHeight * static_cast<float>(ViewportActions(true,false,false,curves).size())};
         submenu.x = fit(viewportPoint.x, submenu.w, scene.w);
         submenu.y = fit(viewportPoint.y, submenu.h, scene.h);
         activeItem = !ramps->exit && ramps->entrance ? 1 : 0;
@@ -607,7 +621,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     roadActionFocused = false;
     const float rootHeight = itemHeight * (roadActionEnabled ? 2 : 1);
     rootItem = {0, 0, roadActionEnabled ? 152.0f : 104.0f, itemHeight};
-    submenu = {0, 0, 288, itemHeight * static_cast<float>(ViewportActions(false, deadEnd.has_value(), switches.has_value()).size())};
+    submenu = {0, 0, 288, itemHeight * static_cast<float>(ViewportActions(false, deadEnd.has_value(), switches.has_value(), curves).size())};
     rootItem.x = fit(viewportPoint.x, rootItem.w, scene.w);
     rootItem.y = fit(viewportPoint.y, rootHeight, scene.h);
     roadActionItem = {rootItem.x, rootItem.y + itemHeight, rootItem.w, itemHeight};
@@ -755,7 +769,7 @@ bool EditorMenu::HandleViewportMenu(SDL_Renderer* renderer, SDL_Rect scene, cons
         return false;
     }
     const bool rampMenu = popup == Popup::Ramp;
-    const auto items = ViewportActions(rampMenu, deadEndEnabled.has_value(), switchOptions.has_value());
+    const auto items = ViewportActions(rampMenu, deadEndEnabled.has_value(), switchOptions.has_value(), curveOptions);
     const int count = static_cast<int>(items.size());
     switch (event.type)
     {
@@ -876,7 +890,7 @@ bool EditorMenu::DrawViewportMenu(SDL_Renderer* renderer) const
     }
     if (popup != Popup::Create)
     {
-        const auto items = ViewportActions(popup == Popup::Ramp, deadEndEnabled.has_value(), switchOptions.has_value());
+        const auto items = ViewportActions(popup == Popup::Ramp, deadEndEnabled.has_value(), switchOptions.has_value(), curveOptions);
         SDL_FRect row{submenu.x, submenu.y, submenu.w, itemHeight};
         for (int i = 0; i < static_cast<int>(items.size()); ++i)
         {

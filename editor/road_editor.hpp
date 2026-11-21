@@ -130,7 +130,7 @@ private:
     bool FinishWaterEditing(WorldDocument& world);
     void CancelWaterEditing(WorldDocument& world);
     void BeginRoadDrag(const Road& road, Drag kind, bool shift);
-    void MovePoint(Road& road, Vector3 position);
+    void MovePoint(WorldDocument& world, Vector3 position);
     void RotatePlanPoint(Road& road);
     void MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void ApplyOutline(const OutlineCommand& cmd, WorldDocument& world);
@@ -150,6 +150,7 @@ private:
     void Release(WorldDocument& world);
     const char* StatusText() const
     {
+        if (curvedConnectorStart && status.empty()) return "Right-click the second road: Create > Finish Curved Connector Here (Esc cancels)";
         return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
     }
     bool UpdateWindowTitle();
@@ -188,6 +189,7 @@ private:
     {
         int index;
         std::uint64_t revision;
+        std::optional<RoadSplineLocation> curveSite;
         std::optional<RoadIntersectionInsertion> insertion;
         std::optional<RampPlan> exitRamp, entranceRamp;
         std::array<std::optional<RailroadSwitchPlan>, 4> switches;
@@ -195,6 +197,8 @@ private:
         int point = -1;
     };
     std::optional<RoadMenuTarget> roadMenuTarget;
+    struct CurvedConnectorStart { int roadId; std::uint64_t revision; RoadSplineLocation at; };
+    std::optional<CurvedConnectorStart> curvedConnectorStart;
     struct CrossingMenuTarget
     {
         int road;

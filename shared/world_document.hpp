@@ -112,6 +112,9 @@ private:
     std::set<std::pair<int,int>> switchLinks;
     void AlignRailroadSwitches();
     void RefreshRailroadSwitches();
+    void RefreshCurvedConnectors();
+    std::map<int, std::uint64_t> curvedConnectorSources;
+    std::set<std::pair<int, int>> curvedConnectorLinks;
     std::uint64_t terrainRevision = 0;
     std::uint64_t terrainWaterRevision = 0;
     std::uint64_t bridgeRevision = 0;

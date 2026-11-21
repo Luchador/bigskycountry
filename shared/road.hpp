@@ -129,6 +129,16 @@ struct RampLink
     bool Valid() const;
 };
 
+// A tangential side connection without a highway taper lane. Stable stations
+// survive control-point insertion and splitting; offset slides along the host.
+struct CurvedRoadLink
+{
+    int station = 0, side = 1, direction = 1;
+    double offset = 0;
+    bool operator==(const CurvedRoadLink&) const = default;
+    bool Valid() const;
+};
+
 struct RoadPoint
 {
     bool operator==(const RoadPoint&) const = default;
@@ -143,6 +153,7 @@ struct RoadPoint
     int rampStation = 0; // Stable attachment knot shared by highway ramps and railroad switches.
     std::optional<RampLink> ramp; // First endpoint exits the highway, last endpoint enters it.
     std::optional<RailroadSwitchLink> railSwitch;
+    std::optional<CurvedRoadLink> curveJoin;
     int connectorSocket = 0; // Identifies the source endpoint of a road/ramp join.
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
@@ -151,7 +162,7 @@ struct RoadPoint
     std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
     std::optional<RoadDivision> segmentDivision; // Outgoing segment; empty inherits the road default.
     std::optional<BridgeSettings> bridge; // Outgoing segment, independent of pavement/lane settings.
-    bool Joined() const { return anchor || ramp || railSwitch || connectorSocket || connectorTarget; }
+    bool Joined() const { return anchor || ramp || railSwitch || curveJoin || connectorSocket || connectorTarget; }
 };
 
 struct RoadGeometry

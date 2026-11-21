@@ -1,4 +1,5 @@
 #include "world_document.hpp"
+#include "curved_road.hpp"
 #include "material.hpp"
 #include "road_io.hpp"
 #include "object_io.hpp"
@@ -299,6 +300,14 @@ bool WorldDocument::ValidConnections() const
             return SDL_SetError("Railroad control points cannot have highway or junction links");
         for (const auto& p : road.points)
         {
+            if (p.curveJoin)
+            {
+                const auto source = stationOwners.find(p.curveJoin->station);
+                if (!p.curveJoin->Valid() || road.style.railroad || p.anchor || p.ramp || p.railSwitch || p.connectorSocket || p.connectorTarget ||
+                    (&p != &road.points.front() && &p != &road.points.back()) || source == stationOwners.end() ||
+                    source->second == &road || !CanHostCurvedConnector(*source->second))
+                    return SDL_SetError("Invalid curved road connection");
+            }
             if (!p.railSwitch) continue;
             const auto source = stationOwners.find(p.railSwitch->station);
             if (!road.style.railroad || !p.railSwitch->Valid() || p.anchor || p.ramp || p.connectorSocket || p.connectorTarget ||

@@ -36,6 +36,7 @@ struct TransformFields
     ObjectTransform value;
     static constexpr int geographicLocation = 9; // A single latitude/longitude edit affecting X and Z.
     bool roadBound = false;
+    bool curveBound = false;
     bool levelOnly = false;
     bool CanEdit(int field) const;
     double DisplayValue(int field) const;

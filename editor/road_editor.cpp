@@ -1,6 +1,7 @@
 #include "viewport_selection.hpp"
 #include "world_package.hpp"
 #include "road_editor.hpp"
+#include "curved_road.hpp"
 #include "marker.hpp"
 #include "editor_theme.hpp"
 #include "editor_colors.hpp"
@@ -190,7 +191,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
             return {};
         }
         const RoadPoint& point = road->points[state.point];
-        if (point.ramp || point.railSwitch || point.connectorTarget) return {};
+        if (point.ramp || point.railSwitch || point.connectorTarget || (point.curveJoin && gizmo.mode != GizmoMode::Translate)) return {};
         auto placement = RoadOverlay::PointPlacement(point.position + road->GuideOffset(), camera, scene);
         if (placement && gizmo.settings.space == GizmoSpace::Local)
         {
@@ -558,6 +559,55 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         return;
     }
     if (waterEdit && command != EditorCommand::Save && (!FinishWaterEditing(world) || !Save(world))) return;
+    if (command == EditorCommand::CancelCurvedConnector)
+    {
+        curvedConnectorStart.reset(); status.clear(); return;
+    }
+    if (command == EditorCommand::StartCurvedConnector || command == EditorCommand::FinishCurvedConnector)
+    {
+        if (!roadMenuTarget || !roadMenuTarget->curveSite) return;
+        const auto target = *roadMenuTarget;
+        if (target.index < 0 || target.index >= static_cast<int>(world.roads.size()) || world.roads[target.index].revision != target.revision) return;
+        if (command == EditorCommand::StartCurvedConnector)
+        {
+            curvedConnectorStart = CurvedConnectorStart{world.roads[target.index].id,target.revision,*target.curveSite};
+            state.SelectPoint(target.index, -1); status.clear(); return;
+        }
+        if (!curvedConnectorStart) return;
+        const auto start = *curvedConnectorStart;
+        const auto first = std::ranges::find(world.roads,start.roadId,&Road::id);
+        if (first == world.roads.end() || first->revision != start.revision)
+        {
+            curvedConnectorStart.reset();
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION,"Curved Connector","The starting road was edited. Please choose the start again.",frame);
+            return;
+        }
+        const int firstIndex = static_cast<int>(first-world.roads.begin());
+        auto plan = PlanCurvedConnector(*first,start.at.segment,start.at.t,world.roads[target.index],
+                                        target.curveSite->segment,target.curveSite->t,world.NextRampStationId());
+        if (!plan || !(plan->connector.id = world.AllocateRoadId()))
+        {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION,"Curved Connector",SDL_GetError(),frame); return;
+        }
+        const int secondId = world.roads[target.index].id;
+        const int folder = world.hierarchy.Parent({SceneKind::Road,firstIndex});
+        EditSnapshot before(state);
+        before.connectedRoadPoints.emplace(start.roadId,first->points);
+        before.connectedRoadPoints.emplace(secondId,world.roads[target.index].points);
+        first->points = std::move(plan->firstPoints); first->Rebuild();
+        world.roads[target.index].points = std::move(plan->secondPoints); world.roads[target.index].Rebuild();
+        world.roads.push_back(std::move(plan->connector));
+        const int index = static_cast<int>(world.roads.size())-1;
+        if (folder) world.hierarchy.Move({{SceneKind::Road,index}},folder);
+        state.drawing = false; state.SelectPoint(index, -1);
+        world.RefreshRampConnections(true);
+        EditSnapshot after(state,&world.roads.back()); after.roadFolder = folder;
+        after.connectedRoadPoints.emplace(start.roadId,world.roads[firstIndex].points);
+        after.connectedRoadPoints.emplace(secondId,world.roads[target.index].points);
+        curvedConnectorStart.reset(); status.clear(); outliner.Invalidate();
+        if (history.Record(index,std::move(before),std::move(after))) Save(world);
+        return;
+    }
     if (command == EditorCommand::CreateExitRamp || command == EditorCommand::CreateEntranceRamp)
     {
         CreateRamp(command, world);
@@ -890,6 +940,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     {
         const auto& host = world.roads[lane->host];
         roadMenuTarget = RoadMenuTarget{lane->host, host.revision};
+        if (CanHostCurvedConnector(host)) roadMenuTarget->curveSite = LocateRoadHit(host,{RoadPickKind::Road,lane->host},RoadOverlay::SplinePosition(lanePicker,scene));
         if (const auto site = PickRampSite(host, RoadOverlay::SplinePosition(lanePicker, scene), lane->side))
         {
             RoadStyle style;
@@ -917,6 +968,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         }
         if (const auto at = LocateRoadHit(road, hit, position))
         {
+            if (CanHostCurvedConnector(road)) roadMenuTarget->curveSite = at;
             roadMenuTarget->insertion = PlanRoadIntersection(road, *at);
             if (road.style.railroad)
             {
@@ -943,7 +995,10 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         canCreate = roadMenuTarget->insertion.has_value();
     }
 
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches))
+    const bool curveSite = roadMenuTarget && roadMenuTarget->curveSite.has_value();
+    const CurveMenuOptions curves{curveSite, curveSite && curvedConnectorStart &&
+        world.roads[roadMenuTarget->index].id != curvedConnectorStart->roadId, curvedConnectorStart.has_value()};
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches, curves))
     {
         RunCommand(*command, world, camera);
     }
@@ -1504,11 +1559,12 @@ std::optional<SceneKey> RoadEditor::PlanElementAt(const WorldDocument& world, Ve
 void RoadEditor::BeginRoadDrag(const Road& road, Drag kind, bool shift)
 {
     if (state.point >= 0 && (road.points[state.point].ramp || road.points[state.point].railSwitch || road.points[state.point].connectorTarget)) return;
+    const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
+    if (state.point >= 0 && road.points[state.point].curveJoin && (!translate || !state.additionalPoints.empty())) return;
     dragStart.emplace(state, &road);
     drag = kind;
-    const bool translate = kind == Drag::Move || (kind == Drag::Gizmo && gizmo.mode == GizmoMode::Translate);
     const bool endpoint = state.point == 0 || state.point + 1 == static_cast<int>(road.points.size());
-    if (state.point >= 0 && state.additionalPoints.empty() && translate && endpoint && shift && !road.points[state.point].connectorSocket)
+    if (state.point >= 0 && state.additionalPoints.empty() && translate && endpoint && shift && !road.points[state.point].connectorSocket && !road.points[state.point].curveJoin)
     {
         extensionSource = state.point;
     }
@@ -1536,8 +1592,19 @@ void RoadEditor::TransformGroup(WorldDocument& world, Vector3 offset, Vector3 ax
     }
 }
 
-void RoadEditor::MovePoint(Road& road, Vector3 position)
+void RoadEditor::MovePoint(WorldDocument& world, Vector3 position)
 {
+    auto& road = world.roads[state.selected];
+    if (road.points[state.point].curveJoin)
+    {
+        if (position == originalPoints[state.point].position)
+        {
+            road.points[state.point] = originalPoints[state.point]; road.Rebuild(); world.RefreshRampConnections(true);
+        }
+        else SlideCurvedConnector(world,state.selected,state.point,position);
+        dragChanged = road.points != originalPoints;
+        return;
+    }
     if (road.points[state.point].position == position)
     {
         return;
@@ -1642,7 +1709,7 @@ void RoadEditor::UpdatePlanDrag(WorldDocument& world, SDL_FPoint pointer)
         const int source = extensionSource.value_or(state.point);
         if (pos != planDragStart) selectOnlyOnClick = false;
         const auto offset = extensionSource ? gizmo.settings.SnapPlanarOffset(pos - planDragStart) : pos - planDragStart;
-        MovePoint(world.roads[state.selected], originalPoints[source].position + offset);
+        MovePoint(world, originalPoints[source].position + offset);
     }
     else RotatePlanPoint(world.roads[state.selected]);
 }
@@ -3407,7 +3474,7 @@ void RoadEditor::CommitTransform(WorldDocument& world, EditSnapshot before)
         for (auto& point : road.points)
         {
             const bool interior = &point != &road.points.front() && &point != &road.points.back();
-            if (interior) point.ramp.reset();
+            if (interior) { point.ramp.reset(); point.curveJoin.reset(); }
             if (!point.anchor) continue;
             const auto ref = *point.anchor;
             if ((&point != &road.points.front() && &point != &road.points.back()) ||
@@ -3563,7 +3630,7 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
     if (gizmo.mode == GizmoMode::Translate)
     {
         const int source = extensionSource.value_or(state.point);
-        MovePoint(road, originalPoints[source].position + gizmoDrag->axis * amount.value());
+        MovePoint(world, originalPoints[source].position + gizmoDrag->axis * amount.value());
         return;
     }
 
@@ -3890,6 +3957,10 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 FocusSelection(world, camera);
             }
             return EditorEvent::Handled;
+        }
+        if (event.key.key == SDLK_ESCAPE && curvedConnectorStart && drag == Drag::None)
+        {
+            curvedConnectorStart.reset(); status.clear(); return EditorEvent::Handled;
         }
         if (event.key.key == SDLK_ESCAPE && state.anchorSelection && drag == Drag::None)
         {

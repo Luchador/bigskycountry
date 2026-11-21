@@ -30,6 +30,7 @@ int WorldDocument::NextRampStationId() const
             last = std::max(last, p.rampStation);
             if (p.ramp) last = std::max(last, p.ramp->station);
             if (p.railSwitch) last = std::max(last, p.railSwitch->station);
+            if (p.curveJoin) last = std::max(last, p.curveJoin->station);
         }
     return last < std::numeric_limits<int>::max() ? last + 1 : 0;
 }
@@ -89,7 +90,7 @@ void WorldDocument::RefreshRampConnections(bool force)
         for (int e = 0; e < 2; ++e)
         {
             auto& point = e == 0 ? ramp.points.front() : ramp.points.back();
-            if (point.connectorTarget)
+            if (point.connectorTarget || point.curveJoin)
             {
                 caps[e] = ramp.rampCaps[e]; // Updated after both source ramps have been resolved.
                 continue;
@@ -145,7 +146,7 @@ void WorldDocument::RefreshRampConnections(bool force)
             RoadPoint& end = e == 0 ? road.points.front() : road.points.back();
             if (!end.connectorTarget)
             {
-                if (!end.ramp && road.rampCaps[e])
+                if (!end.ramp && !end.curveJoin && road.rampCaps[e])
                 {
                     road.rampCaps[e].reset();
                     changed = true;
@@ -212,6 +213,7 @@ void WorldDocument::RefreshRampConnections(bool force)
         host.rampShoulderCuts = std::move(current);
         host.Rebuild();
     }
+    RefreshCurvedConnectors();
     RefreshRailroadSwitches();
     rampRevision = RoadGeometry::latestRevision;
 }

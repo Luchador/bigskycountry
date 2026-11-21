@@ -1,4 +1,5 @@
 #include "transform_inspector.hpp"
+#include "curved_road.hpp"
 #include "world_document.hpp"
 #include "geographic_coordinates.hpp"
 #include "road_group_transform.hpp"
@@ -54,6 +55,7 @@ bool TransformFields::CanEdit(int field) const
     }
 
     if (field == geographicLocation) return true;
+    if (curveBound) return field < 3;
     if (target.kind == SelectionKind::WaterPoint) return field < 3 && (field != 1 || !levelOnly);
     if (target.YawOnly() || levelOnly) return field < 3 || field == 4;
     return field < 6 || target.kind == SelectionKind::Object;
@@ -221,6 +223,8 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
             }
             const auto axes = road.PointAxes(target.point, false);
             fields.roadBound = road.points[target.point].ramp.has_value() || road.points[target.point].railSwitch.has_value() || road.points[target.point].connectorTarget != 0;
+            fields.curveBound = road.points[target.point].curveJoin.has_value();
+            fields.roadBound |= fields.curveBound && !target.additionalPoints.empty();
             fields.value.rotation.x = road.points[target.point].roll;
             fields.value.position = road.points[target.point].position;
             fields.value.rotation.y = std::atan2(axes[2].x, axes[2].z);
@@ -317,7 +321,7 @@ std::optional<double> FlattenElevation(const Road& road, int segment)
     const int last = static_cast<int>(road.points.size()) - 1;
     const auto& a = road.points[segment];
     const auto& b = road.points[segment + 1];
-    const auto fixed = [](const RoadPoint& point) { return point.anchor || point.ramp || point.railSwitch || point.connectorTarget; };
+    const auto fixed = [](const RoadPoint& point) { return point.anchor || point.ramp || point.railSwitch || point.curveJoin || point.connectorTarget; };
     if (fixed(a) && fixed(b) && a.position.y != b.position.y) return {};
 
     bool changed = a.position.y != b.position.y;
@@ -329,7 +333,7 @@ std::optional<double> FlattenElevation(const Road& road, int segment)
         if (road.style.curved && std::abs(road.Tangent(i).y) > 1e-12)
         {
             // A linked ramp or connector receives its tangent from the source road.
-            if (point.ramp || point.railSwitch || point.connectorTarget) return {};
+            if (point.ramp || point.railSwitch || point.curveJoin || point.connectorTarget) return {};
             changed = true;
         }
         if (!road.style.curved && point.anchor && point.heading && road.skewEnds[i == 0 ? 0 : 1] &&
@@ -377,7 +381,7 @@ void FlattenRoadSegment(Road& road, int segment, double elevation)
             const Vector3 tangent = tangents[end];
             const double run = std::hypot(tangent.x, tangent.z);
             handle *= ratio * run;
-            if (handle == 0 || point.ramp || point.railSwitch || point.connectorTarget) continue;
+            if (handle == 0 || point.ramp || point.railSwitch || point.curveJoin || point.connectorTarget) continue;
             const Vector3 flat{tangent.x / run, 0, tangent.z / run};
             // Keep automatic headings whenever moving the points already yields the desired tangent.
             if (Math::Length(road.Tangent(i) - flat) > 1e-12)
@@ -410,6 +414,7 @@ bool TranslateRoadPoints(Road& road, std::span<const RoadPoint> start, int activ
     const auto movedPosition = [&](int i) { return i == active ? destination : start[i].position + offset; };
     const auto validMove = [&](int i)
     {
+        if (start[i].curveJoin) return SDL_SetError("Move curved connector endpoints individually to slide them along their roads");
         const auto moved = movedPosition(i);
         if (!std::isfinite(moved.x) || !std::isfinite(moved.y) || !std::isfinite(moved.z))
             return SDL_SetError("Road point position is out of range");
@@ -503,6 +508,7 @@ bool ApplyTransform(WorldDocument& world, const TransformFields& fields, int fie
 
     if (translating)
     {
+        if (p.curveJoin) return SlideCurvedConnector(world,target.index,i,t.position);
         return TranslateRoadPoints(road, road.points, i, target.additionalPoints, t.position);
     }
     else if (field == 3)

@@ -83,6 +83,7 @@ add_library(BigSkyApplication STATIC
     shared/world_visibility.cpp
     shared/intersection.cpp
     shared/highway_ramp.cpp
+    shared/curved_road.cpp
     shared/railroad_crossing.cpp
     shared/railroad.cpp
     shared/railroad_switch.cpp

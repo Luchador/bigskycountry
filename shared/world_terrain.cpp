@@ -1,4 +1,5 @@
 #include "world_document.hpp"
+#include "curved_road.hpp"
 #include "terrain_fill.hpp"
 #include "railroad_switch.hpp"
 #include "spatial_index.hpp"
@@ -177,6 +178,18 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                 if (p.railSwitch && switchHosts.contains(p.railSwitch->station))
                 {
                     auto seams=RailroadSwitchTerrainSeams(*switchHosts.at(p.railSwitch->station),*road->second);
+                    junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
+                }
+    std::map<int,const Road*> curvedHosts;
+    for (int id : groundRoads)
+        if (const auto road=byId.find(id); road!=byId.end() && !road->second->style.railroad)
+            for (const auto& p : road->second->points) if (p.rampStation) curvedHosts[p.rampStation]=road->second;
+    for (int id : groundRoads)
+        if (const auto road=byId.find(id); road!=byId.end())
+            for (const auto& p : road->second->points)
+                if (p.curveJoin && curvedHosts.contains(p.curveJoin->station))
+                {
+                    auto seams=CurvedConnectorTerrainSeams(*curvedHosts.at(p.curveJoin->station),*road->second);
                     junctionSeams.insert(junctionSeams.end(),seams.begin(),seams.end());
                 }
     const auto scope = boundary.filterIncidentalPockets ? TerrainFillScope::SelectedBoundary : TerrainFillScope::AllPockets;

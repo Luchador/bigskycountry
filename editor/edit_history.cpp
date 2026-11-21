@@ -254,6 +254,12 @@ bool EditHistory::SplitRoad(WorldDocument& world, RoadEditorState& editor, int i
                 const auto& end = exit ? road.points.front() : road.points.back();
                 if (end.railSwitch && end.railSwitch->station == station)
                     (end.railSwitch->direction > 0 ? rightSides : leftSides).insert(0);
+                if (end.curveJoin && end.curveJoin->station == station)
+                {
+                    const auto& link = *end.curveJoin;
+                    (std::abs(link.offset) > 1e-8 ? (link.offset > 0 ? rightSides : leftSides) :
+                        (link.direction > 0 ? rightSides : leftSides)).insert(2);
+                }
                 const auto& link = end.ramp;
                 if (!link || link->station != station) continue;
                 const double direction = std::abs(link->offset) > 1e-8 ? link->offset :
@@ -281,6 +287,12 @@ bool EditHistory::SplitRoad(WorldDocument& world, RoadEditorState& editor, int i
             if (p.railSwitch && p.railSwitch->station == station && p.railSwitch->direction > 0 && rightStation != station)
             {
                 p.railSwitch->station = rightStation;
+                changed = true;
+            }
+            if (p.curveJoin && p.curveJoin->station == station && rightStation != station &&
+                (std::abs(p.curveJoin->offset) > 1e-8 ? p.curveJoin->offset > 0 : p.curveJoin->direction > 0))
+            {
+                p.curveJoin->station = rightStation;
                 changed = true;
             }
             if (p.ramp && p.ramp->station == station && rightSides.contains(p.ramp->side) && rightStation != station)
@@ -394,10 +406,12 @@ bool EditHistory::ReplaceRoad(WorldDocument& world, RoadEditorState& editor, int
                 const bool loseSwitch = p.railSwitch && removedStations.contains(p.railSwitch->station);
                 const bool loseRamp = p.ramp && removedStations.contains(p.ramp->station);
                 const bool loseJoin = removedJoins.contains(collectJoin(p));
-                if (!loseRamp && !loseJoin && !loseSwitch) continue;
+                const bool loseCurve = p.curveJoin && removedStations.contains(p.curveJoin->station);
+                if (!loseRamp && !loseJoin && !loseSwitch && !loseCurve) continue;
                 before.connectedRoadPoints.try_emplace(ramp.id, ramp.points);
                 if (loseRamp) p.ramp.reset();
                 if (loseSwitch) p.railSwitch.reset();
+                if (loseCurve) p.curveJoin.reset();
                 if (loseJoin) p.connectorSocket = p.connectorTarget = 0;
                 disconnected[ramp.id] = ramp.points;
             }

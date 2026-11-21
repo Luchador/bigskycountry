@@ -224,6 +224,11 @@ namespace RoadIO
             WriteDivision(out, p.segmentDivision);
             out << ' ' << p.railSwitch.has_value();
             if (p.railSwitch) out << ' ' << p.railSwitch->station << ' ' << p.railSwitch->direction << ' ' << p.railSwitch->trackSide;
+            if (p.curveJoin && (!p.curveJoin->Valid() || road.style.railroad || p.anchor || p.ramp || p.railSwitch ||
+                p.connectorSocket || p.connectorTarget || (&p != &road.points.front() && &p != &road.points.back())))
+            { out.setstate(std::ios::failbit); return; }
+            out << ' ' << p.curveJoin.has_value();
+            if (p.curveJoin) out << ' ' << p.curveJoin->station << ' ' << p.curveJoin->side << ' ' << p.curveJoin->direction << ' ' << p.curveJoin->offset;
             out << '\n';
         }
     }
@@ -394,6 +399,18 @@ namespace RoadIO
                     in >> link.station >> link.direction;
                     if (version >= 29) in >> link.trackSide;
                     if (!link.Valid() || !road.style.railroad || p.anchor || p.ramp || p.connectorSocket ||
+                        p.connectorTarget || (i != 0 && i + 1 != count)) in.setstate(std::ios::failbit);
+                }
+            }
+            if (version >= 30)
+            {
+                bool linked = false;
+                if (!(in >> linked)) return road;
+                if (linked)
+                {
+                    auto& link = p.curveJoin.emplace();
+                    in >> link.station >> link.side >> link.direction >> link.offset;
+                    if (!link.Valid() || road.style.railroad || p.anchor || p.ramp || p.railSwitch || p.connectorSocket ||
                         p.connectorTarget || (i != 0 && i + 1 != count)) in.setstate(std::ios::failbit);
                 }
             }
