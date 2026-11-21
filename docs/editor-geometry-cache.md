@@ -30,6 +30,3 @@ the least recently used entries are discarded first. It does not retain extra
 mesh copies in memory. Close the editor and delete `build/editor-cache/` whenever
 you want to force a clean rebuild or reclaim space. The next load repopulates it.
 Startup logs report the number of reused, regenerated and stored entries.
-
-Regression tests: configure with `-DBIGSKY_BUILD_TESTS=ON`, build
-`BigSkyEditorGeometryCacheTests`, then run `ctest --test-dir build -R editor_geometry_cache --output-on-failure`.

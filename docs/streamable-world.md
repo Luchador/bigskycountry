@@ -188,20 +188,7 @@ fade transitions can follow in a later milestone.
 Bump the package version when serialization or geometry recipes change in ways
 that invalidate existing payloads.
 
-## Tests
-
-Configure with `-DBIGSKY_BUILD_TESTS=ON`, then build `BigSkyWorldPackageTests`,
-`BigSkyWorldStreamingTests` and `BigSkyVisibilityTests` and run
-`ctest --test-dir build --output-on-failure`. Build the normal game/editor targets
-first to stage model dependencies.
-
-Tests cover IDs, cell clipping and LOD rims, deterministic cooking, independent
-payload validation, stale/corrupt packages, lazy loading, seams, LOD residency,
-budget pressure without churn, parked-pawn pins, camera teleport cancellation,
-catalog replacement, worker shutdown, shared models/textures, and source-save
-protection. `BigSkyWorldStreamingTests --gpu` additionally checks texture sharing,
-texture refresh, warm caches across camera turns, incremental large-mesh
-preparation/uploads, cancellation, and explicit eviction using a GPU renderer.
+## Manual validation
 
 These scheduling/cache changes work with existing version-2 packages; they do not
 require recooking. For a camera-turn check, press F3 and turn away and back after

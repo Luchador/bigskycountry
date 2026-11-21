@@ -94,7 +94,7 @@ namespace WorldPackage
     std::uint64_t AssetHash(AssetKind kind, const std::string& path, AssetRoot root);
     bool Write(const std::string& file, Manifest manifest, std::span<const Cell> cells);
     bool Cook(WorldDocument& world, const std::string& file);
-    // Exposed for regression tests and future incremental cooking.
+    // Shared geometry helpers for cooking.
     std::shared_ptr<Mesh> Simplify(const Mesh& mesh);
     void ClipTriangle(std::map<CellKey, Cell>& cells, EntityId owner, Layer layer,
                       const std::string& material, const std::array<MeshVertex, 3>& triangle);
