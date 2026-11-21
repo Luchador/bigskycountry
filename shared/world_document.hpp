@@ -71,6 +71,7 @@ public:
     bool RemoveTerrain(std::size_t index);
     const std::vector<std::unique_ptr<TerrainChunk>>& Terrain() const { return terrain; }
     void TickObjects(float deltaSeconds);
+    int SpawnPointIndex() const;
 
     template<typename Visit>
     void ForEachMesh(Visit visit) const
@@ -85,7 +86,7 @@ public:
         }
         for (const auto& object : objects)
         {
-            if (object->IsLoaded())
+            if (object->IsLoaded() && !object->EditorOnly())
             {
                 visit(object->Instance());
             }

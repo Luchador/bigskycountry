@@ -371,6 +371,12 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Object " + std::to_string(target.index + 1);
         result.detail = object.Instance().mesh->assetPath;
         result.invincible = object.invincible;
+        if (object.Type() == ObjectType::SpawnPoint)
+        {
+            result.page = PropertiesPage::Other;
+            result.title = "Spawn Point";
+            result.detail = "Player and vehicle start | Rotate Y to set heading";
+        }
         if (const auto* marker = dynamic_cast<const Marker*>(&object))
         {
             result.page = PropertiesPage::Marker;

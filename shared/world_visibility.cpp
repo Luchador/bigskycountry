@@ -63,6 +63,7 @@ std::span<const SceneKey> WorldVisibility::Query(const WorldDocument& world, con
     hidden = outsideFrustum = 0;
     for (const auto key : index.Query(camera.GetPosition(), distance))
     {
+        if (!editor && key.kind == SceneKind::Object && world.Objects()[key.index]->EditorOnly()) continue;
         if (editor && world.hierarchy.EditorHidden(key)) { ++hidden; continue; }
         if (!renderer.BoundsVisible(index.Bounds(key))) { ++outsideFrustum; continue; }
         visible.push_back(key);

@@ -35,6 +35,8 @@ namespace ObjectIO
             }
 
             const ObjectType kind = static_cast<ObjectType>(type);
+            if (kind == ObjectType::SpawnPoint && version < 4)
+                return SDL_SetError("Spawn points require OBJS version 4");
             float acceleration = 0.0f;
             if (kind == ObjectType::Vehicle && (!(in >> acceleration) || !std::isfinite(acceleration)))
             {

@@ -124,7 +124,7 @@ namespace
     {
         Writer w; w.U64(m.sourceHash); w.F64(cellMeters); w.F64(distantMeters);
         w.Count(m.spawns.size());
-        for (const auto& spawn : m.spawns) { w.Vec(spawn.position); w.F64(spawn.yaw); }
+        for (const auto& spawn : m.spawns) { w.Vec(spawn.position); w.F64(spawn.yaw); w.U32(spawn.authored); }
         w.Count(m.entities.size());
         for (const auto& e : m.entities)
         {
@@ -246,13 +246,27 @@ bool Reader::Open(const std::string& file)
         const auto size = in.tellg(); in.seekg(0);
         auto header = Read(in, 28, 28); Input h{header};
         if (std::string(header.data(), 8) != std::string("BSCCHNK\0", 8)) throw std::runtime_error("Invalid cooked world magic");
-        h.data = h.data.subspan(8); if (h.U32() != version) throw std::runtime_error("Unsupported cooked world version");
+        h.data = h.data.subspan(8);
+        const auto fileVersion = h.U32();
+        if (fileVersion < 2 || fileVersion > version) throw std::runtime_error("Unsupported cooked world version");
         const auto bytes = h.U64(), checksum = h.U64();
         if (size < 28 || bytes > static_cast<std::uint64_t>(size) - 28) throw std::runtime_error("Invalid manifest size");
         auto data = Read(in, bytes, maxManifestBytes); if (Hash(data) != checksum) throw std::runtime_error("Manifest checksum mismatch");
         Input r{data}; Manifest m; m.sourceHash = r.U64();
         if (r.F64() != cellMeters || r.F64() != distantMeters) throw std::runtime_error("Unsupported world cook recipe");
-        for (auto n = r.Count(32); n; --n) m.spawns.push_back({r.Vec(), r.F64()});
+        for (auto n = r.Count(fileVersion >= 3 ? 36 : 32); n; --n)
+        {
+            Spawn spawn{r.Vec(), r.F64()};
+            if (fileVersion >= 3)
+            {
+                const auto authored = r.U32();
+                if (authored > 1) throw std::runtime_error("Invalid spawn point flag");
+                spawn.authored = authored != 0;
+            }
+            m.spawns.push_back(spawn);
+        }
+        if (std::ranges::any_of(m.spawns, [](const auto& s) { return s.authored; }) && m.spawns.size() != 1)
+            throw std::runtime_error("An authored spawn point must be the only startup location");
         std::set<EntityId> ids;
         for (auto n = r.Count(280); n; --n)
         {

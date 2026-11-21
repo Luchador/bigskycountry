@@ -3,10 +3,11 @@
 #include <SDL3/SDL.h>
 #include <optional>
 #include <array>
+#include <vector>
 #include "material_action.hpp"
 
 enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
-                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection };
+                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint };
 struct RampMenuOptions { bool exit, entrance; };
 struct CurveMenuOptions { bool start = false, finish = false, cancel = false; };
 struct RiverMenuOptions { bool start = false, finish = false, disconnect = false, cancel = false; };
@@ -43,6 +44,8 @@ public:
     std::optional<EditorCommand> Command(const SDL_Event& event) const;
 
 private:
+    struct ViewportItem { const char* label; EditorCommand command; bool enabled = true; };
+    std::array<std::vector<ViewportItem>, 3> viewportItems;
     bool roadNames = true;
     bool fog = true;
     bool visibilityStatistics = false;
@@ -53,23 +56,14 @@ private:
     void* editMenu = nullptr;
     void* viewMenu = nullptr;
 #else
-    RampMenuOptions rampOptions{};
-    CurveMenuOptions curveOptions{};
-    RiverMenuOptions riverOptions{};
-    std::optional<std::array<bool,4>> switchOptions;
-    bool intersectionEnabled = true;
-    std::optional<bool> deadEndEnabled, overpassState;
-    bool crossingAvailable = false, crossingExists = false;
-    // Segment and control-point actions share the second root-menu row.
-    std::optional<bool> roadActionEnabled;
-    EditorCommand roadAction = EditorCommand::FlattenSegment;
-    const char* roadActionLabel = "Flatten Segment";
-    bool roadActionFocused = false;
     int openMenu = -1, barRow = 0;
     bool Enabled(EditorCommand command) const;
-    enum class Popup { Closed, Create, Submenu, Ramp };
+    enum class Popup { Closed, Root, Submenu };
     Popup popup = Popup::Closed;
-    SDL_FRect rootItem{}, roadActionItem{}, submenu{};
+    std::array<SDL_FRect, 3> rootItems{};
+    SDL_FRect submenu{};
+    int activeCategory = 0, firstItem = 0;
+    void LayoutViewportSubmenu(SDL_Rect scene);
     int activeItem = 0;
 #endif
 };

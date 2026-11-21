@@ -150,8 +150,8 @@ private:
     void Release(WorldDocument& world);
     const char* StatusText() const
     {
-        if (riverConnectionStart && status.empty()) return "Right-click the receiving river: Connect River Here (Esc cancels)";
-        if (curvedConnectorStart && status.empty()) return "Right-click the second road: Create > Finish Curved Connector Here (Esc cancels)";
+        if (riverConnectionStart && status.empty()) return "Right-click the receiving river: Water > Connect River Here (Esc cancels)";
+        if (curvedConnectorStart && status.empty()) return "Right-click the second road: Infrastructure > Finish Curved Connector Here (Esc cancels)";
         return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
     }
     bool UpdateWindowTitle();

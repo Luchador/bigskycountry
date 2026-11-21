@@ -10,7 +10,8 @@ enum class ObjectType : unsigned
     Vehicle = 2,
     Prop = 3,
     Character = 4,
-    Marker = 5
+    Marker = 5,
+    SpawnPoint = 6
 };
 
 // One placed actor. Instances share an immutable model but have independent state.
@@ -19,6 +20,7 @@ class BSCObject : public MeshPlacement
 public:
     virtual ~BSCObject() = default;
     virtual ObjectType Type() const { return ObjectType::Object; }
+    virtual bool EditorOnly() const { return false; }
     // Override alongside Type() so editor copies preserve the concrete object and its properties.
     virtual std::unique_ptr<BSCObject> Clone() const { return std::make_unique<BSCObject>(*this); }
     virtual void Tick(float deltaSeconds);

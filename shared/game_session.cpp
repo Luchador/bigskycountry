@@ -21,21 +21,30 @@ GameSession::GameSession(SDL_Window* window, WorldDocument& document, CookedWorl
 {
 }
 
-bool GameSession::TryStartAt(Vector3 position, double yaw)
+bool GameSession::TryStartAt(Vector3 position, double yaw, bool authored)
 {
     auto car = std::make_unique<Car>();
     ObjectTransform transform{position, {0,yaw,0}};
-    if (!car->PlaceOnGround(world, transform, 5.0)) return false;
+    if (!car->PlaceOnGround(world, transform, 5.0) && !authored) return false;
     car->Teleport(transform);
     const auto frame = car->Instance().transform;
     for (double z : {-1.25,0.0,1.25})
-        if (world.SphereBlocked(frame.Point({0,1.05,z}), 0.9)) return false;
+        if (!authored && world.SphereBlocked(frame.Point({0,1.05,z}), 0.9)) return false;
     for (double lateral : {-2.8,2.8,-2.0,2.0})
     {
         const auto foot = world.collision.Ground(frame.Point({lateral,0,0}), 0.5, 2.0);
         if (!foot || !world.CharacterFits(foot->position)) continue;
         world.Add(std::move(car));
         return player.Spawn(foot->position, yaw - std::copysign(std::numbers::pi / 2, lateral));
+    }
+    if (authored)
+    {
+        // Honor an explicit location even in mid-air or on a narrow surface.
+        // Never silently move the player back to an unrelated automatic spawn.
+        // Start beside the car; gravity handles unsupported placements.
+        const auto foot = frame.Point({-2.8,0,0});
+        world.Add(std::move(car));
+        return player.Spawn(foot, yaw + std::numbers::pi / 2);
     }
     return false;
 }
@@ -47,6 +56,13 @@ bool GameSession::Start()
         if (streaming->Spawns().empty()) return SDL_SetError("Cooked world has no spawn candidates");
         const auto position = streaming->Spawns().front().position;
         loadingCamera.LookAt(position + Vector3{0, 5, -10}, position);
+        return input.SetCaptured(true);
+    }
+    if (const int start = document.SpawnPointIndex(); start >= 0)
+    {
+        const auto& pose = document.Objects()[start]->GetTransform();
+        if (!TryStartAt(pose.position, pose.rotation.y, true)) return false;
+        FinishStart();
         return input.SetCaptured(true);
     }
     bool placed = false;
@@ -121,7 +137,7 @@ void GameSession::Stream(Vector3 eye, WorldRenderer& renderer)
     {
         const auto& candidates = streaming->Spawns();
         const auto& spawn = candidates[spawnIndex];
-        if (TryStartAt(spawn.position, spawn.yaw)) FinishStart();
+        if (TryStartAt(spawn.position, spawn.yaw, spawn.authored)) FinishStart();
         else if (spawnIndex + 1 < candidates.size())
         {
             ++spawnIndex;

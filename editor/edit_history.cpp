@@ -501,7 +501,20 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
     if (action.object)
     {
         auto& edit = *action.object;
-        if (edit.removed)
+        if (edit.replacement)
+        {
+            const int currentFolder = world.hierarchy.Parent({SceneKind::Object, edit.index});
+            auto current = world.TakeObject(edit.index);
+            if (!current) return Result::Failed;
+            if (!world.InsertObject(edit.index, std::move(edit.removed), edit.folder))
+            {
+                world.InsertObject(edit.index, std::move(current), currentFolder);
+                return Result::Failed;
+            }
+            edit.removed = std::move(current);
+            edit.folder = currentFolder;
+        }
+        else if (edit.removed)
         {
             if (!world.InsertObject(edit.index, std::move(edit.removed), edit.folder)) return Result::Failed;
         }

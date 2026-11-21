@@ -226,7 +226,9 @@ bool Cook(WorldDocument& world, const std::string& file)
         for (std::size_t i = 0; i < world.meshes.size(); ++i) entity({SceneKind::Mesh, int(i)}, meshBounds(world.meshes[i]), {}, &world.meshes[i], {});
         for (std::size_t i = 0; i < world.Objects().size(); ++i)
         {
-            const auto& object = *world.Objects()[i]; const auto* marker = dynamic_cast<const Marker*>(&object);
+            const auto& object = *world.Objects()[i];
+            if (object.EditorOnly()) continue;
+            const auto* marker = dynamic_cast<const Marker*>(&object);
             entity({SceneKind::Object, int(i)}, meshBounds(object.Instance()), {}, &object.Instance(), marker ? marker->material : "");
             auto& e = manifest.entities.back(); e.type = object.Type(); e.pose = object.GetTransform();
             e.health = object.health; e.invincible = object.invincible;
@@ -269,6 +271,11 @@ bool Cook(WorldDocument& world, const std::string& file)
         for (const auto& e : manifest.entities)
             if ((e.id.kind == SceneKind::Terrain || e.id.kind == SceneKind::Mesh) && !e.bounds.Empty())
                 manifest.spawns.push_back({(e.bounds.min + e.bounds.max) * 0.5, 0});
+        if (const int start = world.SpawnPointIndex(); start >= 0)
+        {
+            const auto& pose = world.Objects()[start]->GetTransform();
+            manifest.spawns = {{pose.position, pose.rotation.y, true}};
+        }
         if (manifest.spawns.empty()) manifest.spawns.push_back({});
         // Dependency edges are metadata, not recursive render/load requirements. Cycles are expected.
         auto link = [&](EntityId a, EntityId b) {

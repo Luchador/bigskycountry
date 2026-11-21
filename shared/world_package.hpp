@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 2;
+    inline constexpr std::uint32_t version = 3;
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -65,7 +65,7 @@ namespace WorldPackage
         std::uint64_t nearTriangles = 0, distantTriangles = 0;
         std::vector<EntityId> owners;
     };
-    struct Spawn { Vector3 position; double yaw = 0; };
+    struct Spawn { Vector3 position; double yaw = 0; bool authored = false; };
     struct Manifest
     {
         std::uint64_t sourceHash = 0;

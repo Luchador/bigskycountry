@@ -91,7 +91,7 @@ if (!barn)
 
 The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
 
-The optional `OBJS` version 3 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, and 5 for a marker. A marker record ends with its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1 and 2 also load. Older markers use their original mesh colors and white text. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
+The optional `OBJS` version 4 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record ends with its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–3 also load. Older markers use their original mesh colors and white text. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
 
 ### Mesh editor
 
@@ -103,9 +103,17 @@ Assignments save immediately to `model.glb.bmesh` next to the GLB in `assets/mod
 
 ### Place markers
 
-Right-click in the 3D viewport and choose **Create → Marker**. The editor places `assets/models/objects/marker/marker.glb` at the picked position and selects it. In the inspector, enter a place name in **Marker text** and press **Enter**. An empty name hides the lettering. The Outliner shows the name and the world saves it with the marker. Drag a `.bmat` from the **Textures** tab onto **Mesh material** or directly onto the marker mesh. **Clear material** restores the model’s own colors. Choose **Text color** to set the label independently. Windows opens a color picker, and the SDL inspector accepts a `#RRGGBB` value. Each marker saves its own settings and supports Undo and Redo.
+Right-click in the 3D viewport and choose **Infrastructure → Marker**. The editor places `assets/models/objects/marker/marker.glb` at the picked position and selects it. In the inspector, enter a place name in **Marker text** and press **Enter**. An empty name hides the lettering. The Outliner shows the name and the world saves it with the marker. Drag a `.bmat` from the **Textures** tab onto **Mesh material** or directly onto the marker mesh. **Clear material** restores the model’s own colors. Choose **Text color** to set the label independently. Windows opens a color picker, and the SDL inspector accepts a `#RRGGBB` value. Each marker saves its own settings and supports Undo and Redo.
 
 In the game and the editor, the lettering faces the active camera around the world Y axis. Its lower edge is 50 game meters above the transformed mesh. The marker’s X scale controls letter width and its Y scale controls letter height. At unit scale a capital H is 100 game meters tall.
+
+### Spawn point and viewport menus
+
+The 3D viewport's right-click menu has three submenus: **Infrastructure** (roads, railroads, intersections, markers and their contextual tools), **Water** (lakes, rivers and river connections), and **Special**.
+
+Choose **Special → Spawn Point** to place `assets/models/editor/start.glb` at the clicked location. The world has one spawn point: creating another replaces the previous placement in a single undoable action. Select its model or **Spawn Point** row in the Outliner to move it; rotate around Y to set the car's heading (+Z at zero rotation). It supports Delete, Undo and Redo. Shift-drag moves this unique object without duplicating it. The marker appears only in the editor and does not add gameplay collision.
+
+When the game starts, the test car appears at the spawn point and the on-foot player appears beside it. Nearby ground adjusts their resting height; an unsupported placement starts there under gravity. The game keeps its automatic spawn selection when the world has no spawn point. Save and use **File → Cook World** after changing the spawn point so streamed games use the new placement. Cooked format version 3 stores its location and heading as startup metadata; version 2 packages continue to load with automatic startup locations.
 
 ### Terrain chunks
 
@@ -123,7 +131,7 @@ The optional `TERR` version 4 section distinguishes imported meshes and generate
 
 ### Splitting roads
 
-Select a road to show its control points, then right-click an interior control point in the 3D viewport and choose **Split Road**, below **Create**. The chosen point becomes the last point of the first road and the first point of the second road. The roads can then be selected and edited separately. The item is disabled on the first and last points because either would produce an empty road.
+Select a road to show its control points, then right-click an interior control point in the 3D viewport and choose **Infrastructure → Split Road**. The chosen point becomes the last point of the first road and the first point of the second road. The roads can then be selected and edited separately. The item is disabled on the first and last points because either would produce an empty road.
 
 Both sections inherit the original road's names, material, lane and edge settings, paint setting, and Outliner folder. Bézier tangents are retained at the new ends. Attached intersections and ramp connections stay with their corresponding section, and terrain boundaries include both road IDs. Existing ramp tapers contract if a split shortens their available run. Splitting is one undo/redo step and saves with the world. Railroad control points support the same operation.
 
@@ -147,7 +155,7 @@ In the top-down view, use the same selection gestures on the road surfaces and i
 
 ### Highway entrances and exits
 
-Select a road with at least two lanes in the 3D viewport. Right-click the **green guide in an outer travel lane** and choose **Create Exit Ramp** or **Create Entrance Ramp**. The ramp joins the highway at the clicked location, and its free endpoint is selected for editing. Each ramp starts as a one-lane, one-way Bézier road with the highway’s pavement material. The initial 60 m taper needs clear space upstream for an exit or downstream for an entrance. An unavailable direction is grayed out.
+Select a road with at least two lanes in the 3D viewport. Right-click the **green guide in an outer travel lane** and open **Infrastructure**, then choose **Create Exit Ramp** or **Create Entrance Ramp**. The ramp joins the highway at the clicked location, and its free endpoint is selected for editing. Each ramp starts as a one-lane, one-way Bézier road with the highway’s pavement material. The initial 60 m taper needs clear space upstream for an exit or downstream for an entrance. An unavailable direction is grayed out.
 
 Select the highway or its ramp to see two diamonds on the outer lane. Drag the **green diamond** to slide the ramp attachment along the road. Drag the **pink diamond** to move the narrow end of the taper. Each drag follows the lane through curves and elevation changes and stops at neighboring tapers or road ends. **Esc** cancels a drag and **Ctrl+Z** undoes a completed edit. If a later highway edit shortens the available space, the tapers contract to fit and expand again when space returns.
 
@@ -157,7 +165,7 @@ Moving the highway station, editing its grade, or subdividing its spline carries
 
 ### Intersection anchors
 
-In the 3D viewport, right-click and choose **Create → Create Intersection**. On a road, the editor inserts the intersection at the clicked location along the centerline. You can also right-click the blue spline or an interior control point on a selected road. The junction follows the road heading, splits it into two roads, and connects them to opposite anchors. Each side needs room for its 10 m anchor and a remaining approach. Right-click the first or last control point to center the intersection on that endpoint. The road is trimmed to the approach anchor and the other three anchors are free. This requires room for the 10 m anchor on the road side only. An endpoint already attached to a junction cannot receive another one. **Ctrl+Z** restores the original road in one step.
+In the 3D viewport, right-click and choose **Infrastructure → Create Intersection**. On a road, the editor inserts the intersection at the clicked location along the centerline. You can also right-click the blue spline or an interior control point on a selected road. The junction follows the road heading, splits it into two roads, and connects them to opposite anchors. Each side needs room for its 10 m anchor and a remaining approach. Right-click the first or last control point to center the intersection on that endpoint. The road is trimmed to the approach anchor and the other three anchors are free. This requires room for the 10 m anchor on the road side only. An endpoint already attached to a junction cannot receive another one. **Ctrl+Z** restores the original road in one step.
 
 Away from a road, the command places a standalone intersection using the usual surface or ground-plane placement. Pick the cross or its Outliner row to edit it again. Use **W** to move the center and **E** to rotate the junction around its vertical axis. The Transform fields also accept a location and a Y rotation. The intersection inspector lets you adjust the corner radius and assign a pavement material. The horizontal ring previews the radius. The optional `INTS` section in the world file stores these settings. Version 3 adds yaw in radians. Earlier versions load with zero yaw. Version 4 records whether the junction was inserted with through pavement. Version 5 adds the four anchor skew angles in radians. Older worlds open with zero skew.
 
@@ -175,7 +183,7 @@ Select the intersection itself to choose **Continue paint markings → Standard,
 
 ### Y-intersections
 
-Right-click in the viewport and choose **Create → Create Y-Intersection**. This creates three anchors: a stem and two branches, initially 120 degrees apart. Connect roads to these anchors with the usual endpoint + Shift-click + **F** workflow, or Shift-drag a free anchor to grow a road. Pavement is generated once all three anchors have roads. Use the intersection rotation gizmo to orient the junction, and rotate individual anchors to skew their approach by up to 45 degrees (Ctrl snaps to 5 degrees).
+Right-click in the viewport and choose **Infrastructure → Create Y-Intersection**. This creates three anchors: a stem and two branches, initially 120 degrees apart. Connect roads to these anchors with the usual endpoint + Shift-click + **F** workflow, or Shift-drag a free anchor to grow a road. Pavement is generated once all three anchors have roads. Use the intersection rotation gizmo to orient the junction, and rotate individual anchors to skew their approach by up to 45 degrees (Ctrl snaps to 5 degrees).
 
 Select the intersection to edit **Size: center to anchor (m)**, from 10 to 2000 meters (default 60). Enter commits the change. Size spreads the anchors and moves the connected road endpoints; it does not scale the roads' lane widths. If an enlarged junction would move an anchor past the next road control point, move that control point outward first. Size changes support undo/redo.
 
@@ -190,7 +198,7 @@ Click an intersection anchor in the 3D or top-down view to edit its **Stop line*
 
 ### Lakes
 
-In the 3D viewport, right-click and choose **Create → Create Lake**. A lake starts as a 200 m diameter circle with four shoreline control points at 90-degree intervals, with shoreline editing already active. To reshape an existing lake, select its water surface or its Lake row in the Outliner, then click **Edit Shoreline** in the inspector.
+In the 3D viewport, right-click and choose **Water → Create Lake**. A lake starts as a 200 m diameter circle with four shoreline control points at 90-degree intervals, with shoreline editing already active. To reshape an existing lake, select its water surface or its Lake row in the Outliner, then click **Edit Shoreline** in the inspector.
 
 In shoreline edit mode, drag a teal point to reshape the lake in XZ, or select it and use the translation gizmo/Transform fields. Double-click between points on the shoreline to insert a point without changing the existing curve. **Shift-click** adds shoreline points to the selection; **Ctrl-click** removes them. Drag a selected point or use the translation gizmo/Location fields to move the group in XZ. **Ctrl+Shift+left-drag** selects shoreline points in a box. **Delete** removes the selected points together; at least three must remain. Only the spline preview updates during editing; the previous water and terrain meshes remain visible. **Ctrl+Z/Ctrl+Y** undo and redo draft edits without rebuilding either surface.
 
@@ -202,7 +210,7 @@ Water stays horizontal. A subdivided terrain basin slopes down from the exact sh
 
 ### Rivers
 
-In the 3D viewport, right-click **Create → Create River**. The new river starts at the cursor, 25 m wide and 200 m long, with **Edit River Banks** active. Two teal open splines define its banks, and larger green handles mark the center of its start and end. Drag either bank's teal points independently to change the width and course. Double-click a bank between points to insert a control point while preserving that curve; each bank may have a different point count. **Delete** removes a selected bank point, leaving at least two per bank.
+In the 3D viewport, right-click **Water → Create River**. The new river starts at the cursor, 25 m wide and 200 m long, with **Edit River Banks** active. Two teal open splines define its banks, and larger green handles mark the center of its start and end. Drag either bank's teal points independently to change the width and course. Double-click a bank between points to insert a control point while preserving that curve; each bank may have a different point count. **Delete** removes a selected bank point, leaving at least two per bank.
 
 Select a green end handle alone, then **Shift-drag** it to extend the river from either end. This adds a point to both banks, preserving the end's width and current elevation. Dragging an end handle without Shift moves both bank ends together. Bank points and end handles support all three translation axes and Location fields: select a point, then drag the green **Y** gizmo or enter **Location Y** to change its elevation. Raising/lowering an end handle changes both banks together; individual bank points can be adjusted independently. Direct point dragging moves horizontally at that point's current height. Double-click insertion preserves the full 3D curve.
 
@@ -292,7 +300,7 @@ A matching spherical pixel cutoff in the GPU and software renderers handles geom
 
 **Cooked-world streaming (milestone 3):** use **File → Cook World** after building this update. The game loads and unloads nearby geometry, shared models/textures, and collision asynchronously from format-v2 packages. Separate near/far/collision payloads avoid loading full-detail distant geometry. Project Settings now includes geometry, shared-asset, and collision budgets; F3 reports residency, evictions, errors and memory pressure. Collision stays loaded around every live pawn, including parked vehicles, and physics waits if required chunks are missing. The editor keeps authored data, selections, edits and undo history resident while reclaiming unused render caches. Older packages use the authored-world fallback until recooked. See [streaming format and behavior](docs/streamable-world.md).
 
-Right-click the 3D viewport and choose **Create → Create Road**. The first control point lands on the nearest road triangle under the original click, including elevated roads and curbs. On empty space it lands on the ground plane (Y = 0), or 20 m along the ray if the ground is out of reach. The new road starts with a level 10 m segment along world +X. Its far endpoint is selected for Shift-drag extension. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
+Right-click the 3D viewport and choose **Infrastructure → Create Road**. The first control point lands on the nearest road triangle under the original click, including elevated roads and curbs. On empty space it lands on the ground plane (Y = 0), or 20 m along the ray if the ground is out of reach. The new road starts with a level 10 m segment along world +X. Its far endpoint is selected for Shift-drag extension. Creation saves the world and supports **Ctrl+Z** and **Ctrl+Y**.
 
 Select two or more roads in the viewport or Outliner to edit their properties together. The road inspector shows their combined length and marks settings that differ. Each edit changes that property on every selected road and takes one **Ctrl+Z** to undo. For mixed lane counts or separations, **+** steps above the largest value and **−** below the smallest, within the road style limits. Drop a material on the pavement slot to assign it to the selection.
 
@@ -310,7 +318,7 @@ The top-down view retains road, intersection, road-bounded terrain, rail, and ti
 
 ### At-grade railroad crossings
 
-Arrange a road and a railroad so their splines cross in plan view. In the 3D viewport, right-click either surface near the crossing and choose **Create → Create Railroad Crossing**. At an existing crossing, that item becomes **Remove Railroad Crossing**. Creation/removal supports undo and redo and saves with the world.
+Arrange a road and a railroad so their splines cross in plan view. In the 3D viewport, right-click either surface near the crossing and choose **Infrastructure → Create Railroad Crossing**. At an existing crossing, that item becomes **Remove Railroad Crossing**. Creation/removal supports undo and redo and saves with the world.
 
 The same command also connects two railroads at grade. For now this is a terrain-fill connection: it leaves both rail, tie, and embankment meshes unchanged, with no diamond/switch geometry. Select the railroads and the other elements enclosing the land, then press **F** to fill it. The terrain follows both embankment rims (including transition strips) and adds small sealing faces where their edge elevations differ. Rail-head heights at the crossing must be within 0.25 m; adjust the track heights first for larger differences. Elevated or nearly parallel tracks are not accepted as at-grade junctions. The connection follows spline edits and splits, supports undo/redo, and persists in `ROAD` version 26. Terrain seams are regenerated only when their sources change and are included in cooked rendering/collision.
 
@@ -328,9 +336,9 @@ Leave enough spline length on both sides for the full crossing and gradual appro
 
 In **Settings → Project Settings → Optimization**, enter the **Rail and tie render distance (m)** and press **Enter** or **Apply**. The default is **300 m**. The game and editor measure to the nearest point on each control-point segment’s sampled track. Beyond that distance the embankment and transition strip remain visible. Set the distance to **0** to hide rails and ties at all distances. The editor saves the project-wide value in `assets/project-settings.json` and stages it in `build/cooked` for the game.
 
-In the 3D viewport, right-click and choose **Create → Create Railroad** to place 50 m of standard-gauge track. Select its teal spline or control points to edit it as you would a road. **Shift-drag** either endpoint to extend the track, or select a span and press **Ctrl+Q** to subdivide it. The control-point elevation is the base of the embankment.
+In the 3D viewport, right-click and choose **Infrastructure → Create Railroad** to place 50 m of standard-gauge track. Select its teal spline or control points to edit it as you would a road. **Shift-drag** either endpoint to extend the track, or select a span and press **Ctrl+Q** to subdivide it. The control-point elevation is the base of the embankment.
 
-To break a long railroad into smaller, independently editable pieces, select it and right-click an interior control point, then choose **Split Railroad** below **Create**. The first and last points cannot be split. If there is no control point where you want the cut, select that spline segment and use **Ctrl+Q** first. Both pieces inherit the track's embankment settings, materials, names, and Outliner folder. Bézier tangents keep the rails aligned at the cut; existing crossings and terrain boundary references follow their corresponding pieces. **Ctrl+Z** and **Ctrl+Y** undo and redo the split. Subsequent edits rebuild the edited piece's track geometry rather than the original full-length railroad.
+To break a long railroad into smaller, independently editable pieces, select it and right-click an interior control point, then choose **Infrastructure → Split Railroad**. The first and last points cannot be split. If there is no control point where you want the cut, select that spline segment and use **Ctrl+Q** first. Both pieces inherit the track's embankment settings, materials, names, and Outliner folder. Bézier tangents keep the rails aligned at the cut; existing crossings and terrain boundary references follow their corresponding pieces. **Ctrl+Z** and **Ctrl+Y** undo and redo the split. Subsequent edits rebuild the edited piece's track geometry rather than the original full-length railroad.
 
 The railroad inspector adjusts the flat crest width and the bed height in meters. The initial crest is 4 m wide and 0.75 m high. The rails have 1.435 m of clear gauge and the timber ties are spaced every 0.60 m along the track. Enable **Transition strip** for a 0.40 m blend at each toe and drop a Transition material onto the strip slot. The embankment has its own material slot.
 
@@ -340,7 +348,7 @@ During viewport drags, consecutive queued left-mouse movements are combined befo
 
 ### Dead ends
 
-Select a road and right-click either free end control point, then choose **Create → Dead End**. This keeps the existing pavement in place and adds a 5 m transition beyond the endpoint, following its direction and grade. The strip spans the road and shoulders, joins side transitions, and eases raised curb edges down at the far end. Paint stops at the original endpoint.
+Select a road and right-click either free end control point, then choose **Infrastructure → Dead End**. This keeps the existing pavement in place and adds a 5 m transition beyond the endpoint, following its direction and grade. The strip spans the road and shoulders, joins side transitions, and eases raised curb edges down at the far end. Paint stops at the original endpoint.
 
 With that endpoint selected, edit **End transition (m)** in the inspector and press **Enter**. Set it to **0** to remove the dead end. Assign a **Transition** material to the road's **Transition strip material** slot, which is available whenever the road has a dead end, even with Road edges set to None. The strip uses red vertex color to blend from the material's inner layer at the pavement to its outer layer at the far edge.
 
@@ -415,7 +423,7 @@ To extend either end of a road, select its endpoint alone, hold **Shift**, and d
 
 Raise the upper road or railroad to the desired height, then select the adjoining **segments** that
 will form the span. Right-click their cyan center spline (or pavement), then choose
-**Create → Overpass**. Its end control points define the abutments; keep those points
+**Infrastructure → Overpass**. Its end control points define the abutments; keep those points
 beyond all of the lower roads, railroad embankments (including transition strips),
 and river or lake banks. Use Ctrl+Q to add control points if necessary.
 A span must cross a road, railroad, river or lake and have room beneath its 0.6 m default deck.
@@ -429,7 +437,7 @@ internal walls between the crossings. Water-only bridges use the same command.
 The road keeps its spline, lane/shoulder profiles, paint and pavement material. With
 bridge segments selected, the inspector's **Deck thickness (m)** field accepts 0.1–10 m.
 Leave enough clearance for vehicles when changing thickness or road elevations.
-**Create → Remove Overpass** restores ordinary road segments. A single clicked bridge
+**Infrastructure → Remove Overpass** restores ordinary road segments. A single clicked bridge
 segment removes its contiguous span; a multi-segment selection limits the change to
 those segments. Creation, removal and thickness edits support undo/redo.
 
@@ -471,7 +479,7 @@ same dependencies as road-over-road spans. A single span can cross both roads an
 railroads.
 
 For a railroad over a road, select the railroad segments and use the same
-**Create → Overpass** command. Rails, ties, gauge, ballast and transition strips keep
+**Infrastructure → Overpass** command. Rails, ties, gauge, ballast and transition strips keep
 their existing shape and stationing. Concrete supports the full embankment profile,
 with sides, an underside and abutments at the span ends. Clearance is checked from
 the authored railway spline at the embankment toe (the deck's lowest unbanked edge),
@@ -489,7 +497,7 @@ ordinary roads and railroads still load.
 
 ### Railroad single switches
 
-Right-click a railroad spline or control point and open **Create → Left Railroad Switch** or **Right Railroad Switch**. Left and right are viewed toward the railroad's last control point; the **(Reverse)** choices face toward its first point. A single switch adds one branch to the existing through track. The branch starts about 50 m long, with an 8 m lateral offset and a tangent-matched Bézier curve. Its rails retain the 1.435 m standard gauge. The turnout shares ballast and extended sleepers with the main track.
+Right-click a railroad spline or control point and open **Infrastructure → Left Railroad Switch** or **Right Railroad Switch**. Left and right are viewed toward the railroad's last control point; the **(Reverse)** choices face toward its first point. A single switch adds one branch to the existing through track. The branch starts about 50 m long, with an 8 m lateral offset and a tangent-matched Bézier curve. Its rails retain the 1.435 m standard gauge. The turnout shares ballast and extended sleepers with the main track.
 
 Select the branch and move, subdivide, or Shift-drag its free control points as with other railroads. Moving the free point changes the turnout's length and angle. The joined toe follows its host's position, tangent, and rail-head height; move that host control point to relocate the switch. A switch is physically bidirectional, so the same turnout works for converging and diverging tracks. Select free endpoints on two railroads with Shift and press **F** to join them. Road-to-rail endpoint joins remain disallowed.
 
@@ -497,7 +505,7 @@ Switches inherit the host's embankment and material settings and outliner folder
 
 ## Curved road connectors
 
-For a curved cutoff between two roads, right-click a road or its control spline and choose **Create > Start Curved Connector**. Right-click the other road where the curve should join and choose **Create > Finish Curved Connector Here**. The same commands are directly available when right-clicking a green lane line. **Escape** or **Cancel Curved Connector** cancels the unfinished operation. The parent roads remain unchanged until the connector is completed.
+For a curved cutoff between two roads, right-click a road or its control spline and choose **Infrastructure → Start Curved Connector**. Right-click the other road where the curve should join and choose **Infrastructure → Finish Curved Connector Here**. The same commands are available under **Infrastructure** when right-clicking a green lane line. **Escape** or **Cancel Curved Connector** cancels the unfinished operation. The parent roads remain unchanged until the connector is completed.
 
 This creates an editable Bézier road, tangent to each parent road, without adding a highway taper lane. It inherits the first road's pavement material, paint setting, and edge treatment. Ordinary two-way roads produce a two-lane connector (one lane if either road has one); divided/one-way roads produce a one-way connector and require choosing the start and finish in traffic order. Lane counts, materials, and paint can then be edited in the road inspector.
 
@@ -510,9 +518,9 @@ Attachments persist through save/load and undo/redo. Splitting a parent road pre
 To terminate a smaller river in a larger one:
 
 1. Enter **Edit River Banks** on the tributary and right-click its green start or end handle.
-2. Choose **Connect River End**. This finishes the spline edit.
-3. Right-click the receiving river near the bank where the tributary should enter and choose **Connect River Here**. On the SDL menu these actions are in **Create**.
+2. Choose **Water → Connect River End**. This finishes the spline edit.
+3. Right-click the receiving river near the bank where the tributary should enter and choose **Water → Connect River Here**.
 
-The tributary mouth follows that location along the receiving bank, including elevation changes. Each river can feed one other river; a receiving river can have several tributaries. Connections cannot form cycles. Choose a location at least one tributary width from either end of the receiving bank. **Esc** cancels a pending connection. Right-click a connected tributary and choose **Disconnect River** before moving or extending its attached end.
+The tributary mouth follows that location along the receiving bank, including elevation changes. Each river can feed one other river; a receiving river can have several tributaries. Connections cannot form cycles. Choose a location at least one tributary width from either end of the receiving bank. **Esc** cancels a pending connection. Right-click a connected tributary and choose **Water → Disconnect River** before moving or extending its attached end.
 
 Water and submerged terrain share a triangulation at the junction, with no overlapping water faces or internal bank wall. Rivers remain separate selectable objects and terrain fill follows the joined shoreline. Edit mode continues to update only splines; finishing the edit rebuilds affected connections. Connections support undo/redo and save/load. `TERR` version 10 stores an optional receiver ID, tributary end, receiving bank, distance fraction and mouth width after each river's bank data; older worlds load without connections. Recook the world to update in-game geometry.

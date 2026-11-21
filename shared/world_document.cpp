@@ -1,4 +1,5 @@
 #include "world_document.hpp"
+#include "spawn_point.hpp"
 #include "curved_road.hpp"
 #include "material.hpp"
 #include "road_io.hpp"
@@ -396,6 +397,14 @@ BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelP
         }
         object = std::make_unique<Marker>();
         break;
+    case ObjectType::SpawnPoint:
+        if (modelPath != SpawnPoint::modelPath || SpawnPointIndex() >= 0)
+        {
+            SDL_SetError("A world can have only one spawn point using editor/start.glb");
+            return nullptr;
+        }
+        object = std::make_unique<SpawnPoint>();
+        break;
     case ObjectType::Character:
         object = std::make_unique<Character>();
         break;
@@ -436,6 +445,8 @@ bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object,
     {
         return SDL_SetError("Invalid object insertion");
     }
+    if (object->Type() == ObjectType::SpawnPoint && SpawnPointIndex() >= 0)
+        return SDL_SetError("A world can have only one spawn point");
     if (!object->persistentId && !(object->persistentId = AllocatePlacementId())) return false;
     for (const auto& existing : objects)
         if (existing->persistentId == object->persistentId) return SDL_SetError("Duplicate object identity");
@@ -884,4 +895,11 @@ bool WorldDocument::Save()
         return SDL_SetError("Cannot save '%s': %s", path.c_str(), reason.c_str());
     }
     return true;
+}
+
+int WorldDocument::SpawnPointIndex() const
+{
+    for (int i = 0; i < static_cast<int>(objects.size()); ++i)
+        if (objects[i]->Type() == ObjectType::SpawnPoint) return i;
+    return -1;
 }

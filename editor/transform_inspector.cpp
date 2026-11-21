@@ -283,6 +283,7 @@ TransformFields Inspect(const WorldDocument& world, TransformTarget target)
             return {};
         }
         fields.value = world.Objects()[i]->GetTransform();
+        fields.levelOnly = world.Objects()[i]->Type() == ObjectType::SpawnPoint;
         break;
     default: break;
     }

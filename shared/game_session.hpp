@@ -35,5 +35,5 @@ private:
     std::size_t spawnIndex = 0;
     std::vector<Vector3> PhysicsSources() const;
     bool FinishStart();
-    bool TryStartAt(Vector3 position, double yaw);
+    bool TryStartAt(Vector3 position, double yaw, bool authored = false);
 };

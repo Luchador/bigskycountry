@@ -1,6 +1,7 @@
 #include "viewport_selection.hpp"
 #include "world_package.hpp"
 #include "road_editor.hpp"
+#include "spawn_point.hpp"
 #include "curved_road.hpp"
 #include "marker.hpp"
 #include "editor_theme.hpp"
@@ -200,7 +201,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         return placement;
     }
     const auto fields = Inspect(world, target);
-    if (fields.target.kind == SelectionKind::None || fields.roadBound) return {};
+    if (fields.target.kind == SelectionKind::None || fields.roadBound || (fields.levelOnly && gizmo.mode == GizmoMode::Scale)) return {};
     if (target.kind == SelectionKind::WaterPoint && gizmo.mode == GizmoMode::Rotate) return {};
     const Vector3 offset = target.kind == SelectionKind::Road ? world.roads.at(target.index).GuideOffset() : Vector3{};
     auto placement = target.kind == SelectionKind::WaterPoint ? RoadOverlay::PointPlacement(fields.value.position, camera, scene) :
@@ -854,6 +855,39 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         outliner.Invalidate();
         Save(world);
         BeginWaterEditing(world);
+        return;
+    }
+    if (command == EditorCommand::CreateSpawnPoint)
+    {
+        const int existing = world.SpawnPointIndex();
+        if (existing < 0)
+        {
+            PlaceObject(world, ObjectType::SpawnPoint, SpawnPoint::modelPath, creationPoint);
+            return;
+        }
+        // Prepare the new placement before removing the old one. History owns
+        // whichever spawn is not currently in the world, as one undoable action.
+        auto replacement = std::make_unique<SpawnPoint>();
+        replacement->SetMesh(world.models.Load(SpawnPoint::modelPath));
+        if (!replacement->IsLoaded() || !replacement->SetTransform(ObjectTransform{creationPoint}))
+        { status = SDL_GetError(); return; }
+        EditSnapshot before(state);
+        before.hierarchy = world.hierarchy;
+        const int folder = world.hierarchy.Parent({SceneKind::Object, existing});
+        auto previous = world.TakeObject(existing);
+        if (!world.InsertObject(existing, std::move(replacement), 0))
+        {
+            status = SDL_GetError();
+            world.InsertObject(existing, std::move(previous), folder);
+            world.hierarchy = *before.hierarchy;
+            return;
+        }
+        state.SelectRows({{SceneKind::Object, existing}});
+        EditSnapshot after(state); after.hierarchy = world.hierarchy;
+        history.Record(-1, std::move(before), std::move(after),
+            EditHistory::ObjectEdit{existing, folder, std::move(previous), true});
+        outliner.Invalidate();
+        Save(world);
         return;
     }
     if (command == EditorCommand::CreateMarker)
@@ -3119,7 +3153,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
                 dragStart->meshTransform = Inspect(world, state.meshSelection).value;
                 if (state.meshSelection.kind == SelectionKind::WaterPoint)
                     dragStart->water = EditSnapshot::WaterEdit{state.meshSelection.index, *world.Terrain()[state.meshSelection.index]->WaterSource()};
-                drag = shift && state.meshSelection.kind == SelectionKind::Object && gizmo.mode == GizmoMode::Translate
+                drag = shift && state.meshSelection.kind == SelectionKind::Object && !world.Objects()[state.meshSelection.index]->EditorOnly() && gizmo.mode == GizmoMode::Translate
                            ? Drag::DuplicateObject : Drag::Gizmo;
             }
             return;

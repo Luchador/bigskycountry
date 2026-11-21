@@ -201,6 +201,7 @@ public:
         int index, folder;
         // Exactly one owner: the world while placed, this record while removed.
         std::unique_ptr<BSCObject> removed;
+        bool replacement = false; // Swap two placements at this row (the unique spawn point).
     };
     bool Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object = {});
     bool SplitRoad(WorldDocument& world, RoadEditorState& editor, int index, int point);

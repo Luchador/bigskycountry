@@ -21,6 +21,8 @@ namespace
             return "Character";
         case ObjectType::Marker:
             return "Marker";
+        case ObjectType::SpawnPoint:
+            return "Spawn Point";
         case ObjectType::Prop:
             return "Prop";
         default:
@@ -257,7 +259,7 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     {
         const auto& object = *world.Objects()[i];
         const auto* marker = dynamic_cast<const Marker*>(&object);
-        add(SceneKind::Object, i, marker && !marker->Text().empty() ? marker->Text() : ModelLabel(object.Instance(), i),
+        add(SceneKind::Object, i, object.Type() == ObjectType::SpawnPoint ? "Spawn Point" : marker && !marker->Text().empty() ? marker->Text() : ModelLabel(object.Instance(), i),
             ObjectLabel(object.Type()));
     }
     for (int i = 0; i < static_cast<int>(sizes[3]); ++i)
