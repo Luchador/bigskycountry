@@ -240,6 +240,7 @@ private:
     SDL_FPoint lastHoverPoint{-1, -1};
     DragAngle planRotation;
     double appliedAngle = 0; // Signed radians actually applied since mouse-down.
+    double appliedScale = 1; // Multiplier actually applied since mouse-down.
     bool snapRotation = false;
     std::vector<RoadPoint> originalPoints;
     Vector3 originalRotation{};

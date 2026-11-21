@@ -337,4 +337,10 @@ if(BIGSKY_BUILD_TESTS)
     add_executable(BigSkyEditorGeometryCacheTests tests/editor_geometry_cache_tests.cpp)
     target_link_libraries(BigSkyEditorGeometryCacheTests PRIVATE BigSkyApplication)
     add_test(NAME editor_geometry_cache COMMAND BigSkyEditorGeometryCacheTests)
+    add_executable(BigSkyScaleGizmoTests tests/scale_gizmo_tests.cpp
+        editor/transform_gizmo.cpp editor/viewport_picker.cpp editor/transform_settings.cpp
+        editor/transform_inspector.cpp editor/road_group_transform.cpp
+        editor/properties_inspector.cpp editor/edit_history.cpp)
+    target_link_libraries(BigSkyScaleGizmoTests PRIVATE BigSkyApplication)
+    add_test(NAME scale_gizmo COMMAND BigSkyScaleGizmoTests)
 endif()

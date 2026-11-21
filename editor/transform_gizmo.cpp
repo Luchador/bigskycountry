@@ -5,6 +5,7 @@
 #include "world_renderer.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -41,6 +42,40 @@ double DragAngle::Snap(double radians, bool enabled)
     return enabled ? std::round(radians / step) * step : radians;
 }
 
+DragScale::DragScale(const FreeCamera& camera, Vector3 pivot, Vector3 axis, SDL_FPoint mouse)
+    : start(mouse), direction{1, -1}
+{
+    if (axis == Vector3{}) return;
+    // Project the local axis at the pivot, accounting for perspective. When the
+    // axis points directly at the camera, use upward motion to enlarge it.
+    direction = {0, -1};
+    const auto view = camera.WorldToView(pivot), along = camera.WorldDirectionToView(axis);
+    if (view.z < worldNearDepth) return;
+    const double dx = along.x - along.z * view.x / view.z;
+    const double dy = -along.y + along.z * view.y / view.z;
+    const double length = std::hypot(dx, dy);
+    if (length > 0.05)
+        direction = {static_cast<float>(dx / length), static_cast<float>(dy / length)};
+}
+
+double DragScale::Amount(SDL_FPoint mouse) const
+{
+    const double pixels = (double(mouse.x) - start.x) * direction.x + (double(mouse.y) - start.y) * direction.y;
+    if (!std::isfinite(pixels)) return 1;
+    // 100 pixels doubles/halves the starting size. Exponential scaling never
+    // crosses zero, flips an axis, or collapses a mesh during a long drag.
+    return std::exp2(std::clamp(pixels / 100.0, -10.0, 10.0));
+}
+
+ObjectTransform ScaleObjectTransform(ObjectTransform start, int axis, double factor)
+{
+    if (axis < 0 || axis > 3 || !std::isfinite(factor) || factor <= 0) return start;
+    if (axis == 0 || axis == 3) start.scale.x *= factor;
+    if (axis == 1 || axis == 3) start.scale.y *= factor;
+    if (axis == 2 || axis == 3) start.scale.z *= factor;
+    return start;
+}
+
 std::optional<GizmoPlacement> GizmoPlacement::At(Vector3 pivot, const FreeCamera& camera, SDL_Rect scene)
 {
     const double focal = ViewportFocalLength(scene);
@@ -68,22 +103,26 @@ void TransformGizmo::Load(MeshAssets& assets)
 
     arrow = load("editor/arrow.glb");
     ring = load("editor/rotation_gizmo.glb");
+    scaleArrow = load("editor/scale_gizmo.glb");
+    scaleBox = load("editor/box.glb");
 }
 
 const GizmoAxes& TransformGizmo::Axes(const GizmoPlacement& placement) const
 {
-    return settings.space == GizmoSpace::Local ? placement.localAxes : worldAxes;
+    // ObjectTransform stores rotation followed by local component scales. World
+    // nonuniform scaling would require shear, which that transform cannot store.
+    return mode == GizmoMode::Scale || settings.space == GizmoSpace::Local ? placement.localAxes : worldAxes;
 }
 
 MeshInstance TransformGizmo::Handle(const GizmoPlacement& placement, const GizmoAxes& axes, int axis) const
 {
     MeshTransform transform;
     transform.origin = placement.origin;
-    // The arrow points along local X. The ring's normal is local Y.
-    const int from = mode == GizmoMode::Translate ? 0 : 1;
+    // Both arrow meshes point along local X. The ring's normal is local Y.
+    const int from = mode == GizmoMode::Rotate ? 1 : 0;
     GizmoAxes basis = axes;
 
-    if (axis != from)
+    if (axis < 3 && axis != from)
     {
         basis[from] = axes[axis];
         basis[axis] = axes[from] * -1;
@@ -95,7 +134,9 @@ MeshInstance TransformGizmo::Handle(const GizmoPlacement& placement, const Gizmo
     transform.y = basis[1] * scale;
     transform.z = basis[2] * scale;
 
-    return {mode == GizmoMode::Translate ? arrow : ring, transform};
+    const auto mesh = mode == GizmoMode::Scale ? (axis == 3 ? scaleBox : scaleArrow)
+                                              : (mode == GizmoMode::Translate ? arrow : ring);
+    return {mesh, transform};
 }
 
 void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placement, const GizmoDrag* drag,
@@ -103,11 +144,12 @@ void TransformGizmo::Draw(WorldRenderer& renderer, const GizmoPlacement& placeme
 {
     const GizmoAxes& axes = drag ? drag->startAxes : Axes(placement);
 
-    for (int axis = 0; axis < 3; ++axis)
+    for (int axis = 0; axis < (mode == GizmoMode::Scale ? 4 : 3); ++axis)
     {
         if (mode == GizmoMode::Rotate && placement.yawOnly && axis != 1) continue;
         if (mode == GizmoMode::Translate && placement.horizontalTranslation && axis == 1) continue;
-        renderer.SubmitMesh(Handle(placement, axes, axis), hoveredAxis == axis ? EditorColors::amber : axisColors[axis]);
+        const SDL_FColor color = axis == 3 ? SDL_FColor{0.9f, 0.9f, 0.9f, 1} : axisColors[axis];
+        renderer.SubmitMesh(Handle(placement, axes, axis), hoveredAxis == axis ? EditorColors::amber : color);
     }
 }
 
@@ -115,6 +157,10 @@ std::optional<int> TransformGizmo::PickAxis(ViewportPicker& picker, const GizmoP
 {
     const GizmoAxes& axes = drag ? drag->startAxes : Axes(placement);
     std::optional<int> hit;
+
+    // The three shafts start inside the box. Give its projected face priority
+    // so a click at the pivot reliably selects uniform scaling.
+    if (mode == GizmoMode::Scale && picker.TestMesh(Handle(placement, axes, 3))) return 3;
 
     for (int axis = 0; axis < 3; ++axis)
     {
@@ -140,9 +186,15 @@ std::optional<GizmoDrag> TransformGizmo::BeginDrag(ViewportPicker& picker, const
 }
 
 GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const GizmoPlacement& placement, const ViewportPicker& pick)
-    : axis(axes[axisIndex]), axisName("XYZ"[axisIndex]), startAxes(axes), mode(tool), origin(placement.origin),
+    : axis(axisIndex < 3 ? axes[axisIndex] : Vector3{}), axisIndex(axisIndex), axisName("XYZA"[axisIndex]),
+      startAxes(axes), mode(tool), origin(placement.origin),
       mouseStart(pick.mouse), unitsPerPixel(placement.metersPerPixel)
 {
+    if (mode == GizmoMode::Scale)
+    {
+        scaling.emplace(pick.camera, origin, axis, mouseStart);
+        return;
+    }
     const double metersPerPixel = placement.metersPerPixel;
     const Vector3 view = Math::Normalize(origin - pick.eye);
 
@@ -187,6 +239,7 @@ GizmoDrag::GizmoDrag(GizmoMode tool, const GizmoAxes& axes, int axisIndex, const
 
 std::optional<double> GizmoDrag::Amount(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse, const TransformSettings& settings, bool snapRotation)
 {
+    if (scaling) return scaling->Amount(mouse);
     if (useScreen)
     {
         const double amount = ((mouse.x - mouseStart.x) * screenDirection.x + (mouse.y - mouseStart.y) * screenDirection.y) * unitsPerPixel;

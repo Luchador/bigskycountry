@@ -29,7 +29,8 @@ namespace
     }
     float SpriteScale(SDL_Rect viewport)
     {
-        return std::clamp(std::min(viewport.w, viewport.h) / 1080.0f, 0.75f, 2.0f);
+        // 0.5f to scale to half size.
+        return 0.5f * std::clamp(std::min(viewport.w, viewport.h) / 1080.0f, 0.75f, 2.0f);
     }
 }
 

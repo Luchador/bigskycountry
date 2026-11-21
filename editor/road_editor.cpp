@@ -173,6 +173,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         return {};
     }
     const auto target = state.Target();
+    if (gizmo.mode == GizmoMode::Scale && target.kind != SelectionKind::Object) return {};
     if (target.kind == SelectionKind::Anchor)
     {
         if (gizmo.mode != GizmoMode::Rotate) return {};
@@ -208,7 +209,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
         placement->yawOnly = target.YawOnly() || fields.levelOnly;
         placement->horizontalTranslation = target.kind == SelectionKind::WaterPoint && fields.levelOnly;
     }
-    if (placement && gizmo.settings.space == GizmoSpace::Local)
+    if (placement && (gizmo.settings.space == GizmoSpace::Local || gizmo.mode == GizmoMode::Scale))
     {
         const auto frame = ObjectTransform{{}, fields.value.rotation}.ToMeshTransform();
         placement->localAxes = {frame.x, frame.y, frame.z};
@@ -1683,6 +1684,7 @@ void RoadEditor::Release(WorldDocument& world)
     extensionSource.reset();
     gizmoDrag.reset();
     appliedAngle = 0;
+    appliedScale = 1;
     snapRotation = false;
     dragStart.reset();
     riverExtendEnd = -1;
@@ -1759,6 +1761,13 @@ bool RoadEditor::DrawTransformDelta(SDL_Renderer* renderer, Vector3 position) co
         // Rebuild already measured the preview spline, including its curve and
         // Ctrl-snapped endpoint. Reuse that length without resampling each frame.
         SDL_snprintf(label, sizeof(label), "Length: %.2f m", roadPreview->SplineLengthMeters());
+    }
+    else if (DraggingGizmo() && gizmo.mode == GizmoMode::Scale)
+    {
+        if (gizmoDrag->AxisIndex() == 3)
+            SDL_snprintf(label, sizeof(label), "XYZ %.1f%%", appliedScale * 100.0);
+        else
+            SDL_snprintf(label, sizeof(label), "%c %.1f%%", gizmoDrag->AxisName(), appliedScale * 100.0);
     }
     else if (drag == Drag::Rotate || (DraggingGizmo() && gizmo.mode == GizmoMode::Rotate))
     {
@@ -2945,6 +2954,7 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
         gizmoDrag = gizmo.BeginDrag(GizmoInForeground() ? handles : picker, *placement);
         if (gizmoDrag)
         {
+            appliedScale = 1;
             snapRotation = subtract;
             if (state.RoadGroupSelected() || state.meshSelection.kind == SelectionKind::Intersection ||
                 state.meshSelection.kind == SelectionKind::Anchor)
@@ -3447,6 +3457,16 @@ void RoadEditor::MoveGizmo(WorldDocument& world, const FreeCamera& camera, SDL_F
     const auto& target = state.meshSelection;
     const bool skewing = target.kind == SelectionKind::Anchor;
     const auto amount = gizmoDrag->Amount(camera, scene, pointer, gizmo.settings, snapRotation && !skewing);
+    if (gizmo.mode == GizmoMode::Scale)
+    {
+        if (!amount || target.kind != SelectionKind::Object || !dragStart->meshTransform) return;
+        const auto& start = *dragStart->meshTransform;
+        const auto pose = ScaleObjectTransform(start, gizmoDrag->AxisIndex(), *amount);
+        if (!SetPlacementTransform(world, target, pose)) return;
+        appliedScale = *amount;
+        dragChanged = pose != start;
+        return;
+    }
     if (skewing && amount)
     {
         const auto& start = dragStart->roadGroup->junctions.at(target.index);
@@ -3933,11 +3953,13 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
         }
         if (!planView && state.Target().kind != SelectionKind::None && !SDL_GetWindowRelativeMouseMode(window) &&
             !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
-            (event.key.key == SDLK_W || event.key.key == SDLK_E))
+            (event.key.key == SDLK_W || event.key.key == SDLK_E ||
+             (event.key.key == SDLK_S && ViewportFocused() && state.Target().kind == SelectionKind::Object)))
         {
             if (!DraggingGizmo())
             {
-                gizmo.mode = event.key.key == SDLK_W ? GizmoMode::Translate : GizmoMode::Rotate;
+                gizmo.mode = event.key.key == SDLK_W ? GizmoMode::Translate :
+                             event.key.key == SDLK_E ? GizmoMode::Rotate : GizmoMode::Scale;
             }
             return EditorEvent::Handled;
         }
