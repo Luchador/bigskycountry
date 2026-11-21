@@ -203,6 +203,7 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
 
 void WorldDocument::RefreshTerrainFills()
 {
+    if (!RefreshRiverConnections()) return;
     RefreshOverpasses();
     if (terrainRevision == RoadGeometry::latestRevision && terrainWaterRevision == TerrainChunk::LatestWaterRevision()) return;
     terrainRevision = RoadGeometry::latestRevision;
@@ -230,6 +231,7 @@ TerrainChunk* WorldDocument::PlaceTerrainFill(TerrainBoundary boundary, bool all
         SDL_SetError("Select roads, railroads, intersections, rivers or lakes around the area to fill");
         return nullptr;
     }
+    if (!allowOpen && !RefreshRiverConnections()) return nullptr;
     RefreshOverpasses();
     auto chunk = std::make_unique<TerrainChunk>();
     chunk->boundary = std::move(boundary);

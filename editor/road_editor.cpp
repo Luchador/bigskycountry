@@ -559,6 +559,50 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         return;
     }
     if (waterEdit && command != EditorCommand::Save && (!FinishWaterEditing(world) || !Save(world))) return;
+    if (command == EditorCommand::CancelRiverConnection)
+    { riverConnectionStart.reset(); status.clear(); return; }
+    if (command == EditorCommand::StartRiverConnection || command == EditorCommand::FinishRiverConnection ||
+        command == EditorCommand::DisconnectRiver)
+    {
+        if (!riverMenuTarget) return;
+        const auto find = [&](std::uint64_t id) {
+            for (int i=0;i<static_cast<int>(world.Terrain().size());++i)
+                if (world.Terrain()[i]->persistentId==id && world.Terrain()[i]->River()) return i;
+            return -1;
+        };
+        const int target=find(riverMenuTarget->id);
+        if (target<0) return;
+        if (command == EditorCommand::StartRiverConnection)
+        {
+            if (riverMenuTarget->end>=0) riverConnectionStart=RiverEndTarget{riverMenuTarget->id,riverMenuTarget->end};
+            status.clear(); return;
+        }
+        const int source=command == EditorCommand::DisconnectRiver ? target : riverConnectionStart ? find(riverConnectionStart->id) : -1;
+        if (source<0) { riverConnectionStart.reset(); return; }
+        auto& chunk=*world.Terrain()[source];
+        EditSnapshot before(state); before.water=EditSnapshot::WaterEdit{source,*chunk.WaterSource()};
+        bool success;
+        if (command == EditorCommand::DisconnectRiver)
+        {
+            auto river=*chunk.River(); river.connection.reset();
+            success=chunk.SetRiver(river) && world.RefreshRiverConnections();
+        }
+        else success=world.ConnectRiver(source,riverConnectionStart->end,target,riverMenuTarget->position);
+        if (!success)
+        {
+            const std::string error=SDL_GetError();
+            chunk.SetWater(before.water->definition);
+            world.RefreshRiverConnections();
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION,"River Connection",error.c_str(),frame);
+            return;
+        }
+        state.SelectRows({{SceneKind::Terrain,source}});
+        EditSnapshot after(state); after.water=EditSnapshot::WaterEdit{source,*chunk.WaterSource()};
+        riverConnectionStart.reset(); status.clear();
+        world.RefreshTerrainFills();
+        if (history.Record(-1,std::move(before),std::move(after))) Save(world);
+        return;
+    }
     if (command == EditorCommand::CancelCurvedConnector)
     {
         curvedConnectorStart.reset(); status.clear(); return;
@@ -867,9 +911,36 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
 void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
 {
     roadMenuTarget.reset();
+    riverMenuTarget.reset();
     auto picker = rightClick->picker;
     const Road* selected = Selected(world);
     RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, false, &creationPoint);
+    RiverMenuOptions riverOptions;
+    if (hit.kind == RoadPickKind::Terrain && world.Terrain()[hit.index]->River())
+    {
+        const auto& chunk=*world.Terrain()[hit.index];
+        riverMenuTarget=RiverMenuTarget{chunk.persistentId,-1,picker.HitPosition()};
+    }
+    if (waterEdit)
+    {
+        const auto& chunk=*world.Terrain()[waterEdit->index];
+        if (chunk.River())
+        {
+            auto controlPicker=picker;
+            if (const auto point=overlay.PickWater(controlPicker,chunk,camera,scene); point && point->point>=0 && chunk.River()->End(point->point)>=0)
+                riverMenuTarget=RiverMenuTarget{chunk.persistentId,chunk.River()->End(point->point),controlPicker.HitPosition()};
+        }
+    }
+    if (riverMenuTarget)
+    {
+        for (const auto& chunk:world.Terrain()) if (chunk->persistentId==riverMenuTarget->id)
+        {
+            riverOptions.start=riverMenuTarget->end>=0 && !chunk->River()->connection;
+            riverOptions.disconnect=chunk->River()->connection.has_value();
+        }
+        riverOptions.finish=riverConnectionStart && riverConnectionStart->id!=riverMenuTarget->id;
+    }
+    riverOptions.cancel=riverConnectionStart.has_value();
     int hitRoad = hit.kind == RoadPickKind::Road ? hit.index : state.selected;
     // Test the visible lane stroke against the same depth as the scene and its handles.
     auto lanePicker = picker;
@@ -998,7 +1069,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     const bool curveSite = roadMenuTarget && roadMenuTarget->curveSite.has_value();
     const CurveMenuOptions curves{curveSite, curveSite && curvedConnectorStart &&
         world.roads[roadMenuTarget->index].id != curvedConnectorStart->roadId, curvedConnectorStart.has_value()};
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches, curves))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches, curves, riverOptions))
     {
         RunCommand(*command, world, camera);
     }
@@ -2866,6 +2937,16 @@ bool RoadEditor::FinishWaterEditing(WorldDocument& world)
         if (frame) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Water boundary", status.c_str(), frame);
         return false;
     }
+    const auto candidate=*chunk.WaterSource();
+    if (!world.RefreshRiverConnections())
+    {
+        const std::string error=SDL_GetError();
+        chunk.SetWater(waterEdit->original); world.RefreshRiverConnections();
+        chunk.BeginWaterEdit(); chunk.SetWater(candidate);
+        status=error + ". Adjust the bank or Cancel editing.";
+        if (frame) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"River Connection",status.c_str(),frame);
+        return false;
+    }
     state.SelectRows({{SceneKind::Terrain, waterEdit->index}});
     if (*chunk.WaterSource() != waterEdit->original)
     {
@@ -3958,6 +4039,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             }
             return EditorEvent::Handled;
         }
+        if (event.key.key == SDLK_ESCAPE && riverConnectionStart && drag == Drag::None)
+        { riverConnectionStart.reset(); status.clear(); return EditorEvent::Handled; }
         if (event.key.key == SDLK_ESCAPE && curvedConnectorStart && drag == Drag::None)
         {
             curvedConnectorStart.reset(); status.clear(); return EditorEvent::Handled;

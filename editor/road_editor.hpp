@@ -150,6 +150,7 @@ private:
     void Release(WorldDocument& world);
     const char* StatusText() const
     {
+        if (riverConnectionStart && status.empty()) return "Right-click the receiving river: Connect River Here (Esc cancels)";
         if (curvedConnectorStart && status.empty()) return "Right-click the second road: Create > Finish Curved Connector Here (Esc cancels)";
         return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
     }
@@ -199,6 +200,10 @@ private:
     std::optional<RoadMenuTarget> roadMenuTarget;
     struct CurvedConnectorStart { int roadId; std::uint64_t revision; RoadSplineLocation at; };
     std::optional<CurvedConnectorStart> curvedConnectorStart;
+    struct RiverEndTarget { std::uint64_t id; int end; };
+    struct RiverMenuTarget { std::uint64_t id; int end; Vector3 position; };
+    std::optional<RiverEndTarget> riverConnectionStart;
+    std::optional<RiverMenuTarget> riverMenuTarget;
     struct CrossingMenuTarget
     {
         int road;

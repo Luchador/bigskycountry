@@ -3,6 +3,15 @@
 #include "lake.hpp"
 #include <array>
 #include <variant>
+#include <cstdint>
+
+struct RiverConnection
+{
+    std::uint64_t riverId = 0;
+    int end = 1, bank = 0;
+    double fraction = .5, width = 25;
+    bool operator==(const RiverConnection&) const = default;
+};
 
 // Two open cubic splines running from start to end, including local elevation.
 // Banks can have different numbers of control points. End handles move both banks.
@@ -10,9 +19,13 @@ struct RiverDefinition
 {
     std::array<std::vector<LakePoint>, 2> banks;
     double depth = 5;
+    // Stable receiving river ID and distance fraction along its bank. No generated
+    // junction vertices are serialized into the editable control splines.
+    std::optional<RiverConnection> connection;
     static RiverDefinition Straight(double width = 25, double length = 200);
     Vector3 Evaluate(int bank, int segment, double t) const;
     int PointCount() const;
+    bool ConnectedPoint(int point) const;
     int End(int point) const; // 0 = start handle, 1 = end handle, -1 = bank point.
     Vector3 Point(int point) const;
     bool MovePoint(int point, Vector3 position);
@@ -20,7 +33,7 @@ struct RiverDefinition
     bool Extend(int end, Vector3 position);
     int InsertPoint(int bank, int segment, double t); // Returns the new flattened control index.
     bool RemovePoint(int point);
-    bool Read(std::istream& in, bool elevations = true);
+    bool Read(std::istream& in, bool elevations = true, bool connections = true);
     bool Write(std::ostream& out) const;
     bool operator==(const RiverDefinition&) const = default;
 private:

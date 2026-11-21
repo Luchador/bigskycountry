@@ -504,3 +504,15 @@ This creates an editable Bézier road, tangent to each parent road, without addi
 Select either connector end control point and drag it with the translation gizmo, or drag it in the 2D view, to slide its attachment along the parent road. The endpoint's heading and elevation follow that road. Subdivide the connector with **Ctrl+Q** to add control points for further shaping. Select the connector, its parent roads, and any intersection completing the perimeter, then press **F** to fill the enclosed island with terrain. The fill updates with subsequent edits.
 
 Attachments persist through save/load and undo/redo. Splitting a parent road preserves the link to the appropriate piece; deleting it detaches the connector. Generated joins are rebuilt from authored geometry only when their source roads change. `ROAD` version 30 appends an optional curved-connector attachment (station ID, side, direction, and signed offset along the parent) to each point. Earlier worlds load with no such attachments. Recook after editing to update the game's geometry.
+
+### River connections
+
+To terminate a smaller river in a larger one:
+
+1. Enter **Edit River Banks** on the tributary and right-click its green start or end handle.
+2. Choose **Connect River End**. This finishes the spline edit.
+3. Right-click the receiving river near the bank where the tributary should enter and choose **Connect River Here**. On the SDL menu these actions are in **Create**.
+
+The tributary mouth follows that location along the receiving bank, including elevation changes. Each river can feed one other river; a receiving river can have several tributaries. Connections cannot form cycles. Choose a location at least one tributary width from either end of the receiving bank. **Esc** cancels a pending connection. Right-click a connected tributary and choose **Disconnect River** before moving or extending its attached end.
+
+Water and submerged terrain share a triangulation at the junction, with no overlapping water faces or internal bank wall. Rivers remain separate selectable objects and terrain fill follows the joined shoreline. Edit mode continues to update only splines; finishing the edit rebuilds affected connections. Connections support undo/redo and save/load. `TERR` version 10 stores an optional receiver ID, tributary end, receiving bank, distance fraction and mouth width after each river's bank data; older worlds load without connections. Recook the world to update in-game geometry.

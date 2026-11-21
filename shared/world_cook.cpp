@@ -306,6 +306,9 @@ bool Cook(WorldDocument& world, const std::string& file)
                 for (auto water : boundary->waterBodies) link(id, {SceneKind::Terrain, water});
                 for (const auto& [lake, revision] : world.Terrain()[i]->sourceWaterBodies) link(id, {SceneKind::Terrain, lake});
             }
+        for (std::size_t i=0;i<world.Terrain().size();++i)
+            if (const auto& river=world.Terrain()[i]->River(); river && river->connection)
+                link(world.StableId({SceneKind::Terrain,int(i)}), {SceneKind::Terrain,river->connection->riverId});
         for (auto& e : manifest.entities) { auto& d = e.dependencies; std::sort(d.begin(), d.end()); d.erase(std::unique(d.begin(), d.end()), d.end()); }
         std::vector<Cell> packed; packed.reserve(cells.size());
         for (auto& [key, cell] : cells)

@@ -96,7 +96,7 @@ bool TerrainChunk::BeginWaterEdit()
     if (!river) return BeginLakeEdit();
     if (riverDraft) return true;
     riverDraft = river;
-    draftShoreline = shoreline;
+    draftShoreline = *RiverGeometry::Sample(*river);
     return true;
 }
 
@@ -167,4 +167,14 @@ const std::vector<TerrainChunk::OutlineEdge>& TerrainChunk::Outline() const
         outline.push_back({a, b, Math::Normalize(Math::Cross(b - a, c - a))});
     }
     return outline;
+}
+
+void TerrainChunk::ApplyRiverGeometry(const RiverDefinition& definition, LakeGeometry geometry, bool joined)
+{
+    river = definition;
+    SetMesh(std::move(geometry.bed));
+    water = {std::move(geometry.water), Instance().transform};
+    shoreline = std::move(geometry.shoreline);
+    joinedRiver = joined;
+    WaterChanged();
 }

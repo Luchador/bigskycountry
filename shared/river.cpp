@@ -40,6 +40,13 @@ int RiverDefinition::End(int point) const
     const int end = point - (PointCount()-2);
     return end == 0 || end == 1 ? end : -1;
 }
+bool RiverDefinition::ConnectedPoint(int point) const
+{
+    if (!connection) return false;
+    if (End(point)>=0) return End(point)==connection->end;
+    const int left=static_cast<int>(banks[0].size());
+    return connection->end ? point==left-1 || point==PointCount()-3 : point==0 || point==left;
+}
 Vector3 RiverDefinition::Point(int point) const
 {
     if (End(point) == 0) return (banks[0].front().position + banks[1].front().position)*.5;
@@ -67,6 +74,7 @@ void RiverDefinition::SmoothHandles(int bank)
 bool RiverDefinition::MovePoint(int point, Vector3 position)
 {
     if (point < 0 || point >= PointCount() || !FinitePoint(position)) return SDL_SetError("Invalid river point");
+    if (ConnectedPoint(point)) return SDL_SetError("Disconnect this river end before moving it");
     const int end = End(point);
     if (end >= 0)
     {
@@ -90,6 +98,7 @@ bool RiverDefinition::MovePoint(int point, Vector3 position)
 bool RiverDefinition::TranslatePoints(const std::set<int>& indices, Vector3 delta)
 {
     if (indices.empty()) return false;
+    for (int point:indices) if (ConnectedPoint(point)) return SDL_SetError("Disconnect this river end before moving it");
     const int left = static_cast<int>(banks[0].size());
     std::array<std::size_t, 2> counts{};
     for (int i : indices)
@@ -112,6 +121,7 @@ bool RiverDefinition::TranslatePoints(const std::set<int>& indices, Vector3 delt
 bool RiverDefinition::Extend(int end, Vector3 position)
 {
     if ((end != 0 && end != 1) || !FinitePoint(position)) return SDL_SetError("Invalid river endpoint");
+    if (connection && connection->end==end) return SDL_SetError("Disconnect this river end before extending it");
     const auto delta = position - Point(PointCount()-2+end);
     if (std::hypot(delta.x, delta.z) < .5) return SDL_SetError("Extend the river by at least 0.5 m horizontally");
     for (const auto& bank : banks)
@@ -141,6 +151,7 @@ int RiverDefinition::InsertPoint(int bank, int segment, double t)
 
 bool RiverDefinition::RemovePoint(int point)
 {
+    if (ConnectedPoint(point)) return SDL_SetError("Disconnect this river end before deleting its bank points");
     if (point < 0 || point >= PointCount()-2) return SDL_SetError("Delete a bank control point, not a river end handle");
     const int left = static_cast<int>(banks[0].size()), bank = point < left ? 0 : 1;
     if (banks[bank].size() <= 2) return SDL_SetError("A river bank needs at least two control points");
@@ -149,7 +160,7 @@ bool RiverDefinition::RemovePoint(int point)
     return true;
 }
 
-bool RiverDefinition::Read(std::istream& in, bool elevations)
+bool RiverDefinition::Read(std::istream& in, bool elevations, bool connections)
 {
     if (!(in >> depth)) return false;
     for (auto& bank : banks)
@@ -164,6 +175,21 @@ bool RiverDefinition::Read(std::istream& in, bool elevations)
                 if (!(in >> v->x) || (elevations && !(in >> v->y)) || !(in >> v->z)) return false;
             }
     }
+    connection.reset();
+    if (connections)
+    {
+        bool linked;
+        if (!(in >> linked)) return false;
+        if (linked)
+        {
+            RiverConnection c;
+            if (!(in >> c.riverId >> c.end >> c.bank >> c.fraction >> c.width) || !c.riverId ||
+                c.end < 0 || c.end > 1 || c.bank < 0 || c.bank > 1 ||
+                !std::isfinite(c.fraction) || c.fraction <= 0 || c.fraction >= 1 ||
+                !std::isfinite(c.width) || c.width < .5 || c.width > 10000) return false;
+            connection = c;
+        }
+    }
     return true;
 }
 bool RiverDefinition::Write(std::ostream& out) const
@@ -174,6 +200,12 @@ bool RiverDefinition::Write(std::ostream& out) const
         out << ' ' << bank.size();
         for (const auto& p : bank)
             for (const auto v : {p.position, p.incoming, p.outgoing}) out << ' ' << v.x << ' ' << v.y << ' ' << v.z;
+    }
+    out << ' ' << connection.has_value();
+    if (connection)
+    {
+        const auto& c = *connection;
+        out << ' ' << c.riverId << ' ' << c.end << ' ' << c.bank << ' ' << c.fraction << ' ' << c.width;
     }
     return bool(out);
 }

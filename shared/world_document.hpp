@@ -62,6 +62,8 @@ public:
     // Loading and history can restore a perimeter before all of its sources exist.
     TerrainChunk* PlaceTerrainFill(TerrainBoundary boundary, bool allowOpen = false);
     void RefreshTerrainFills();
+    bool RefreshRiverConnections();
+    bool ConnectRiver(int tributary, int end, int receiver, Vector3 position);
     void RefreshOverpasses();
     void RefreshRailroadCrossings(bool force = false);
     // Restore history at a specific outliner index after successfully loading the chunk.
@@ -117,6 +119,8 @@ private:
     std::set<std::pair<int, int>> curvedConnectorLinks;
     std::uint64_t terrainRevision = 0;
     std::uint64_t terrainWaterRevision = 0;
+    std::uint64_t riverRevision = 0;
+    std::map<std::uint64_t, std::vector<std::pair<std::uint64_t,std::uint64_t>>> riverNetworks;
     std::uint64_t bridgeRevision = 0;
     std::uint64_t bridgeWaterRevision = 0;
     std::size_t bridgeRoadCount = 0;

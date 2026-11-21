@@ -32,7 +32,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 9;
+    constexpr Uint32 terrainVersion = 10;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -145,7 +145,7 @@ namespace
                 std::string material;
                 if (!(in >> t.position.x >> t.position.y >> t.position.z >> t.rotation.y >> std::quoted(material)) ||
                     (!material.empty() && !Material::ValidAssetPath(material)) || !std::visit([&](auto& source) {
-                        if constexpr (std::is_same_v<std::decay_t<decltype(source)>, RiverDefinition>) return source.Read(in, version >= 8);
+                        if constexpr (std::is_same_v<std::decay_t<decltype(source)>, RiverDefinition>) return source.Read(in, version >= 8, version >= 10);
                         else return source.Read(in);
                     }, water))
                     return SDL_SetError("Invalid water body in TERR");
@@ -483,7 +483,7 @@ bool WorldDocument::RemoveTerrain(std::size_t index)
         return SDL_SetError("Invalid terrain chunk index");
     }
     hierarchy.ReplaceRange(SceneKind::Terrain, static_cast<int>(index), 1, 0);
-    if (terrain[index]->HasWater()) terrainWaterRevision = 0;
+    if (terrain[index]->HasWater()) { terrainWaterRevision = 0; riverRevision = 0; }
     terrain.erase(terrain.begin() + index);
     return true;
 }
@@ -742,6 +742,7 @@ bool WorldDocument::Open(const char* documentPath)
     }
     if (identities && !loaded.ReadStableIds(*identities)) return false;
     if (!loaded.EnsureStableIds()) return false;
+    if (!loaded.RefreshRiverConnections()) return false;
     loaded.UpdateIntersections();
     *this = std::move(loaded);
     return true;
@@ -754,7 +755,7 @@ bool WorldDocument::Save()
     {
         return SDL_SetError("Open a world before saving it");
     }
-    if (!ValidConnections() || !EnsureStableIds()) return false;
+    if (!ValidConnections() || !EnsureStableIds() || !RefreshRiverConnections()) return false;
     for (const auto& [key, parent] : hierarchy.Members())
     {
         if (!Contains(key)) return SDL_SetError("Cannot save an outliner entry for a missing entity");
