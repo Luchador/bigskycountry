@@ -122,6 +122,7 @@ private:
     void FillSelection(WorldDocument& world);
     void ConnectRoads(WorldDocument& world);
     void ConnectRamps(WorldDocument& world);
+    void ConnectAnchors(WorldDocument& world);
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
@@ -153,7 +154,10 @@ private:
     {
         if (riverConnectionStart && status.empty()) return "Right-click the receiving river or lake: Water > Connect River Here (Esc cancels)";
         if (curvedConnectorStart && status.empty()) return "Right-click the second road: Infrastructure > Finish Curved Connector Here (Esc cancels)";
-        return state.anchorSelection && status.empty() ? "Press F to connect the road endpoint" : status.c_str();
+        if (state.anchorSelection && status.empty())
+            return state.meshSelection.kind == SelectionKind::Anchor ? "Press F to create a road between the anchors" :
+                                                                      "Press F to connect the road endpoint";
+        return status.c_str();
     }
     bool UpdateWindowTitle();
     bool Save(WorldDocument& world);

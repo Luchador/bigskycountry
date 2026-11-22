@@ -1600,7 +1600,7 @@ void RoadEditor::PressCanvas(WorldDocument& world, float x, float y, SDL_Keymod 
     if (closest && (shift || subtract))
     {
         if (shift && BeginAnchorRoad(world, *closest, cursor, subtract)) return;
-        if (state.point < 0 && !state.anchorSelection)
+        if (state.point < 0 && !state.anchorSelection && state.meshSelection.kind != SelectionKind::Anchor)
         {
             state.PickElement({SceneKind::Intersection, closest->intersectionId}, shift, subtract);
             return;
@@ -2664,9 +2664,42 @@ void RoadEditor::SelectAnchor(const WorldDocument& world, IntersectionAnchor anc
     if (subtract)
     {
         if (state.anchorSelection == anchor) state.anchorSelection.reset();
+        else if (state.InspectingAnchor(anchor))
+        {
+            if (state.anchorSelection) state.InspectAnchor(*state.anchorSelection);
+            else state.SelectPoint(-1, -1);
+        }
+        status.clear();
         return;
     }
     state.anchorSelection.reset();
+    if (state.meshSelection.kind == SelectionKind::Anchor)
+    {
+        const IntersectionAnchor first{state.meshSelection.index, state.meshSelection.point};
+        const auto visible = [&](IntersectionAnchor ref) {
+            const auto found = world.intersections.find(ref.intersectionId);
+            return ref.Valid() && found != world.intersections.end() && found->second.HasAnchor(ref.side) &&
+                   !world.hierarchy.EditorHidden({SceneKind::Intersection, ref.intersectionId});
+        };
+        if (!visible(first) || !visible(anchor))
+        {
+            status = "Select two visible intersection anchors";
+            return;
+        }
+        if (first.intersectionId == anchor.intersectionId)
+        {
+            status = "Select anchors on two different intersections";
+            return;
+        }
+        if (AnchorOccupied(world, first) || AnchorOccupied(world, anchor))
+        {
+            status = "One of these intersection anchors is already connected";
+            return;
+        }
+        state.anchorSelection = anchor;
+        status.clear();
+        return;
+    }
     const Road* road = Selected(world);
     if (!road || road->style.railroad || !state.additionalPoints.empty() || state.point < 0 ||
         (state.point != 0 && state.point + 1 != static_cast<int>(road->points.size())))
@@ -2974,6 +3007,42 @@ void RoadEditor::ConnectRamps(WorldDocument& world)
     if (history.Record(index, std::move(before), std::move(after))) Save(world);
 }
 
+void RoadEditor::ConnectAnchors(WorldDocument& world)
+{
+    if (state.meshSelection.kind != SelectionKind::Anchor || !state.anchorSelection ||
+        EditingDraft() || drag != Drag::None) return;
+    const IntersectionAnchor first{state.meshSelection.index, state.meshSelection.point};
+    const IntersectionAnchor last = *state.anchorSelection;
+    SelectAnchor(world, last, false); // Recheck both anchors before changing the world.
+    if (!state.anchorSelection) return;
+
+    Road road;
+    road.style = state.defaults;
+    road.style.railroad.reset();
+    road.style.oneWay = false;
+    road.style.curved = true;
+    road.points = {AttachedEndpoint(world.intersections.at(first.intersectionId), first, true),
+                   AttachedEndpoint(world.intersections.at(last.intersectionId), last, false)};
+    if (!ValidRoadSpan(road, road.points.front().position, road.points.back().position))
+    {
+        status = SDL_GetError();
+        return;
+    }
+    road.Rebuild();
+    if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
+
+    EditSnapshot before(state);
+    const int index = static_cast<int>(world.roads.size());
+    const int folder = world.hierarchy.Parent({SceneKind::Intersection, first.intersectionId});
+    world.roads.push_back(std::move(road));
+    state.SelectPoint(index, -1);
+    if (folder) world.hierarchy.Move({{SceneKind::Road, index}}, folder);
+    EditSnapshot after(state, &world.roads.back());
+    after.roadFolder = folder;
+    outliner.Invalidate();
+    if (history.Record(index, std::move(before), std::move(after))) Save(world);
+}
+
 void RoadEditor::ConnectEndpoint(WorldDocument& world)
 {
     if (!state.anchorSelection || EditingDraft() || drag != Drag::None) return;
@@ -3264,7 +3333,8 @@ void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, S
             }
         }
         if (shift && BeginAnchorRoad(world, anchor, mouse, subtract)) return;
-        if ((shift || subtract) && (state.point >= 0 || state.anchorSelection)) SelectAnchor(world, anchor, subtract);
+        if ((shift || subtract) && (state.point >= 0 || state.anchorSelection || state.meshSelection.kind == SelectionKind::Anchor))
+            SelectAnchor(world, anchor, subtract);
         else if (shift || subtract) state.PickElement({SceneKind::Intersection, hit.index}, shift, subtract);
         else
         {
@@ -4127,7 +4197,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         if (!event.key.repeat && drag == Drag::None)
         {
-            if (!state.groupEndpoints.empty()) ConnectRoads(world);
+            if (state.meshSelection.kind == SelectionKind::Anchor && state.anchorSelection) ConnectAnchors(world);
+            else if (!state.groupEndpoints.empty()) ConnectRoads(world);
             else if (IsTerrainFillSelection(state.SelectedRows(), &world)) FillSelection(world);
             else ConnectEndpoint(world);
         }

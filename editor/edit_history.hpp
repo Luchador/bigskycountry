@@ -32,7 +32,7 @@ struct RoadEditorState
     bool drawing = false;
     std::set<int> segments; // Indices of selected spans in the active road.
 
-    std::optional<IntersectionAnchor> anchorSelection; // Secondary selection paired with an active road endpoint.
+    std::optional<IntersectionAnchor> anchorSelection; // Secondary anchor paired with a road endpoint or another anchor.
     TransformTarget meshSelection;
     std::set<SceneKey> outlineSelection; // Folder, static mesh, or multiple rows.
     std::set<SceneKey> SelectedRows() const;
