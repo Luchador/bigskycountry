@@ -232,6 +232,7 @@ bool Cook(WorldDocument& world, const std::string& file)
             entity({SceneKind::Object, int(i)}, meshBounds(object.Instance()), {}, &object.Instance(), marker ? marker->material : "");
             auto& e = manifest.entities.back(); e.type = object.Type(); e.pose = object.GetTransform();
             e.health = object.health; e.invincible = object.invincible;
+            e.hasCollision = object.hasCollision;
             if (const auto* vehicle = dynamic_cast<const Vehicle*>(&object)) e.acceleration = vehicle->acceleration;
             if (marker) { e.markerText = marker->Text(); e.markerColor = marker->textColor; }
         }

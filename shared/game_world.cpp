@@ -56,7 +56,7 @@ bool GameWorld::SphereBlocked(Vector3 center, double radius, PawnHandle ignore) 
 {
     if (collision.SphereBlocked(center, radius)) return true;
     for (const auto& pawn : pawns)
-        if (pawn->Handle() != ignore && pawn->BlocksSphere(center, radius)) return true;
+        if (pawn->hasCollision && pawn->Handle() != ignore && pawn->BlocksSphere(center, radius)) return true;
     return false;
 }
 

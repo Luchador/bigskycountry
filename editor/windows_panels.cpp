@@ -993,6 +993,7 @@ struct WindowsPanels::Impl
             case IDC_STOP_LINE: PostAction(RoadAction::ToggleStopLine); return;
             case IDC_ALIGNED_APPROACHES: PostAction(RoadAction::ToggleAlignedApproaches); return;
             case IDC_INVINCIBLE: PostAction(RoadAction::ToggleInvincible); return;
+            case IDC_HAS_COLLISION: PostAction(RoadAction::ToggleHasCollision); return;
             case IDC_LAKE_EDIT: PostAction(RoadAction::EditWater); SetFocus(frame); return;
             case IDC_LAKE_FINISH: PostAction(RoadAction::FinishWater); SetFocus(frame); return;
             case IDC_LAKE_CANCEL: PostAction(RoadAction::CancelWater); SetFocus(frame); return;
@@ -1117,6 +1118,7 @@ struct WindowsPanels::Impl
                 ShowWindow(GetDlgItem(road, id), junction && !town ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, IDC_HAS_COLLISION), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
             for (int id : {IDC_MARKER_TEXT_LABEL, IDC_MARKER_TEXT, IDC_MARKER_TEXT_COLOR, IDC_MARKER_CLEAR_MATERIAL})
                 ShowWindow(GetDlgItem(road, id), marker ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_PROPERTY_DETAIL), !roadPage && !railroad && properties.page != PropertiesPage::Other ? SW_SHOWNA : SW_HIDE);
@@ -1187,6 +1189,7 @@ struct WindowsPanels::Impl
             }
             CheckDlgButton(road, IDC_STOP_LINE, properties.stopLine ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(road, IDC_INVINCIBLE, properties.invincible ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(road, IDC_HAS_COLLISION, properties.hasCollision ? BST_CHECKED : BST_UNCHECKED);
             return;
         }
         EnableWindow(GetDlgItem(road, IDC_ROAD_NAMES), properties.roadNames.has_value());

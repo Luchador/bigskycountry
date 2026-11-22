@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 3;
+    inline constexpr std::uint32_t version = 4;
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -44,6 +44,7 @@ namespace WorldPackage
         ObjectTransform pose;
         float health = 100, acceleration = 0;
         bool invincible = false;
+        bool hasCollision = true;
         std::string markerText;
         std::array<Uint8, 3> markerColor{255, 255, 255};
         std::vector<EntityId> dependencies;

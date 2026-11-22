@@ -53,6 +53,7 @@ struct PropertiesInspector
     Marker::TextColor textColor{255, 255, 255};
     const char* MaterialCaption() const;
     bool materialSlot = false, invincible = false;
+    bool hasCollision = true;
     bool water = false, river = false, editingWater = false;
     bool stopLine = false;
     bool canAlignApproaches = false, alignedApproaches = false;

@@ -272,7 +272,8 @@ bool CookedWorld::LoadPath(const std::string &source)
             auto bounds = e.type == ObjectType::Marker ? Marker::VisibilityBounds(e.bounds, e.markerText, e.pose.scale)
                                                        : e.bounds;
             s.objectsIndex.Upsert({SceneKind::Mesh, static_cast<int>(i)}, bounds);
-            s.objectCollisionIndex.Upsert({SceneKind::Mesh, static_cast<int>(i)}, e.bounds);
+            if (e.hasCollision)
+                s.objectCollisionIndex.Upsert({SceneKind::Mesh, static_cast<int>(i)}, e.bounds);
         }
     }
     s.cellsIndex.EndSync();
@@ -424,6 +425,7 @@ void CookedWorld::Update(Vector3 eye, std::span<const Vector3> sources, WorldCol
                 continue;
             }
             marker->SetMesh(model->second);
+            marker->hasCollision = e.hasCollision;
             marker->textColor = e.markerColor;
             marker->material = e.material;
             instance.marker = std::move(marker);
@@ -648,7 +650,7 @@ bool CookedWorld::MayHaveGroundBelow(Vector3 position) const
     // pawn can be far above its landing cell. Missing residency is not a hole.
     for (const auto& cell : impl->reader.Index().cells) if (below(cell.bounds)) return true;
     for (const auto& entity : impl->reader.Index().entities)
-        if (!entity.model.empty() && below(entity.bounds)) return true;
+        if (entity.hasCollision && !entity.model.empty() && below(entity.bounds)) return true;
     return false;
 }
 void CookedWorld::Submit(WorldRenderer &renderer, const CameraView &camera, double radius)

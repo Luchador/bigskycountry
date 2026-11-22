@@ -104,7 +104,10 @@ void WorldCollision::Build(const WorldDocument& world)
     };
     for (const auto& item : world.roads) road(item);
     for (const auto& [id, item] : world.IntersectionSurfaces()) road(item.geometry);
-    world.ForEachMesh([&](const MeshInstance& mesh) { AddMesh(mesh); });
+    for (const auto& mesh : world.meshes) AddMesh(mesh);
+    for (const auto& chunk : world.Terrain()) AddMesh(chunk->Instance());
+    for (const auto& object : world.Objects())
+        if (object->hasCollision && !object->EditorOnly()) AddMesh(object->Instance());
     Finish();
 }
 

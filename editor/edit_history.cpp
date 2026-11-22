@@ -214,7 +214,7 @@ void RoadProperties::Apply(Road& road) const
 bool EditHistory::Action::ChangesWorld() const
 {
     return roadIndex >= 0 || !after.roadProperties.empty() || object || after.meshTransform || after.roadGroup || after.junction ||
-           after.objectInvincible || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
+           after.objectInvincible || after.objectHasCollision || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
            before.addedTerrain || after.addedTerrain || after.water;
 }
 
@@ -594,6 +594,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         if (to.markerTextColor) marker->textColor = *to.markerTextColor;
     }
     if (to.objectInvincible) world.Objects().at(to.meshSelection.index)->invincible = *to.objectInvincible;
+    if (to.objectHasCollision) world.Objects().at(to.meshSelection.index)->hasCollision = *to.objectHasCollision;
     if (to.placedMaterial)
     {
         auto* path = FindPlacedMaterial(world, to.placedMaterial->target);

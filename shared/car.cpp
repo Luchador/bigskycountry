@@ -50,6 +50,7 @@ int Car::SimulationSubsteps(double seconds) const
 
 bool Car::BlocksSphere(Vector3 center, double radius) const
 {
+    if (!hasCollision) return false;
     const auto frame = GetTransform().ToMeshTransform();
     const Vector3 p = frame.Unrotate(center - frame.origin);
     const Vector3 closest{std::clamp(p.x, -1.0, 1.0), std::clamp(p.y, 0.15, 1.6), std::clamp(p.z, -2.2, 2.2)};
@@ -60,6 +61,7 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
 {
     const auto frame = body.Pose().ToMeshTransform();
     groundedWheels = 0;
+    if (!hasCollision) return;
     Vector3 groundNormal{};
     const double speed = Speed();
     const double targetSteering = Commands().right * handling.steeringAngle / (1.0 + std::abs(speed) * 0.035);
@@ -138,6 +140,7 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
 
 void Car::ResolveWorldContacts(GameWorld& world)
 {
+    if (!hasCollision) return;
     for (int pass = 0; pass < 3; ++pass)
     {
         for (Vector3 local : hull)
@@ -150,7 +153,7 @@ void Car::ResolveWorldContacts(GameWorld& world)
             for (const auto& pawn : world.Pawns())
             {
                 const auto* character = dynamic_cast<const Character*>(pawn.get());
-                if (!character || character->IsSeated()) continue;
+                if (!character || !character->hasCollision || character->IsSeated()) continue;
                 center = body.Pose().ToMeshTransform().Point(local);
                 const auto feet = character->GetTransform().position;
                 const Vector3 nearest{feet.x, std::clamp(center.y, feet.y + 0.35, feet.y + 1.45), feet.z};
@@ -178,6 +181,7 @@ void Car::Simulate(double seconds, GameWorld& world)
 
 void Car::ResolveCollision(Car& other)
 {
+    if (!hasCollision || !other.hasCollision) return;
     if (Math::Length(body.Center() - other.body.Center()) > 5.5) return;
     for (int pass = 0; pass < 2; ++pass)
     {
@@ -201,6 +205,7 @@ void Car::ResolveCollision(Car& other)
 
 bool Car::PlaceOnGround(GameWorld& world, ObjectTransform& transform, double drop) const
 {
+    if (!hasCollision) return false;
     ObjectTransform horizontal = transform;
     horizontal.rotation.x = horizontal.rotation.z = 0;
     const auto frame = horizontal.ToMeshTransform();

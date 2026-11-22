@@ -13,7 +13,7 @@ void Character::SetSeated(bool value)
 
 bool Character::BlocksSphere(Vector3 center, double radius) const
 {
-    if (seated) return false;
+    if (!hasCollision || seated) return false;
     const auto feet = GetTransform().position;
     const Vector3 nearest{feet.x, std::clamp(center.y, feet.y + 0.35, feet.y + 1.45), feet.z};
     return Math::Length(center - nearest) < radius + 0.35;
@@ -31,6 +31,14 @@ void Character::Simulate(double seconds, GameWorld& world)
     const double speed = Commands().sprint ? 7.0 : 4.0;
     velocity.x = direction.x * speed;
     velocity.z = direction.z * speed;
+    if (!hasCollision)
+    {
+        grounded = false;
+        velocity.y -= 9.81 * seconds;
+        transform.position = transform.position + velocity * seconds;
+        SetTransform(transform);
+        return;
+    }
     if (grounded && Commands().jump)
     {
         velocity.y = 5.0;

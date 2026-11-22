@@ -26,6 +26,7 @@ public:
     virtual void Tick(float deltaSeconds);
     virtual void TakeDamage(float damage);
 
+    bool hasCollision = true;
     bool invincible = false;
     float health = 100.0f;
 };

@@ -43,6 +43,7 @@ enum class RoadAction
     NorthSouthIntersectionPaint,
     EastWestIntersectionPaint,
     ToggleInvincible,
+    ToggleHasCollision,
     EditWater,
     FinishWater,
     CancelWater

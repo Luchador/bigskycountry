@@ -395,7 +395,9 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
         return buttons;
     }
     if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
-        return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible}};
+        return {{Action::ToggleInvincible, {12, 73, 194, 28}, "Invincible", properties.invincible},
+                {Action::ToggleHasCollision, {12, properties.page == PropertiesPage::Marker ? 282.0f : 110.0f, 194, 28},
+                 "Has Collision", properties.hasCollision}};
     if (properties.page != PropertiesPage::Road) return {};
     const auto& style = properties.style;
     const float offset = LaneOptionsHeight(properties);
@@ -1342,14 +1344,24 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         return;
     }
     case Action::ToggleInvincible:
+    case Action::ToggleHasCollision:
     {
         const auto target = state.Target();
         if (target.kind != SelectionKind::Object) return;
         auto& object = *world.Objects().at(target.index);
         EditSnapshot before(state), after(state);
-        before.objectInvincible = object.invincible;
-        object.invincible = !object.invincible;
-        after.objectInvincible = object.invincible;
+        if (action == Action::ToggleHasCollision)
+        {
+            before.objectHasCollision = object.hasCollision;
+            object.hasCollision = !object.hasCollision;
+            after.objectHasCollision = object.hasCollision;
+        }
+        else
+        {
+            before.objectInvincible = object.invincible;
+            object.invincible = !object.invincible;
+            after.objectInvincible = object.invincible;
+        }
         history.Record(-1, std::move(before), std::move(after));
         Save(world);
         return;
@@ -2320,7 +2332,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     for (const Button& b : Buttons(properties))
     {
         if (b.action == Action::ToggleEmbankmentTransition || b.action == Action::ToggleStopLine || b.action == Action::ToggleAlignedApproaches || b.action == Action::TogglePaintMarkings ||
-            b.action == Action::Left || b.action == Action::Right || b.action == Action::Divide)
+            b.action == Action::Left || b.action == Action::Right || b.action == Action::Divide || b.action == Action::ToggleHasCollision)
         {
             const SDL_FRect box{b.rect.x + 2, b.rect.y + 6, 16, 16};
             if (!Fill(renderer, box, (b.active || b.mixed) ? EditorTheme::selected : EditorTheme::field) ||
@@ -2565,7 +2577,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.townSquare ? 382 : properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
-        properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.river ? 245 : properties.water ? 205 : properties.materialSlot ? 182 : 110;
+        properties.page == PropertiesPage::Marker ? 318 : properties.page == PropertiesPage::Object ? 146 : properties.river ? 245 : properties.water ? 205 : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;

@@ -74,6 +74,8 @@ namespace ObjectIO
                     }
                 }
             }
+            if (version >= 5 && !(in >> object->hasCollision))
+                return SDL_SetError("Invalid object collision flag in OBJS");
             in >> std::ws;
         }
         return true;
@@ -111,7 +113,7 @@ namespace ObjectIO
                 out << ' ' << std::quoted(marker->Text()) << ' ' << std::quoted(marker->material);
                 for (auto channel : marker->textColor) out << ' ' << int(channel);
             }
-            out << '\n';
+            out << ' ' << object->hasCollision << '\n';
         }
         return out.good() || SDL_SetError("Could not serialize world objects");
     }

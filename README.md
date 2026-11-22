@@ -74,7 +74,7 @@ In C++, load the asset with `world.models.Load("props/barn.glb")`. On success, a
 
 ### Placed objects
 
-`BSCObject` holds a transform, a shared mesh, health, and invincibility. `Building`, `Vehicle`, `Prop`, `Character`, and `Marker` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
+`BSCObject` holds a transform, a shared mesh, health, invincibility, and a `hasCollision` flag (true by default). `Building`, `Vehicle`, `Prop`, `Character`, and `Marker` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
 
 Place an object from C++ using a model path relative to `assets/models`. This example places a barn from `assets/models/buildings/barn.glb`.
 
@@ -91,7 +91,7 @@ if (!barn)
 
 The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
 
-The optional `OBJS` version 4 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record ends with its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–3 also load. Older markers use their original mesh colors and white text. A vehicle record ends with its acceleration in meters per second squared. Existing `MESH` placements keep their original transform, including any shear.
+The optional `OBJS` version 5 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record adds its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–4 also load, with collision enabled by default. Older markers use their original mesh colors and white text. A vehicle record adds its acceleration in meters per second squared. Every version 5 record ends with a collision flag (0 or 1). Existing `MESH` placements keep their original transform, including any shear.
 
 ### Mesh editor
 
@@ -254,7 +254,7 @@ With a folder selected, **Delete** moves its contents to its parent and removes 
 
 ### Transform panel
 
-The Transform panel sits above a selection-sensitive properties inspector. Roads and control points show the road settings. Terrain chunks show their mesh and material slot, and objects show their mesh and Invincible setting. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. With **Use Geographic Coordinates** unchecked, locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
+The Transform panel sits above a selection-sensitive properties inspector. Roads and control points show the road settings. Terrain chunks show their mesh and material slot, and objects show their mesh, Invincible setting, and **Has Collision** checkbox. Has Collision is enabled by default; disable it to keep an object visible and selectable while excluding it from gameplay collision. The setting is per object (including Markers), is preserved by duplication and save/load, and supports Undo/Redo. Recook the world after changing it for the streamed game. Click the pavement to select a whole road, a visible control-point marker to edit just that point, or a placed object or terrain chunk to edit its transform. With **Use Geographic Coordinates** unchecked, locations are world coordinates in meters, shown to two decimal places. Rotations are in degrees. Only objects have editable scale.
 
 Check **Use Geographic Coordinates** to display the selection’s latitude and longitude. Paste a Google Maps pair such as `35.0851266266639, -106.65282545913769` into **Latitude, longitude** and press **Enter**. Both horizontal axes update in one undo step. The separate elevation field uses game meters.
 

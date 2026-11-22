@@ -132,6 +132,7 @@ namespace
             w.U32(static_cast<unsigned>(e.type));
             w.Vec(e.pose.position); w.Vec(e.pose.rotation); w.Vec(e.pose.scale);
             w.F32(e.health); w.F32(e.acceleration); w.U32(e.invincible);
+            w.U32(e.hasCollision);
             w.String(e.markerText); for (auto color : e.markerColor) w.U32(color);
             w.Count(e.dependencies.size()); for (auto dep : e.dependencies) w.Id(dep);
         }
@@ -277,6 +278,12 @@ bool Reader::Open(const std::string& file)
             if (!e.pose.ToMeshTransform().Valid()) throw std::runtime_error("Invalid object pose");
             e.health = r.F32(); e.acceleration = r.F32(); const auto invincible = r.U32();
             if (e.health < 0 || invincible > 1) throw std::runtime_error("Invalid object properties"); e.invincible = invincible != 0;
+            if (fileVersion >= 4)
+            {
+                const auto hasCollision = r.U32();
+                if (hasCollision > 1) throw std::runtime_error("Invalid object collision flag");
+                e.hasCollision = hasCollision != 0;
+            }
             e.markerText = r.String();
             for (auto& channel : e.markerColor) { auto c = r.U32(); if (c > 255) throw std::runtime_error("Invalid marker color"); channel = static_cast<Uint8>(c); }
             for (auto d = r.Count(12); d; --d) e.dependencies.push_back(r.Id());

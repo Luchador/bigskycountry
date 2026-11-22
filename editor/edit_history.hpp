@@ -174,6 +174,7 @@ struct EditSnapshot
     std::vector<WorldDocument::ConnectedEnd> detachedEnds; // Restore these links when undoing a junction deletion.
     std::optional<IntersectionAnchor> anchorSelection;
     std::optional<bool> objectInvincible;
+    std::optional<bool> objectHasCollision;
     std::optional<std::string> markerText;
     std::optional<Marker::TextColor> markerTextColor;
     std::optional<SceneHierarchy> hierarchy;

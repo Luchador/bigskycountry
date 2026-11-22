@@ -381,6 +381,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Object " + std::to_string(target.index + 1);
         result.detail = object.Instance().mesh->assetPath;
         result.invincible = object.invincible;
+        result.hasCollision = object.hasCollision;
         if (object.Type() == ObjectType::SpawnPoint)
         {
             result.page = PropertiesPage::Other;
