@@ -53,6 +53,7 @@ struct InspectorEdit
     static constexpr int deadEndLength = roadNames + 1;
     static constexpr int bridgeDepth = deadEndLength + 1;
     static constexpr int intersectionSize = bridgeDepth + 1;
+    static constexpr int townIslandSize = intersectionSize + 1;
     TransformTarget target;
     int field;
     std::string text;

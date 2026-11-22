@@ -57,7 +57,10 @@ struct PropertiesInspector
     bool stopLine = false;
     bool canAlignApproaches = false, alignedApproaches = false;
     double radius = 0;
-    bool yIntersection = false, island = false;
+    bool yIntersection = false, townSquare = false, island = false;
+    TownIsland townIsland = TownIsland::None;
+    double islandSize = 30;
+    std::string IslandSizeText() const;
     double intersectionSize = 60;
     std::string IntersectionSizeText() const;
     IntersectionPaint intersectionPaint = IntersectionPaint::Standard;

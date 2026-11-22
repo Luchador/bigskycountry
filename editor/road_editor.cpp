@@ -180,6 +180,7 @@ std::optional<GizmoPlacement> RoadEditor::SelectedGizmoPlacement(const WorldDocu
     {
         if (gizmo.mode != GizmoMode::Rotate) return {};
         const auto& junction = world.intersections.at(target.index);
+        if (junction.shape == IntersectionShape::TownSquare) return {};
         const auto pivot = junction.AlignsOpposite(target.point) ? junction.position : junction.AnchorPosition(target.point);
         auto placement = RoadOverlay::PointPlacement(pivot, camera, scene);
         if (placement) placement->yawOnly = true;
@@ -360,6 +361,11 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
     }
     if (properties.page == PropertiesPage::Intersection)
     {
+        if (properties.townSquare)
+        {
+            static constexpr std::array islands{"No island", "Square island", "Circular island"};
+            return {{Action::CycleTownIsland, {12, 250, 194, 28}, islands.at(static_cast<int>(properties.townIsland))}};
+        }
         static constexpr std::array labels{"Standard  v", "North/South  v", "East/West  v"};
         std::vector<Button> buttons{
             {Action::SmallerRadius, {12, 73, 32, 28}, "-", false, properties.radius > 0},
@@ -813,10 +819,10 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         }
         return;
     }
-    if (command == EditorCommand::CreateIntersection || command == EditorCommand::CreateYIntersection)
+    if (command == EditorCommand::CreateIntersection || command == EditorCommand::CreateYIntersection || command == EditorCommand::CreateTownSquare)
     {
         const bool yJunction = command == EditorCommand::CreateYIntersection;
-        if (roadMenuTarget && !yJunction)
+        if (roadMenuTarget && command == EditorCommand::CreateIntersection)
         {
             auto target = std::move(*roadMenuTarget);
             roadMenuTarget.reset();
@@ -836,6 +842,13 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         if (!id) { status = SDL_GetError(); return; }
         roadMenuTarget.reset();
         if (yJunction) world.intersections.at(id).shape = IntersectionShape::Y;
+        if (command == EditorCommand::CreateTownSquare)
+        {
+            auto& square = world.intersections.at(id);
+            square.shape = IntersectionShape::TownSquare;
+            square.size = 100;
+            square.stopLines.set();
+        }
         before.junction = EditSnapshot::Junction{id, {}};
         state.SelectRows({{SceneKind::Intersection, id}});
         EditSnapshot after(state);
@@ -1261,6 +1274,27 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
         intersectionPaintOpen = !intersectionPaintOpen;
 #endif
         return;
+    case Action::NoTownIsland:
+    case Action::SquareTownIsland:
+    case Action::CircleTownIsland:
+    case Action::CycleTownIsland:
+    {
+        const auto target = state.Target();
+        if (target.kind != SelectionKind::Intersection) return;
+        auto& item = world.intersections.at(target.index);
+        if (item.shape != IntersectionShape::TownSquare) return;
+        const auto shape = action == Action::CycleTownIsland ? static_cast<TownIsland>((static_cast<int>(item.townIsland) + 1) % 3) :
+            action == Action::SquareTownIsland ? TownIsland::Square : action == Action::CircleTownIsland ? TownIsland::Circle : TownIsland::None;
+        if (shape == item.townIsland) return;
+        EditSnapshot before(state), after(state);
+        before.junction = EditSnapshot::Junction{target.index, item};
+        const double half = item.islandSize * (item.townIsland == TownIsland::Square ? .5 : 1.0);
+        item.townIsland = shape;
+        item.islandSize = std::clamp(half * (shape == TownIsland::Square ? 2.0 : 1.0), 1.0, item.MaxIslandSize());
+        after.junction = EditSnapshot::Junction{target.index, item};
+        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        return;
+    }
     case Action::StandardIntersectionPaint:
     case Action::NorthSouthIntersectionPaint:
     case Action::EastWestIntersectionPaint:
@@ -2360,6 +2394,14 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     }
     if (properties.page == PropertiesPage::Intersection)
     {
+        if (properties.townSquare)
+            return Text(renderer, 12, 48, "12 road connections", muted) &&
+                Text(renderer, 12, 192, "Square width (m)", muted) &&
+                transformPanel.DrawField(renderer, {12, 210, 194, 28}, state.Target(), InspectorEdit::intersectionSize, properties.IntersectionSizeText(), true) &&
+                (properties.townIsland == TownIsland::None ||
+                 (Text(renderer, 12, 292, properties.townIsland == TownIsland::Circle ? "Island radius (m)" : "Island width (m)", muted) &&
+                  transformPanel.DrawField(renderer, {12, 310, 194, 28}, state.Target(), InspectorEdit::townIslandSize, properties.IslandSizeText(), true))) &&
+                Text(renderer, 12, 355, "F: fill central island", muted);
         if (!Text(renderer, 12, 48, properties.yIntersection ? "Island corner radius (m)" : "Corner radius (m)", muted) ||
             !SDL_RenderDebugTextFormat(renderer, 78, 83, "%.2f", properties.radius)) return false;
         if (!properties.yIntersection) return Text(renderer, 12, 192, "Continue paint markings", muted);
@@ -2515,7 +2557,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     if (properties.page != PropertiesPage::Intersection || intersectionPaintOwner != state.Target().index)
         intersectionPaintOpen = false;
     intersectionPaintOwner = properties.page == PropertiesPage::Intersection ? state.Target().index : -1;
-    const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
+    const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.townSquare ? 382 : properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
         properties.page == PropertiesPage::Marker ? static_cast<int>(markerColorBox.y + markerColorBox.h + 8) : properties.river ? 245 : properties.water ? 205 : properties.materialSlot ? 182 : 110;
@@ -3427,22 +3469,44 @@ void RoadEditor::ApplyOutline(const OutlineCommand& cmd, WorldDocument& world)
 void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& edit)
 {
     if (edit.target != state.Target() || drag != Drag::None) return;
+    if (edit.field == InspectorEdit::townIslandSize)
+    {
+        if (edit.target.kind != SelectionKind::Intersection) return;
+        auto& item = world.intersections.at(edit.target.index);
+        if (item.shape != IntersectionShape::TownSquare || item.townIsland == TownIsland::None) return;
+        const auto value = ParseTransformValue(edit.text);
+        if (!value || *value < 1 || *value > item.MaxIslandSize())
+        {
+            status = "Island must leave at least 5 meters of pavement on every side";
+            return;
+        }
+        if (*value == item.islandSize) return;
+        EditSnapshot before(state), after(state);
+        before.junction = EditSnapshot::Junction{edit.target.index, item};
+        item.islandSize = *value;
+        after.junction = EditSnapshot::Junction{edit.target.index, item};
+        if (history.Record(-1, std::move(before), std::move(after))) Save(world);
+        return;
+    }
     if (edit.field == InspectorEdit::intersectionSize)
     {
         if (edit.target.kind != SelectionKind::Intersection) return;
         const auto value = ParseTransformValue(edit.text);
         auto& junction = world.intersections.at(edit.target.index);
-        if (junction.shape != IntersectionShape::Y) return;
-        if (!value || *value < Intersection::minSize || *value > Intersection::maxSize)
+        const bool town = junction.shape == IntersectionShape::TownSquare;
+        if (!town && junction.shape != IntersectionShape::Y) return;
+        if (!value || *value < (town ? Intersection::minTownSize : Intersection::minSize) || *value > Intersection::maxSize)
         {
-            status = "Y-intersection size must be between 10 and 2000 meters";
+            status = town ? "Town square width must be between 40 and 2000 meters" : "Y-intersection size must be between 10 and 2000 meters";
             return;
         }
         if (*value == junction.size) return;
         EditSnapshot before(state);
         before.roadGroup = RoadGroupPose::Capture(world, state.SelectedRows());
         auto next = *before.roadGroup;
-        next.junctions.at(edit.target.index).size = *value;
+        auto& resized = next.junctions.at(edit.target.index);
+        resized.size = *value;
+        if (town) resized.islandSize = std::min(resized.islandSize, resized.MaxIslandSize());
         for (const auto& end : world.ConnectedEnds(edit.target.index))
         {
             auto& points = next.roads.at(static_cast<int>(end.road)).points;
@@ -4316,9 +4380,15 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 const SDL_FPoint local{pointer.x - roadPanel.x, windowY - roadPanel.y + roadScroll};
                 const auto properties = InspectProperties(world, state, EditingDraft());
                 const SDL_FRect intersectionSizeBox{12, 210, 194, 28};
-                if (properties.page == PropertiesPage::Intersection && properties.yIntersection && SDL_PointInRectFloat(&local, &intersectionSizeBox))
+                if (properties.page == PropertiesPage::Intersection && (properties.yIntersection || properties.townSquare) && SDL_PointInRectFloat(&local, &intersectionSizeBox))
                 {
                     transformPanel.StartEdit(window, state.Target(), InspectorEdit::intersectionSize, properties.IntersectionSizeText());
+                    return EditorEvent::Handled;
+                }
+                const SDL_FRect islandSizeBox{12, 310, 194, 28};
+                if (properties.page == PropertiesPage::Intersection && properties.townSquare && properties.townIsland != TownIsland::None && SDL_PointInRectFloat(&local, &islandSizeBox))
+                {
+                    transformPanel.StartEdit(window, state.Target(), InspectorEdit::townIslandSize, properties.IslandSizeText());
                     return EditorEvent::Handled;
                 }
                 const auto deadEndBox = DeadEndBox(properties);

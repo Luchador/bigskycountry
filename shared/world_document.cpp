@@ -27,7 +27,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 8;
+    constexpr Uint32 intersectionVersion = 9;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -230,6 +230,8 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
                 incident[point.anchor->intersectionId][point.anchor->side] = End{i, end};
         }
     }
+    for (const auto& [id, item] : intersections)
+        if (item.shape == IntersectionShape::TownSquare) incident.try_emplace(id);
     std::vector<std::array<std::optional<RoadMouth>, 2>> mouths(roads.size());
     std::vector<std::array<bool, 2>> skewEnds(roads.size());
     std::set<int> active;
@@ -245,16 +247,18 @@ void WorldDocument::UpdateIntersections(const std::set<int>& changedRoads)
         layout.shape = item.shape;
         layout.size = item.size;
         layout.island = item.island;
+        layout.townIsland = item.townIsland;
+        layout.islandSize = item.islandSize;
         for (int i = 0; i < sides; ++i)
         {
             if (!ends[i] || !item.HasAnchor(i)) continue;
             const auto [road, end] = *ends[i];
-            skewEnds[road][end] = item.skew[i] != 0 || item.AlignsOpposite(i);
+            skewEnds[road][end] = item.shape == IntersectionShape::TownSquare || item.skew[i] != 0 || item.AlignsOpposite(i);
             ++connectedArms; // A loop occupies a separate anchor at each end.
             layout.arms[i] = IntersectionApproach::FromRoad(roads[road], end == 0, item.stopLines.test(i));
         }
         const bool through = item.pavedThrough && ((ends[0] && ends[2]) || (ends[1] && ends[3]));
-        if (connectedArms < 3 && !through) continue;
+        if (connectedArms < 3 && !through && item.shape != IntersectionShape::TownSquare) continue;
         active.insert(id);
         auto& surface = junctions[id];
         if (layout != surface.layout) surface.Build(layout);
@@ -668,8 +672,8 @@ bool WorldDocument::Open(const char* documentPath)
                 if (section.version >= 4 && !(data >> item.pavedThrough))
                     return SDL_SetError("Invalid through pavement flag in INTS");
                 if (section.version >= 5)
-                    for (double& angle : item.skew)
-                        if (!(data >> angle) || !std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew)
+                    for (int side = 0; side < (section.version >= 9 ? IntersectionAnchor::sideCount : IntersectionAnchor::cardinalCount); ++side)
+                        if (!(data >> item.skew[side]) || !std::isfinite(item.skew[side]) || std::abs(item.skew[side]) > Intersection::maxSkew)
                             return SDL_SetError("Invalid intersection anchor skew in INTS");
                 if (section.version >= 6)
                 {
@@ -681,7 +685,7 @@ bool WorldDocument::Open(const char* documentPath)
                 if (section.version >= 7)
                 {
                     int shape;
-                    if (!(data >> shape >> item.size >> item.island) || shape < 0 || shape > 1 ||
+                    if (!(data >> shape >> item.size >> item.island) || shape < 0 || shape > (section.version >= 9 ? 2 : 1) ||
                         !std::isfinite(item.size) || item.size < Intersection::minSize || item.size > Intersection::maxSize)
                         return SDL_SetError("Invalid intersection shape/size in INTS");
                     item.shape = static_cast<IntersectionShape>(shape);
@@ -692,6 +696,14 @@ bool WorldDocument::Open(const char* documentPath)
                     if (!(data >> mask) || mask > 3) return SDL_SetError("Invalid intersection alignment mask in INTS");
                     item.alignedApproaches = decltype(item.alignedApproaches){mask};
                     if (!item.ValidAlignment()) return SDL_SetError("Invalid aligned intersection approaches in INTS");
+                }
+                if (section.version >= 9)
+                {
+                    int island;
+                    if (!(data >> island >> item.islandSize) || island < 0 || island > 2)
+                        return SDL_SetError("Invalid town square island in INTS");
+                    item.townIsland = static_cast<TownIsland>(island);
+                    if (!item.ValidTownSquare()) return SDL_SetError("Invalid town square dimensions in INTS");
                 }
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
@@ -809,14 +821,14 @@ bool WorldDocument::Save()
         const auto p = item.position;
         if (id <= 0 || !std::isfinite(item.yaw) || !std::isfinite(Math::Length(p)) || !std::isfinite(item.cornerRadius) || item.cornerRadius < 0 ||
             !Material::ValidAssetPath(item.material) || static_cast<unsigned>(item.paint) > 2 || !item.ValidAlignment() ||
-            static_cast<unsigned>(item.shape) > 1 || !std::isfinite(item.size) || item.size < Intersection::minSize || item.size > Intersection::maxSize ||
+            static_cast<unsigned>(item.shape) > 2 || !item.ValidTownSquare() || !std::isfinite(item.size) || item.size < Intersection::minSize || item.size > Intersection::maxSize ||
             !(junctionData << id << ' ' << p.x << ' ' << p.y << ' ' << p.z << ' ' << item.cornerRadius
                           << ' ' << std::quoted(item.material) << ' ' << item.stopLines.to_ulong() << ' ' << item.yaw << ' ' << item.pavedThrough))
             return SDL_SetError("Cannot save invalid intersection");
         for (double angle : item.skew)
             if (!std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew || !(junctionData << ' ' << angle))
                 return SDL_SetError("Cannot save invalid intersection anchor skew");
-        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << ' ' << item.alignedApproaches.to_ulong() << '\n';
+        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << ' ' << item.alignedApproaches.to_ulong() << ' ' << static_cast<int>(item.townIsland) << ' ' << item.islandSize << '\n';
     }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))

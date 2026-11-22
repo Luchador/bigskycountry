@@ -108,13 +108,13 @@ private:
     int lanes = 2; // Total across both directions, including any center turn lane.
 };
 
-// Persistent reference to one of a junction's four approaches.
+// Persistent reference to a junction approach (four ordinary sockets, twelve for a town square).
 struct IntersectionAnchor
 {
     int intersectionId;
     int side; // Index into directions, stored in ROAD records.
-    static constexpr int sideCount = 4;
-    static constexpr std::array<Vector3, sideCount> directions{{{1, 0, 0}, {0, 0, 1}, {-1, 0, 0}, {0, 0, -1}}};
+    static constexpr int cardinalCount = 4, sideCount = 12;
+    static constexpr std::array<Vector3, cardinalCount> directions{{{1, 0, 0}, {0, 0, 1}, {-1, 0, 0}, {0, 0, -1}}};
     bool Valid() const { return intersectionId > 0 && side >= 0 && side < sideCount; }
     auto operator<=>(const IntersectionAnchor&) const = default;
 };

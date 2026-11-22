@@ -7,7 +7,7 @@
 #include "material_action.hpp"
 
 enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
-                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint };
+                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint, CreateTownSquare };
 struct RampMenuOptions { bool exit, entrance; };
 struct CurveMenuOptions { bool start = false, finish = false, cancel = false; };
 struct RiverMenuOptions { bool start = false, finish = false, disconnect = false, cancel = false; };

@@ -455,6 +455,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
         {"Create Railroad", EditorCommand::CreateRailroad},
         {"Create Intersection", EditorCommand::CreateIntersection, canCreateIntersection},
         {"Create Y-Intersection", EditorCommand::CreateYIntersection},
+        {"Create Town Square", EditorCommand::CreateTownSquare},
         {"Marker", EditorCommand::CreateMarker},
         {crossingExists ? "Remove Railroad Crossing" : "Create Railroad Crossing", EditorCommand::ToggleRailroadCrossing, crossingAvailable}};
     if (ramps)
@@ -516,7 +517,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     if (ready && ClientToScreen(hwnd, &at))
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, at.x, at.y, hwnd, nullptr);
     DestroyMenu(root);
-    if (choice >= commandBase && choice <= commandBase + static_cast<UINT>(EditorCommand::CreateSpawnPoint))
+    if (choice >= commandBase && choice <= commandBase + static_cast<UINT>(EditorCommand::CreateTownSquare))
         return static_cast<EditorCommand>(choice - commandBase);
 #else
     openMenu = -1;

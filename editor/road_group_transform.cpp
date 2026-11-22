@@ -106,14 +106,14 @@ bool RoadGroupPose::SetApproach(WorldDocument& world, int id, int side, double s
 {
     const auto found = junctions.find(id);
     if (found == junctions.end() || !found->second.HasAnchor(side) || !std::isfinite(skew) ||
-        std::abs(skew) > Intersection::maxSkew || (alignOpposite && found->second.shape != IntersectionShape::Standard))
+        std::abs(skew) > Intersection::maxSkew || found->second.shape == IntersectionShape::TownSquare || (alignOpposite && found->second.shape != IntersectionShape::Standard))
         return SDL_SetError("Invalid intersection approach");
     RoadGroupPose next = *this;
     const auto& original = found->second;
     auto& junction = next.junctions.at(id);
     junction.alignedApproaches.set(side % 2, alignOpposite);
     junction.skew[side] = skew;
-    if (alignOpposite) junction.skew[(side + 2) % IntersectionAnchor::sideCount] = skew;
+    if (alignOpposite) junction.skew[(side + 2) % IntersectionAnchor::cardinalCount] = skew;
     if (!junction.ValidAlignment()) return SDL_SetError("Aligned crossroads cannot be parallel");
     for (auto& [index, pose] : next.roads)
     {

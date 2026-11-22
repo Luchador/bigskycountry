@@ -10,7 +10,8 @@
 
 namespace
 {
-    constexpr int sides = IntersectionAnchor::sideCount;
+    constexpr int sides = IntersectionAnchor::cardinalCount;
+    using Axes = std::array<Vector3, IntersectionAnchor::sideCount>;
     constexpr Vector3 up{0, 1, 0};
     constexpr int cornerIntervals = 12;
 
@@ -54,13 +55,13 @@ namespace
                 Mix(a.inner, b.inner, t), Mix(a.outer, b.outer, t)};
     }
 
-    SDL_FPoint SurfaceUV(Vector3 center, const std::array<Vector3, sides>& axes, Vector3 p)
+    SDL_FPoint SurfaceUV(Vector3 center, const Axes& axes, Vector3 p)
     {
         const Vector3 d = p - center;
         return {float(Math::Dot(d, axes[0]) / RoadStyle::laneWidth), float(Math::Dot(d, axes[1]) / RoadStyle::laneWidth)};
     }
 
-    void Pavement(IntersectionSurface& surface, const std::array<Vector3, sides>& axes, Vector3 a, Vector3 b, Vector3 c)
+    void Pavement(IntersectionSurface& surface, const Axes& axes, Vector3 a, Vector3 b, Vector3 c)
     {
         const auto vertex = [&](Vector3 p)
         {
@@ -73,7 +74,7 @@ namespace
     }
 
     void Join(IntersectionSurface& surface, const Rim& a, const Rim& b,
-              const IntersectionApproach& approach, const std::array<Vector3, sides>& axes)
+              const IntersectionApproach& approach, const Axes& axes)
     {
         for (int i = 0; i < 3; ++i)
         {
@@ -174,7 +175,7 @@ namespace
     // The skewed mouths can put the junction center outside a corner's
     // visibility region. Triangulate the entire inner curb boundary in XZ.
     void FillPavement(IntersectionSurface& surface, const std::vector<Vector3>& rim,
-                      const std::array<Vector3, sides>& axes, const std::vector<Vector3>& hole = {})
+                      const Axes& axes, const std::vector<Vector3>& hole = {})
     {
         std::vector<CDT::V2d<double>> vertices;
         std::vector<CDT::Edge> edges;
@@ -385,7 +386,7 @@ namespace
     // Inset the actual pavement boundary instead of shrinking a fixed triangle.
     // Each side can expand independently, following skewed approach curves.
     std::vector<Vector3> BuildIsland(IntersectionSurface& surface, const std::vector<Vector3>& pavement,
-                                     const std::array<Vector3, sides>& axes)
+                                     const Axes& axes)
     {
         const auto& layout = surface.layout;
         if (layout.shape != IntersectionShape::Y || !layout.island || pavement.size() < 3) return {};
@@ -465,6 +466,104 @@ namespace
         surface.geometry.holes.push_back(std::move(land));
         return hole;
     }
+
+    void BuildTownSquare(IntersectionSurface& surface, const Axes& axes)
+    {
+        const auto& layout = surface.layout;
+        const double half = layout.size * .5;
+        // Reserve room around unusually wide corner approaches without squeezing
+        // their lanes. Ordinary town streets stay flush with the authored square.
+        double reach = half;
+        for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+            if (const auto& arm = layout.arms[side])
+                reach = std::max(reach, (side < sides ? 0.0 : half - RoadStyle::laneWidth) +
+                    std::max(arm->left, arm->right) + Profile(arm->edge).Width());
+        surface.setbacks.fill(layout.AnchorDistance() + reach - half);
+        std::vector<Vector3> pavement;
+        // Each run has no edge by default. At a connected road, taper its curb or
+        // transition strip into the plaza, preserving every mouth seam vertex.
+        struct End { Rim rim; const IntersectionApproach* arm = nullptr; bool mouth = false, center = false; };
+        std::vector<End> boundary;
+        for (int edge = 0; edge < sides; ++edge)
+        {
+            const Vector3 forward = axes[edge], left = Math::Cross(forward, up);
+            const Vector3 center = layout.center + forward * reach;
+            const auto bare = [&](Vector3 p) { boundary.push_back({Section(p, {}, {}, {}, 0)}); };
+            bare(center - left * reach);
+            for (int side : {4 + edge * 2, edge, 5 + edge * 2})
+            {
+                const auto& arm = layout.arms[side];
+                if (!arm) continue;
+                const auto mouth = surface.Mouth(side).center;
+                const auto profile = Profile(arm->edge);
+                const auto a = Section(mouth - left * (arm->right + profile.Width()), left * -1, profile, profile, 0);
+                const auto b = Section(mouth + left * (arm->left + profile.Width()), left, profile, profile, 0);
+                boundary.push_back({a, &*arm, true});
+                // A null marker prevents generating edge triangles across the road.
+                boundary.push_back({Section(mouth, {}, {}, {}, 0), nullptr, true, true});
+                boundary.push_back({b, &*arm});
+            }
+            bare(center + left * reach);
+        }
+        for (std::size_t i = 0; i < boundary.size(); ++i)
+        {
+            const auto& a = boundary[i];
+            const auto& b = boundary[(i + 1) % boundary.size()];
+            pavement.push_back(a.rim.p[0]);
+            if (!a.center) surface.geometry.outline.push_back(a.rim.p.back());
+            // Leave road mouths open, including their raised curb end sections.
+            if (!a.mouth && (a.arm || b.arm)) Join(surface, a.rim, b.rim, *(a.arm ? a.arm : b.arm), axes);
+        }
+        // A road's outer curb can meet a square corner exactly. Different
+        // rotated-coordinate sums must not leave a microscopic backtracking edge.
+        // Keep height steps, which the terrain filler uses to seal raised curbs.
+        auto& outline = surface.geometry.outline;
+        for (std::size_t i = 1; i < outline.size(); ++i)
+            for (std::size_t j = 0; j < i; ++j)
+                if (std::hypot(outline[i].x - outline[j].x, outline[i].z - outline[j].z) < 1e-7)
+                {
+                    outline[i].x = outline[j].x;
+                    outline[i].z = outline[j].z;
+                    break;
+                }
+        // Wide neighboring entrances can overlap along the same square edge.
+        // Keep the perimeter monotone even then, rather than backtracking through
+        // their mouth vertices and creating invalid triangulation constraints.
+        const auto aroundCenter = [&](Vector3 a, Vector3 b)
+        {
+            a = a - layout.center;
+            b = b - layout.center;
+            return std::atan2(a.z, a.x) < std::atan2(b.z, b.x);
+        };
+        std::stable_sort(pavement.begin(), pavement.end(), aroundCenter);
+        std::stable_sort(outline.begin(), outline.end(), aroundCenter);
+        std::vector<Vector3> hole;
+        if (layout.townIsland == TownIsland::Square)
+        {
+            const double h = layout.islandSize * .5;
+            for (auto p : {Vector3{-h, 0, -h}, Vector3{-h, 0, h}, Vector3{h, 0, h}, Vector3{h, 0, -h}})
+                hole.push_back(layout.center + axes[0] * p.x + axes[1] * p.z);
+        }
+        else if (layout.townIsland == TownIsland::Circle)
+        {
+            const int count = std::clamp(static_cast<int>(std::ceil(2 * std::numbers::pi * layout.islandSize)), 64, 1024);
+            for (int i = 0; i < count; ++i)
+            {
+                const double angle = -2 * std::numbers::pi * i / count;
+                hole.push_back(layout.center + (axes[0] * std::cos(angle) + axes[1] * std::sin(angle)) * layout.islandSize);
+            }
+        }
+        if (!hole.empty()) surface.geometry.holes.push_back(hole);
+        FillPavement(surface, pavement, axes, hole);
+        for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
+            if (const auto& arm = layout.arms[side]; arm && arm->stopLine)
+            {
+                const auto mouth = surface.Mouth(side);
+                PaintStopLine(surface.geometry, mouth.center, mouth.outward, Math::Cross(mouth.outward, up), *arm->stopLine);
+            }
+        surface.geometry.UpdateBounds();
+    }
+
 }
 
 std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(double yaw, IntersectionShape shape)
@@ -477,9 +576,10 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::Directions(doub
         axes[1] = {}; // The fourth socket is deliberately unavailable.
         return axes;
     }
-    if (yaw == 0) return IntersectionAnchor::directions;
     const double c = std::cos(yaw), s = std::sin(yaw);
-    return {{{c, 0, -s}, {s, 0, c}, {-c, 0, s}, {-s, 0, -c}}};
+    Axes axes{{{c, 0, -s}, {s, 0, c}, {-c, 0, s}, {-s, 0, -c}}};
+    for (int edge = 0; edge < sides; ++edge) axes[4 + edge * 2] = axes[5 + edge * 2] = axes[edge];
+    return axes;
 }
 
 std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions() const
@@ -487,6 +587,22 @@ std::array<Vector3, IntersectionAnchor::sideCount> Intersection::AnchorPositions
     std::array<Vector3, IntersectionAnchor::sideCount> anchors;
     for (int side = 0; side < IntersectionAnchor::sideCount; ++side) anchors[side] = AnchorPosition(side);
     return anchors;
+}
+
+Vector3 Intersection::TownAnchor(int side, double width, double yaw)
+{
+    const int edge = side < sides ? side : (side - sides) / 2;
+    const auto axes = Directions(yaw);
+    const double offset = side < sides ? 0 : ((side - sides) % 2 ? 1.0 : -1.0) * (width * .5 - RoadStyle::laneWidth);
+    return axes.at(edge) * (width * .5) + Math::Cross(axes.at(edge), up) * offset;
+}
+
+bool Intersection::ValidTownSquare() const
+{
+    if (static_cast<unsigned>(townIsland) > 2 || !std::isfinite(islandSize) || islandSize < 1) return false;
+    if (shape != IntersectionShape::TownSquare) return true;
+    return size >= minTownSize && islandSize <= MaxIslandSize() &&
+        std::ranges::all_of(skew, [](double angle) { return angle == 0; });
 }
 
 bool Intersection::ValidAlignment() const
@@ -539,6 +655,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     geometry = {};
     geometry.MarkRebuilt();
     setbacks.fill(layout.AnchorDistance());
+    if (layout.shape == IntersectionShape::TownSquare) { BuildTownSquare(*this, directions); return; }
     if (layout.shape == IntersectionShape::Y) layout.arms[1].reset();
     std::array<ApproachFrame, sides> frames;
     std::array<std::optional<Corner>, sides> corners;

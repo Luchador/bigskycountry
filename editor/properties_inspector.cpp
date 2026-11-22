@@ -330,8 +330,12 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.title = "Intersection " + std::to_string(target.index);
         result.radius = item.cornerRadius;
         result.yIntersection = item.shape == IntersectionShape::Y;
+        result.townSquare = item.shape == IntersectionShape::TownSquare;
+        result.townIsland = item.townIsland;
+        result.islandSize = item.islandSize;
         result.island = item.island;
         result.intersectionSize = item.size;
+        if (result.townSquare) result.title = "Town Square " + std::to_string(target.index);
         if (result.yIntersection) result.title = "Y-intersection " + std::to_string(target.index);
         result.intersectionPaint = item.paint;
         result.material = item.material;
@@ -343,8 +347,11 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         result.page = PropertiesPage::Anchor;
         result.title = "Intersection " + std::to_string(target.index);
         result.detail = world.intersections.at(target.index).shape == IntersectionShape::Y ?
-            (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : names.at(target.point);
+            (target.point == 3 ? "Stem anchor" : target.point == 0 ? "Right branch anchor" : "Left branch anchor") : world.intersections.at(target.index).shape == IntersectionShape::TownSquare ?
+            (target.point < 4 ? std::string(names.at(target.point)) + " (side center)" :
+             std::string(names.at((target.point - 4) / 2)) + ((target.point - 4) % 2 ? " (corner +)" : " (corner -)")) : names.at(target.point);
         const auto& junction = world.intersections.at(target.index);
+        if (junction.shape == IntersectionShape::TownSquare) result.title = "Town Square " + std::to_string(target.index);
         result.stopLine = junction.stopLines.test(target.point);
         result.canAlignApproaches = junction.shape == IntersectionShape::Standard;
         result.alignedApproaches = junction.AlignsOpposite(target.point);
@@ -402,5 +409,12 @@ std::string PropertiesInspector::IntersectionSizeText() const
 {
     char text[48];
     SDL_snprintf(text, sizeof(text), "%.2f", intersectionSize);
+    return text;
+}
+
+std::string PropertiesInspector::IslandSizeText() const
+{
+    char text[64];
+    SDL_snprintf(text, sizeof(text), "%.2f", islandSize);
     return text;
 }

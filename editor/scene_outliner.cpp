@@ -268,7 +268,9 @@ void SceneOutliner::Update(const WorldDocument& world, const RoadEditorState& st
     }
 
     for (const auto& [id, item] : world.intersections)
-        add(SceneKind::Intersection, id, "Intersection " + std::to_string(id), "Intersection");
+        add(SceneKind::Intersection, id,
+            std::string(item.shape == IntersectionShape::TownSquare ? "Town Square " : "Intersection ") + std::to_string(id),
+            item.shape == IntersectionShape::TownSquare ? "Town Square" : "Intersection");
 
     rows.clear();
     std::vector<OutlineRow> stack{{{}, Stem(world.Path()), "World", 0, true, true}};

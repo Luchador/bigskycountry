@@ -376,7 +376,7 @@ void RoadOverlay::DrawIntersections(WorldRenderer& renderer, const WorldDocument
         if (group && selected && !world.IntersectionSurfaces().contains(id))
         {
             // Until the junction has pavement, outline its active authoring anchors.
-            auto previous = camera.WorldToView(anchors.back());
+            auto previous = camera.WorldToView(anchors[IntersectionAnchor::cardinalCount - 1]);
             for (int side = 0; side < IntersectionAnchor::sideCount; ++side)
             {
                 if (!item.HasAnchor(side)) continue;

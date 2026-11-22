@@ -5,7 +5,8 @@
 #include <bitset>
 
 enum class IntersectionPaint { Standard, NorthSouth, EastWest };
-enum class IntersectionShape { Standard, Y };
+enum class IntersectionShape { Standard, Y, TownSquare };
+enum class TownIsland { None, Square, Circle };
 
 // Authoring data for a flat junction. Its center is at world elevation position.y.
 struct Intersection
@@ -23,10 +24,17 @@ struct Intersection
     std::array<double, IntersectionAnchor::sideCount> skew{}; // Per-anchor yaw relative to its nominal outward axis.
     std::bitset<2> alignedApproaches{}; // +X/-X and +Z/-Z share a straight line through the center.
     IntersectionShape shape = IntersectionShape::Standard;
-    double size = 60.0; // Y: center to each anchor, in meters; lane widths are not scaled.
+    double size = 60.0; // Y: center to anchor; town square: pavement width, in meters.
     bool island = true;
+    TownIsland townIsland = TownIsland::Circle;
+    double islandSize = 30.0; // Square width or circle radius, in meters.
     static constexpr double minSize = 10.0, maxSize = 2000.0;
-    bool HasAnchor(int side) const { return side >= 0 && side < IntersectionAnchor::sideCount && (shape != IntersectionShape::Y || side != 1); }
+    static constexpr double minTownSize = 40.0;
+    static constexpr double islandClearance = RoadStyle::laneWidth;
+    bool HasAnchor(int side) const { return side >= 0 && side < (shape == IntersectionShape::TownSquare ? IntersectionAnchor::sideCount : IntersectionAnchor::cardinalCount) && (shape != IntersectionShape::Y || side != 1); }
+    double MaxIslandSize() const { return (size * .5 - islandClearance) * (townIsland == TownIsland::Square ? 2 : 1); }
+    bool ValidTownSquare() const;
+    static Vector3 TownAnchor(int side, double width, double yaw);
     double AnchorDistance() const { return shape == IntersectionShape::Y ? size : anchorDistance; }
     Vector3 ApproachDirection(int side) const { return Directions(yaw + skew.at(side), shape).at(side); }
     static std::array<Vector3, IntersectionAnchor::sideCount> Directions(double yaw, IntersectionShape shape = IntersectionShape::Standard);
@@ -34,6 +42,7 @@ struct Intersection
     bool ValidAlignment() const;
     Vector3 AnchorPosition(int side) const
     {
+        if (shape == IntersectionShape::TownSquare) return position + TownAnchor(side, size, yaw);
         return position + Directions(yaw + (AlignsOpposite(side) ? skew.at(side) : 0), shape).at(side) * AnchorDistance();
     }
     std::array<Vector3, IntersectionAnchor::sideCount> AnchorPositions() const;
@@ -70,9 +79,12 @@ struct IntersectionLayout
     IntersectionShape shape = IntersectionShape::Standard;
     double size = 60.0;
     bool island = true;
+    TownIsland townIsland = TownIsland::Circle;
+    double islandSize = 30.0; // Square width or circle radius, in meters.
     double AnchorDistance() const { return shape == IntersectionShape::Y ? size : Intersection::anchorDistance; }
     Vector3 AnchorPosition(int side) const
     {
+        if (shape == IntersectionShape::TownSquare) return center + Intersection::TownAnchor(side, size, yaw);
         const bool aligned = shape == IntersectionShape::Standard && alignedApproaches.test(side % 2);
         return center + Intersection::Directions(yaw + (aligned ? skew.at(side) : 0), shape).at(side) * AnchorDistance();
     }

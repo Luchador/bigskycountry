@@ -263,6 +263,7 @@ struct WindowsPanels::Impl
 
     std::optional<std::string> FieldText(int id) const
     {
+        if (id == IDC_TOWN_ISLAND_SIZE && lastInspector) return lastInspector->properties.IslandSizeText();
         if (id == IDC_INTERSECTION_SIZE && lastInspector) return lastInspector->properties.IntersectionSizeText();
         if (id == IDC_DEAD_END_LENGTH && lastInspector && lastInspector->properties.HasRoadDetail())
             return lastInspector->properties.RoadDetailText();
@@ -296,7 +297,7 @@ struct WindowsPanels::Impl
     {
         if (inspected && *inspected == fields) return;
         const bool changedTarget = !inspected || inspected->target != fields.target;
-        if (changedTarget && (GetFocus() == GetDlgItem(road, IDC_ROAD_NAMES) || GetFocus() == GetDlgItem(road, IDC_INTERSECTION_SIZE) || GetFocus() == GetDlgItem(road, IDC_DEAD_END_LENGTH))) SetFocus(frame);
+        if (changedTarget && (GetFocus() == GetDlgItem(road, IDC_ROAD_NAMES) || GetFocus() == GetDlgItem(road, IDC_INTERSECTION_SIZE) || GetFocus() == GetDlgItem(road, IDC_TOWN_ISLAND_SIZE) || GetFocus() == GetDlgItem(road, IDC_DEAD_END_LENGTH))) SetFocus(frame);
         inspected = fields;
         for (int field = 0; field <= TransformFields::geographicLocation; ++field)
         {
@@ -311,7 +312,9 @@ struct WindowsPanels::Impl
         const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
         const bool roadNames = field == InspectorEdit::roadNames && lastInspector && lastInspector->properties.roadNames;
         const bool deadEnd = lastInspector && (field == InspectorEdit::deadEndLength || field == InspectorEdit::bridgeDepth) && lastInspector->properties.HasRoadDetail();
-        const bool intersectionSize = field == InspectorEdit::intersectionSize && lastInspector && lastInspector->properties.yIntersection;
+        const bool intersectionSize = lastInspector &&
+            ((field == InspectorEdit::intersectionSize && (lastInspector->properties.yIntersection || lastInspector->properties.townSquare)) ||
+             (field == InspectorEdit::townIslandSize && lastInspector->properties.townSquare && lastInspector->properties.townIsland != TownIsland::None));
         if (inspected && (intersectionSize || deadEnd || roadNames || marker || inspected->CanEdit(field)) && SendMessageW(control, EM_GETMODIFY, 0, 0))
         {
             pendingEdits.push_back({inspected->target, field, ReadEdit(control)});
@@ -462,7 +465,7 @@ struct WindowsPanels::Impl
         const int height = page == PropertiesPage::Road ? ROAD_PANEL_HEIGHT + stripHeight + endHeight :
                            page == PropertiesPage::Railroad ? 231 + stripHeight + endHeight :
                            page == PropertiesPage::Marker ? 267 :
-                           page == PropertiesPage::Intersection ? (lastInspector && lastInspector->properties.yIntersection ? 275 : 232) : page == PropertiesPage::Terrain ? 211 : 150;
+                           page == PropertiesPage::Intersection ? (lastInspector && lastInspector->properties.townSquare ? 325 : lastInspector && lastInspector->properties.yIntersection ? 275 : 232) : page == PropertiesPage::Terrain ? 211 : 150;
         SCROLLINFO si{sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS};
         si.nMax = DialogSize(road, 0, height).cy - 1;
         si.nPage = static_cast<UINT>(client.bottom);
@@ -1010,6 +1013,11 @@ struct WindowsPanels::Impl
             static constexpr RoadAction alignment[] = {RoadAction::Straight, RoadAction::Curve};
             static constexpr RoadAction layout[] = {RoadAction::TwoNorthbound, RoadAction::TwoSouthbound, RoadAction::CenterTurn};
             static constexpr RoadAction edge[] = {RoadAction::NoEdge, RoadAction::Transition, RoadAction::Curb};
+            if (id == IDC_TOWN_ISLAND && i >= 0 && i < 3)
+            {
+                static constexpr RoadAction shapes[] = {RoadAction::NoTownIsland, RoadAction::SquareTownIsland, RoadAction::CircleTownIsland};
+                PostAction(shapes[i]);
+            }
             if (id == IDC_INTERSECTION_PAINT && i >= 0 && i < 3)
             {
                 static constexpr RoadAction paint[] = {RoadAction::StandardIntersectionPaint,
@@ -1043,7 +1051,8 @@ struct WindowsPanels::Impl
         }
 
         const auto& properties = data.properties;
-        const bool pageChanged = !lastInspector || lastInspector->properties.page != properties.page;
+        const bool pageChanged = !lastInspector || lastInspector->properties.page != properties.page ||
+            lastInspector->properties.townSquare != properties.townSquare || lastInspector->properties.yIntersection != properties.yIntersection;
         const bool marker = properties.page == PropertiesPage::Marker;
         const bool refreshText = marker && (pageChanged || lastInspector->properties.title != properties.title ||
                                              lastInspector->properties.markerText != properties.markerText);
@@ -1059,15 +1068,26 @@ struct WindowsPanels::Impl
         const bool railroad = properties.page == PropertiesPage::Railroad;
         const bool junction = properties.page == PropertiesPage::Intersection;
         const bool yJunction = junction && properties.yIntersection;
+        const bool town = junction && properties.townSquare;
         SetDlgItemTextW(road, IDC_LAKE_HINT, properties.river ? L"Enter: finish | Esc: cancel\nShift-drag green ends: extend\nDouble-click banks: add point" : L"Enter: finish | Esc: cancel");
         SetDlgItemTextW(road, IDC_LAKE_EDIT, properties.river ? L"Edit River Banks" : L"Edit Shoreline");
         ShowWindow(GetDlgItem(road, IDC_LAKE_EDIT), properties.water && !properties.editingWater ? SW_SHOWNA : SW_HIDE);
         for (int id : {IDC_LAKE_FINISH, IDC_LAKE_CANCEL, IDC_LAKE_HINT})
             ShowWindow(GetDlgItem(road, id), properties.editingWater ? SW_SHOWNA : SW_HIDE);
-        for (int id : {IDC_INTERSECTION_SIZE_LABEL, IDC_INTERSECTION_SIZE, IDC_INTERSECTION_ISLAND, IDC_INTERSECTION_FILL_HINT})
+        for (int id : {IDC_INTERSECTION_SIZE_LABEL, IDC_INTERSECTION_SIZE})
+            ShowWindow(GetDlgItem(road, id), yJunction || town ? SW_SHOWNA : SW_HIDE);
+        for (int id : {IDC_INTERSECTION_ISLAND, IDC_INTERSECTION_FILL_HINT})
             ShowWindow(GetDlgItem(road, id), yJunction ? SW_SHOWNA : SW_HIDE);
+        SetDlgItemTextW(road, IDC_INTERSECTION_SIZE_LABEL, town ? L"Square width (m)" : L"Size: center to anchor (m)");
+        for (int id : {IDC_TOWN_ISLAND, IDC_TOWN_FILL_HINT})
+            ShowWindow(GetDlgItem(road, id), town ? SW_SHOWNA : SW_HIDE);
+        for (int id : {IDC_TOWN_ISLAND_SIZE_LABEL, IDC_TOWN_ISLAND_SIZE})
+            ShowWindow(GetDlgItem(road, id), town && properties.townIsland != TownIsland::None ? SW_SHOWNA : SW_HIDE);
+        SetDlgItemTextW(road, IDC_TOWN_ISLAND_SIZE_LABEL, properties.townIsland == TownIsland::Square ? L"Island width (m)" : L"Island radius (m)");
+        SendDlgItemMessageW(road, IDC_TOWN_ISLAND, CB_SETCURSEL, static_cast<int>(properties.townIsland), 0);
+        if (GetFocus() != GetDlgItem(road, IDC_TOWN_ISLAND_SIZE)) RestoreField(IDC_TOWN_ISLAND_SIZE);
         for (int id : {IDC_INTERSECTION_PAINT_LABEL, IDC_INTERSECTION_PAINT})
-            ShowWindow(GetDlgItem(road, id), junction && !yJunction ? SW_SHOWNA : SW_HIDE);
+            ShowWindow(GetDlgItem(road, id), junction && !yJunction && !town ? SW_SHOWNA : SW_HIDE);
         CheckDlgButton(road, IDC_INTERSECTION_ISLAND, properties.island ? BST_CHECKED : BST_UNCHECKED);
         ShowWindow(GetDlgItem(road, IDC_ALIGNED_APPROACHES), properties.page == PropertiesPage::Anchor && properties.canAlignApproaches ? SW_SHOWNA : SW_HIDE);
         CheckDlgButton(road, IDC_ALIGNED_APPROACHES, properties.alignedApproaches ? BST_CHECKED : BST_UNCHECKED);
@@ -1094,7 +1114,7 @@ struct WindowsPanels::Impl
             SetWindowPos(GetDlgItem(road, IDC_TRANSITION_MATERIAL), nullptr, slot.cx, slot.cy - scroll, 0, 0,
                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             for (int id : {IDC_RADIUS_LESS, IDC_RADIUS_VALUE, IDC_RADIUS_MORE})
-                ShowWindow(GetDlgItem(road, id), junction ? SW_SHOWNA : SW_HIDE);
+                ShowWindow(GetDlgItem(road, id), junction && !town ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_STOP_LINE), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
             ShowWindow(GetDlgItem(road, IDC_INVINCIBLE), (properties.page == PropertiesPage::Object || marker) ? SW_SHOWNA : SW_HIDE);
             for (int id : {IDC_MARKER_TEXT_LABEL, IDC_MARKER_TEXT, IDC_MARKER_TEXT_COLOR, IDC_MARKER_CLEAR_MATERIAL})
@@ -1156,7 +1176,7 @@ struct WindowsPanels::Impl
         }
         if (!roadPage)
         {
-            SetDlgItemTextW(road, IDC_PROPERTY_DETAIL, junction ? (yJunction ? L"Island corner radius (m)" : L"Corner radius (m)") : Wide(properties.detail).c_str());
+            SetDlgItemTextW(road, IDC_PROPERTY_DETAIL, junction ? (town ? L"12 road connections" : yJunction ? L"Island corner radius (m)" : L"Corner radius (m)") : Wide(properties.detail).c_str());
             if (junction)
             {
                 wchar_t radius[48];
@@ -1679,8 +1699,9 @@ struct WindowsPanels::Impl
         const int field = id == IDC_MARKER_TEXT ? InspectorEdit::markerText :
                           id == IDC_ROAD_NAMES ? InspectorEdit::roadNames :
                           id == IDC_INTERSECTION_SIZE ? InspectorEdit::intersectionSize :
+                          id == IDC_TOWN_ISLAND_SIZE ? InspectorEdit::townIslandSize :
                           id == IDC_DEAD_END_LENGTH ? (self.lastInspector && self.lastInspector->properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength) : id - IDC_LOC_X;
-        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || id == IDC_INTERSECTION_SIZE || id == IDC_DEAD_END_LENGTH || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
+        if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || id == IDC_INTERSECTION_SIZE || id == IDC_TOWN_ISLAND_SIZE || id == IDC_DEAD_END_LENGTH || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
             if (msg->message == WM_KEYDOWN)
@@ -1833,6 +1854,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     {
         SendDlgItemMessageW(p.road, id, EM_SETLIMITTEXT, 120, 0);
     }
+    Choices(p.road, IDC_TOWN_ISLAND, {L"No island", L"Square island", L"Circular island"});
     Choices(p.road, IDC_INTERSECTION_PAINT, {L"Standard", L"North/South", L"East/West"});
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
