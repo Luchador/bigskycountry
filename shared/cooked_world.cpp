@@ -660,7 +660,7 @@ void CookedWorld::Submit(WorldRenderer &renderer, const CameraView &camera, doub
     for (const auto &[i, render] : s.renders)
     {
         const auto &bounds = s.reader.Index().cells[i].bounds;
-        if (BoundsDistanceSquared(bounds, eye) > radius * radius || !renderer.BoundsVisible(bounds)) continue;
+        if (BoundsDistanceSquared(bounds, eye) > radius * radius || !renderer.BoundsNeeded(bounds)) continue;
         for (const auto &batch : render.cell->batches)
         {
             const auto &mesh = batch.nearMesh;

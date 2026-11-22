@@ -11,6 +11,7 @@ namespace
 {
     constexpr auto filename = "project-settings.json";
     constexpr auto distanceKey = "railroadDetailDistanceMeters";
+    constexpr auto shadowDistanceKey = "shadowDistanceMeters";
     constexpr auto viewDistanceKey = "viewDistanceMeters";
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
@@ -63,6 +64,10 @@ bool ProjectSettings::Load(AssetRoot location)
     if (view && (!cJSON_IsNumber(view) || !std::isfinite(view->valuedouble) ||
                  view->valuedouble < minViewDistance || view->valuedouble > maxViewDistance))
         return SDL_SetError("Invalid view distance in %s", path.c_str());
+    const auto* shadow = cJSON_GetObjectItemCaseSensitive(settings.get(), shadowDistanceKey);
+    if (shadow && (!cJSON_IsNumber(shadow) || !std::isfinite(shadow->valuedouble) ||
+                   shadow->valuedouble < 0 || shadow->valuedouble > maxShadowDistance))
+        return SDL_SetError("Invalid shadow distance in %s", path.c_str());
     StreamingSettings loaded;
     const auto readBudget = [&](const char* key, std::size_t& bytes) {
         const auto* value = cJSON_GetObjectItemCaseSensitive(settings.get(), key);
@@ -74,6 +79,7 @@ bool ProjectSettings::Load(AssetRoot location)
     };
     if (!readBudget("streamGeometryMiB", loaded.geometryBytes) || !readBudget("streamAssetsMiB", loaded.assetBytes) ||
         !readBudget("streamCollisionMiB", loaded.collisionBytes)) return false;
+    shadowDistance = shadow ? shadow->valuedouble : defaultShadowDistance;
     streaming = loaded;
     railroadDetailDistance = distance ? distance->valuedouble : defaultRailroadDetailDistance;
     viewDistance = view ? view->valuedouble : defaultViewDistance;
@@ -85,8 +91,10 @@ bool ProjectSettings::SaveDistances(double meters, double viewMeters)
     return SaveOptions(meters, viewMeters, streaming);
 }
 
-bool ProjectSettings::SaveOptions(double meters, double viewMeters, const StreamingSettings& budgets)
+bool ProjectSettings::SaveOptions(double meters, double viewMeters, const StreamingSettings& budgets, double shadowMeters)
 {
+    if (!std::isfinite(shadowMeters) || shadowMeters < 0 || shadowMeters > maxShadowDistance)
+        return SDL_SetError("Enter a shadow distance between 0 and 10 kilometers (0 disables shadows).");
     for (auto bytes : {budgets.geometryBytes, budgets.assetBytes, budgets.collisionBytes})
         if (bytes < 64 * StreamingSettings::MiB || bytes > 16384 * StreamingSettings::MiB)
             return SDL_SetError("Streaming budgets must be between 64 and 16384 MiB.");
@@ -101,6 +109,8 @@ bool ProjectSettings::SaveOptions(double meters, double viewMeters, const Stream
     if (!cJSON_AddNumberToObject(settings.get(), distanceKey, meters)) return SDL_OutOfMemory();
     cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), viewDistanceKey);
     if (!cJSON_AddNumberToObject(settings.get(), viewDistanceKey, viewMeters)) return SDL_OutOfMemory();
+    cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), shadowDistanceKey);
+    if (!cJSON_AddNumberToObject(settings.get(), shadowDistanceKey, shadowMeters)) return SDL_OutOfMemory();
     const auto addBudget = [&](const char* key, std::size_t bytes) {
         cJSON_DeleteItemFromObjectCaseSensitive(settings.get(), key);
         return cJSON_AddNumberToObject(settings.get(), key, double(bytes) / StreamingSettings::MiB) != nullptr;
@@ -110,6 +120,7 @@ bool ProjectSettings::SaveOptions(double meters, double viewMeters, const Stream
     std::unique_ptr<char, decltype(&cJSON_free)> data(cJSON_Print(settings.get()), cJSON_free);
     if (!data) return SDL_OutOfMemory();
     if (!WriteSettings(source, data.get())) return false;
+    shadowDistance = shadowMeters;
     streaming = budgets;
     railroadDetailDistance = meters;
     viewDistance = viewMeters;

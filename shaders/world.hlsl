@@ -62,8 +62,65 @@ cbuffer WorldLights : register(b0, space3)
     float4 fogDensity; // density, height falloff, eye height minus base, start distance
     float4 fogAir;     // uniform air density in x; zero density disables fog
     float4 fogZenith, fogOpposite, fogSunward, fogSun;
+    float4 shadowX[4], shadowY[4], shadowZ[4];
+    float4 shadowParams[4]; // far view depth, texel meters, depth bias, blend start
+    float4 shadowControl;   // cascade count, inverse map size, moon flag, horizon fade
+    float4 shadowForward;
     float4 visibility; // radius squared, inverse focal length, viewport half width/height
 };
+
+#ifdef __spirv__
+#define BSC_COMBINED [[vk::combinedImageSampler]]
+#else
+#define BSC_COMBINED
+#endif
+BSC_COMBINED Texture2DArray<float> shadowMap : register(t0, space2);
+BSC_COMBINED SamplerComparisonState shadowSampler : register(s0, space2);
+
+float CascadeShadow(int cascade, float3 p, float3 normal)
+{
+    // Use the geometric normal, not the normal-map perturbation. Correct each
+    // PCF tap for the receiver plane so sloped terrain does not shadow itself.
+    float3 zRow = shadowZ[cascade].xyz;
+    float depthScale = length(zRow);
+    float facing = dot(normal, -zRow/depthScale);
+    if (facing <= 0) return 1;
+    float2 planeSlope = float2(dot(normal,normalize(shadowX[cascade].xyz)),
+                             -dot(normal,normalize(shadowY[cascade].xyz))) / max(facing,.05);
+    float2 tapDepth = planeSlope * shadowParams[cascade].y * depthScale;
+    float bias = shadowParams[cascade].z + .75*(abs(tapDepth.x)+abs(tapDepth.y));
+    p += normal * shadowParams[cascade].y * .25;
+    float3 q = float3(dot(p,shadowX[cascade].xyz)+shadowX[cascade].w,
+                      dot(p,shadowY[cascade].xyz)+shadowY[cascade].w,
+                      dot(p,shadowZ[cascade].xyz)+shadowZ[cascade].w);
+    float2 uv = float2(q.x*.5+.5, .5-q.y*.5);
+    if (any(uv < shadowControl.y*2) || any(uv > 1-shadowControl.y*2) || q.z <= 0 || q.z >= 1) return 1;
+    float result = 0;
+    [unroll] for (int y=-1;y<=1;++y)
+        [unroll] for (int x=-1;x<=1;++x)
+            result += shadowMap.SampleCmpLevelZero(shadowSampler, float3(uv+float2(x,y)*shadowControl.y,cascade),
+                                                   q.z+dot(tapDepth,float2(x,y))-bias);
+    return result/9;
+}
+
+float ShadowVisibility(float3 normal, float3 view)
+{
+    if (shadowControl.x == 0) return 1;
+    float depth = dot(-view,shadowForward.xyz);
+    if (depth <= 0 || depth >= shadowParams[3].x) return 1;
+    int c = depth > shadowParams[0].x ? 1 : 0;
+    if (depth > shadowParams[1].x) c=2;
+    if (depth > shadowParams[2].x) c=3;
+    float result = CascadeShadow(c,-view,normal);
+    float blend = saturate((depth-shadowParams[c].w) / max(shadowParams[c].x-shadowParams[c].w,.001));
+    if (blend > 0)
+    {
+        float next = 1;
+        if (c < 3) next = CascadeShadow(c+1,-view,normal);
+        result = lerp(result,next,blend);
+    }
+    return lerp(1,result,shadowControl.w);
+}
 
 void ClipVisibility(WorldFragment input)
 {
@@ -101,13 +158,14 @@ float3 ToDisplay(float3 c)
 }
 
 // Keep the software renderer's WorldLighting::Shade in sync.
-float3 ShadeSurface(float3 normal, float3 view, float3 base, float3 orm, float3 emission)
+float3 ShadeSurface(float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission)
 {
     float3 diffuse = skyAmbient.rgb * orm.r;
     float3 specular = 0;
     float3 eye = UnitVector(view);
-    Illuminate(sunDirection.xyz, sunRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
-    Illuminate(moonDirection.xyz, moonRadiance.rgb, normal, eye, 1 - orm.g, orm.b, diffuse, specular);
+    float shadow = ShadowVisibility(geometricNormal,view);
+    Illuminate(sunDirection.xyz, sunRadiance.rgb * (shadowControl.z == 0 ? shadow : 1), normal, eye, 1 - orm.g, orm.b, diffuse, specular);
+    Illuminate(moonDirection.xyz, moonRadiance.rgb * (shadowControl.z != 0 ? shadow : 1), normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     float3 c = emission + base * diffuse + lerp(0.08, base, orm.b) * specular;
     return c;
 }
@@ -149,7 +207,7 @@ float4 PSMain(WorldFragment input) : SV_Target0
 {
     ClipVisibility(input);
     if (input.normal.w == 0) return input.color;
-    float3 c = ShadeSurface(UnitVector(input.normal.xyz), 0, input.color.rgb, float3(1, 1, 0), 0);
+    float3 c = ShadeSurface(UnitVector(input.normal.xyz), UnitVector(input.normal.xyz), input.view, input.color.rgb, float3(1, 1, 0), 0);
     return float4(ToDisplay(ApplyFog(c, input.view)), input.color.a);
 }
 
@@ -166,24 +224,19 @@ float4 WireframePS(WorldFragment input) : SV_Target0
     return onEdge ? float4(input.color.rgb, 1.0) : 0;
 }
 
-#ifdef __spirv__
-#define BSC_COMBINED [[vk::combinedImageSampler]]
-#else
-#define BSC_COMBINED
-#endif
-BSC_COMBINED Texture2D<float4> baseColorMap : register(t0, space2);
-BSC_COMBINED Texture2D<float2> normalMap : register(t1, space2);
-BSC_COMBINED Texture2D<float4> ormMap : register(t2, space2);
-BSC_COMBINED Texture2D<float4> emissionOrOuterColor : register(t3, space2);
-BSC_COMBINED Texture2D<float4> alphaOrOuterNormal : register(t4, space2);
-BSC_COMBINED Texture2D<float4> outerOrmMap : register(t5, space2);
-BSC_COMBINED SamplerState outerOrmSampler : register(s5, space2);
-BSC_COMBINED SamplerState colorSampler : register(s0, space2);
-BSC_COMBINED SamplerState normalSampler : register(s1, space2);
-BSC_COMBINED SamplerState ormSampler : register(s2, space2);
+BSC_COMBINED Texture2D<float4> baseColorMap : register(t1, space2);
+BSC_COMBINED Texture2D<float2> normalMap : register(t2, space2);
+BSC_COMBINED Texture2D<float4> ormMap : register(t3, space2);
+BSC_COMBINED Texture2D<float4> emissionOrOuterColor : register(t4, space2);
+BSC_COMBINED Texture2D<float4> alphaOrOuterNormal : register(t5, space2);
+BSC_COMBINED Texture2D<float4> outerOrmMap : register(t6, space2);
+BSC_COMBINED SamplerState outerOrmSampler : register(s6, space2);
+BSC_COMBINED SamplerState colorSampler : register(s1, space2);
+BSC_COMBINED SamplerState normalSampler : register(s2, space2);
+BSC_COMBINED SamplerState ormSampler : register(s3, space2);
 
-BSC_COMBINED SamplerState emissiveSampler : register(s3, space2);
-BSC_COMBINED SamplerState opacitySampler : register(s4, space2);
+BSC_COMBINED SamplerState emissiveSampler : register(s4, space2);
+BSC_COMBINED SamplerState opacitySampler : register(s5, space2);
 cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;
@@ -226,7 +279,7 @@ float4 MaterialPS(WorldFragment input) : SV_Target0
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
     float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
-    float3 c = ShadeSurface(mapped, input.view, base.rgb, orm, glow);
+    float3 c = ShadeSurface(mapped, n, input.view, base.rgb, orm, glow);
     if (input.normal.w != 0) c = ApplyFog(c, input.view);
     // SDL composites the world into a display-encoded color target.
     return float4(ToDisplay(c), 1);

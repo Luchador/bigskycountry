@@ -16,6 +16,12 @@
 #include "wireframe_frag_spirv.hpp"
 #include "material_frag_dxil.hpp"
 #include "material_frag_spirv.hpp"
+#include "shadow_vert_dxil.hpp"
+#include "shadow_vert_spirv.hpp"
+#include "shadow_frag_dxil.hpp"
+#include "shadow_frag_spirv.hpp"
+#include "shadow_cutout_dxil.hpp"
+#include "shadow_cutout_spirv.hpp"
 
 namespace
 {
@@ -57,6 +63,10 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
+    if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
+    if (shadowPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
+    if (shadowCutoutPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowCutoutPipeline);
     if (colorTarget)
     {
         SDL_DestroyTexture(colorTarget);
@@ -104,7 +114,7 @@ bool WorldRenderer::CreatePipelines()
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 0, 1);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 1, 1);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
@@ -158,7 +168,7 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount, 2);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2);
     }
 
     if (texturedPipeline)
@@ -171,7 +181,7 @@ bool WorldRenderer::CreatePipelines()
         blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
         blend.color_blend_op = blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
         ds.enable_depth_write = false;
-        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount, 2);
+        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2);
         color.blend_state = {};
         ds.enable_depth_write = true;
     }
@@ -194,8 +204,57 @@ bool WorldRenderer::CreatePipelines()
     SDL_ReleaseGPUShader(device, vs);
     SDL_ReleaseGPUShader(device, ps);
 
-    if (!outlinePipeline)
+    if (outlinePipeline)
     {
+        for (auto format : {SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREFORMAT_D16_UNORM})
+            if (SDL_GPUTextureSupportsFormat(device, format, SDL_GPU_TEXTURETYPE_2D_ARRAY,
+                    SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+            {
+                shadowFormat = format;
+                break;
+            }
+        auto* shadowVS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "ShadowVS", shadow_vert_dxil, shadow_vert_spirv, 0, 1);
+        auto* shadowPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "ShadowPS", shadow_frag_dxil, shadow_frag_spirv);
+        auto* cutoutPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "ShadowCutoutPS", shadow_cutout_dxil, shadow_cutout_spirv, 2);
+        if (shadowVS && shadowPS && cutoutPS && shadowFormat != SDL_GPU_TEXTUREFORMAT_INVALID)
+        {
+            SDL_GPUGraphicsPipelineCreateInfo shadow{};
+            shadow.vertex_shader = shadowVS;
+            shadow.fragment_shader = shadowPS;
+            shadow.vertex_input_state = pipeline.vertex_input_state;
+            shadow.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            shadow.target_info.has_depth_stencil_target = true;
+            shadow.target_info.depth_stencil_format = shadowFormat;
+            shadow.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            shadow.rasterizer_state.enable_depth_clip = true;
+            shadow.depth_stencil_state.enable_depth_test = true;
+            shadow.depth_stencil_state.enable_depth_write = true;
+            shadow.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            shadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &shadow);
+            shadow.fragment_shader = cutoutPS;
+            shadowCutoutPipeline = SDL_CreateGPUGraphicsPipeline(device, &shadow);
+            SDL_GPUSamplerCreateInfo sampler{};
+            sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
+            sampler.address_mode_u = sampler.address_mode_v = sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            sampler.enable_compare = true;
+            sampler.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            shadowSampler = SDL_CreateGPUSampler(device, &sampler);
+        }
+        if (shadowVS) SDL_ReleaseGPUShader(device, shadowVS);
+        if (shadowPS) SDL_ReleaseGPUShader(device, shadowPS);
+        if (cutoutPS) SDL_ReleaseGPUShader(device, cutoutPS);
+    }
+
+    if (!outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1))
+    {
+        if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
+        if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
+        if (shadowPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
+        if (shadowCutoutPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowCutoutPipeline);
+        if (outlinePipeline) SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
+        shadowTarget = nullptr;
+        shadowSampler = nullptr;
+        shadowPipeline = shadowCutoutPipeline = outlinePipeline = nullptr;
         if (wireframePipeline)
         {
             SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
@@ -296,8 +355,92 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
     return true;
 }
 
+// A tiny valid texture serves unshadowed previews without allocating full cascades.
+bool WorldRenderer::PrepareShadowTarget(int resolution)
+{
+    if (shadowTarget && shadowResolution >= resolution) return true;
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+    info.format = shadowFormat;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    info.width = info.height = resolution;
+    info.layer_count_or_depth = ShadowCascades::count;
+    info.num_levels = 1;
+    auto* replacement = SDL_CreateGPUTexture(device, &info);
+    if (!replacement) return false;
+    if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
+    shadowTarget = replacement;
+    shadowResolution = resolution;
+    shadowInitialized = false;
+    return true;
+}
+
+bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
+{
+    if (!shadows.active && shadowInitialized) return true;
+    const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };
+    for (int i = 0; i < ShadowCascades::count; ++i)
+    {
+        SDL_GPUDepthStencilTargetInfo depth{};
+        depth.texture = shadowTarget;
+        depth.layer = static_cast<Uint8>(i);
+        depth.clear_depth = 1;
+        depth.load_op = SDL_GPU_LOADOP_CLEAR;
+        depth.store_op = SDL_GPU_STOREOP_STORE;
+        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        depth.cycle = i == 0; // Cycle the array once; retain the layers already rendered.
+        auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
+        if (!pass) return false;
+        if (shadows.active)
+        {
+            const auto& cascade = shadows.cascades[i];
+            const auto rows = cascade.Rows(camera->GetPosition());
+            SDL_FColor uniforms[]{rows[0], rows[1], rows[2], {}, {}};
+            const auto bindSource = [&](SDL_GPUBuffer* buffer, const ResidentGeometry* mesh) {
+                const SDL_GPUBufferBinding binding{buffer, 0};
+                SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+                const Vector3 offset = mesh ? mesh->origin - camera->GetPosition() : Vector3{};
+                uniforms[3] = axis(offset, mesh ? 1.f : 0.f);
+                uniforms[4] = axis(offset - Vector3{uniforms[3].r, uniforms[3].g, uniforms[3].b});
+                SDL_PushGPUVertexUniformData(commands, 0, uniforms, sizeof(uniforms));
+            };
+            SDL_GPUGraphicsPipeline* bound = nullptr;
+            const auto draw = [&](size_t first, size_t end, const SurfaceMaterial* material) {
+                if (first >= end || (material && material->type == MaterialType::Unlit)) return;
+                const bool cutout = material && material->type == MaterialType::AlphaCutout;
+                auto* pipeline = cutout ? shadowCutoutPipeline : shadowPipeline;
+                if (bound != pipeline) SDL_BindGPUGraphicsPipeline(pass, bound = pipeline);
+                if (cutout) materialCache.BindShadow(*material, pass);
+                SDL_DrawGPUPrimitives(pass, static_cast<Uint32>(end-first), 1, static_cast<Uint32>(first), 0);
+            };
+            for (const auto& batch : residentDraws)
+            {
+                const auto& mesh = *batch.geometry;
+                if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
+                    !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes)) || !cascade.Intersects(mesh.bounds)) continue;
+                bindSource(mesh.buffer, &mesh);
+                for (const auto& part : mesh.parts) draw(part.first, part.end, part.material);
+            }
+            const size_t end = std::min(shadowEnd, outlineStart);
+            if (vertexBuffer && end)
+            {
+                bindSource(vertexBuffer, nullptr);
+                for (const auto& range : draws) draw(range.first, std::min(range.end, end), range.material);
+            }
+        }
+        SDL_EndGPURenderPass(pass);
+    }
+    return true;
+}
+
 bool WorldRenderer::DrawGPU()
 {
+    if (shadows.active && !PrepareShadowTarget(ShadowCascades::resolution))
+    {
+        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Shadows disabled for this frame: %s", SDL_GetError());
+        shadows.active = false;
+    }
     // Stage newly visible or edited assets together. Once uploaded, their buffers
     // stay on the device. Only camera uniforms and dynamic geometry change each frame.
     constexpr size_t maxVertices = std::numeric_limits<Uint32>::max() / sizeof(WorldDepthVertex);
@@ -403,6 +546,11 @@ bool WorldRenderer::DrawGPU()
         SDL_EndGPUCopyPass(copy);
     }
 
+    if (!DrawShadows(commands))
+    {
+        SDL_CancelGPUCommandBuffer(commands);
+        return false;
+    }
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
 
     if (!pass)
@@ -416,13 +564,38 @@ bool WorldRenderer::DrawGPU()
     const auto pack = [](Vector3 v) -> SDL_FColor { return {float(v.x), float(v.y), float(v.z), 0}; };
     const SDL_FColor fogDensity = fog ? SDL_FColor{float(fog->density), float(fog->heightFalloff),
         float(camera->GetPosition().y - fog->baseHeight), float(fog->startDistance)} : SDL_FColor{};
-    SDL_FColor lighting[]{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
+    struct LightingData
+    {
+        SDL_FColor sunDirection, sunRadiance, moonDirection, moonRadiance, ambient;
+        SDL_FColor fogDensity, fogAir, fogZenith, fogOpposite, fogSunward, fogSun;
+        std::array<SDL_FColor, 4> shadowX, shadowY, shadowZ, shadowParams;
+        SDL_FColor shadowControl, shadowForward, visibility;
+    };
+    static_assert(sizeof(LightingData) == 30*sizeof(SDL_FColor));
+    LightingData lighting{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
                                 pack(lights.moon.radiance), pack(lights.ambient), fogDensity,
                                 {fog ? float(fog->airDensity) : 0.f, 0, 0, 0},
                                 fog ? fog->zenith : SDL_FColor{}, fog ? fog->oppositeHorizon : SDL_FColor{},
-                                fog ? fog->sunwardHorizon : SDL_FColor{}, fog ? pack(fog->horizontalSun) : SDL_FColor{},
-                                {float(viewDistance * viewDistance), float(1 / focal), float(viewport.w) * 0.5f, float(viewport.h) * 0.5f}};
-    SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
+                                fog ? fog->sunwardHorizon : SDL_FColor{}, fog ? pack(fog->horizontalSun) : SDL_FColor{}};
+    if (shadows.active)
+    {
+        for (int i = 0; i < ShadowCascades::count; ++i)
+        {
+            const auto& cascade = shadows.cascades[i];
+            const auto rows = cascade.Rows(camera->GetPosition());
+            lighting.shadowX[i] = rows[0]; lighting.shadowY[i] = rows[1]; lighting.shadowZ[i] = rows[2];
+            lighting.shadowParams[i] = {float(cascade.farDepth), float(cascade.texelMeters),
+                float(std::max(.015, cascade.texelMeters*.15) / (2*cascade.depthRadius)), float(cascade.farDepth*.9)};
+        }
+        const double elevation = shadows.moon ? lights.moon.direction.y : lights.sun.direction.y;
+        lighting.shadowControl = {4, 1.f/ShadowCascades::resolution, shadows.moon ? 1.f : 0.f,
+                        float(std::clamp((elevation-.01)/.09, 0.0, 1.0))};
+        lighting.shadowForward = pack(camera->Forward());
+    }
+    lighting.visibility = {float(viewDistance * viewDistance), float(1 / focal), float(viewport.w) * .5f, float(viewport.h) * .5f};
+    const SDL_GPUTextureSamplerBinding shadowBinding{shadowTarget, shadowSampler};
+    SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+    SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
     // Form the origin-to-eye offset in double before packing the shader uniforms.
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };
     SDL_FColor cameraData[]{axis(camera->Right() * scaleX), axis(camera->Up() * scaleY),
@@ -459,7 +632,7 @@ bool WorldRenderer::DrawGPU()
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             bound = pipeline;
         }
-        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass);
+        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass, 1);
         boundMaterial = material;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
@@ -518,14 +691,16 @@ bool WorldRenderer::DrawGPU()
             return false;
         }
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
-        lighting[11] = {}; // Editor foreground handles remain visible at any distance.
-        SDL_PushGPUFragmentUniformData(commands, 0, lighting, sizeof(lighting));
+        SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+        lighting.visibility = {}; // Editor foreground handles remain visible at any distance.
+        SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
         source = nullptr; // Bindings are local to a render pass.
         bindSource(vertexBuffer, nullptr);
         draw(foregroundStart, vertices.size(), 0);
         SDL_EndGPURenderPass(pass);
     }
     if (!SDL_SubmitGPUCommandBuffer(commands)) return false;
+    shadowInitialized = true;
     for (const auto& item : uploads)
     {
         auto& mesh = *item.geometry;

@@ -52,6 +52,7 @@ public:
     bool GeometrySelected(SceneKey key) const override { return state.GeometrySelected(key); }
     bool WireframeEnabled() const override { return menu.WireframeEnabled(); }
     bool VisibilityStatisticsEnabled() const override { return menu.VisibilityStatisticsEnabled(); }
+    bool ShadowsEnabled() const override { return menu.ShadowsEnabled(); }
     bool FogEnabled() const override { return menu.FogEnabled(); }
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;

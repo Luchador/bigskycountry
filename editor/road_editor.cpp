@@ -550,6 +550,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleRoadNames();
         return;
     }
+    if (command == EditorCommand::ToggleShadows)
+    {
+        menu.ToggleShadows();
+        return;
+    }
     if (command == EditorCommand::ToggleFog)
     {
         menu.ToggleFog();

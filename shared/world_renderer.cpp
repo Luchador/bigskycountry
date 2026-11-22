@@ -41,7 +41,7 @@ std::size_t WorldRenderer::ResidentBytes() const
     return bytes;
 }
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance, bool enableShadows)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
@@ -90,6 +90,17 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     selectedRanges.clear();
     outlineStart = 0;
     if (viewport.w > 0 && viewport.h > 0 && !PrepareTarget(target, viewport.w, viewport.h)) return false;
+    shadowEnd = std::numeric_limits<std::size_t>::max();
+    shadows.active = false;
+    if (device && environment && enableShadows)
+    {
+        const auto& sun = lights.sun;
+        shadows.moon = sun.direction.y <= 0 || Math::Length(sun.radiance) < .01;
+        const auto& light = shadows.moon ? lights.moon : sun;
+        const double meters = viewDistance > 0 ? std::min(viewDistance, g_ProjectSettings.ShadowDistance()) : g_ProjectSettings.ShadowDistance();
+        if (light.direction.y > .01 && Math::Length(light.radiance) > .001)
+            shadows.Build(view, light.direction, scaleX, scaleY, meters);
+    }
     materialCache.BeginFrame(device, g_ProjectSettings.Streaming().assetBytes / 2);
     return true;
 }
@@ -160,6 +171,15 @@ bool WorldRenderer::BoundsVisible(const Bounds3& bounds, const MeshTransform* pl
     return outside == 0;
 }
 
+bool WorldRenderer::BoundsNeeded(const Bounds3& bounds, const MeshTransform* placement) const
+{
+    if (BoundsVisible(bounds, placement)) return true;
+    if (!lightGeometry || !shadows.active) return false;
+    const auto worldBounds = placement ? WorldBounds(bounds, *placement) : bounds;
+    if (viewDistance > 0 && BoundsDistanceSquared(worldBounds, camera->GetPosition()) > viewDistance*viewDistance) return false;
+    return shadows.Intersects(worldBounds);
+}
+
 bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 {
     if (viewDistance > 0 && foregroundStart == std::numeric_limits<size_t>::max() &&
@@ -173,7 +193,7 @@ bool WorldRenderer::SphereVisible(Vector3 center, double radius) const
 
 void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
 {
-    if (!instance.mesh || (!packingOrigin && !BoundsVisible(instance.mesh->bounds, &instance.transform)))
+    if (!instance.mesh || (!packingOrigin && !BoundsNeeded(instance.mesh->bounds, &instance.transform)))
     {
         return;
     }
@@ -261,7 +281,7 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         return;
     }
     const Mesh& mesh = *instance.mesh;
-    if (!packingOrigin && !BoundsVisible(mesh.bounds, &instance.transform)) return;
+    if (!packingOrigin && !BoundsNeeded(mesh.bounds, &instance.transform)) return;
     const auto normalMatrix = instance.transform.NormalTransform();
     const auto worldNormal = [&](Vector3 n) {
         // Terrain placements are rigid. Object scale can be nonuniform or mirrored.
@@ -401,7 +421,7 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
 void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
                                     MeshUVs mapping, SDL_FColor tint)
 {
-    if (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform)) return;
+    if (!instance.mesh || !BoundsNeeded(instance.mesh->bounds, &instance.transform)) return;
     if (material.empty() && instance.mesh->HasMaterials()) mapping = MeshUVs::Authored;
     const auto emit = [&] {
         if (material.empty()) SubmitMesh(instance, tint);
@@ -441,6 +461,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         entry->material = material;
         entry->mapping = mapping;
         entry->tint = tint;
+        entry->bounds = WorldBounds(bounds, instance.transform);
         entry->origin = bounds.Empty() ? instance.transform.origin : instance.transform.Point((bounds.min + bounds.max) * 0.5);
     }
     PrepareMesh(*entry, instance);
@@ -461,7 +482,7 @@ void WorldRenderer::AppendSelectionVertex(SDL_FPoint point, double depth, double
 void WorldRenderer::SubmitTerrain(const TerrainChunk& chunk, bool selected)
 {
     const auto& instance = chunk.Instance();
-    if (selected && (!instance.mesh || !BoundsVisible(instance.mesh->bounds, &instance.transform))) return;
+    if (selected && (!instance.mesh || !BoundsNeeded(instance.mesh->bounds, &instance.transform))) return;
     const auto start = vertices.size(), firstResident = residentDraws.size();
     SubmitWorldMesh(chunk.Instance(), chunk.material, MeshUVs::TerrainProjection,
                     chunk.boundary ? TerrainChunk::groundColor : SDL_FColor{1, 1, 1, 1});
@@ -504,6 +525,7 @@ void WorldRenderer::WireframeSubmittedGeometry()
     // Reserve UVs in this pass for two barycentric coordinates. Clipping and
     // perspective interpolation then preserve the edges of the original triangle.
     constexpr SDL_FPoint corners[] = {{1, 0}, {0, 1}, {0, 0}};
+    shadows.active = false;
     residentWire = true;
     wireframeEnd = vertices.size();
     for (size_t i = 0; i < wireframeEnd; ++i)

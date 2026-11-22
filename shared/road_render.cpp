@@ -231,7 +231,7 @@ void WorldRenderer::EmitRoadSurface(const RoadGeometry& road, const std::string&
 
 void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected)
 {
-    if (!BoundsVisible(road.bounds)) return;
+    if (!BoundsNeeded(road.bounds)) return;
     const size_t start = vertices.size();
     const bool cache = road.revision && CanRetain(material);
     const size_t previousBatches = residentDraws.size();
@@ -255,6 +255,7 @@ void WorldRenderer::SubmitRoad(const RoadGeometry& road, const std::string& mate
             entry->revision = road.revision;
             entry->material = path;
             entry->origin = origin;
+            entry->bounds = road.bounds;
             const size_t first = vertices.size(), firstMaterial = materialRanges.size();
             packingOrigin = origin;
             emit();
@@ -298,7 +299,7 @@ void WorldRenderer::SubmitRailroadTies(const RailroadTieRun& run, std::uint64_t 
     const auto center = run.Center();
     const double radius = run.Radius();
     if (Math::Length(center - camera->GetPosition()) > g_ProjectSettings.RailroadDetailDistance() + radius ||
-        !SphereVisible(center, radius) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing) return;
+        !BoundsNeeded({center - Vector3{radius,radius,radius}, center + Vector3{radius,radius,radius}}) || camera->WorldToView(center).z - radius > 2 * focal * RailroadSettings::tieSpacing) return;
     const auto emit = [&] { for (int i = 0; i < run.count; ++i) SubmitMesh({RailroadTieMesh(), run.At(i)}); };
     if (!CanRetain({})) { emit(); return; }
     auto& entry = resident[&run];
@@ -307,6 +308,7 @@ void WorldRenderer::SubmitRailroadTies(const RailroadTieRun& run, std::uint64_t 
         entry = std::make_shared<ResidentGeometry>();
         entry->revision = revision;
         entry->origin = center;
+        entry->bounds = {center - Vector3{radius,radius,radius}, center + Vector3{radius,radius,radius}};
         entry->device = device;
     }
     if (!entry->complete && CanPrepare())

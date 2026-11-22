@@ -1548,6 +1548,7 @@ struct WindowsPanels::Impl
             SetDlgItemTextW(dialog, IDC_STREAM_GEOMETRY, Wide(ProjectDistanceFields::Text(2)).c_str());
             SetDlgItemTextW(dialog, IDC_STREAM_ASSETS, Wide(ProjectDistanceFields::Text(3)).c_str());
             SetDlgItemTextW(dialog, IDC_STREAM_COLLISION, Wide(ProjectDistanceFields::Text(4)).c_str());
+            SetDlgItemTextW(dialog, IDC_SHADOW_DISTANCE, Wide(ProjectDistanceFields::Text(5)).c_str());
             SendDlgItemMessageW(dialog, IDC_VIEW_DISTANCE, EM_SETLIMITTEXT, 64, 0);
             return TRUE;
         }
@@ -1561,13 +1562,14 @@ struct WindowsPanels::Impl
         {
             HWND field = GetDlgItem(dialog, IDC_RAIL_DETAIL_DISTANCE);
             if (ProjectDistanceFields::Apply(ReadEdit(field), ReadEdit(GetDlgItem(dialog, IDC_VIEW_DISTANCE)),
-                ReadEdit(GetDlgItem(dialog, IDC_STREAM_GEOMETRY)), ReadEdit(GetDlgItem(dialog, IDC_STREAM_ASSETS)), ReadEdit(GetDlgItem(dialog, IDC_STREAM_COLLISION))))
+                ReadEdit(GetDlgItem(dialog, IDC_STREAM_GEOMETRY)), ReadEdit(GetDlgItem(dialog, IDC_STREAM_ASSETS)), ReadEdit(GetDlgItem(dialog, IDC_STREAM_COLLISION)), ReadEdit(GetDlgItem(dialog, IDC_SHADOW_DISTANCE))))
             {
                 SetWindowTextW(field, Wide(ProjectDistanceFields::Text()).c_str());
                 SetDlgItemTextW(dialog, IDC_VIEW_DISTANCE, Wide(ProjectDistanceFields::Text(true)).c_str());
                 SetDlgItemTextW(dialog, IDC_STREAM_GEOMETRY, Wide(ProjectDistanceFields::Text(2)).c_str());
                 SetDlgItemTextW(dialog, IDC_STREAM_ASSETS, Wide(ProjectDistanceFields::Text(3)).c_str());
                 SetDlgItemTextW(dialog, IDC_STREAM_COLLISION, Wide(ProjectDistanceFields::Text(4)).c_str());
+                SetDlgItemTextW(dialog, IDC_SHADOW_DISTANCE, Wide(ProjectDistanceFields::Text(5)).c_str());
             }
             else
                 MessageBoxW(dialog, Wide(SDL_GetError()).c_str(), L"Project Settings", MB_OK | MB_ICONERROR);

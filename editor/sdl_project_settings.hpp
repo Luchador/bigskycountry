@@ -15,7 +15,7 @@ private:
     void Close();
     void Apply();
     void StoreField();
-    std::array<std::string, 5> values;
+    std::array<std::string, 6> values;
     int activeField = -1;
     SDL_Renderer* renderer = nullptr;
     SdlTransformPanel distanceField;

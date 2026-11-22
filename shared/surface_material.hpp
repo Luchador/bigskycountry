@@ -45,7 +45,8 @@ public:
     void BeginFrame(SDL_GPUDevice* target, std::size_t budget);
     std::size_t Bytes() const;
     std::size_t TextureCount() const;
-    void Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const;
+    void Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, Uint32 firstSampler = 0) const;
+    void BindShadow(const SurfaceMaterial& material, SDL_GPURenderPass* pass) const;
 
 private:
     void ClearTextures();

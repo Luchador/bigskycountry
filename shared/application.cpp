@@ -212,7 +212,8 @@ namespace
             {
                 const bool fogEnabled = !roadTool || roadTool->FogEnabled();
                 if (!sky.Draw(renderer, view, g_WorldState.GetTimeOfDayMinutes()) ||
-                    !worldRenderer.Begin(renderer, view, &sky.Lighting(), fogEnabled ? &sky.Fog() : nullptr, g_ProjectSettings.ViewDistance()))
+                    !worldRenderer.Begin(renderer, view, &sky.Lighting(), fogEnabled ? &sky.Fog() : nullptr, g_ProjectSettings.ViewDistance(),
+                                         !roadTool || roadTool->ShadowsEnabled()))
                 {
                     return false;
                 }

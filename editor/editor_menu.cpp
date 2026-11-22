@@ -36,6 +36,7 @@ namespace
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
                                       {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED},
                                       {BSC_VIEW_FOG, L"&Fog", MF_CHECKED},
+                                      {BSC_VIEW_SHADOWS, L"&Shadows", MF_CHECKED},
                                       {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3"}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
     void MenuBackground(HMENU menu, SDL_Color color)
@@ -117,7 +118,7 @@ namespace
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, WindowsTheme::Color(fg));
             if (!item.bar) { r.left += pad; r.right -= pad; }
-            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES || item.id == BSC_VIEW_FOG || item.id == BSC_VIEW_VISIBILITY_STATS)
+            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES || item.id == BSC_VIEW_FOG || item.id == BSC_VIEW_SHADOWS || item.id == BSC_VIEW_VISIBILITY_STATS)
             {
                 if (draw->itemState & ODS_CHECKED)
                 {
@@ -213,7 +214,7 @@ namespace
         {
             const int id = LOWORD(wParam);
             if (id == BSC_FILE_SAVE || id == BSC_FILE_COOK_WORLD || id == BSC_EDIT_UNDO || id == BSC_EDIT_REDO || id == BSC_VIEW_WIREFRAME ||
-                id == BSC_VIEW_ROAD_NAMES || id == BSC_VIEW_FOG || id == BSC_VIEW_VISIBILITY_STATS || id == BSC_PROJECT_SETTINGS)
+                id == BSC_VIEW_ROAD_NAMES || id == BSC_VIEW_FOG || id == BSC_VIEW_SHADOWS || id == BSC_VIEW_VISIBILITY_STATS || id == BSC_PROJECT_SETTINGS)
             {
                 SDL_Event event{};
                 event.type = static_cast<Uint32>(eventType);
@@ -294,6 +295,14 @@ void EditorMenu::ToggleRoadNames()
 #endif
 }
 
+void EditorMenu::ToggleShadows()
+{
+    shadows = !shadows;
+#ifdef _WIN32
+    CheckMenuItem(static_cast<HMENU>(viewMenu), BSC_VIEW_SHADOWS, MF_BYCOMMAND | (shadows ? MF_CHECKED : MF_UNCHECKED));
+#endif
+}
+
 void EditorMenu::ToggleFog()
 {
     fog = !fog;
@@ -339,6 +348,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         {
         case BSC_VIEW_WIREFRAME: return EditorCommand::ToggleWireframe;
         case BSC_VIEW_ROAD_NAMES: return EditorCommand::ToggleRoadNames;
+        case BSC_VIEW_SHADOWS: return EditorCommand::ToggleShadows;
         case BSC_VIEW_FOG: return EditorCommand::ToggleFog;
         case BSC_VIEW_VISIBILITY_STATS: return EditorCommand::ToggleVisibilityStatistics;
         case BSC_PROJECT_SETTINGS: return EditorCommand::ProjectSettings;
@@ -375,6 +385,7 @@ namespace
     constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe},
                                      {"Road Names", EditorCommand::ToggleRoadNames},
                                      {"Fog", EditorCommand::ToggleFog},
+                                     {"Shadows", EditorCommand::ToggleShadows},
                                      {"Visibility Statistics  F3", EditorCommand::ToggleVisibilityStatistics}};
     constexpr BarAction settings[] = {{"Project Settings", EditorCommand::ProjectSettings}};
     struct BarMenu { const char* label; std::span<const BarAction> items; };
@@ -565,6 +576,7 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
         if ((items[i].command == EditorCommand::ToggleWireframe && wireframe) ||
             (items[i].command == EditorCommand::ToggleRoadNames && roadNames) ||
             (items[i].command == EditorCommand::ToggleFog && fog) ||
+            (items[i].command == EditorCommand::ToggleShadows && shadows) ||
             (items[i].command == EditorCommand::ToggleVisibilityStatistics && visibilityStatistics))
         {
             const SDL_FPoint check[] = {{row.x + 6, row.y + 13}, {row.x + 9, row.y + 16}, {row.x + 16, row.y + 8}};

@@ -4,6 +4,7 @@
 #include <optional>
 #include "surface_material.hpp"
 #include "world_fog.hpp"
+#include "shadow_cascades.hpp"
 #include <array>
 #include <SDL3/SDL.h>
 
@@ -46,7 +47,7 @@ public:
 
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
-    // Fog is opt-in for world viewports; thumbnails and material previews stay clear.
+    // Fog and shadows are opt-in for world viewports; previews stay clear.
     void Forget(const void* key) { resident.erase(key); }
     std::size_t ResidentBytes() const;
     // Per-frame work counters, also displayed by the F3 overlay.
@@ -57,8 +58,8 @@ public:
     std::size_t TextureBytes() const { return materialCache.Bytes(); }
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
-               double viewDistance = 0);
-    void BeginUnlit() { lightGeometry = false; }
+               double viewDistance = 0, bool shadows = false);
+    void BeginUnlit() { shadowEnd = vertices.size(); lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
@@ -67,6 +68,8 @@ public:
     void SubmitRoad(const RoadGeometry& road, const std::string& material, bool selected);
     bool SphereVisible(Vector3 center, double radius) const;
     bool BoundsVisible(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
+    // Includes off-screen casters intersecting an active cascade, within the view radius.
+    bool BoundsNeeded(const Bounds3& bounds, const MeshTransform* placement = nullptr) const;
     void SubmitMesh(const MeshInstance& instance, SDL_FColor tint = {1, 1, 1, 1});
     enum class MeshUVs { Authored, TerrainProjection };
     void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});
@@ -83,6 +86,8 @@ private:
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();
+    bool PrepareShadowTarget(int resolution);
+    bool DrawShadows(SDL_GPUCommandBuffer* commands);
     bool DrawSoftware();
     void BuildDrawRanges();
 
@@ -122,6 +127,7 @@ private:
         bool meshOwned = false;
         ~ResidentGeometry();
         Vector3 origin{};
+        Bounds3 bounds;
         std::vector<WorldDepthVertex> pendingUpload;
         std::vector<MaterialRange> parts; // Contiguous, including the untextured gaps.
         std::string material;
@@ -164,6 +170,16 @@ private:
     std::vector<VertexRange> selectedRanges; // Ordered, disjoint spans of selected world geometry.
     std::size_t outlineStart = 0;
     SDL_Texture* colorTarget = nullptr;
+
+    ShadowCascades shadows;
+    std::size_t shadowEnd = 0;
+    SDL_GPUTexture* shadowTarget = nullptr;
+    SDL_GPUSampler* shadowSampler = nullptr;
+    SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* shadowCutoutPipeline = nullptr;
+    SDL_GPUTextureFormat shadowFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    int shadowResolution = 0;
+    bool shadowInitialized = false;
 
     SDL_GPUDevice* device = nullptr; // Borrowed from the SDL renderer.
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;

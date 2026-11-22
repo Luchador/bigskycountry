@@ -261,7 +261,7 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
     return it->second ? &*it->second : nullptr;
 }
 
-void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass) const
+void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, Uint32 firstSampler) const
 {
     std::array<SDL_GPUTextureSamplerBinding, SurfaceMaterial::shaderMapCount> bindings{};
     const bool unlit = material.type == MaterialType::Unlit;
@@ -275,10 +275,18 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     const auto& slots = transition ? transitionSlots : unlit ? unlitSlots : standardSlots;
     for (size_t i = 0; i < slots.size(); ++i)
         bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
-    SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), bindings.size());
+    SDL_BindGPUFragmentSamplers(pass, firstSampler, bindings.data(), bindings.size());
     struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, padding; };
     const Properties params{material.tint, material.type == MaterialType::AlphaCutout, unlit, transition, 0};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
+}
+
+void SurfaceMaterialCache::BindShadow(const SurfaceMaterial& material, SDL_GPURenderPass* pass) const
+{
+    const SDL_GPUTextureSamplerBinding maps[]{
+        {material.maps[static_cast<size_t>(MaterialSlot::BaseColor)]->gpu, sampler},
+        {material.maps[static_cast<size_t>(MaterialSlot::Opacity)]->gpu, sampler}};
+    SDL_BindGPUFragmentSamplers(pass, 0, maps, 2);
 }
 
 SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
