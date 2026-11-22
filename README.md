@@ -191,7 +191,7 @@ Right-click in the viewport and choose **Infrastructure → Create Town Square**
 
 The inspector offers **Square width (m)** (40–2000 m), **No island / Square island / Circular island**, and an island width or radius in meters. At least 5 m of pavement remains around the island; reducing the outer width also reduces an oversized island. Connected road ends follow resizing, translation and rotation, with undo/redo. Very wide approaches can extend the outside edge to retain their full width. Individual square anchors stay aligned with its street grid; rotate the whole square to orient it. The pavement material can be assigned with the existing material slot.
 
-Select the Town Square and press **F** to fill its island with subdivided terrain, then assign a terrain material normally. The terrain follows later edits and disappears while **No island** is selected. The outer boundary also participates in surrounding terrain fills. `INTS` version 9 stores the twelve anchors and island settings; older worlds still load. Rebuild both executables and recook the world for the game.
+Select **only the Town Square** and press **F** to fill its island with subdivided terrain, then assign a terrain material normally. The terrain follows later edits and disappears while **No island** is selected. When the square is selected with roads or other boundary elements, only its outer boundary participates; the interior is excluded to prevent overlapping island terrain. Saved surrounding fills are rebuilt with this rule when the world loads. `INTS` version 9 stores the twelve anchors and island settings; older worlds still load. Rebuild both executables and recook the world for the game.
 
 ### Y-intersections
 

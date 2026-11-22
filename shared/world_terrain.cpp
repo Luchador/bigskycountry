@@ -49,7 +49,9 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     std::vector<const RoadGeometry*> supportingFootprints;
     std::vector<std::uint64_t> revisions;
     std::vector<std::array<Vector3, 2>> links;
+    std::vector<std::vector<Vector3>> exclusions;
     const auto& boundary = *chunk.boundary;
+    const bool standaloneIntersection = boundary.intersections.size() == 1 && boundary.roads.empty() && boundary.waterBodies.empty();
     auto groundRoads = boundary.roads;
     for (int id : boundary.roads)
         if (auto it = byId.find(id); it != byId.end())
@@ -84,7 +86,15 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
     {
         const auto it = junctions.find(id);
         revisions.push_back(it == junctions.end() ? 0 : it->second.geometry.revision);
-        if (it != junctions.end()) footprints.push_back(&it->second.geometry);
+        if (it != junctions.end())
+        {
+            const auto& surface = it->second;
+            footprints.push_back(&surface.geometry);
+            // A town square's island is an explicit, standalone fill. Surrounding
+            // blocks must not include it, including older saved all-pocket fills.
+            if (!standaloneIntersection && surface.layout.shape == IntersectionShape::TownSquare)
+                exclusions.insert(exclusions.end(), surface.geometry.holes.begin(), surface.geometry.holes.end());
+        }
     }
     Bounds3 bounds;
     for (const auto* footprint : footprints)
@@ -123,10 +133,9 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
         chunk.sourceWaterBodies = std::move(waterRevisions);
         return;
     }
-    std::vector<std::vector<Vector3>> shorelines;
     for (const auto* lake : lakes)
     {
-        auto& rim = shorelines.emplace_back();
+        auto& rim = exclusions.emplace_back();
         rim.reserve(lake->BuiltShoreline().size());
         for (const auto& sample : lake->BuiltShoreline()) rim.push_back(lake->Water().transform.Point(sample.position));
     }
@@ -194,8 +203,8 @@ void WorldDocument::RebuildTerrain(TerrainChunk& chunk, const std::map<int, cons
                 }
     const auto scope = boundary.filterIncidentalPockets ? TerrainFillScope::SelectedBoundary : TerrainFillScope::AllPockets;
     chunk.SetMesh(geometryCache
-        ? geometryCache->Fill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints)
-        : BuildTerrainFill(footprints, links, shorelines, junctionSeams, scope, supportingFootprints));
+        ? geometryCache->Fill(footprints, links, exclusions, junctionSeams, scope, supportingFootprints)
+        : BuildTerrainFill(footprints, links, exclusions, junctionSeams, scope, supportingFootprints));
     chunk.sourceRevisions = std::move(revisions);
     chunk.anchorLinks = std::move(links);
     chunk.sourceWaterBodies = std::move(waterRevisions);

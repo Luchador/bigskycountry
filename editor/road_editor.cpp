@@ -2741,13 +2741,22 @@ void RoadEditor::FinishAnchorRoad(WorldDocument& world)
 
 void RoadEditor::FillSelection(WorldDocument& world)
 {
+    const auto selection = state.SelectedRows();
     TerrainBoundary boundary;
-    for (SceneKey key : state.SelectedRows())
+    for (SceneKey key : selection)
     {
         if (key.kind == SceneKind::Road) boundary.roads.insert(world.roads.at(key.index).id);
         else if (key.kind == SceneKind::Intersection) boundary.intersections.insert(key.index);
         else if (key.kind == SceneKind::Terrain && world.Terrain().at(key.index)->HasWater())
             boundary.waterBodies.insert(world.Terrain()[key.index]->persistentId);
+    }
+    // Props and ordinary terrain are not stored as fill boundaries. Do not let
+    // ignoring them turn a mixed selection into a standalone town-square fill.
+    if (selection.size() > 1 && boundary.roads.empty() && boundary.waterBodies.empty() && boundary.intersections.size() == 1 &&
+        world.intersections.at(*boundary.intersections.begin()).shape == IntersectionShape::TownSquare)
+    {
+        status = "Select only the Town Square to fill its central island";
+        return;
     }
     for (std::size_t i = 0; i < world.Terrain().size(); ++i)
     {
