@@ -4,6 +4,7 @@
 #include "car.hpp"
 #include "character.hpp"
 #include "test_pawn_meshes.hpp"
+#include "speedometer.hpp"
 #include "world_document.hpp"
 #include "world_renderer.hpp"
 
@@ -233,12 +234,10 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer) const
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
     const char* controls = "WASD: walk   Mouse: look   Shift: sprint   Space: jump   F: enter car";
     std::string status;
-    if (const auto* car = dynamic_cast<const Car*>(player.controller.Controlled()))
+    const auto* vehicle = dynamic_cast<const Vehicle*>(player.controller.Controlled());
+    if (vehicle)
     {
         controls = "W/S: accelerate, brake/reverse   A/D: steer   Space: handbrake   Mouse: look   F: exit";
-        char speed[64];
-        SDL_snprintf(speed, sizeof(speed), "%.0f km/h", std::abs(car->Speed()) * 3.6);
-        status = speed;
     }
     else if (player.NearbyVehicle()) status = "Press F to enter the car";
     if (!player.Notice().empty()) status = player.Notice();
@@ -257,9 +256,10 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer) const
         status = streaming->Error().empty() ? "Loading nearby collision..." : "Collision unavailable. Recook the world and restart.";
     constexpr float y = 0;
     const SDL_FRect background{0,y,float(viewport.w),56};
-    return SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
+    const bool console = SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
            SDL_RenderFillRect(renderer, &background) &&
            SDL_SetRenderDrawColor(renderer, 225,228,235,255) &&
            SDL_RenderDebugText(renderer, 12, y + 9, controls) &&
            SDL_RenderDebugText(renderer, 12, y + 30, status.c_str());
+    return console && (!vehicle || debugCamera || !started || DrawSpeedometer(renderer, vehicle->Speed()));
 }

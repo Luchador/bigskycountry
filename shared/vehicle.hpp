@@ -10,5 +10,6 @@ public:
     PawnInputProfile InputProfile() const override { return PawnInputProfile::Driving; }
     PawnCameraSettings CameraSettings() const override { return {PawnCameraMode::Chase, {0, 1.1, 0}, 6.0}; }
     virtual Vector3 SeatPosition() const { return {0, 0.7, 0}; }
+    virtual double Speed() const { return 0.0; } // Signed forward speed in meters per second.
     float acceleration = 0.0f; // Meters per second squared.
 };

@@ -28,7 +28,7 @@ public:
     int SimulationSubsteps(double seconds) const override;
     void Simulate(double seconds, GameWorld& world) override;
     bool BlocksSphere(Vector3 center, double radius) const override;
-    double Speed() const;
+    double Speed() const override;
     Vector3 Velocity() const { return body.velocity; }
     Vector3 AngularVelocity() const { return body.angularVelocity; }
     bool IsGrounded() const { return groundedWheels != 0; }
