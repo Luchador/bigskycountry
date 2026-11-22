@@ -183,9 +183,11 @@ bool RiverDefinition::Read(std::istream& in, bool elevations, bool connections)
         if (linked)
         {
             RiverConnection c;
-            if (!(in >> c.riverId >> c.end >> c.bank >> c.fraction >> c.width) || !c.riverId ||
+            // A closed lake shoreline may attach at fraction zero. Open river
+            // end clearance is validated when the connection is resolved.
+            if (!(in >> c.waterId >> c.end >> c.bank >> c.fraction >> c.width) || !c.waterId ||
                 c.end < 0 || c.end > 1 || c.bank < 0 || c.bank > 1 ||
-                !std::isfinite(c.fraction) || c.fraction <= 0 || c.fraction >= 1 ||
+                !std::isfinite(c.fraction) || c.fraction < 0 || c.fraction >= 1 ||
                 !std::isfinite(c.width) || c.width < .5 || c.width > 10000) return false;
             connection = c;
         }
@@ -205,7 +207,7 @@ bool RiverDefinition::Write(std::ostream& out) const
     if (connection)
     {
         const auto& c = *connection;
-        out << ' ' << c.riverId << ' ' << c.end << ' ' << c.bank << ' ' << c.fraction << ' ' << c.width;
+        out << ' ' << c.waterId << ' ' << c.end << ' ' << c.bank << ' ' << c.fraction << ' ' << c.width;
     }
     return bool(out);
 }

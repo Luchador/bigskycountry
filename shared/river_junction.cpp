@@ -28,10 +28,27 @@ namespace
     {
         std::vector<Vector3> result;
         // Stable, dense arc-length parameterization, independent of render subdivision.
-        for (int segment=0;segment+1<static_cast<int>(source.definition.banks[bank].size());++segment)
-            for (int j=0;j<64;++j) result.push_back(source.transform.Point(source.definition.Evaluate(bank,segment,j/64.0)));
-        result.push_back(source.transform.Point(source.definition.banks[bank].back().position));
+        if (const auto* river=std::get_if<RiverDefinition>(&source.definition))
+        {
+            for (int segment=0;segment+1<static_cast<int>(river->banks[bank].size());++segment)
+                for (int j=0;j<64;++j) result.push_back(source.transform.Point(river->Evaluate(bank,segment,j/64.0)));
+            result.push_back(source.transform.Point(river->banks[bank].back().position));
+        }
+        else
+        {
+            const auto& lake=std::get<LakeDefinition>(source.definition);
+            for (int segment=0;segment<static_cast<int>(lake.points.size());++segment)
+                for (int j=0;j<64;++j) result.push_back(source.transform.Point(lake.Evaluate(segment,j/64.0)));
+            result.push_back(result.front());
+        }
         return result;
+    }
+    std::optional<std::vector<LakeSample>> Sample(const WaterDefinition& definition)
+    {
+        return std::visit([](const auto& water) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(water)>,LakeDefinition>) return LakeGeometry::Sample(water);
+            else return RiverGeometry::Sample(water);
+        },definition);
     }
     double Length(const std::vector<Vector3>& bank)
     {
@@ -68,6 +85,16 @@ namespace
                 const double u=Cross(b-p,c-p)/area,v=Cross(c-p,a-p)/area,w=1-u-v;
                 if (u>=-1e-7 && v>=-1e-7 && w>=-1e-7) return a.y*u+b.y*v+c.y*w;
             }
+            // The network welds X/Z to 0.1 micrometers. At a narrow boundary
+            // triangle that rounding can put a seam vertex just outside the
+            // original triangulation. Keep its receiver's bank height rather
+            // than falling through to the tributary's sloping surface.
+            for (std::size_t i=1;i<rim.size();++i)
+            {
+                const auto a=rim[i-1].position,b=rim[i].position;
+                const double t=Along(p,a,b);
+                if (Distance(p,a+(b-a)*t)<2e-6) return a.y+(b.y-a.y)*t;
+            }
             return {};
         }
     };
@@ -77,14 +104,18 @@ std::optional<RiverConnection> RiverJunction::Locate(const Source& tributary, in
                                                      std::uint64_t receiverId, Vector3 position)
 {
     if (end<0 || end>1 || !receiverId) return {};
-    RiverConnection result; result.riverId=receiverId; result.end=end;
-    const auto& banks=tributary.definition.banks;
+    const auto* river=std::get_if<RiverDefinition>(&tributary.definition);
+    if (!river) return {};
+    RiverConnection result; result.waterId=receiverId; result.end=end;
+    const auto& banks=river->banks;
     result.width=Distance(tributary.transform.Point(end?banks[0].back().position:banks[0].front().position),
                           tributary.transform.Point(end?banks[1].back().position:banks[1].front().position));
-    double closest=std::numeric_limits<double>::max();
-    for (int bank=0;bank<2;++bank)
+    double closest=std::numeric_limits<double>::infinity();
+    const bool lake=std::holds_alternative<LakeDefinition>(receiver.definition);
+    for (int bank=0;bank<(lake?1:2);++bank)
     {
         auto samples=Bank(receiver,bank); double distance=0,total=Length(samples);
+        if (total<=1e-8) continue;
         for (std::size_t i=1;i<samples.size();++i)
         {
             const auto a=samples[i-1],b=samples[i]; const double t=Along(position,a,b),score=Distance(position,a+(b-a)*t);
@@ -92,41 +123,73 @@ std::optional<RiverConnection> RiverJunction::Locate(const Source& tributary, in
             distance+=Distance(a,b);
         }
     }
-    if (!std::isfinite(result.width) || result.width<.5 || result.width>10000 || result.fraction<=0 || result.fraction>=1)
+    if (lake && result.fraction>=1) result.fraction=0;
+    if (!std::isfinite(result.width) || result.width<.5 || result.width>10000)
+    { SDL_SetError("River mouth width must be between 0.5 and 10000 meters"); return {}; }
+    if (!std::isfinite(closest))
+    { SDL_SetError("Choose a valid receiving shoreline"); return {}; }
+    if (!lake && (result.fraction<=0 || result.fraction>=1))
     { SDL_SetError("Choose a receiving bank away from the river ends"); return {}; }
     return result;
 }
 
 bool RiverJunction::Attach(Source& tributary, const Source& receiver)
 {
-    const auto& link=*tributary.definition.connection;
+    auto& definition=std::get<RiverDefinition>(tributary.definition);
+    if (!definition.connection) return SDL_SetError("Choose a river end to connect");
+    const auto& link=*definition.connection;
+    const bool lake=std::holds_alternative<LakeDefinition>(receiver.definition);
     auto bank=Bank(receiver,link.bank); Vector3 tangent;
     const double total=Length(bank),distance=total*link.fraction;
-    if (distance<link.width || total-distance<link.width)
+    if (!lake && (distance<link.width || total-distance<link.width))
         return SDL_SetError("Leave at least one tributary width between the junction and the receiving river ends");
     auto mouth=At(bank,distance,&tangent);
-    auto opposite=Bank(receiver,1-link.bank);
-    double closest=std::numeric_limits<double>::max(); Vector3 across;
-    for (std::size_t i=1;i<opposite.size();++i)
+    const auto receiverRim=Sample(receiver.definition);
+    if (!receiverRim) return false;
+    const auto inside=[&](Vector3 world) {
+        return Inside(receiver.transform.Unrotate(world-receiver.transform.origin),*receiverRim);
+    };
+    Vector3 inward{-tangent.z,0,tangent.x};
+    double closest=std::numeric_limits<double>::max();
+    if (lake)
     {
-        const auto p=opposite[i-1]+(opposite[i]-opposite[i-1])*Along(mouth,opposite[i-1],opposite[i]);
-        if (Distance(p,mouth)<closest) { closest=Distance(p,mouth); across=p-mouth; }
+        // Closed shores have no end exclusion. Determine the inward side from
+        // polygon winding (works for concave shores and either control order).
+        double area=0;
+        for (std::size_t i=1;i<bank.size();++i) area+=Cross(bank[i-1]-mouth,bank[i]-mouth);
+        if (area<0) inward=inward*-1;
+        // Find the far shore along this inward ray, without using the centroid
+        // (which can lie outside a concave lake).
+        for (std::size_t i=1;i<bank.size();++i)
+        {
+            const auto edge=bank[i]-bank[i-1]; const double divisor=Cross(inward,edge);
+            if (std::abs(divisor)<1e-12) continue;
+            const double along=Cross(bank[i-1]-mouth,edge)/divisor;
+            const double t=Cross(bank[i-1]-mouth,inward)/divisor;
+            if (along>1e-4 && t>=0 && t<=1) closest=std::min(closest,along);
+        }
     }
-    Vector3 inward{-tangent.z,0,tangent.x}; if (Math::Dot(inward,across)<0) inward=inward*-1;
+    else
+    {
+        auto opposite=Bank(receiver,1-link.bank); Vector3 across;
+        for (std::size_t i=1;i<opposite.size();++i)
+        {
+            const auto p=opposite[i-1]+(opposite[i]-opposite[i-1])*Along(mouth,opposite[i-1],opposite[i]);
+            if (Distance(p,mouth)<closest) { closest=Distance(p,mouth); across=p-mouth; }
+        }
+        if (Math::Dot(inward,across)<0) inward=inward*-1;
+    }
     // The mouth overlaps the receiving channel; the common triangulation removes
     // the overlap and its internal bank. Only the tributary's terminal points move.
     const double inset=std::min(closest*.35,std::max(1.0,link.width*.2));
-    auto& banks=tributary.definition.banks;
+    auto& banks=definition.banks;
     const auto old0=tributary.transform.Point(link.end?banks[0].back().position:banks[0].front().position);
     const auto old1=tributary.transform.Point(link.end?banks[1].back().position:banks[1].front().position);
     if (Math::Dot(tangent,old1-old0)<0) tangent=tangent*-1;
-    const auto receiverRim=RiverGeometry::Sample(receiver.definition);
-    if (!receiverRim) return false;
     for (int side=0;side<2;++side)
     {
         auto world=mouth+inward*inset+tangent*((side?1:-1)*link.width*.5);
-        const auto localReceiver=receiver.transform.Unrotate(world-receiver.transform.origin);
-        if (!Inside(localReceiver,*receiverRim)) return SDL_SetError("The tributary mouth does not fit here; choose a wider or straighter receiving bank");
+        if (!inside(world)) return SDL_SetError("The river mouth does not fit here; choose a wider or straighter shoreline");
         auto& points=banks[side]; const auto index=link.end?points.size()-1:0;
         auto& point=points[index]; const auto neighbor=points[link.end?index-1:1].position;
         point.position=tributary.transform.Unrotate(world-tributary.transform.origin);
@@ -157,9 +220,11 @@ std::optional<std::vector<LakeGeometry>> RiverJunction::Build(std::span<const So
         std::vector<Edge> edges;
         for (const auto& source:sources)
         {
-            auto sampled=RiverGeometry::Sample(source.definition);
+            auto sampled=Sample(source.definition);
             if (!sampled) return {};
-            auto& surface=surfaces.emplace_back(); surface.depth=source.definition.depth; surface.rim=std::move(*sampled);
+            auto& surface=surfaces.emplace_back();
+            surface.depth=std::visit([](const auto& water) { return water.depth; },source.definition);
+            surface.rim=std::move(*sampled);
             std::vector<CDT::V2d<double>> points; std::vector<Edge> boundary;
             Bounds3 bounds;
             for (auto& p:surface.rim) { p.position=source.transform.Point(p.position)-origin; bounds.Include(p.position); }
@@ -248,7 +313,7 @@ std::optional<std::vector<LakeGeometry>> RiverJunction::Build(std::span<const So
                 }
                 water->indices.push_back(it->second); bed->indices.push_back(it->second);
             }
-            if (water->indices.empty()) throw std::runtime_error("A river is completely covered by another river");
+            if (water->indices.empty()) throw std::runtime_error("A water body is completely covered by another water body");
             water->UpdateBounds(); bed->UpdateBounds(); result[s].water=water; result[s].bed=bed;
             // Terrain follows the same split constraint vertices and elevations,
             // including where two banks intersect. Overlapping interiors exclude land.

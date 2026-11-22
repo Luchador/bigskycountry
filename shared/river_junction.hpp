@@ -4,7 +4,7 @@
 
 namespace RiverJunction
 {
-    struct Source { RiverDefinition definition; MeshTransform transform; };
+    struct Source { WaterDefinition definition; MeshTransform transform; };
     std::optional<RiverConnection> Locate(const Source& tributary, int end, const Source& receiver,
                                           std::uint64_t receiverId, Vector3 position);
     bool Attach(Source& tributary, const Source& receiver);

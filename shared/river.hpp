@@ -7,7 +7,7 @@
 
 struct RiverConnection
 {
-    std::uint64_t riverId = 0;
+    std::uint64_t waterId = 0; // Stable receiving river or lake ID.
     int end = 1, bank = 0;
     double fraction = .5, width = 25;
     bool operator==(const RiverConnection&) const = default;
@@ -19,8 +19,9 @@ struct RiverDefinition
 {
     std::array<std::vector<LakePoint>, 2> banks;
     double depth = 5;
-    // Stable receiving river ID and distance fraction along its bank. No generated
-    // junction vertices are serialized into the editable control splines.
+    // Distance fraction along the receiving river bank or closed lake shoreline.
+    // For lakes, bank is zero and the shoreline fraction wraps at the first point.
+    // No generated junction vertices are serialized into the editable splines.
     std::optional<RiverConnection> connection;
     static RiverDefinition Straight(double width = 25, double length = 200);
     Vector3 Evaluate(int bank, int segment, double t) const;

@@ -580,7 +580,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         if (!riverMenuTarget) return;
         const auto find = [&](std::uint64_t id) {
             for (int i=0;i<static_cast<int>(world.Terrain().size());++i)
-                if (world.Terrain()[i]->persistentId==id && world.Terrain()[i]->River()) return i;
+                if (world.Terrain()[i]->persistentId==id && world.Terrain()[i]->HasWater()) return i;
             return -1;
         };
         const int target=find(riverMenuTarget->id);
@@ -591,7 +591,7 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
             status.clear(); return;
         }
         const int source=command == EditorCommand::DisconnectRiver ? target : riverConnectionStart ? find(riverConnectionStart->id) : -1;
-        if (source<0) { riverConnectionStart.reset(); return; }
+        if (source<0 || !world.Terrain()[source]->River()) { riverConnectionStart.reset(); return; }
         auto& chunk=*world.Terrain()[source];
         EditSnapshot before(state); before.water=EditSnapshot::WaterEdit{source,*chunk.WaterSource()};
         bool success;
@@ -969,7 +969,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     const Road* selected = Selected(world);
     RoadPick hit = overlay.Pick(picker, world, selected, camera, scene, false, &creationPoint);
     RiverMenuOptions riverOptions;
-    if (hit.kind == RoadPickKind::Terrain && world.Terrain()[hit.index]->River())
+    if (hit.kind == RoadPickKind::Terrain && world.Terrain()[hit.index]->HasWater())
     {
         const auto& chunk=*world.Terrain()[hit.index];
         riverMenuTarget=RiverMenuTarget{chunk.persistentId,-1,picker.HitPosition()};
@@ -988,8 +988,8 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     {
         for (const auto& chunk:world.Terrain()) if (chunk->persistentId==riverMenuTarget->id)
         {
-            riverOptions.start=riverMenuTarget->end>=0 && !chunk->River()->connection;
-            riverOptions.disconnect=chunk->River()->connection.has_value();
+            riverOptions.start=chunk->River() && riverMenuTarget->end>=0 && !chunk->River()->connection;
+            riverOptions.disconnect=chunk->River() && chunk->River()->connection.has_value();
         }
         riverOptions.finish=riverConnectionStart && riverConnectionStart->id!=riverMenuTarget->id;
     }

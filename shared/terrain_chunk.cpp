@@ -32,7 +32,9 @@ bool TerrainChunk::BeginLakeEdit()
     if (!lake) return SDL_SetError("Select a lake to edit its shoreline");
     if (lakeDraft) return true;
     lakeDraft = lake;
-    draftShoreline = shoreline;
+    // The committed rim may contain extra junction vertices. Draft picking uses
+    // the original spline's segment/t values, just as river editing does.
+    draftShoreline = *LakeGeometry::Sample(*lake);
     return true;
 }
 
@@ -169,12 +171,13 @@ const std::vector<TerrainChunk::OutlineEdge>& TerrainChunk::Outline() const
     return outline;
 }
 
-void TerrainChunk::ApplyRiverGeometry(const RiverDefinition& definition, LakeGeometry geometry, bool joined)
+void TerrainChunk::ApplyWaterGeometry(const WaterDefinition& definition, LakeGeometry geometry, bool joined)
 {
-    river = definition;
+    if (const auto* source = std::get_if<RiverDefinition>(&definition)) river = *source;
+    else lake = std::get<LakeDefinition>(definition);
     SetMesh(std::move(geometry.bed));
     water = {std::move(geometry.water), Instance().transform};
     shoreline = std::move(geometry.shoreline);
-    joinedRiver = joined;
+    joinedWater = joined;
     WaterChanged();
 }

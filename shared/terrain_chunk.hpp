@@ -42,8 +42,8 @@ public:
     }
     bool SetWater(const WaterDefinition& definition);
     bool SetRiver(const RiverDefinition& definition);
-    void ApplyRiverGeometry(const RiverDefinition& definition, LakeGeometry geometry, bool joined);
-    bool JoinedRiver() const { return joinedRiver; }
+    void ApplyWaterGeometry(const WaterDefinition& definition, LakeGeometry geometry, bool joined);
+    bool JoinedWater() const { return joinedWater; }
     bool EditingWater() const { return lakeDraft.has_value() || riverDraft.has_value(); }
     bool BeginWaterEdit();
     bool FinishWaterEdit();
@@ -100,7 +100,7 @@ private:
     inline static std::uint64_t latestWaterRevision = 0;
     std::uint64_t waterRevision = 0;
     std::optional<RiverDefinition> river, riverDraft;
-    bool joinedRiver = false;
+    bool joinedWater = false;
     std::optional<LakeDefinition> lake;
     std::optional<LakeDefinition> lakeDraft; // Transient editor state; never serialized.
     std::vector<LakeSample> draftShoreline;

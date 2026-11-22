@@ -525,14 +525,14 @@ Select either connector end control point and drag it with the translation gizmo
 
 Attachments persist through save/load and undo/redo. Splitting a parent road preserves the link to the appropriate piece; deleting it detaches the connector. Generated joins are rebuilt from authored geometry only when their source roads change. `ROAD` version 30 appends an optional curved-connector attachment (station ID, side, direction, and signed offset along the parent) to each point. Earlier worlds load with no such attachments. Recook after editing to update the game's geometry.
 
-### River connections
+### River and lake connections
 
-To terminate a smaller river in a larger one:
+To connect either end of a river to another river or a lake:
 
 1. Enter **Edit River Banks** on the tributary and right-click its green start or end handle.
 2. Choose **Water → Connect River End**. This finishes the spline edit.
-3. Right-click the receiving river near the bank where the tributary should enter and choose **Water → Connect River Here**.
+3. Right-click the receiving river or lake near the shoreline where the river should join and choose **Water → Connect River Here**.
 
-The tributary mouth follows that location along the receiving bank, including elevation changes. Each river can feed one other river; a receiving river can have several tributaries. Connections cannot form cycles. Choose a location at least one tributary width from either end of the receiving bank. **Esc** cancels a pending connection. Right-click a connected tributary and choose **Water → Disconnect River** before moving or extending its attached end.
+The river mouth follows that location along the receiving bank or lake shoreline, including elevation changes. Lakes remain level; the attached river end meets the lake's water height. Either river end may be attached, allowing rivers to enter or leave a lake. Each river has one attached end; a receiving river or lake can have several attached rivers. Connections cannot form cycles. For river receivers, choose a location at least one tributary width from either bank end. Lakes have closed shores, so connections can cross the shoreline's first/last control point. **Esc** cancels a pending connection. Right-click a connected river and choose **Water → Disconnect River** before moving or extending its attached end.
 
-Water and submerged terrain share a triangulation at the junction, with no overlapping water faces or internal bank wall. Rivers remain separate selectable objects and terrain fill follows the joined shoreline. Edit mode continues to update only splines; finishing the edit rebuilds affected connections. Connections support undo/redo and save/load. `TERR` version 10 stores an optional receiver ID, tributary end, receiving bank, distance fraction and mouth width after each river's bank data; older worlds load without connections. Recook the world to update in-game geometry.
+Water and submerged terrain share a triangulation at the junction, with no overlapping water faces or internal bank wall. Rivers and lakes remain separate selectable objects, and terrain fill follows the joined shoreline. Edit mode continues to update only splines; finishing a river or lake edit rebuilds affected connections. Connections support undo/redo and save/load. Deleting a receiving water body suspends its attachments; undo restores them. `TERR` version 10 stores an optional receiver water ID, river end, receiving bank (zero for lakes), distance fraction and mouth width after each river's bank data; existing river connections still load. Recook the world to update in-game geometry and streaming dependencies.
