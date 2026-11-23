@@ -4173,6 +4173,9 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     {
         return EditorEvent::Pass;
     }
+    // Holding Escape must not cancel a drag and then clear its restored selection.
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && event.key.repeat)
+        return EditorEvent::Handled;
     if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE && drag == Drag::None)
     {
         mouse = {-1, -1};
@@ -4338,7 +4341,19 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
             Activate(Action::Cancel, world);
             return EditorEvent::Handled;
         }
-        if (event.key.key == SDLK_R || (event.key.key == SDLK_ESCAPE && planView))
+        if (event.key.key == SDLK_ESCAPE)
+        {
+            // Active tools above get first refusal. Otherwise clear selection in either view.
+            if (ViewportFocused() && !SDL_GetWindowRelativeMouseMode(window) &&
+                !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT)))
+            {
+                Release(world);
+                state.SelectRows({});
+                status.clear();
+            }
+            return EditorEvent::Handled;
+        }
+        if (event.key.key == SDLK_R)
         {
             if (waterEdit && !Save(world)) return EditorEvent::Handled;
             ChangeView(world, camera);

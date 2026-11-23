@@ -364,6 +364,8 @@ In the road inspector, enter one or more comma-separated **Road names**, such as
 
 Press **R** to switch between the 3D and top-down views. In the top-down viewport, press **N** to start or resume a road draft.
 
+In either viewport, **Esc** cancels the active action first; when no action is active, it clears the selection. Escape never closes the editor or switches views. Use the window's close button to quit.
+
 In the top-down view, **left-drag** away from a control point or transform handle to draw a selection box. Releasing selects whole roads (including railroads), intersections, terrain/lakes, objects, and static meshes whose projected geometry touches the box, at any elevation. Drag in any direction; **Shift** adds to the selection and **Ctrl** removes from it. **Esc** cancels without changing the previous selection. Hidden folder contents are excluded. A click without dragging still picks a single item, and an empty click clears the selection. Road creation and control-point dragging keep their existing gestures.
 
 In the **3D viewport**, hold **Ctrl+Shift** and **left-drag** to draw a selection box. Releasing replaces the selection with all scene elements whose geometry touches the box, including objects behind other objects. Hidden folder contents and objects behind the camera are excluded. While editing a river or lake, the box selects only that water body's control points, using their current draft positions. An empty dragged box clears the selection without leaving water edit mode; a click without dragging leaves the selection alone. **Esc** cancels the box without changing the previous selection or ending water editing.

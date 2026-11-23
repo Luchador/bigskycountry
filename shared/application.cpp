@@ -139,9 +139,10 @@ namespace
                 }
 
                 if (event.type == SDL_EVENT_QUIT) return true;
-                if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat)
+                // Escape belongs to cancel/deselect in the editor, never application exit.
+                if (game && event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat)
                 {
-                    if (game && !input.IsCameraEnabled() && game->MouseCaptured())
+                    if (!input.IsCameraEnabled() && game->MouseCaptured())
                     {
                         if (!game->ReleaseMouse()) return false;
                         continue;
