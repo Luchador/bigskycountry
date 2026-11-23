@@ -168,8 +168,12 @@ namespace
         const int b = a + 2;
         if (!layout.arms[a] || !layout.arms[b]) return;
         RoadGeometry paint;
+        // Along A -> B, the next cardinal arm is on the right and the previous
+        // arm is on the left. A connected minor road opens that whole edge
+        // between the through-road mouths, even if the minor road has no paint.
+        const std::array whiteEdges{!layout.arms[(a + 1) % sides], !layout.arms[(a + 3) % sides]};
         BuildConnectingRoadPaint(paint, surface.Mouth(a), surface.Mouth(b),
-                                 layout.arms[a]->paint, layout.arms[b]->paint);
+                                 layout.arms[a]->paint, layout.arms[b]->paint, whiteEdges);
         AppendClippedPaint(surface.geometry, paint.whiteStripes, surface.geometry.whiteStripes);
         AppendClippedPaint(surface.geometry, paint.yellowStripes, surface.geometry.yellowStripes);
     }

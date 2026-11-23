@@ -18,5 +18,8 @@ struct RoadPaintProfile
 
 // Uses the same stripe widths, dash pattern and mesh builders as ordinary roads.
 // Both profiles and mouths face outward; the connecting curve travels A -> B.
+// White outer edges can be omitted independently: {right, left} along that curve.
+// Center/lane markings and yellow one-way edges are unaffected.
 void BuildConnectingRoadPaint(RoadGeometry& geometry, const RoadMouth& a, const RoadMouth& b,
-                              RoadPaintProfile profileA, RoadPaintProfile profileB);
+                              RoadPaintProfile profileA, RoadPaintProfile profileB,
+                              std::array<bool, 2> whiteEdges = {true, true});

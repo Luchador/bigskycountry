@@ -1412,7 +1412,8 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
 }
 
 void BuildConnectingRoadPaint(RoadGeometry& geometry, const RoadMouth& a, const RoadMouth& b,
-                              RoadPaintProfile profileA, RoadPaintProfile profileB)
+                              RoadPaintProfile profileA, RoadPaintProfile profileB,
+                              std::array<bool, 2> whiteEdges)
 {
     if (!profileA.enabled || !profileB.enabled) return;
     // Enter A against its outward frame, leave B along its outward frame.
@@ -1475,6 +1476,9 @@ void BuildConnectingRoadPaint(RoadGeometry& geometry, const RoadMouth& a, const 
     combined.insert(last.begin(), last.end());
     for (const auto& [key, line] : combined)
     {
+        // Keys 0/1 are the right/left white outer edges. Leave openings for
+        // minor roads without interrupting dashed lane dividers or yellow paint.
+        if (key < 2 && !whiteEdges[key]) continue;
         const auto begin = first.find(key), end = last.find(key);
         // Like road lane transitions, omit dashed white dividers while lane
         // configurations differ. Edge/center lines still meet both mouths exactly.
