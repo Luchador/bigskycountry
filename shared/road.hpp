@@ -60,6 +60,7 @@ struct RoadStyle
     static constexpr double innerShoulderWidth = 1.0;
     static constexpr double minSeparation = 2.0 * innerShoulderWidth;
     static constexpr double stripeHeight = 0.02; // Road paint offset above the pavement.
+    static constexpr double stripeWidth = 0.16;
     static constexpr double stripWidth = 0.40;
     static constexpr double curbHeight = 0.15;
     static constexpr double curbTopWidth = 0.15;

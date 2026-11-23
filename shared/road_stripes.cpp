@@ -9,7 +9,7 @@
 
 namespace
 {
-    constexpr double stripeWidth = 0.16;
+    constexpr double stripeWidth = RoadStyle::stripeWidth;
     constexpr double yellowGap = 0.16; // Clear space between the two yellow stripes.
     constexpr double yellowPairOffset = (yellowGap + stripeWidth) * 0.5;
     constexpr double goreWidth = 1.0;

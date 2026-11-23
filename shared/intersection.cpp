@@ -135,6 +135,31 @@ namespace
         }
     }
 
+    void AppendClippedPaint(const RoadGeometry& pavement, const std::vector<RoadGeometry::Triangle>& source,
+                            std::vector<RoadGeometry::Triangle>& destination)
+    {
+        // Skewed/asymmetric junctions may have a concave pavement outline.
+        // Clip to its triangulation so paint never floats across a corner or curb.
+        for (const auto& stripe : source)
+        {
+            for (const auto& triangle : pavement.pavementTriangles)
+            {
+                ViewGeometry::Polygon polygon{{stripe[0], stripe[1], stripe[2]}, 3};
+                for (int i = 0; i < 3 && polygon.count >= 3; ++i)
+                {
+                    const Vector3 start = triangle[i].position;
+                    const Vector3 normal = Math::Cross(up, triangle[(i + 1) % 3].position - start);
+                    polygon = ViewGeometry::Clip(polygon, normal, Math::Dot(start, normal));
+                }
+                for (int i = 2; i < polygon.count; ++i)
+                {
+                    const auto a = polygon.points[0], b = polygon.points[i - 1], c = polygon.points[i];
+                    if (Math::Cross(b - a, c - a).y > 1e-10) destination.push_back({a, b, c});
+                }
+            }
+        }
+    }
+
     void ContinuePaint(IntersectionSurface& surface)
     {
         const auto& layout = surface.layout;
@@ -145,31 +170,24 @@ namespace
         RoadGeometry paint;
         BuildConnectingRoadPaint(paint, surface.Mouth(a), surface.Mouth(b),
                                  layout.arms[a]->paint, layout.arms[b]->paint);
-        // Skewed/asymmetric junctions may have a concave pavement outline.
-        // Clip to its triangulation so paint never floats across a corner or curb.
-        const auto append = [&](const auto& source, auto& destination)
+        AppendClippedPaint(surface.geometry, paint.whiteStripes, surface.geometry.whiteStripes);
+        AppendClippedPaint(surface.geometry, paint.yellowStripes, surface.geometry.yellowStripes);
+    }
+
+    using PaintBand = std::array<Vector3, 2>; // Outer and inner edges of the stripe.
+
+    void JoinPaint(std::vector<RoadGeometry::Triangle>& paint, const PaintBand& a, const PaintBand& b)
+    {
+        const auto triangle = [&](Vector3 p, Vector3 q, Vector3 r)
         {
-            for (const auto& stripe : source)
-            {
-                for (const auto& pavement : surface.geometry.pavementTriangles)
-                {
-                    ViewGeometry::Polygon polygon{{stripe[0], stripe[1], stripe[2]}, 3};
-                    for (int i = 0; i < 3 && polygon.count >= 3; ++i)
-                    {
-                        const Vector3 start = pavement[i].position;
-                        const Vector3 normal = Math::Cross(Vector3{0, 1, 0}, pavement[(i + 1) % 3].position - start);
-                        polygon = ViewGeometry::Clip(polygon, normal, Math::Dot(start, normal));
-                    }
-                    for (int i = 2; i < polygon.count; ++i)
-                    {
-                        const auto a = polygon.points[0], b = polygon.points[i - 1], c = polygon.points[i];
-                        if (Math::Cross(b - a, c - a).y > 1e-10) destination.push_back({a, b, c});
-                    }
-                }
-            }
+            const double area = Math::Cross(q - p, r - p).y;
+            if (std::abs(area) <= 1e-10) return;
+            if (area < 0) std::swap(q, r);
+            const Vector3 lift = up * RoadStyle::stripeHeight;
+            paint.push_back({p + lift, q + lift, r + lift});
         };
-        append(paint.whiteStripes, surface.geometry.whiteStripes);
-        append(paint.yellowStripes, surface.geometry.yellowStripes);
+        triangle(a[0], b[0], b[1]);
+        triangle(a[0], b[1], a[1]);
     }
 
     // The skewed mouths can put the junction center outside a corner's
@@ -683,6 +701,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     }
 
     std::vector<Vector3> pavementRim;
+    std::vector<RoadGeometry::Triangle> edgePaint;
     for (int i = 0; i < sides; ++i)
     {
         if (!layout.arms[i]) continue;
@@ -697,6 +716,16 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         const Vector3 nextMouth = Mouth(j).center;
         pavementRim.push_back(mouth);
         std::optional<Rim> previous;
+        std::optional<PaintBand> previousPaint;
+        // Only follow closed boundaries between connected mouths; never draw a
+        // stripe across an entrance. One-way yellow edges keep their road color.
+        const bool paintEdge = layout.shape == IntersectionShape::Standard &&
+            layout.paint == IntersectionPaint::Standard && i != j &&
+            a.paint.enabled && b.paint.enabled && a.paint.oneWay <= 0 && b.paint.oneWay >= 0;
+        const auto travelHalf = [](const RoadPaintProfile& paint)
+        { return paint.separation + paint.lanes * paint.laneWidth * .5; };
+        const double shoulderA = std::max(0.0, a.left - travelHalf(a.paint));
+        const double shoulderB = std::max(0.0, b.right - travelHalf(b.paint));
         auto emit = [&](const Rim& rim, double t)
         {
             if (previous)
@@ -712,7 +741,17 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         };
         const auto add = [&](Vector3 p, Vector3 normal, double t)
         {
-            emit(Section(p, normal, pa, pb, t), t);
+            const auto rim = Section(p, normal, pa, pb, t);
+            emit(rim, t);
+            if (paintEdge)
+            {
+                // The road's stripe lies inside the travel edge, before any
+                // shoulder. Use the same eased offset along this corner/back edge.
+                const Vector3 outer = rim.p[0] - normal * std::lerp(shoulderA, shoulderB, t);
+                const PaintBand band{outer, outer - normal * RoadStyle::stripeWidth};
+                if (previousPaint) JoinPaint(edgePaint, *previousPaint, band);
+                previousPaint = band;
+            }
         };
         const Vector3 start = mouth + frameA.left * wa;
         const Vector3 end = nextMouth - frameB.left * wb;
@@ -760,6 +799,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
 
     const auto hole = BuildIsland(*this, pavementRim, directions);
     FillPavement(*this, pavementRim, directions, hole);
+    AppendClippedPaint(geometry, edgePaint, geometry.whiteStripes);
     ContinuePaint(*this);
     for (int i = 0; i < sides; ++i)
     {
