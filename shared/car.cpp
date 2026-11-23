@@ -2,6 +2,7 @@
 #include "character.hpp"
 #include "game_world.hpp"
 #include "test_pawn_meshes.hpp"
+#include "spatial_index.hpp"
 
 #include <algorithm>
 #include <array>
@@ -55,6 +56,12 @@ bool Car::BlocksSphere(Vector3 center, double radius) const
     const Vector3 p = frame.Unrotate(center - frame.origin);
     const Vector3 closest{std::clamp(p.x, -1.0, 1.0), std::clamp(p.y, 0.15, 1.6), std::clamp(p.z, -2.2, 2.2)};
     return Math::Length(p - closest) < radius;
+}
+
+Bounds3 Car::CollisionBounds() const
+{
+    if (!hasCollision) return {};
+    return WorldBounds({{-1,0,-2.2},{1,1.7,2.2}}, GetTransform().ToMeshTransform());
 }
 
 void Car::ApplyWheelForces(double seconds, GameWorld& world)
@@ -146,6 +153,7 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
 void Car::ResolveWorldContacts(GameWorld& world)
 {
     if (!hasCollision) return;
+    const auto nearby = world.NearbyPawns(PawnIndex::Around(body.Center(), 4));
     for (int pass = 0; pass < 3; ++pass)
     {
         for (Vector3 local : hull)
@@ -155,9 +163,9 @@ void Car::ResolveWorldContacts(GameWorld& world)
                 body.ResolveContact(*hit, 0.05, 0.65);
             // Characters remain kinematic obstacles. Seated occupants have no
             // collision, while another walking character can stop the chassis.
-            for (const auto& pawn : world.Pawns())
+            for (const auto* pawn : nearby)
             {
-                const auto* character = dynamic_cast<const Character*>(pawn.get());
+                const auto* character = dynamic_cast<const Character*>(pawn);
                 if (!character || !character->hasCollision || character->IsSeated()) continue;
                 center = body.Pose().ToMeshTransform().Point(local);
                 const auto feet = character->GetTransform().position;

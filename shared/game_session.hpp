@@ -38,11 +38,13 @@ private:
     std::size_t spawnIndex = 0;
     std::vector<Vector3> PhysicsSources(bool includeTraffic = true) const;
     TrafficNetwork traffic;
-    std::unique_ptr<TrafficDriver> testDriver;
+    static constexpr std::size_t maxTrafficCars = 64;
+    std::vector<std::unique_ptr<TrafficDriver>> trafficDrivers;
     bool trafficDebug = false;
     std::string trafficNotice;
     const TrafficNetwork& Traffic() const;
-    void SpawnTrafficTest(const CameraView& view);
+    void SpawnTrafficTest(const CameraView& view, int count = 1);
+    bool SpawnTrafficCar(const TrafficLane& lane, double start);
     void RemoveTrafficTest();
     bool FinishStart();
     bool TryStartAt(Vector3 position, double yaw, bool authored = false);

@@ -32,9 +32,12 @@ public:
     virtual int SimulationSubsteps(double seconds) const { return 1; }
     virtual void Simulate(double seconds, GameWorld& world) {}
     virtual bool BlocksSphere(Vector3 center, double radius) const { return false; }
+    virtual Bounds3 CollisionBounds() const { return {}; }
+    virtual Vector3 Velocity() const { return {}; }
     std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Pawn>(*this); }
     PawnHandle Handle() const { return handle; }
     bool IsPossessed() const { return controller != nullptr; }
+    const PawnController* Controller() const { return controller; }
     virtual void Teleport(const ObjectTransform& transform);
     ObjectTransform InterpolatedTransform(double fraction) const;
     const MeshInstance& RenderInstance(double fraction) const;

@@ -13,27 +13,35 @@ PawnHandle GameWorld::Add(std::unique_ptr<Pawn> pawn)
     pawn->input = {};
     pawn->previous = pawn->GetTransform();
     const auto handle = pawn->handle;
+    byHandle.emplace(handle, pawn.get());
+    pawnIndex.Update(*pawn);
     pawns.push_back(std::move(pawn));
     return handle;
 }
 
 Pawn* GameWorld::Find(PawnHandle handle) const
 {
-    if (!handle) return nullptr;
-    for (const auto& pawn : pawns)
-        if (pawn->Handle() == handle) return pawn.get();
-    return nullptr;
+    const auto it = byHandle.find(handle);
+    return it == byHandle.end() ? nullptr : it->second;
 }
 
 bool GameWorld::Remove(PawnHandle handle)
 {
     if (auto* pawn = Find(handle); pawn && pawn->controller) pawn->controller->Release();
+    pawnIndex.Remove(handle);
+    byHandle.erase(handle);
     return std::erase_if(pawns, [handle](const auto& pawn) { return pawn->Handle() == handle; }) != 0;
 }
 
 void GameWorld::Step(double seconds)
 {
     if (!std::isfinite(seconds) || seconds <= 0) return;
+    // All controllers observe the same pre-physics poses. Teleports, seating,
+    // collision toggles and spawning are reflected before perception runs.
+    SyncPawns();
+    stepping = true;
+    pairChecks = 0;
+    pawnIndex.ResetStatistics();
     for (auto& pawn : pawns) if (pawn->controller) pawn->controller->Update(seconds);
     int steps = 1;
     for (auto& pawn : pawns)
@@ -46,21 +54,45 @@ void GameWorld::Step(double seconds)
     for (int step = 0; step < steps; ++step)
     {
         for (auto& pawn : pawns)
-            if (!pawn->controller || pawn->controller->SimulationReady()) pawn->Simulate(dt, *this);
-        for (size_t i = 0; i < pawns.size(); ++i)
+            if (!pawn->controller || pawn->controller->SimulationReady())
+            {
+                pawn->Simulate(dt, *this);
+                pawnIndex.Update(*pawn);
+            }
+        for (auto& pawn : pawns)
         {
-            auto* car = dynamic_cast<Car*>(pawns[i].get());
-            if (!car || (car->controller && !car->controller->SimulationReady())) continue;
-            for (size_t j = i + 1; j < pawns.size(); ++j)
-                if (auto* other = dynamic_cast<Car*>(pawns[j].get()); other && (!other->controller || other->controller->SimulationReady())) car->ResolveCollision(*other);
+            auto* car = dynamic_cast<Car*>(pawn.get());
+            if (!car || !car->hasCollision || (car->controller && !car->controller->SimulationReady())) continue;
+            for (auto* candidate : NearbyPawns(car->CollisionBounds()))
+                if (auto* other = dynamic_cast<Car*>(candidate); other && other->Handle() > car->Handle() &&
+                    (!other->controller || other->controller->SimulationReady()))
+                {
+                    ++pairChecks;
+                    car->ResolveCollision(*other);
+                    pawnIndex.Update(*car); pawnIndex.Update(*other);
+                }
         }
     }
+    stepping = false;
+}
+
+void GameWorld::SyncPawns() const
+{
+    for (const auto& pawn : pawns) pawnIndex.Update(*pawn);
+}
+
+std::vector<Pawn*> GameWorld::NearbyPawns(const Bounds3& bounds, bool predicted) const
+{
+    // Calls outside Step include placement and entering/exiting vehicles. They
+    // can follow direct pose changes, so refresh before consulting the grid.
+    if (!stepping) SyncPawns();
+    return pawnIndex.Query(bounds, predicted);
 }
 
 bool GameWorld::SphereBlocked(Vector3 center, double radius, PawnHandle ignore) const
 {
     if (collision.SphereBlocked(center, radius)) return true;
-    for (const auto& pawn : pawns)
+    for (const auto* pawn : NearbyPawns(PawnIndex::Around(center, radius)))
         if (pawn->hasCollision && pawn->Handle() != ignore && pawn->BlocksSphere(center, radius)) return true;
     return false;
 }

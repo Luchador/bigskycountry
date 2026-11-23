@@ -11,6 +11,13 @@ void Character::SetSeated(bool value)
     grounded = false;
 }
 
+Bounds3 Character::CollisionBounds() const
+{
+    if (!hasCollision || seated) return {};
+    const auto feet = GetTransform().position;
+    return {feet - Vector3{0.35,0,0.35}, feet + Vector3{0.35,1.8,0.35}};
+}
+
 bool Character::BlocksSphere(Vector3 center, double radius) const
 {
     if (!hasCollision || seated) return false;

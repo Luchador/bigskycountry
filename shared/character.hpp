@@ -9,10 +9,11 @@ public:
     std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Character>(*this); }
     void Simulate(double seconds, GameWorld& world) override;
     bool BlocksSphere(Vector3 center, double radius) const override;
+    Bounds3 CollisionBounds() const override;
     void SetSeated(bool value);
     bool IsSeated() const { return seated; }
     bool IsGrounded() const { return grounded; }
-    Vector3 Velocity() const { return velocity; }
+    Vector3 Velocity() const override { return velocity; }
 
 private:
     Vector3 velocity{};

@@ -29,9 +29,10 @@ public:
     int SimulationSubsteps(double seconds) const override;
     void Simulate(double seconds, GameWorld& world) override;
     bool BlocksSphere(Vector3 center, double radius) const override;
+    Bounds3 CollisionBounds() const override;
     double Speed() const override;
     double SteeringLimit() const { return handling.steeringAngle / (1.0 + std::abs(Speed()) * 0.035); }
-    Vector3 Velocity() const { return body.velocity; }
+    Vector3 Velocity() const override { return body.velocity; }
     Vector3 AngularVelocity() const { return body.angularVelocity; }
     bool IsGrounded() const { return groundedWheels != 0; }
     bool PlaceOnGround(GameWorld& world, ObjectTransform& transform, double drop) const;

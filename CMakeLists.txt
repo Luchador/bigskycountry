@@ -120,6 +120,7 @@ add_library(BigSkyApplication STATIC
     shared/application.cpp
     shared/camera_view.cpp
     shared/game_world.cpp
+    shared/pawn_index.cpp
     shared/game_session.cpp
     shared/speedometer.cpp
     shared/world_collision.cpp
