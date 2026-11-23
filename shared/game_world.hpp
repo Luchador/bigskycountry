@@ -3,6 +3,7 @@
 #include "pawn.hpp"
 #include "world_collision.hpp"
 #include "pawn_index.hpp"
+#include "frame_profiler.hpp"
 #include <functional>
 
 class GameWorld
@@ -19,6 +20,8 @@ public:
     std::vector<Pawn*> NearbyPawns(const Bounds3& bounds, bool predicted = false) const;
     const PawnIndex::Statistics& QueryStatistics() const { return pawnIndex.Stats(); }
     std::size_t CollisionPairChecks() const { return pairChecks; }
+    bool profiling = false;
+    const SimulationProfile& Profile() const { return profile; }
     const auto& Pawns() const { return pawns; }
     WorldCollision collision;
 
@@ -28,6 +31,7 @@ private:
     mutable PawnIndex pawnIndex;
     bool stepping = false;
     std::size_t pairChecks = 0;
+    SimulationProfile profile;
     void SyncPawns() const;
     PawnHandle nextHandle = 0;
 };

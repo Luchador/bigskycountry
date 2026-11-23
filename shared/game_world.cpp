@@ -35,7 +35,9 @@ bool GameWorld::Remove(PawnHandle handle)
 
 void GameWorld::Step(double seconds)
 {
+    profile = {};
     if (!std::isfinite(seconds) || seconds <= 0) return;
+    const Uint64 begin = profiling ? SDL_GetTicksNS() : 0;
     // All controllers observe the same pre-physics poses. Teleports, seating,
     // collision toggles and spawning are reflected before perception runs.
     SyncPawns();
@@ -44,12 +46,24 @@ void GameWorld::Step(double seconds)
     pawnIndex.ResetStatistics();
     if (prepareControllers) prepareControllers(seconds);
     for (auto& pawn : pawns) if (pawn->controller) pawn->controller->Update(seconds);
+    const Uint64 physicsBegin = profiling ? SDL_GetTicksNS() : 0;
     int steps = 1;
     for (auto& pawn : pawns)
     {
         pawn->previous = pawn->GetTransform();
         if (!pawn->controller || pawn->controller->SimulationReady())
-            steps = std::max(steps, pawn->SimulationSubsteps(seconds));
+        {
+            const int requested = pawn->SimulationSubsteps(seconds);
+            if (profiling && (requested > steps || !profile.limitingPawn))
+            {
+                profile.limitingPawn = pawn->Handle();
+                profile.limitingSpeed = Math::Length(pawn->Velocity());
+                if (const auto* car = dynamic_cast<const Car*>(pawn.get()))
+                    profile.limitingSpin = Math::Length(car->AngularVelocity());
+                else profile.limitingSpin = 0;
+            }
+            steps = std::max(steps, requested);
+        }
     }
     const double dt = seconds / steps;
     for (int step = 0; step < steps; ++step)
@@ -59,6 +73,7 @@ void GameWorld::Step(double seconds)
             {
                 pawn->Simulate(dt, *this);
                 pawnIndex.Update(*pawn);
+                if (profiling) ++profile.pawnSteps;
             }
         for (auto& pawn : pawns)
         {
@@ -75,6 +90,13 @@ void GameWorld::Step(double seconds)
         }
     }
     stepping = false;
+    if (profiling)
+    {
+        profile.controllersMs = (physicsBegin - begin) / 1.0e6;
+        profile.physicsMs = (SDL_GetTicksNS() - physicsBegin) / 1.0e6;
+        profile.ticks = 1;
+        profile.maxSubsteps = static_cast<unsigned>(steps);
+    }
 }
 
 void GameWorld::SyncPawns() const

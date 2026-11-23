@@ -55,6 +55,7 @@ namespace
         FreeCamera freeCamera;
         WorldVisibility visibility;
         bool gameVisibilityStats = false;
+        FrameProfiler frameProfiler;
         unsigned cacheSweep = 0;
 
         if (!world.roads.empty())
@@ -92,6 +93,7 @@ namespace
         while (true)
         {
             const Uint64 frameStart = SDL_GetTicksNS();
+            FrameProfile frameProfile;
             input.BeginFrame();
             if (++cacheSweep == 120) { world.models.PruneUnused(); cacheSweep = 0; }
 
@@ -158,6 +160,7 @@ namespace
                 if (game && event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F3 && !event.key.repeat)
                 {
                     gameVisibilityStats = !gameVisibilityStats;
+                    frameProfiler.Reset();
                     continue;
                 }
                 if (game && game->HandleTrafficKey(event, input.IsCameraEnabled() ? static_cast<const CameraView&>(freeCamera) : game->View())) continue;
@@ -195,8 +198,17 @@ namespace
             if (mode == ApplicationMode::Game)
             {
                 g_WorldState.AdvanceTime(elapsedNanoseconds);
+                game->SetProfiling(gameVisibilityStats);
+                const Uint64 streamStart = gameVisibilityStats ? SDL_GetTicksNS() : 0;
                 game->Stream(input.IsCameraEnabled() ? freeCamera.GetPosition() : game->View().GetPosition(), worldRenderer);
+                const Uint64 updateStart = gameVisibilityStats ? SDL_GetTicksNS() : 0;
                 game->Update(elapsedNanoseconds / 1.0e9);
+                if (gameVisibilityStats)
+                {
+                    frameProfile.streamMs = (updateStart - streamStart) / 1.0e6;
+                    frameProfile.updateMs = (SDL_GetTicksNS() - updateStart) / 1.0e6;
+                    frameProfile.simulation = game->Profile();
+                }
             }
 
             if (input.IsCameraEnabled() && (!roadTool || (roadTool->ViewportFocused() && !roadTool->DraggingGizmo())))
@@ -212,6 +224,8 @@ namespace
                 return false;
             }
 
+            const bool profiling = game && gameVisibilityStats;
+            const Uint64 sceneStart = profiling ? SDL_GetTicksNS() : 0;
             if (!roadTool || !roadTool->IsPlanView())
             {
                 const bool fogEnabled = !roadTool || roadTool->FogEnabled();
@@ -286,13 +300,20 @@ namespace
                 }
             }
 
+            const Uint64 trafficStart = profiling ? SDL_GetTicksNS() : 0;
+            if (profiling) frameProfile.sceneMs = (trafficStart - sceneStart) / 1.0e6;
             if (game && !game->DrawTrafficDebug(renderer, view)) return false;
+            if (profiling) frameProfile.trafficMs = (SDL_GetTicksNS() - trafficStart) / 1.0e6;
             if (game && !game->DrawHUD(renderer, framesPerSecond)) return false;
+            if (profiling && !frameProfiler.Draw(renderer)) return false;
 
+            const Uint64 presentStart = profiling ? SDL_GetTicksNS() : 0;
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {
                 return false;
             }
+            const Uint64 presentEnd = profiling ? SDL_GetTicksNS() : 0;
+            if (profiling) frameProfile.presentMs = (presentEnd - presentStart) / 1.0e6;
 
             if (!vsyncEnabled)
             {
@@ -306,6 +327,12 @@ namespace
                 // the fallback frame limiter. Never use the clamped physics dt.
                 ++completedFrames;
                 const Uint64 end = SDL_GetTicksNS();
+                if (profiling)
+                {
+                    frameProfile.totalMs = (end - frameStart) / 1.0e6;
+                    frameProfile.limiterMs = vsyncEnabled ? 0 : (end - presentEnd) / 1.0e6;
+                    frameProfiler.Record(frameProfile);
+                }
                 const Uint64 elapsed = end - fpsWindowStart;
                 if (elapsed >= SDL_NS_PER_SECOND / 4)
                 {

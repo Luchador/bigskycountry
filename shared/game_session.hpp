@@ -24,6 +24,8 @@ public:
     const CameraView& View() const { return started ? player.controller.camera.View() : loadingCamera; }
     void Submit(WorldRenderer& renderer) const;
     bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const;
+    void SetProfiling(bool enabled) { world.profiling = enabled; }
+    const SimulationProfile& Profile() const { return profile; }
 
 private:
     WorldDocument& document;
@@ -32,6 +34,7 @@ private:
     GameplayInput input;
     MeshInstance testGround;
     double accumulator = 0;
+    SimulationProfile profile;
     bool debugCamera = false;
     CookedWorld* streaming = nullptr;
     CameraView loadingCamera;

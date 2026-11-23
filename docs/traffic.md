@@ -13,6 +13,22 @@ The shared spatial index and vehicle physics are unchanged for this comparison.
 Set `detectPlayerCars` to `true` in `shared/traffic_driver.cpp` to restore normal
 player-car avoidance. This diagnostic only requires a rebuild, not a recook.
 
+Press **F3** for a frame profile at the upper right. It reports main-thread
+milliseconds per rendered frame, averaged over at least half a second: streaming
+and collision preparation, controllers (including junctions and pawn-index sync),
+physics, other simulation, scene submission, traffic debug drawing, HUD/input,
+presentation/vsync, and the fallback frame limiter. These are CPU wall times, not
+GPU timestamp measurements; renderer calls can include waiting for the GPU.
+It also reports simulation ticks per frame, peak substeps per tick, pawn simulation
+calls per frame, and the pawn whose motion requested that peak substep count.
+The build label comes from CMake's selected configuration. `Debug` or
+`Unspecified` may be unoptimized; use an optimized build for performance comparisons.
+
+To investigate a slowdown, capture F3 once at low speed and once while it is slow.
+F8 independently toggles traffic lane/debug drawing; F3 does not change traffic
+or physics behavior. Profiling timers are disabled when F3 is hidden. NPC
+player-car detection stays disabled until `detectPlayerCars` is restored.
+
 ## Trying it
 
 1. Rebuild the game and editor, save, and use **File → Cook World** again.

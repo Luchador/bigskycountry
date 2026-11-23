@@ -335,6 +335,7 @@ bool GameSession::SetDebugCamera(bool enabled)
 
 void GameSession::Update(double seconds)
 {
+    profile = {};
     seconds = std::clamp(seconds, 0.0, 0.25);
     if (streaming && (!started || !collisionReady))
     {
@@ -357,6 +358,7 @@ void GameSession::Update(double seconds)
     while (accumulator + 1e-12 >= fixedStep)
     {
         world.Step(fixedStep);
+        if (world.profiling) profile.Add(world.Profile());
         RemoveLostTraffic();
         document.TickObjects(static_cast<float>(fixedStep));
         if (player.AfterStep(streaming))

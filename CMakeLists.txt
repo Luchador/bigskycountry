@@ -135,6 +135,7 @@ add_library(BigSkyApplication STATIC
     shared/player_controller.cpp
     shared/player_camera.cpp
     shared/gameplay_input.cpp
+    shared/frame_profiler.cpp
     shared/rigid_body.cpp
     shared/car.cpp
     shared/test_pawn_meshes.cpp
@@ -147,6 +148,7 @@ add_library(BigSkyApplication STATIC
 )
 set_source_files_properties("${cjson_SOURCE_DIR}/cJSON.c" shared/material.cpp shared/project_settings.cpp PROPERTIES COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
 target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
+set_source_files_properties(shared/frame_profiler.cpp PROPERTIES COMPILE_DEFINITIONS "BIGSKY_BUILD_CONFIG=\"$<CONFIG>\"")
 target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 find_package(Threads REQUIRED)
 target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static PRIVATE meshoptimizer Threads::Threads)
