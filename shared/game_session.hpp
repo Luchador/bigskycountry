@@ -23,7 +23,7 @@ public:
     void Update(double seconds);
     const CameraView& View() const { return started ? player.controller.camera.View() : loadingCamera; }
     void Submit(WorldRenderer& renderer) const;
-    bool DrawHUD(SDL_Renderer* renderer) const;
+    bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const;
 
 private:
     WorldDocument& document;

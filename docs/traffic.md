@@ -1,5 +1,18 @@
 # Traffic intersections — milestone 3
 
+## Temporary performance diagnostic
+
+The game shows FPS at the top right, averaged over at least 0.25 seconds of
+complete rendered frames (including vsync or the frame limiter).
+
+NPCs temporarily ignore the car currently possessed by the player in following,
+braking, intersection intrusion and blocked-exit checks. NPC-to-NPC avoidance,
+on-foot player detection, parked-car detection and physical collisions remain
+active. After the player exits a car, it is detected as a parked vehicle again.
+The shared spatial index and vehicle physics are unchanged for this comparison.
+Set `detectPlayerCars` to `true` in `shared/traffic_driver.cpp` to restore normal
+player-car avoidance. This diagnostic only requires a rebuild, not a recook.
+
 ## Trying it
 
 1. Rebuild the game and editor, save, and use **File → Cook World** again.

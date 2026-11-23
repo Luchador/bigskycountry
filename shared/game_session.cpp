@@ -386,7 +386,7 @@ void GameSession::Submit(WorldRenderer& renderer) const
     }
 }
 
-bool GameSession::DrawHUD(SDL_Renderer* renderer) const
+bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
@@ -419,5 +419,14 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer) const
            SDL_SetRenderDrawColor(renderer, 225,228,235,255) &&
            SDL_RenderDebugText(renderer, 12, y + 9, controls) &&
            SDL_RenderDebugText(renderer, 12, y + 30, status.c_str());
-    return console && (!vehicle || debugCamera || !started || DrawSpeedometer(renderer, vehicle->Speed()));
+    if (!console) return false;
+    char fpsText[32] = "FPS: --";
+    if (framesPerSecond > 0) SDL_snprintf(fpsText, sizeof(fpsText), "FPS: %.1f", framesPerSecond);
+    const float fpsWidth = static_cast<float>(SDL_strlen(fpsText)) * 8.f + 12.f;
+    const SDL_FRect fpsBackground{std::max(0.f, viewport.w - fpsWidth - 8.f), 4.f, fpsWidth, 22.f};
+    return SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
+           SDL_RenderFillRect(renderer, &fpsBackground) &&
+           SDL_SetRenderDrawColor(renderer, 255,255,255,255) &&
+           SDL_RenderDebugText(renderer, fpsBackground.x + 6.f, fpsBackground.y + 7.f, fpsText) &&
+           (!vehicle || debugCamera || !started || DrawSpeedometer(renderer, vehicle->Speed()));
 }

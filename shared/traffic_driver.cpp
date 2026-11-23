@@ -1,11 +1,25 @@
 #include "traffic_driver.hpp"
 #include "car.hpp"
 #include "game_world.hpp"
+#include "player_controller.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string_view>
+
+namespace
+{
+    // Temporary performance diagnostic. Restore true to enable player-car
+    // avoidance again; physical collisions and NPC-to-NPC detection stay active.
+    constexpr bool detectPlayerCars = false;
+}
+
+bool TrafficDriver::Detects(const Pawn& pawn)
+{
+    return detectPlayerCars || !dynamic_cast<const Car*>(&pawn) ||
+        !dynamic_cast<const PlayerController*>(pawn.Controller());
+}
 
 TrafficDriver::TrafficDriver(GameWorld& world, const TrafficLane& lane, double start, TrafficFollowing following)
     : PawnController(world), source(&lane), lane(lane), following(following), progress(start),
@@ -66,7 +80,7 @@ double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, 
     // their current body reaches the lane; exact heights reject other decks.
     for (const auto* other : world.NearbyPawns(corridor, true))
     {
-        if (other->Handle() == car.Handle() || !other->hasCollision) continue;
+        if (other->Handle() == car.Handle() || !other->hasCollision || !Detects(*other)) continue;
         const auto* otherCar = dynamic_cast<const Car*>(other);
         const auto* driver = dynamic_cast<const TrafficDriver*>(other->Controller());
         const bool frozen = other->Controller() && !other->Controller()->SimulationReady();

@@ -85,6 +85,9 @@ namespace
         }
         Uint64 previousTime = SDL_GetTicksNS();
         const bool vsyncEnabled = SDL_SetRenderVSync(renderer, 1);
+        Uint64 fpsWindowStart = SDL_GetTicksNS();
+        unsigned completedFrames = 0;
+        double framesPerSecond = 0;
 
         while (true)
         {
@@ -284,7 +287,7 @@ namespace
             }
 
             if (game && !game->DrawTrafficDebug(renderer, view)) return false;
-            if (game && !game->DrawHUD(renderer)) return false;
+            if (game && !game->DrawHUD(renderer, framesPerSecond)) return false;
 
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))
             {
@@ -296,6 +299,20 @@ namespace
                 constexpr Uint64 frameBudget = SDL_NS_PER_SECOND / 60;
                 const Uint64 workTime = SDL_GetTicksNS() - frameStart;
                 if (workTime < frameBudget) SDL_DelayNS(frameBudget - workTime);
+            }
+            if (game)
+            {
+                // Measure complete rendered frames, including present/vsync and
+                // the fallback frame limiter. Never use the clamped physics dt.
+                ++completedFrames;
+                const Uint64 end = SDL_GetTicksNS();
+                const Uint64 elapsed = end - fpsWindowStart;
+                if (elapsed >= SDL_NS_PER_SECOND / 4)
+                {
+                    framesPerSecond = completedFrames * 1.0e9 / elapsed;
+                    completedFrames = 0;
+                    fpsWindowStart = end;
+                }
             }
         }
     }

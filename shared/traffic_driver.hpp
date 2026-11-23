@@ -22,6 +22,8 @@ public:
     void SetNetwork(const TrafficNetwork* value) { network = value; }
     void PrepareRoute();
     bool FallenOutsideWorld() const;
+    // Shared by following, junction intrusion and blocked-exit perception.
+    static bool Detects(const Pawn& pawn);
     const TrafficMovement* Movement() const;
     unsigned JunctionVisit() const { return visits; }
     double Entry() const { return entry; }
