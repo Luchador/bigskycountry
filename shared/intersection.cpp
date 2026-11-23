@@ -701,7 +701,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
     }
 
     std::vector<Vector3> pavementRim;
-    std::vector<RoadGeometry::Triangle> edgePaint;
+    std::vector<RoadGeometry::Triangle> whiteEdgePaint, yellowEdgePaint;
     for (int i = 0; i < sides; ++i)
     {
         if (!layout.arms[i]) continue;
@@ -718,10 +718,14 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
         std::optional<Rim> previous;
         std::optional<PaintBand> previousPaint;
         // Only follow closed boundaries between connected mouths; never draw a
-        // stripe across an entrance. One-way yellow edges keep their road color.
+        // stripe across an entrance.
         const bool paintEdge = layout.shape == IntersectionShape::Standard &&
             layout.paint == IntersectionPaint::Standard && i != j &&
-            a.paint.enabled && b.paint.enabled && a.paint.oneWay <= 0 && b.paint.oneWay >= 0;
+            a.paint.enabled && b.paint.enabled;
+        // This boundary joins A's left edge to B's right, looking outward.
+        // Carry a ramp's yellow edge around the whole corner to the crossroad.
+        // FromRoad already accounts for which endpoint is attached to the junction.
+        auto& cornerPaint = a.paint.oneWay > 0 || b.paint.oneWay < 0 ? yellowEdgePaint : whiteEdgePaint;
         const auto travelHalf = [](const RoadPaintProfile& paint)
         { return paint.separation + paint.lanes * paint.laneWidth * .5; };
         const double shoulderA = std::max(0.0, a.left - travelHalf(a.paint));
@@ -749,7 +753,7 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
                 // shoulder. Use the same eased offset along this corner/back edge.
                 const Vector3 outer = rim.p[0] - normal * std::lerp(shoulderA, shoulderB, t);
                 const PaintBand band{outer, outer - normal * RoadStyle::stripeWidth};
-                if (previousPaint) JoinPaint(edgePaint, *previousPaint, band);
+                if (previousPaint) JoinPaint(cornerPaint, *previousPaint, band);
                 previousPaint = band;
             }
         };
@@ -799,7 +803,8 @@ void IntersectionSurface::Build(const IntersectionLayout& input)
 
     const auto hole = BuildIsland(*this, pavementRim, directions);
     FillPavement(*this, pavementRim, directions, hole);
-    AppendClippedPaint(geometry, edgePaint, geometry.whiteStripes);
+    AppendClippedPaint(geometry, whiteEdgePaint, geometry.whiteStripes);
+    AppendClippedPaint(geometry, yellowEdgePaint, geometry.yellowStripes);
     ContinuePaint(*this);
     for (int i = 0; i < sides; ++i)
     {
