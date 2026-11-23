@@ -202,7 +202,7 @@ namespace
                 const Uint64 streamStart = gameVisibilityStats ? SDL_GetTicksNS() : 0;
                 game->Stream(input.IsCameraEnabled() ? freeCamera.GetPosition() : game->View().GetPosition(), worldRenderer);
                 const Uint64 updateStart = gameVisibilityStats ? SDL_GetTicksNS() : 0;
-                game->Update(elapsedNanoseconds / 1.0e9);
+                game->Update(elapsedNanoseconds / 1.0e9, input.IsCameraEnabled() ? &freeCamera : nullptr);
                 if (gameVisibilityStats)
                 {
                     frameProfile.streamMs = (updateStart - streamStart) / 1.0e6;

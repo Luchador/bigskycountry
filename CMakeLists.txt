@@ -134,6 +134,7 @@ add_library(BigSkyApplication STATIC
     shared/traffic_network.cpp
     shared/traffic_driver.cpp
     shared/traffic_overlay.cpp
+    shared/traffic_population.cpp
     shared/player_controller.cpp
     shared/player_camera.cpp
     shared/gameplay_input.cpp

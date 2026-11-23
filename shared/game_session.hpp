@@ -4,6 +4,7 @@
 #include "player.hpp"
 #include "traffic_driver.hpp"
 #include "traffic_junctions.hpp"
+#include "traffic_population.hpp"
 
 class WorldRenderer;
 class CookedWorld;
@@ -20,7 +21,7 @@ public:
     bool ReleaseMouse();
     bool MouseCaptured() const { return input.IsCaptured(); }
     void Stream(Vector3 eye, WorldRenderer& renderer);
-    void Update(double seconds);
+    void Update(double seconds, const CameraView* externalView = nullptr);
     const CameraView& View() const { return started ? player.controller.camera.View() : loadingCamera; }
     void Submit(WorldRenderer& renderer) const;
     bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const;
@@ -45,13 +46,18 @@ private:
     static constexpr std::size_t maxTrafficCars = 64;
     std::vector<std::unique_ptr<TrafficDriver>> trafficDrivers;
     std::unique_ptr<TrafficJunctions> junctionTraffic;
+    std::unique_ptr<TrafficPopulation> population;
+    std::optional<TrafficPopulation::Site> pendingSpawn;
+    bool automaticTraffic = true;
+    double spawnDelay = 0, spawnWait = 0;
     bool trafficDebug = false;
     std::string trafficNotice;
     const TrafficNetwork& Traffic() const;
     void SpawnTrafficTest(const CameraView& view, int count = 1);
-    bool SpawnTrafficCar(const TrafficLane& lane, double start);
+    bool SpawnTrafficCar(const TrafficLane& lane, double start, bool automatic = false);
+    void UpdateTrafficPopulation(double seconds, const CameraView& view);
     void RemoveTrafficTest();
-    void RemoveLostTraffic();
+    void RemoveExpiredTraffic();
     bool FinishStart();
     bool TryStartAt(Vector3 position, double yaw, bool authored = false);
 };

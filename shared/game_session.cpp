@@ -24,6 +24,7 @@ GameSession::GameSession(SDL_Window* window, WorldDocument& document, CookedWorl
     : document(document), world(document), player(world), input(window), streaming(streaming), traffic(streaming ? TrafficNetwork{} : TrafficNetwork::Build(document))
 {
     junctionTraffic = std::make_unique<TrafficJunctions>(world, Traffic());
+    population = std::make_unique<TrafficPopulation>(Traffic());
     world.prepareControllers = [this](double seconds) { junctionTraffic->Update(seconds, trafficDrivers); };
 }
 
@@ -134,6 +135,12 @@ std::vector<Vector3> GameSession::PhysicsSources(bool includeTraffic) const
     if (includeTraffic)
     {
         for (const auto& driver : trafficDrivers) driver->CollisionSources(sources);
+        if (pendingSpawn)
+        {
+            const auto& lane = Traffic().lanes[pendingSpawn->lane];
+            for (double d=0; d<=TrafficPopulation::runwayMeters; d+=20)
+                sources.push_back(lane.At(pendingSpawn->distance+d));
+        }
         // Queued cars share residency. Coalesce nearby preload requests, while
         // each car's exact collision-readiness checks remain independent.
         std::set<std::tuple<double,double,double>> seen;
@@ -181,6 +188,7 @@ const TrafficNetwork& GameSession::Traffic() const
 
 void GameSession::RemoveTrafficTest()
 {
+    pendingSpawn.reset();
     for (auto& driver : trafficDrivers)
     {
         const auto* pawn = driver->Controlled();
@@ -192,20 +200,66 @@ void GameSession::RemoveTrafficTest()
     junctionTraffic->Clear();
 }
 
-void GameSession::RemoveLostTraffic()
+void GameSession::RemoveExpiredTraffic()
 {
+    const auto* active = player.controller.Controlled();
     std::erase_if(trafficDrivers, [&](auto& driver) {
-        if (!driver->FallenOutsideWorld()) return false;
         const auto* pawn = driver->Controlled();
-        if (streaming && streaming->MayHaveGroundBelow(pawn->GetTransform().position)) return false;
+        if (!pawn) return true;
+        if (pawn == active) return false;
+        const bool distant = active && Math::Length(pawn->GetTransform().position-active->GetTransform().position) > TrafficPopulation::despawnMeters;
+        if (!distant && (!driver->FallenOutsideWorld() ||
+            (streaming && streaming->MayHaveGroundBelow(pawn->GetTransform().position)))) return false;
         // An endlessly falling body demands more substeps for every other car
         // and keeps requesting collision for an ever-longer fall trajectory.
+        // Distant NPCs also release their junction requests and collision pins.
         const auto handle = pawn->Handle();
         junctionTraffic->Remove(handle);
         driver->Release();
         world.Remove(handle);
         return true;
     });
+}
+
+void GameSession::UpdateTrafficPopulation(double seconds, const CameraView& view)
+{
+    const auto* active = player.controller.Controlled();
+    if (!started || !active || (streaming && !collisionReady)) return;
+    if (!automaticTraffic || trafficDrivers.size() >= TrafficPopulation::targetCars)
+    {
+        pendingSpawn.reset();
+        spawnDelay = TrafficPopulation::attemptSeconds;
+        return;
+    }
+    const auto position = active->GetTransform().position;
+    spawnDelay -= seconds;
+    if (pendingSpawn)
+    {
+        spawnWait += seconds;
+        if (spawnWait > TrafficPopulation::loadTimeoutSeconds ||
+            !TrafficPopulation::InSpawnArea(Traffic().lanes[pendingSpawn->lane].At(pendingSpawn->distance),position,view))
+        {
+            pendingSpawn.reset();
+            spawnDelay = TrafficPopulation::attemptSeconds;
+        }
+    }
+    if (spawnDelay > 0) return;
+    // No catch-up burst after a slow frame. Keep at most one pending collision
+    // request, retry it at 2 Hz, and discard it if the player/camera moves away.
+    spawnDelay = TrafficPopulation::attemptSeconds;
+    if (!pendingSpawn)
+    {
+        pendingSpawn = population->Pick(position,view);
+        spawnWait = 0;
+    }
+    if (!pendingSpawn) return;
+    const auto& lane = Traffic().lanes[pendingSpawn->lane];
+    for (double d=0; d<=TrafficPopulation::runwayMeters; d+=20)
+        if (streaming && !streaming->CollisionReady(lane.At(pendingSpawn->distance+d),32)) return;
+    // Dynamic gaps and support are checked again after loading, using the latest
+    // pawn poses. Automatic attempts don't overwrite manual placement messages.
+    SpawnTrafficCar(lane,pendingSpawn->distance,true);
+    pendingSpawn.reset();
 }
 
 void GameSession::SpawnTrafficTest(const CameraView& view, int count)
@@ -233,43 +287,65 @@ void GameSession::SpawnTrafficTest(const CameraView& view, int count)
     else if (added) trafficNotice = "Added " + std::to_string(added) + " of " + std::to_string(count) + ": " + trafficNotice;
 }
 
-bool GameSession::SpawnTrafficCar(const TrafficLane& lane, double start)
+bool GameSession::SpawnTrafficCar(const TrafficLane& lane, double start, bool automatic)
 {
-    if (trafficDrivers.size() >= maxTrafficCars) { trafficNotice = "Traffic test limit: 64 cars. F7 clears them."; return false; }
+    const auto fail = [&](const char* text) { if (!automatic) trafficNotice=text; return false; };
+    if (trafficDrivers.size() >= maxTrafficCars) return fail("Traffic limit: 64 cars. F7 clears them.");
     const auto position = lane.At(start);
     const auto* playerPawn = player.controller.Controlled();
-    if (!playerPawn || Math::Length(position - playerPawn->GetTransform().position) > 250)
-    { trafficNotice = "Place the test car within 250 m of the player."; return false; }
+    if (!playerPawn || Math::Length(position - playerPawn->GetTransform().position) > (automatic ? TrafficPopulation::spawnFarMeters : 250))
+        return fail("Place the test car within 250 m of the player.");
     if (streaming && !streaming->CollisionReady(position, 32))
-    { trafficNotice = "Move closer and wait for collision to load before placing the test car."; return false; }
+        return fail("Move closer and wait for collision to load before placing the test car.");
     auto car = std::make_unique<Car>();
     const auto tangent = lane.Tangent(start);
     ObjectTransform pose{position, {0, std::atan2(tangent.x, tangent.z), 0}};
-    if (!car->PlaceOnGround(world, pose, 3.0)) { trafficNotice = "No supporting road surface at this lane."; return false; }
+    if (!car->PlaceOnGround(world, pose, 3.0) || std::abs(pose.position.y-position.y)>0.5)
+        return fail("No supporting road surface at this lane.");
     const auto frame = pose.ToMeshTransform();
     for (double z : {-1.5, 0.0, 1.5})
         if (world.SphereBlocked(frame.Point({0,1.0,z}), 0.9))
-        { trafficNotice = "The test car needs clear space, away from the player and other vehicles."; return false; }
+            return fail("The test car needs clear space, away from the player and other vehicles.");
     // Do not insert a stationary car into the braking space of approaching traffic.
-    for (const auto* other : world.NearbyPawns(PawnIndex::Around(position, 80)))
+    // Include a fast player's braking distance, not just the former 80 m bubble.
+    for (const auto* other : world.NearbyPawns(PawnIndex::Around(position, 300),true))
     {
         if (!dynamic_cast<const Car*>(other)) continue;
-        const auto p = lane.Project(other->GetTransform().position, std::max(0.0, start - 80), start + 80);
+        if (automatic)
+        {
+            // A merging/turning car may not be centered in this lane yet. Keep
+            // its immediate planned corridor clear of newly appearing vehicles.
+            const auto* driver = dynamic_cast<const TrafficDriver*>(other->Controller());
+            const bool frozen = other->Controller() && !other->Controller()->SimulationReady();
+            const auto velocity = frozen ? Vector3{} : other->Velocity();
+            const double speed = Math::Length(velocity);
+            const int samples = std::clamp(static_cast<int>(std::ceil(speed*2.5/3)),1,128);
+            for (int i=0; i<=samples; ++i)
+            {
+                const double seconds = 2.5*i/samples;
+                auto predicted = other->GetTransform().position+velocity*seconds;
+                if (driver && !frozen) predicted = driver->Lane().At(driver->Progress()+speed*seconds);
+                const auto delta = predicted-position;
+                if (std::abs(delta.y)<2 && std::hypot(delta.x,delta.z)<6)
+                    return fail("Leave more space for nearby or approaching cars.");
+            }
+        }
+        const auto p = lane.Project(other->GetTransform().position, std::max(0.0, start - 300), start + 300);
         if (p.error > 2.3) continue;
         const double delta = p.distance - start;
         const double velocity = Math::Dot(other->Velocity(), lane.Tangent(p.distance));
         const double closing = std::max(0.0, delta < 0 ? velocity : -velocity);
         if (std::abs(delta) < 7.5 + closing * 1.6 + closing * closing / 16.0)
-        { trafficNotice = "Leave more space for nearby or approaching cars."; return false; }
+            return fail("Leave more space for nearby or approaching cars.");
     }
     car->Teleport(pose);
     const auto handle = world.Add(std::move(car));
     auto driver = std::make_unique<TrafficDriver>(world, lane, start);
     driver->SetNetwork(&Traffic());
     driver->collisionReady = [this](Vector3 p) { return !streaming || streaming->CollisionReady(p, 8); };
-    if (!driver->Possess(handle)) { driver.reset(); world.Remove(handle); trafficNotice = "Cannot control the test car."; return false; }
+    if (!driver->Possess(handle)) { driver.reset(); world.Remove(handle); return fail("Cannot control the test car."); }
     trafficDrivers.push_back(std::move(driver));
-    trafficNotice.clear();
+    if (!automatic) trafficNotice.clear();
     return true;
 }
 
@@ -278,7 +354,21 @@ bool GameSession::HandleTrafficKey(const SDL_Event& event, const CameraView& vie
     if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat ||
         (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) return false;
     if (event.key.key == SDLK_F6) SpawnTrafficTest(view, event.key.mod & SDL_KMOD_SHIFT ? 5 : 1);
-    else if (event.key.key == SDLK_F7) { RemoveTrafficTest(); trafficNotice = "Test traffic removed."; }
+    else if (event.key.key == SDLK_F7)
+    {
+        if (event.key.mod & SDL_KMOD_SHIFT)
+        {
+            automaticTraffic = !automaticTraffic;
+            pendingSpawn.reset(); spawnDelay = 0;
+            trafficNotice = automaticTraffic ? "Automatic traffic enabled." : "Automatic spawning paused; existing cars keep driving.";
+        }
+        else
+        {
+            automaticTraffic = false;
+            RemoveTrafficTest();
+            trafficNotice = "Traffic cleared and automatic spawning paused. Shift+F7 resumes it.";
+        }
+    }
     else if (event.key.key == SDLK_F8) trafficDebug = !trafficDebug;
     else return false;
     return true;
@@ -296,15 +386,18 @@ bool GameSession::DrawTrafficDebug(SDL_Renderer* renderer, const CameraView& vie
     const SDL_FRect panel{8, float(viewport.h - 100), float(std::min(1000, viewport.w - 16)), 92};
     SDL_SetRenderDrawColor(renderer, 22, 24, 28, 255); if (!SDL_RenderFillRect(renderer, &panel)) return false;
     SDL_SetRenderDrawColor(renderer, 225, 228, 235, 255);
-    if (!SDL_RenderDebugText(renderer, 16, panel.y+8, "Traffic: F6 add | Shift+F6 add 5 behind aim | F7 clear all | F8 overlay")) return false;
+    if (!SDL_RenderDebugText(renderer, 16, panel.y+8, "Traffic: F6 add | Shift+F6 add 5 | F7 clear/pause | Shift+F7 auto | F8 overlay")) return false;
     if (testDriver)
     {
         char spacing[96] = "lane clear";
         if (testDriver->Leader()) SDL_snprintf(spacing, sizeof(spacing), "gap %.1f / desired %.1f m", testDriver->Gap(), testDriver->DesiredGap());
-        if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+26, "%u cars | last: road %d | target %.1f mph | %s | %s",
-            static_cast<unsigned>(trafficDrivers.size()), testDriver->Lane().roadId, testDriver->TargetSpeed() * 2.2369362921,
+        if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+26, "%u cars | auto %s%s | last: road %d | %.1f mph | %s | %s",
+            static_cast<unsigned>(trafficDrivers.size()), automaticTraffic ? "on" : "off", pendingSpawn ? " (loading)" : "",
+            testDriver->Lane().roadId, testDriver->TargetSpeed() * 2.2369362921,
             spacing, testDriver->Reason())) return false;
     }
+    else if (!SDL_RenderDebugTextFormat(renderer,16,panel.y+26,"0 cars | auto %s%s | target %u",
+        automaticTraffic ? "on" : "off", pendingSpawn ? " (loading)" : "", static_cast<unsigned>(TrafficPopulation::targetCars))) return false;
     const auto& stats = world.QueryStatistics();
     if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+44, "Physics: %u nearby queries | %u results | %u car-pair checks | %u junction reservations",
         static_cast<unsigned>(stats.queries), static_cast<unsigned>(stats.results), static_cast<unsigned>(world.CollisionPairChecks()), static_cast<unsigned>(junctionTraffic->Reservations()))) return false;
@@ -332,10 +425,12 @@ bool GameSession::SetDebugCamera(bool enabled)
     return input.SetCaptured(!enabled);
 }
 
-void GameSession::Update(double seconds)
+void GameSession::Update(double seconds, const CameraView* externalView)
 {
     profile = {};
     seconds = std::clamp(seconds, 0.0, 0.25);
+    // Once per frame, including while player collision is loading after a move.
+    RemoveExpiredTraffic();
     if (streaming && (!started || !collisionReady))
     {
         accumulator = 0; // Never catch up physics through an unloaded collision boundary.
@@ -358,7 +453,6 @@ void GameSession::Update(double seconds)
     {
         world.Step(fixedStep);
         if (world.profiling) profile.Add(world.Profile());
-        RemoveLostTraffic();
         document.TickObjects(static_cast<float>(fixedStep));
         if (player.AfterStep(streaming))
         {
@@ -374,6 +468,7 @@ void GameSession::Update(double seconds)
     }
     if (auto* active = player.controller.Controlled())
         player.controller.camera.Update(*active, accumulator / fixedStep, seconds, world.collision);
+    UpdateTrafficPopulation(seconds,externalView ? *externalView : View());
 }
 
 void GameSession::Submit(WorldRenderer& renderer) const

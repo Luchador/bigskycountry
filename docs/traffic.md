@@ -1,4 +1,4 @@
-# Traffic highways — milestone 4
+# Traffic highways and automatic population
 
 ## Performance testing
 
@@ -32,13 +32,17 @@ or physics behavior. Profiling timers are disabled when F3 is hidden.
 
 ## Trying it
 
-1. Rebuild the game and editor in **Release**, save, and use **File → Cook World** again.
-   Milestone 4 needs a recook to add ramp and road-end connections.
+1. Rebuild the game and editor in **Release**. Automatic population works with the
+   existing milestone 4 cook; no additional recook is needed for this update.
+   If upgrading an older world, save and use **File → Cook World** to add traffic
+   lanes, intersections, ramps and road-end connections.
    Select each intersection anchor to set **Traffic control: Stop/Yield/Priority**.
    Existing intersections default to Stop on every approach. Controls and stop-line
    paint are independent; both save and support undo/redo.
 2. Enable **View → Traffic Lanes** to inspect directions in either editor view.
-3. In-game, press **F8**, aim the crosshair at a through lane, and press **F6**.
+3. Traffic now appears automatically around the player. For an isolated manual
+   test, press **F7** to clear traffic and pause automatic spawning. Press **F8**,
+   aim the crosshair at a through lane, and press **F6**.
    Choose a loaded road within 250 m of the player, with at least 15 m left before
    the lane end and clear space for the vehicle. F1's free camera also works.
 4. Press F6 again on another clear part of the lane to add a car without replacing
@@ -46,7 +50,8 @@ or physics behavior. Profiling timers are disabled when F3 is hidden.
    working backwards at 18 m intervals. The group can be partial if it reaches a
    lane boundary, unsafe gap, or the 64-car test limit; the overlay explains why.
 5. Watch the cars form queues and resume when a blocker moves away. F7 clears all
-   AI traffic, preserving the player and their vehicle.
+   AI traffic and pauses automatic spawning, preserving the player and their
+   vehicle. **Shift+F7** toggles automatic spawning without removing existing cars.
 
 Green arrows run in the road's authored direction; blue arrows run against it.
 The last spawned car's lane and available turns are amber. Purple paths connect
@@ -235,8 +240,8 @@ preserved. F7 clears the test population.
 
 F8 shows the last spawned car's planned path in pale yellow, ramp/road connections
 in purple, and entrance merges in orange. The state readout reports route
-preparation, changing lanes, taking an exit, or yielding for a merge. F6/Shift+F6
-and F7 retain their existing spawn/clear controls.
+preparation, changing lanes, taking an exit, or yielding for a merge. It also
+reports whether automatic spawning is enabled or waiting for collision.
 
 Try a four-lane divided highway with an exit, an entrance, and an outer lane
 reduction. Place cars in both lanes and on the entrance. Block the receiving lane
@@ -244,12 +249,55 @@ with the player's car to verify waiting, then clear it. Try a 5-lane undivided t
 4-lane divided conversion: the two through lanes per direction continue across
 the changing center profile. Test with F3 showing **Build: Release**.
 
-## Boundaries of this milestone
+## Automatic population
 
-Traffic is manually placed, capped at 64 AI cars, and does not persist between
+Traffic is enabled on game startup. Defaults live in `shared/traffic_population.hpp`:
+
+| Setting | Default |
+| --- | --- |
+| Desired NPC population | 24 cars |
+| Spawn distance from the player | 150–600 m |
+| Minimum distance for spawns in view | 450 m |
+| Despawn distance from the player | Over 1,000 m |
+| Maximum spawn attempt rate | 2 per second |
+| Pending collision request timeout | 5 seconds |
+
+Each eligible road gets one equal chance in the spawn lottery. Longer roads and
+roads with more lanes do not get extra chances. After choosing a road, the system
+chooses a location along its eligible lane stretches. There are no road-class,
+speed-limit, city or highway density weights. Obstructed roads can still produce
+fewer successful spawns. A target is a maximum desired population, not a promise
+to place cars when no safe sites are available.
+
+Sites must be outside the player's near radius and away from lane ends (8 m from
+the start, with 40 m of lane remaining). Within 450 m of the camera, sites must
+also be behind it. Farther sites can be in view so a fast-moving player still
+encounters traffic ahead on straight roads; distant cars may appear at that range.
+The population stays centered on
+the controlled player pawn, including when walking or using F1's free camera.
+Distances are 3D engine meters, independent of the render-distance setting.
+
+The game indexes short lane stretches once, searches only nearby stretches when
+below the target, and handles at most one pending spawn. Pending locations request
+collision through the existing asynchronous streamer. A car is added only after
+support, collision readiness, physical clearance and approaching-vehicle gaps are
+checked. Moving or turning away invalidates a pending site. The target includes
+manually spawned NPCs; manual placement can still raise the total to 64.
+
+All traffic-owned cars, including manual ones, are retired beyond the outer
+radius. Their controllers, collision bodies and junction reservations are removed,
+so they no longer pin distant collision chunks. Player vehicles and other
+unmanaged parked vehicles are never removed by this system. The wider despawn
+radius prevents cars from repeatedly appearing and disappearing at one boundary.
+Nearby queues and stopped dead-end traffic remain valid and are not culled merely
+for stopping. Disabling automatic spawning doesn't disable distance cleanup.
+
+## Current boundaries
+
+Traffic is capped at 64 AI cars and does not persist between
 sessions. AI-possessed cars cannot be entered. The initial speed limit remains
 30 mph; this milestone adds highway maneuvering, not an inferred highway speed
-limit. There are no traffic lights, automatic populations, destination routing,
+limit. There are no traffic lights, destination routing,
 roundabout/town-square circulation, or routing through curved side connectors yet.
 Very short tapers or lanes without sufficient room for a safe lane change may
 still stop traffic. A saturated mainline can delay merging traffic; there is no
