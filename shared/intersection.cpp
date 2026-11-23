@@ -25,7 +25,7 @@ namespace
     EdgeProfile Profile(RoadEdge edge)
     {
         if (edge == RoadEdge::Curb)
-            return {RoadStyle::stripWidth, RoadStyle::curbHeight, RoadStyle::curbTopWidth, RoadEdgeColor::apron, RoadEdgeColor::apron};
+            return {RoadStyle::curbApronWidth, RoadStyle::curbHeight, RoadStyle::curbTopWidth, RoadEdgeColor::apron, RoadEdgeColor::apron};
         if (edge == RoadEdge::Transition) return {RoadStyle::stripWidth, 0, 0, RoadEdgeColor::transitionInner, RoadEdgeColor::transitionOuter};
         return {};
     }

@@ -395,7 +395,7 @@ double RoadStyle::EdgeWidth() const
     switch (edge)
     {
         case RoadEdge::Transition: return stripWidth;
-        case RoadEdge::Curb: return stripWidth + curbTopWidth;
+        case RoadEdge::Curb: return curbApronWidth + curbTopWidth;
         default: return 0.0;
     }
 }

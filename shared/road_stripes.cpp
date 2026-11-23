@@ -634,6 +634,7 @@ namespace
         const double median = path.profile ? path.profile->Mix(section.distance,
             [](const RoadStyle& s) { return s.HalfMedianWidth(); }) : style.HalfMedianWidth();
         struct Rim { double offset, height, red; };
+        const double apron = style.edge == RoadEdge::Curb ? RoadStyle::curbApronWidth : RoadStyle::stripWidth;
         const auto side = [&](int sign)
         {
             const auto widthOf = [&](const RoadStyle& s) { return sign < 0 ? s.RightWidth() : s.LeftWidth(); };
@@ -643,10 +644,10 @@ namespace
             if (gap > 0) rim.push_back({sign * gap, 0, 1});
             rim.push_back({sign * width, 0, 1});
             if (style.edge != RoadEdge::None)
-                rim.push_back({sign * (width + RoadStyle::stripWidth), 0, style.edge == RoadEdge::Transition ? 0.0 : 1.0});
+                rim.push_back({sign * (width + apron), 0, style.edge == RoadEdge::Transition ? 0.0 : 1.0});
             if (style.edge == RoadEdge::Curb)
             {
-                rim.push_back({sign * (width + RoadStyle::stripWidth), RoadStyle::curbHeight, 1});
+                rim.push_back({sign * (width + apron), RoadStyle::curbHeight, 1});
                 rim.push_back({sign * (width + style.EdgeWidth()), RoadStyle::curbHeight, 1});
             }
             return rim;
@@ -832,7 +833,7 @@ namespace
         {
             EdgeProfile rim{};
             rim[0] = s.At(outer);
-            rim[1] = s.At(outer + RoadStyle::stripWidth);
+            rim[1] = s.At(outer + (edge == RoadEdge::Curb ? RoadStyle::curbApronWidth : RoadStyle::stripWidth));
             rim[2] = rim[1] + s.up * RoadStyle::curbHeight;
             rim[3] = rim[2] + s.lateral * RoadStyle::curbTopWidth;
             return rim;
