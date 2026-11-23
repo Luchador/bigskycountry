@@ -142,7 +142,10 @@ distance; vehicle physics still resolves contacts.
 Entries cover current bounds and predicted motion. Query results are deduplicated
 and sorted by handle. Membership updates when pawns move, spawn, disappear, seat,
 teleport, or change collision state. Oversized entries/queries have a bounded
-fallback. Static geometry continues using the existing collision BVHs.
+fallback. Static geometry uses per-chunk triangle BVHs behind a spatial tree of
+loaded chunk bounds. Wheel rays and body contacts skip unrelated chunks,
+including ones kept resident by traffic elsewhere. Attachment changes invalidate
+the chunk tree; the next query rebuilds it once for all cars and substeps.
 
 All controllers observe pre-physics poses in each fixed tick. During substeps the
 index follows moved pawns and contact corrections. Car pairs are checked once per
@@ -156,7 +159,12 @@ cars. Nearby preload requests from a queue are coalesced; exact readiness checks
 remain per car. Drivers brake before unavailable collision. If support becomes
 unavailable underneath one, that AI car is suspended independently of the player
 and treated as stopped by other traffic. Cars pushed off their lane brake; there
-is no autonomous recovery or despawning yet. F7 clears the test population.
+is no autonomous rerouting at a dead end. Cars that fall more than 100 m below
+their last support, with no landing surface below them in either loaded collision
+or unloaded-world metadata, are removed along with their intersection requests.
+This prevents lost cars from accumulating fall speed and increasing physics work
+indefinitely. Ordinary queues, dead-end stops, and falls toward lower terrain are
+preserved. F7 clears the test population.
 
 ## Boundaries of this milestone
 

@@ -21,6 +21,7 @@ public:
     void Update(double seconds) override;
     void SetNetwork(const TrafficNetwork* value) { network = value; }
     void PrepareRoute();
+    bool FallenOutsideWorld() const;
     const TrafficMovement* Movement() const;
     unsigned JunctionVisit() const { return visits; }
     double Entry() const { return entry; }
@@ -53,6 +54,7 @@ private:
     double gap = -1, desiredGap = 0;
     double FollowingSpeed(const Car& car, double speed, double scan, bool& emergency);
     double progress = 0, targetSpeed = 0;
+    double lastSupportHeight = 0;
     Vector3 lookAhead{};
     const char* reason = "Starting";
 };

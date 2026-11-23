@@ -193,6 +193,22 @@ void GameSession::RemoveTrafficTest()
     junctionTraffic->Clear();
 }
 
+void GameSession::RemoveLostTraffic()
+{
+    std::erase_if(trafficDrivers, [&](auto& driver) {
+        if (!driver->FallenOutsideWorld()) return false;
+        const auto* pawn = driver->Controlled();
+        if (streaming && streaming->MayHaveGroundBelow(pawn->GetTransform().position)) return false;
+        // An endlessly falling body demands more substeps for every other car
+        // and keeps requesting collision for an ever-longer fall trajectory.
+        const auto handle = pawn->Handle();
+        junctionTraffic->Remove(handle);
+        driver->Release();
+        world.Remove(handle);
+        return true;
+    });
+}
+
 void GameSession::SpawnTrafficTest(const CameraView& view, int count)
 {
     trafficDebug = true;
@@ -341,6 +357,7 @@ void GameSession::Update(double seconds)
     while (accumulator + 1e-12 >= fixedStep)
     {
         world.Step(fixedStep);
+        RemoveLostTraffic();
         document.TickObjects(static_cast<float>(fixedStep));
         if (player.AfterStep(streaming))
         {

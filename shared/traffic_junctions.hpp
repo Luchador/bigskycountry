@@ -10,6 +10,7 @@ public:
     TrafficJunctions(GameWorld& world, const TrafficNetwork& network) : world(world), network(network) {}
     void Update(double seconds, const std::vector<std::unique_ptr<TrafficDriver>>& drivers);
     void Clear() { requests.clear(); clock = 0; }
+    void Remove(PawnHandle handle) { requests.erase(handle); }
     std::size_t Reservations() const;
 private:
     struct Request

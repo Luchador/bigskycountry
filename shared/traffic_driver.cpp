@@ -4,10 +4,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string_view>
 
 TrafficDriver::TrafficDriver(GameWorld& world, const TrafficLane& lane, double start, TrafficFollowing following)
-    : PawnController(world), source(&lane), lane(lane), following(following), progress(start), lookAhead(lane.At(start)) {}
+    : PawnController(world), source(&lane), lane(lane), following(following), progress(start),
+      lastSupportHeight(lane.At(start).y), lookAhead(lane.At(start)) {}
+
+bool TrafficDriver::FallenOutsideWorld() const
+{
+    const auto* car = dynamic_cast<const Car*>(Controlled());
+    // A stopped queue or dead end is valid. Only retire an unsupported car
+    // after a large fall with no landing surface below it. The session also
+    // checks unloaded-world metadata before removing a streamed-world car.
+    return car && !suspended && !car->IsGrounded() && car->Velocity().y < -1.0 &&
+        car->GetTransform().position.y < lastSupportHeight - 100.0 &&
+        !world.collision.Ground(car->GetTransform().position, 0, std::numeric_limits<double>::infinity());
+}
 
 const TrafficMovement* TrafficDriver::Movement() const
 {
@@ -17,6 +30,8 @@ void TrafficDriver::PrepareRoute()
 {
     const auto* car = Controlled();
     if (!car) return;
+    if (const auto* vehicle = dynamic_cast<const Car*>(car); vehicle && vehicle->IsGrounded())
+        lastSupportHeight = car->GetTransform().position.y;
     const auto projection = lane.Project(car->GetTransform().position, std::max(0.0, progress-5), progress+25);
     progress = std::max(progress, projection.distance);
     if (const auto* m = Movement(); m && progress >= exit+3.0)

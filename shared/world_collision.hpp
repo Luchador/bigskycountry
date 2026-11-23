@@ -20,9 +20,9 @@ public:
     void Build(const WorldDocument& world);
     void AddMesh(const MeshInstance& instance);
     void Finish();
-    void Attach(std::uint64_t key, std::shared_ptr<const WorldCollision> chunk) { chunks[key] = std::move(chunk); }
-    void Detach(std::uint64_t key) { chunks.erase(key); }
-    void ClearChunks() { chunks.clear(); }
+    void Attach(std::uint64_t key, std::shared_ptr<const WorldCollision> chunk);
+    void Detach(std::uint64_t key);
+    void ClearChunks();
     std::size_t ChunkCount() const { return chunks.size(); }
     std::size_t MemoryBytes() const;
     const Bounds3& Bounds() const;
@@ -38,6 +38,20 @@ private:
     struct Node { Bounds3 bounds; size_t first = 0, count = 0, left = 0, right = 0; };
     std::vector<Triangle> triangles;
     std::vector<Node> nodes;
+    // A second BVH rejects distant streamed chunks before consulting their
+    // triangle trees. Rebuild once after a batch of attachment changes, never
+    // for each car or physics substep. Chunks are immutable while attached.
+    struct Chunk { const WorldCollision* collision; Bounds3 bounds; };
+    mutable std::vector<Chunk> orderedChunks;
+    mutable std::vector<Node> chunkNodes;
+    mutable Bounds3 bounds;
+    mutable bool chunksDirty = true;
+    void IndexChunks() const;
+    size_t BuildChunkNode(size_t first, size_t count) const;
+    void TraceChunks(size_t node, Vector3 origin, Vector3 direction, bool walkableOnly,
+                     std::optional<Hit>& hit, double& distance) const;
+    bool OverlapChunks(size_t node, Vector3 center, double radius) const;
+    void ContactChunks(size_t node, Vector3 center, double radius, std::optional<BodyContact>& result) const;
     void AddTriangle(Vector3 a, Vector3 b, Vector3 c);
     size_t BuildNode(size_t first, size_t count);
     void Trace(size_t node, Vector3 origin, Vector3 direction, bool walkableOnly, std::optional<Hit>& hit, double& distance) const;

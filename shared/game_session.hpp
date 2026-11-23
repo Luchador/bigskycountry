@@ -48,6 +48,7 @@ private:
     void SpawnTrafficTest(const CameraView& view, int count = 1);
     bool SpawnTrafficCar(const TrafficLane& lane, double start);
     void RemoveTrafficTest();
+    void RemoveLostTraffic();
     bool FinishStart();
     bool TryStartAt(Vector3 position, double yaw, bool authored = false);
 };

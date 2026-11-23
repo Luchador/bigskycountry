@@ -34,6 +34,15 @@ namespace
         return true;
     }
 
+    bool SphereBounds(const Bounds3& bounds, Vector3 center, double radius)
+    {
+        const Vector3 nearest{std::clamp(center.x, bounds.min.x, bounds.max.x),
+                              std::clamp(center.y, bounds.min.y, bounds.max.y),
+                              std::clamp(center.z, bounds.min.z, bounds.max.z)};
+        const auto offset = center - nearest;
+        return radius > 0 && Math::Dot(offset, offset) < radius * radius;
+    }
+
     Vector3 ClosestPoint(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
     {
         const Vector3 ab = b - a, ac = c - a, ap = p - a;
@@ -84,7 +93,7 @@ void WorldCollision::AddMesh(const MeshInstance& instance)
 
 void WorldCollision::Build(const WorldDocument& world)
 {
-    chunks.clear();
+    ClearChunks();
     triangles.clear();
     nodes.clear();
     const auto road = [&](const RoadGeometry& geometry) {
@@ -115,6 +124,118 @@ void WorldCollision::Finish()
 {
     nodes.clear();
     if (!triangles.empty()) BuildNode(0, triangles.size());
+    chunksDirty = true; // Include the updated local tree in the aggregate bounds.
+}
+
+void WorldCollision::Attach(std::uint64_t key, std::shared_ptr<const WorldCollision> chunk)
+{
+    if (!chunk) { Detach(key); return; }
+    auto [it, inserted] = chunks.try_emplace(key, chunk);
+    if (inserted || it->second != chunk)
+    {
+        it->second = std::move(chunk);
+        chunksDirty = true;
+    }
+}
+
+void WorldCollision::Detach(std::uint64_t key)
+{
+    if (chunks.erase(key)) chunksDirty = true;
+}
+
+void WorldCollision::ClearChunks()
+{
+    chunks.clear();
+    orderedChunks.clear();
+    chunkNodes.clear();
+    chunksDirty = true;
+}
+
+void WorldCollision::IndexChunks() const
+{
+    if (!chunksDirty) return;
+    orderedChunks.clear();
+    chunkNodes.clear();
+    bounds = nodes.empty() ? Bounds3{} : nodes.front().bounds;
+    for (const auto& [key, chunk] : chunks)
+    {
+        const auto& childBounds = chunk->Bounds();
+        if (childBounds.Empty()) continue;
+        orderedChunks.push_back({chunk.get(), childBounds});
+        bounds.Include(childBounds.min); bounds.Include(childBounds.max);
+    }
+    if (!orderedChunks.empty()) BuildChunkNode(0, orderedChunks.size());
+    chunksDirty = false;
+}
+
+size_t WorldCollision::BuildChunkNode(size_t first, size_t count) const
+{
+    Bounds3 box;
+    for (size_t i = first; i < first + count; ++i)
+    {
+        box.Include(orderedChunks[i].bounds.min);
+        box.Include(orderedChunks[i].bounds.max);
+    }
+    const size_t index = chunkNodes.size();
+    chunkNodes.push_back({box, first, count});
+    if (count <= 4) return index;
+    const Vector3 extent = box.max - box.min;
+    int axis = extent.x > extent.y ? 0 : 1;
+    if (extent.z > Axis(extent, axis)) axis = 2;
+    const size_t middle = first + count / 2;
+    std::nth_element(orderedChunks.begin() + first, orderedChunks.begin() + middle, orderedChunks.begin() + first + count,
+        [axis](const Chunk& a, const Chunk& b) {
+            return Axis(a.bounds.min + a.bounds.max, axis) < Axis(b.bounds.min + b.bounds.max, axis);
+        });
+    const size_t left = BuildChunkNode(first, middle - first);
+    const size_t right = BuildChunkNode(middle, first + count - middle);
+    chunkNodes[index].left = left; chunkNodes[index].right = right;
+    chunkNodes[index].count = 0;
+    return index;
+}
+
+void WorldCollision::TraceChunks(size_t index, Vector3 origin, Vector3 direction, bool walkableOnly,
+                                 std::optional<Hit>& hit, double& distance) const
+{
+    const auto& node = chunkNodes[index];
+    if (!RayBounds(node.bounds, origin, direction, distance)) return;
+    if (!node.count)
+    {
+        TraceChunks(node.left, origin, direction, walkableOnly, hit, distance);
+        TraceChunks(node.right, origin, direction, walkableOnly, hit, distance);
+        return;
+    }
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+        if (RayBounds(orderedChunks[i].bounds, origin, direction, distance))
+            if (const auto next = orderedChunks[i].collision->Raycast(origin, direction, distance, walkableOnly))
+            { hit = next; distance = next->distance; }
+}
+
+bool WorldCollision::OverlapChunks(size_t index, Vector3 center, double radius) const
+{
+    const auto& node = chunkNodes[index];
+    if (!SphereBounds(node.bounds, center, radius)) return false;
+    if (!node.count) return OverlapChunks(node.left, center, radius) || OverlapChunks(node.right, center, radius);
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+        if (SphereBounds(orderedChunks[i].bounds, center, radius) &&
+            orderedChunks[i].collision->SphereBlocked(center, radius)) return true;
+    return false;
+}
+
+void WorldCollision::ContactChunks(size_t index, Vector3 center, double radius, std::optional<BodyContact>& result) const
+{
+    const auto& node = chunkNodes[index];
+    if (!SphereBounds(node.bounds, center, radius)) return;
+    if (!node.count)
+    {
+        ContactChunks(node.left, center, radius, result);
+        ContactChunks(node.right, center, radius, result);
+        return;
+    }
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+        if (SphereBounds(orderedChunks[i].bounds, center, radius))
+            if (const auto next = orderedChunks[i].collision->SphereContact(center, radius);
+                next && (!result || next->penetration > result->penetration)) result = next;
 }
 
 size_t WorldCollision::BuildNode(size_t first, size_t count)
@@ -180,10 +301,11 @@ void WorldCollision::Trace(size_t index, Vector3 origin, Vector3 direction, bool
 std::optional<WorldCollision::Hit> WorldCollision::Raycast(Vector3 origin, Vector3 direction, double distance, bool walkableOnly) const
 {
     std::optional<Hit> hit;
-    if (!nodes.empty() && distance >= 0 && Math::Length(direction) > 0)
-        Trace(0, origin, Math::Normalize(direction), walkableOnly, hit, distance);
-    for (const auto& [key, chunk] : chunks)
-        if (const auto next = chunk->Raycast(origin, direction, distance, walkableOnly)) { hit = next; distance = next->distance; }
+    if (distance < 0 || Math::Length(direction) <= 0) return hit;
+    direction = Math::Normalize(direction);
+    if (!nodes.empty()) Trace(0, origin, direction, walkableOnly, hit, distance);
+    IndexChunks();
+    if (!chunkNodes.empty()) TraceChunks(0, origin, direction, walkableOnly, hit, distance);
     return hit;
 }
 
@@ -218,8 +340,8 @@ bool WorldCollision::Overlap(size_t index, Vector3 center, double radius) const
 bool WorldCollision::SphereBlocked(Vector3 center, double radius) const
 {
     if (!nodes.empty() && Overlap(0, center, radius)) return true;
-    for (const auto& [key, chunk] : chunks) if (chunk->SphereBlocked(center, radius)) return true;
-    return false;
+    IndexChunks();
+    return !chunkNodes.empty() && OverlapChunks(0, center, radius);
 }
 
 void WorldCollision::Contact(size_t index, Vector3 center, double radius, std::optional<BodyContact>& result) const
@@ -251,17 +373,18 @@ std::optional<BodyContact> WorldCollision::SphereContact(Vector3 center, double 
 {
     std::optional<BodyContact> contact;
     if (!nodes.empty()) Contact(0, center, radius, contact);
-    for (const auto& [key, chunk] : chunks)
-        if (const auto next = chunk->SphereContact(center, radius); next && (!contact || next->penetration > contact->penetration)) contact = next;
+    IndexChunks();
+    if (!chunkNodes.empty()) ContactChunks(0, center, radius, contact);
     return contact;
 }
 
 std::size_t WorldCollision::MemoryBytes() const
 {
-    return sizeof(*this) + triangles.capacity() * sizeof(Triangle) + nodes.capacity() * sizeof(Node);
+    return sizeof(*this) + triangles.capacity() * sizeof(Triangle) + nodes.capacity() * sizeof(Node) +
+        orderedChunks.capacity() * sizeof(Chunk) + chunkNodes.capacity() * sizeof(Node);
 }
 const Bounds3& WorldCollision::Bounds() const
 {
-    static const Bounds3 empty;
-    return nodes.empty() ? empty : nodes.front().bounds;
+    IndexChunks();
+    return bounds;
 }
