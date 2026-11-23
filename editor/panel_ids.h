@@ -166,5 +166,6 @@
 
 #define IDC_SHADOW_DISTANCE 1303
 
-#define IDC_TRAFFIC_CONTROL_LABEL 1190
-#define IDC_TRAFFIC_CONTROL 1191
+// Keep anchor traffic controls distinct from the intersection paint controls.
+#define IDC_TRAFFIC_CONTROL_LABEL 1192
+#define IDC_TRAFFIC_CONTROL 1193
