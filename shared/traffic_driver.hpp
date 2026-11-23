@@ -3,6 +3,7 @@
 #include "pawn_controller.hpp"
 #include "traffic_network.hpp"
 #include <functional>
+#include <set>
 
 class Car;
 
@@ -21,9 +22,12 @@ public:
     void Update(double seconds) override;
     void SetNetwork(const TrafficNetwork* value) { network = value; }
     void PrepareRoute();
+    void CollisionSources(std::vector<Vector3>& points) const;
+    bool ChangingLanes() const { return changing; }
+    bool ClaimsMerge() const;
+    double ManeuverStart() const { return entry; }
+    double ManeuverEnd() const { return exit; }
     bool FallenOutsideWorld() const;
-    // Shared by following, junction intrusion and blocked-exit perception.
-    static bool Detects(const Pawn& pawn);
     const TrafficMovement* Movement() const;
     unsigned JunctionVisit() const { return visits; }
     double Entry() const { return entry; }
@@ -47,6 +51,22 @@ private:
     TrafficLane lane; // Current lane + chosen turn + outgoing lane, for continuous lookahead.
     const TrafficNetwork* network = nullptr;
     std::optional<std::size_t> movement;
+    const TrafficLane* destination = nullptr;
+    double destinationStation = 0;
+    std::optional<std::size_t> highwayLink, goalLink, goalMovement;
+    std::uint64_t goalLane = 0;
+    std::set<std::size_t> skippedExits;
+    TrafficLane maneuver;
+    bool changing = false, mergeGranted = false;
+    double decisionDelay = 0, changeCooldown = 0, mergeDelay = 0;
+    double laneWaitDistance = -1;
+    const char* highwayReason = nullptr;
+    void PlanRoute();
+    void JoinRoute(const TrafficLane& path, const TrafficLane& to, double start, double end);
+    void HighwayUpdate(double seconds);
+    bool TryLaneChange(const TrafficLane& to, double length);
+    bool GapAvailable(const TrafficLane& path, const TrafficLane& to, double toDistance) const;
+    bool PathReady(const TrafficLane& path) const;
     unsigned visits = 0;
     double entry = 0, exit = 0;
     bool granted = false;

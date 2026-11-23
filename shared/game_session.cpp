@@ -133,8 +133,7 @@ std::vector<Vector3> GameSession::PhysicsSources(bool includeTraffic) const
     }
     if (includeTraffic)
     {
-        for (const auto& driver : trafficDrivers)
-            for (double d = 0; d <= 120; d += 24) sources.push_back(driver->Lane().At(driver->Progress() + d));
+        for (const auto& driver : trafficDrivers) driver->CollisionSources(sources);
         // Queued cars share residency. Coalesce nearby preload requests, while
         // each car's exact collision-readiness checks remain independent.
         std::set<std::tuple<double,double,double>> seen;
@@ -290,7 +289,7 @@ bool GameSession::DrawTrafficDebug(SDL_Renderer* renderer, const CameraView& vie
     if (!trafficDebug) return true;
     const auto* testDriver = trafficDrivers.empty() ? nullptr : trafficDrivers.back().get();
     SDL_Rect viewport{}; if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
-    if (!DrawTrafficLanes(renderer, Traffic(), view, viewport, false, {}, 1, testDriver ? testDriver->Lane().id : 0)) return false;
+    if (!DrawTrafficLanes(renderer, Traffic(), view, viewport, false, {}, 1, testDriver ? testDriver->Lane().id : 0, {}, testDriver ? &testDriver->Lane() : nullptr)) return false;
     SDL_SetRenderDrawColor(renderer, 255, 220, 140, 255);
     const float x = viewport.w * 0.5f, y = viewport.h * 0.5f;
     if (!SDL_RenderLine(renderer, x-5, y, x+5, y) || !SDL_RenderLine(renderer, x, y-5, x, y+5)) return false;

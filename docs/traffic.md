@@ -1,17 +1,19 @@
-# Traffic intersections — milestone 3
+# Traffic highways — milestone 4
 
-## Temporary performance diagnostic
+## Performance testing
 
 The game shows FPS at the top right, averaged over at least 0.25 seconds of
 complete rendered frames (including vsync or the frame limiter).
 
-NPCs temporarily ignore the car currently possessed by the player in following,
-braking, intersection intrusion and blocked-exit checks. NPC-to-NPC avoidance,
-on-foot player detection, parked-car detection and physical collisions remain
-active. After the player exits a car, it is detected as a parked vehicle again.
-The shared spatial index and vehicle physics are unchanged for this comparison.
-Set `detectPlayerCars` to `true` in `shared/traffic_driver.cpp` to restore normal
-player-car avoidance. This diagnostic only requires a rebuild, not a recook.
+The temporary player-car detection switch has been removed. NPCs always perceive
+player vehicles, parked vehicles, and on-foot players. Use **Release** builds for
+performance testing; Debug's additional CPU cost can dominate both physics and
+scene submission, especially at high speeds and with several physics substeps.
+
+```bat
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target BigSkyCountry BigSkyCountryEditor
+```
 
 Press **F3** for a frame profile at the upper right. It reports main-thread
 milliseconds per rendered frame, averaged over at least half a second: streaming
@@ -26,12 +28,12 @@ The build label comes from CMake's selected configuration. `Debug` or
 
 To investigate a slowdown, capture F3 once at low speed and once while it is slow.
 F8 independently toggles traffic lane/debug drawing; F3 does not change traffic
-or physics behavior. Profiling timers are disabled when F3 is hidden. NPC
-player-car detection stays disabled until `detectPlayerCars` is restored.
+or physics behavior. Profiling timers are disabled when F3 is hidden.
 
 ## Trying it
 
-1. Rebuild the game and editor, save, and use **File → Cook World** again.
+1. Rebuild the game and editor in **Release**, save, and use **File → Cook World** again.
+   Milestone 4 needs a recook to add ramp and road-end connections.
    Select each intersection anchor to set **Traffic control: Stop/Yield/Priority**.
    Existing intersections default to Stop on every approach. Controls and stop-line
    paint are independent; both save and support undo/redo.
@@ -69,8 +71,11 @@ road's elevation; there is no connection to a road underneath.
 Through lanes follow right-hand traffic. Center turn lanes and shoulders are not
 through lanes. One-way roads (including ramps) support one or more lanes. Shared
 two-way single-lane roads are excluded until passing/yielding behavior exists.
-New or disappearing lanes are limited to their full-width portions. No lane
-change or invented continuation is added through the narrowing part.
+New or disappearing lanes are limited to their full-width portions. Drivers merge
+before a disappearing lane's full-width portion ends, and can use newly added
+lanes after they are wide enough. Through-lane paths continue smoothly through
+divided/undivided and center-turn-lane/median conversions. Center turn lanes and
+medians never become lane-change destinations.
 
 `TrafficNetwork::Build` orders each path in its driving direction and derives arc
 lengths and bounds. IDs combine the stable road ID with a local path number and
@@ -78,7 +83,7 @@ are valid within a cooked network revision. Editing a road's topology can change
 its local path IDs, so future persisted traffic must also identify the network
 revision. This milestone does not persist NPC state.
 
-Cooked format **v6** stores the directed paths, road IDs, lane ordinals, widths,
+Cooked format **v7** stores the directed paths, road IDs, lane ordinals, widths,
 and initial speed limits in the manifest. The reader validates ownership,
 identity, finite coordinates, dimensions, and nonzero segments. Runtime traffic
 uses this resident metadata without loading/rebuilding authored roads. It is
@@ -86,8 +91,10 @@ additional manifest memory, outside the geometry/asset residency budgets.
 Version 6 adds stable movement IDs (junction ID/local path ID), source/destination
 lane IDs, approach IDs, controls, turn type, speed caps, and sampled turn paths.
 Conflict lists and lookup indices are derived once on load, not each frame.
-Versions 2–4 still load without traffic lanes; v5 loads with lane following but
-no intersection turns. Recook to enable this milestone. Authored `INTS` v10
+Version 7 adds directed road-end and ramp links, source/destination lane stations,
+connection kind, and sampled taper paths. Older packages still load; v5 has lanes
+and v6 adds intersections, but neither contains highway connections. Recook to
+enable the complete milestone. Authored `INTS` v10
 stores the twelve approach controls; older intersections default to Stop.
 The editor caches its overlay until a road revision or control changes.
 
@@ -97,7 +104,8 @@ Only explicitly attached intersection approaches are connected. Geometric
 crossings and overpasses never create an implicit traffic connection. Paths join
 actual lane mouths with tangent-continuous cubic curves. Straight movements
 preserve lane order, left turns use the innermost lane, and right turns use the
-outermost lane. U-turns and lane-changing merges are excluded. Each curve is
+outermost lane. U-turns inside intersections are excluded; approach lane changes finish before
+entering a junction. Each curve is
 checked against the junction pavement with lateral clearance and a curvature
 limit. An unsafe path is omitted rather than crossing an island or a curb.
 Standard, skewed, aligned, and supported Y-intersection turns use these rules;
@@ -195,12 +203,56 @@ This prevents lost cars from accumulating fall speed and increasing physics work
 indefinitely. Ordinary queues, dead-end stops, and falls toward lower terrain are
 preserved. F7 clears the test population.
 
+## Highway behavior
+
+- **Lane changes:** cars can pass a slower leader on the left and return right
+  when a safe gap exists. Adjacent lanes must belong to the same road and travel
+  direction. A smooth lateral blend follows the actual road curves and grade.
+  Decisions are staggered and separated by a cooldown to avoid oscillation.
+- **Lane reductions:** drivers look ahead and move into a surviving neighboring
+  lane before the narrowing begins, making successive changes when several lanes
+  disappear. If blocked, they stop with room to resume the merge when a gap opens.
+  They never drive across a median or shoulder to
+  invent a continuation.
+- **Exits and entrances:** cooked links follow the actual pavement taper guides,
+  including both sides of a divided highway and shoulders. Entrance traffic yields
+  before the taper until there is room in the mainline. It checks front/rear gaps,
+  closing speed, predicted motion and other accepted maneuver paths. Mainline
+  traffic continues using normal following and collision avoidance.
+- **Route preparation:** cars choose a local exit/turn ahead of time, then move
+  one lane at a time into a legal approach lane. Approximately one in four test
+  cars chooses an available exit (stable handle/visit choices); the others stay
+  on the mainline. If an exit is too close to reach safely, they miss it. If a
+  junction approach cannot be reached, they take a legal movement from their
+  current lane, or stop if none exists. These are local routes, not navigation to
+  a user-selected destination.
+- **Road seams:** explicit endpoint sockets and exactly matching, aligned lane
+  ends connect roads, including roads made with Split Road. Unrelated nearby
+  roads, grade-separated crossings and intersections are not proximity-linked.
+- **Streaming:** the chosen route and candidate adjacent lanes prefetch collision.
+  A maneuver only begins with loaded, unobstructed collision along its path.
+  The original lane and target lane are both considered during a transition.
+
+F8 shows the last spawned car's planned path in pale yellow, ramp/road connections
+in purple, and entrance merges in orange. The state readout reports route
+preparation, changing lanes, taking an exit, or yielding for a merge. F6/Shift+F6
+and F7 retain their existing spawn/clear controls.
+
+Try a four-lane divided highway with an exit, an entrance, and an outer lane
+reduction. Place cars in both lanes and on the entrance. Block the receiving lane
+with the player's car to verify waiting, then clear it. Try a 5-lane undivided to
+4-lane divided conversion: the two through lanes per direction continue across
+the changing center profile. Test with F3 showing **Build: Release**.
+
 ## Boundaries of this milestone
 
 Traffic is manually placed, capped at 64 AI cars, and does not persist between
-sessions. AI-possessed cars cannot be entered. This milestone does not add traffic
-lights or physical sign meshes, lane changes, disappearing-lane merges, ramp/road
-seam routing, roundabout/town-square circulation, destination navigation, or an
-automatic population manager. Paths with no usable continuation still stop at
-their ends. A continuously busy priority road can delay minor-road traffic; there
-is no artificial timeout that lets a waiting vehicle ignore right-of-way.
+sessions. AI-possessed cars cannot be entered. The initial speed limit remains
+30 mph; this milestone adds highway maneuvering, not an inferred highway speed
+limit. There are no traffic lights, automatic populations, destination routing,
+roundabout/town-square circulation, or routing through curved side connectors yet.
+Very short tapers or lanes without sufficient room for a safe lane change may
+still stop traffic. A saturated mainline can delay merging traffic; there is no
+forced timeout that makes an unsafe gap acceptable. Prediction cannot prevent a
+player from deliberately hitting traffic or suddenly appearing inside braking
+distance. Cars retain physical collision response throughout maneuvers.

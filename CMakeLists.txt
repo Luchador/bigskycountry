@@ -129,6 +129,8 @@ add_library(BigSkyApplication STATIC
     shared/pawn_controller.cpp
     shared/traffic_junction_paths.cpp
     shared/traffic_junctions.cpp
+    shared/traffic_highways.cpp
+    shared/traffic_lane_change.cpp
     shared/traffic_network.cpp
     shared/traffic_driver.cpp
     shared/traffic_overlay.cpp

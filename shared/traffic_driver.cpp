@@ -1,25 +1,11 @@
 #include "traffic_driver.hpp"
 #include "car.hpp"
 #include "game_world.hpp"
-#include "player_controller.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string_view>
-
-namespace
-{
-    // Temporary performance diagnostic. Restore true to enable player-car
-    // avoidance again; physical collisions and NPC-to-NPC detection stay active.
-    constexpr bool detectPlayerCars = true;
-}
-
-bool TrafficDriver::Detects(const Pawn& pawn)
-{
-    return detectPlayerCars || !dynamic_cast<const Car*>(&pawn) ||
-        !dynamic_cast<const PlayerController*>(pawn.Controller());
-}
 
 TrafficDriver::TrafficDriver(GameWorld& world, const TrafficLane& lane, double start, TrafficFollowing following)
     : PawnController(world), source(&lane), lane(lane), following(following), progress(start),
@@ -48,24 +34,41 @@ void TrafficDriver::PrepareRoute()
         lastSupportHeight = car->GetTransform().position.y;
     const auto projection = lane.Project(car->GetTransform().position, std::max(0.0, progress-5), progress+25);
     progress = std::max(progress, projection.distance);
-    if (const auto* m = Movement(); m && progress >= exit+3.0)
+    if (destination && progress >= exit+3.0)
     {
-        source = network->FindLane(m->to);
-        progress -= exit; lane = *source; movement.reset(); granted = false; ++visits;
+        const bool roadChanged = destination->roadId != source->roadId;
+        source = destination;
+        progress = destinationStation+progress-exit; lane = *source;
+        destination = nullptr; movement.reset(); highwayLink.reset();
+        granted = false; mergeGranted = false;
+        if (changing)
+        {
+            changing = false; changeCooldown = 6;
+            if (goalLane==source->id && !goalLink && !goalMovement) goalLane=0;
+        }
+        else
+        {
+            ++visits; goalLane = 0; goalMovement.reset(); goalLink.reset();
+            if (roadChanged) skippedExits.clear();
+        }
     }
-    if (!network || movement) return;
-    const auto& choices = network->Outgoing(source->id);
-    if (choices.empty()) return;
-    // Stable, varied destinations for the manual test population. No U-turns or
-    // mid-junction route changes; every choice already respects lane discipline.
-    movement = choices[(car->Handle()+visits) % choices.size()];
-    const auto& m = *Movement();
-    const auto* destination = network->FindLane(m.to);
-    entry = source->Length(); exit = entry + m.path.Length();
-    lane = *source;
-    lane.points.insert(lane.points.end(), m.path.points.begin()+1, m.path.points.end());
-    lane.points.insert(lane.points.end(), destination->points.begin()+1, destination->points.end());
-    lane.Measure(); granted = false;
+    if (!network || destination) return;
+    PlanRoute();
+    if (goalLane != source->id) return;
+    if (goalMovement)
+    {
+        movement = goalMovement;
+        const auto& m = *Movement();
+        JoinRoute(m.path, *network->FindLane(m.to), source->Length(), 0);
+        goalLane = 0; goalMovement.reset(); granted = false;
+    }
+    else if (goalLink)
+    {
+        highwayLink = goalLink;
+        const auto& link = network->links[*highwayLink];
+        JoinRoute(link.path, *network->FindLane(link.to), link.fromDistance, link.toDistance);
+        goalLane = 0; goalLink.reset(); mergeGranted = false;
+    }
 }
 
 double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, bool& emergency)
@@ -80,7 +83,7 @@ double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, 
     // their current body reaches the lane; exact heights reject other decks.
     for (const auto* other : world.NearbyPawns(corridor, true))
     {
-        if (other->Handle() == car.Handle() || !other->hasCollision || !Detects(*other)) continue;
+        if (other->Handle() == car.Handle() || !other->hasCollision) continue;
         const auto* otherCar = dynamic_cast<const Car*>(other);
         const auto* driver = dynamic_cast<const TrafficDriver*>(other->Controller());
         const bool frozen = other->Controller() && !other->Controller()->SimulationReady();
@@ -142,6 +145,7 @@ void TrafficDriver::Update(double seconds)
     auto* car = dynamic_cast<Car*>(Controlled());
     if (!car || seconds <= 0) return;
     PrepareRoute();
+    HighwayUpdate(seconds);
     PawnInput input;
     const auto frame = car->GetTransform().ToMeshTransform();
     const auto projection = lane.Project(frame.origin, std::max(0.0, progress - 5), progress + 25);
@@ -163,8 +167,9 @@ void TrafficDriver::Update(double seconds)
     const double braking = following.braking;
     constexpr double bumperMargin = 3.5;
     double stopAt = lane.Length() - bumperMargin;
+    if (!destination && laneWaitDistance >= 0) stopAt = std::min(stopAt,laneWaitDistance);
     targetSpeed = lane.speedLimit;
-    reason = "Following lane";
+    reason = highwayReason ? highwayReason : "Following lane";
     // Plan braking for curves, not just the curvature under the car.
     for (double d = 0; d <= 60; d += 3)
     {
@@ -197,6 +202,11 @@ void TrafficDriver::Update(double seconds)
         if (progress >= entry && progress < exit+3) targetSpeed = std::min(targetSpeed, move->path.speedLimit);
         if (!granted && progress < entry) { stopAt = std::min(stopAt, entry-bumperMargin); reason = junctionReason; }
         else if (progress >= entry && progress < exit) reason = "Crossing intersection";
+    }
+    if (highwayLink && network->links[*highwayLink].kind == TrafficLinkKind::Merge && !mergeGranted && progress < entry)
+    {
+        stopAt = std::min(stopAt, entry-bumperMargin);
+        reason = "Yielding for ramp merge";
     }
     const double remaining = stopAt - progress;
     const double stoppingSpeed = std::sqrt(2 * braking * std::max(0.0, remaining - 0.5));

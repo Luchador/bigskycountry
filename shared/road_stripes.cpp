@@ -1338,6 +1338,14 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
             laneCenterlines.resize(taper.firstGuide + taper.lane.laneCount);
         }
         BuildRoadSide(*this, path, side, hasGradedBend, tapers);
+        for (const auto& taper : tapers)
+            for (int i = 0; i < taper.lane.laneCount; ++i)
+            {
+                RampTrafficPath guide{taper.lane.station, side, taper.lane.exit,
+                    laneCenterlines[taper.firstGuide + i]};
+                if (style.TravelDirection(side) < 0) std::reverse(guide.points.begin(), guide.points.end());
+                if (guide.points.size() > 1) rampTrafficPaths.push_back(std::move(guide));
+            }
         if (side < 0) rightBoundaryCount = outline.size();
         if (paintMarkings && !style.IsDivided() && tapers.empty() && !variable)
         {

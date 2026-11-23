@@ -162,6 +162,14 @@ namespace
             w.F64(move.path.speedLimit);
             w.Count(move.path.points.size()); for (auto p : move.path.points) w.Vec(p);
         }
+        w.Count(m.traffic.links.size());
+        for (const auto& link : m.traffic.links)
+        {
+            w.U64(link.from); w.U64(link.to);
+            w.F64(link.fromDistance); w.F64(link.toDistance);
+            w.U32(static_cast<unsigned>(link.kind)); w.F64(link.path.speedLimit);
+            w.Count(link.path.points.size()); for (auto p : link.path.points) w.Vec(p);
+        }
         return w;
     }
     std::vector<char> Read(std::ifstream& in, std::uint64_t bytes, std::uint64_t limit)
@@ -360,6 +368,18 @@ bool Reader::Open(const std::string& file)
                     move.path.speedLimit = r.F64();
                     for (auto count = r.Count(24); count; --count) move.path.points.push_back(r.Vec());
                     m.traffic.movements.push_back(std::move(move));
+                }
+            if (fileVersion >= 7)
+                for (auto n = r.Count(96); n; --n)
+                {
+                    TrafficLink link;
+                    link.from = r.U64(); link.to = r.U64();
+                    link.fromDistance = r.F64(); link.toDistance = r.F64();
+                    const auto kind = r.U32();
+                    if (kind > 2) throw std::runtime_error("Invalid highway connection kind");
+                    link.kind = static_cast<TrafficLinkKind>(kind); link.path.speedLimit = r.F64();
+                    for (auto count = r.Count(24); count; --count) link.path.points.push_back(r.Vec());
+                    m.traffic.links.push_back(std::move(link));
                 }
             if (!m.traffic.Validate()) throw std::runtime_error(SDL_GetError());
         }

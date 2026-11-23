@@ -8,7 +8,7 @@
 
 bool DrawTrafficLanes(SDL_Renderer* renderer, const TrafficNetwork& network, const CameraView& camera,
                       SDL_Rect viewport, bool plan, Vector3 center, double scale, std::uint64_t selected,
-                      const std::set<int>& hiddenRoads)
+                      const std::set<int>& hiddenRoads, const TrafficLane* route)
 {
     // SDL's viewport already supplies its origin.
     viewport.x = viewport.y = 0;
@@ -57,6 +57,23 @@ bool DrawTrafficLanes(SDL_Renderer* renderer, const TrafficNetwork& network, con
         const auto end = lane.At(lane.Length());
         const auto right = Math::Normalize(Math::Cross({0,1,0}, lane.Tangent(lane.Length()))) * (lane.width * 0.45);
         if (!line(end - right, end + right)) return false;
+    }
+    for (const auto& link : network.links)
+    {
+        const auto* from=network.FindLane(link.from); const auto* to=network.FindLane(link.to);
+        if (!from || !to || hiddenRoads.contains(from->roadId) || hiddenRoads.contains(to->roadId)) continue;
+        if (!plan && BoundsDistanceSquared(link.path.bounds,camera.GetPosition()) > 1000*1000) continue;
+        if (link.from == selected) SDL_SetRenderDrawColor(renderer,255,185,40,255);
+        else if (link.kind == TrafficLinkKind::Merge) SDL_SetRenderDrawColor(renderer,255,145,70,255);
+        else SDL_SetRenderDrawColor(renderer,195,125,245,255);
+        for (std::size_t i=1; i<link.path.points.size(); ++i)
+            if (!line(link.path.points[i-1],link.path.points[i])) return false;
+    }
+    if (route)
+    {
+        SDL_SetRenderDrawColor(renderer,255,235,150,255);
+        for (std::size_t i=1; i<route->points.size(); ++i)
+            if (!line(route->points[i-1],route->points[i])) return false;
     }
     for (const auto& move : network.movements)
     {

@@ -56,13 +56,31 @@ struct TrafficMovement
     std::vector<std::size_t> conflicts; // Derived, sorted movement indices.
 };
 
+enum class TrafficLinkKind { Continue, Exit, Merge };
+
+// Directed, authored road/ramp connections. Stations may be inside the host lane.
+struct TrafficLink
+{
+    std::uint64_t from = 0, to = 0;
+    double fromDistance = 0, toDistance = 0;
+    TrafficLinkKind kind = TrafficLinkKind::Continue;
+    TrafficLane path;
+};
+
 class TrafficNetwork
 {
 public:
     std::vector<TrafficLane> lanes;
     std::vector<TrafficMovement> movements;
+    std::vector<TrafficLink> links;
     const TrafficLane* FindLane(std::uint64_t id) const;
     const std::vector<std::size_t>& Outgoing(std::uint64_t lane) const;
+    const std::vector<std::size_t>& Connections(std::uint64_t lane) const;
+    const std::vector<std::size_t>& Family(const TrafficLane& lane) const;
+    // Only neighboring same-direction lanes on the same road; never across a median.
+    bool LaneChange(const TrafficLane& from, double start, const TrafficLane& to,
+                    double length, TrafficLane& path, double& destination) const;
+    void BuildHighways(const WorldDocument& world);
     void BuildMovements(const WorldDocument& world);
     static TrafficNetwork Build(const WorldDocument& world);
     // Also used to validate cooked data before publishing it to the game.
@@ -71,5 +89,7 @@ public:
     std::optional<Pick> Nearest(Vector3 position, double radius) const;
 private:
     std::unordered_map<std::uint64_t, std::size_t> laneIndex;
-    std::unordered_map<std::uint64_t, std::vector<std::size_t>> outgoing;
+    std::unordered_map<std::uint64_t, std::vector<std::size_t>> outgoing, connections, families;
+    static std::uint64_t FamilyKey(const TrafficLane& lane)
+    { return (std::uint64_t(lane.roadId) << 1) | (lane.direction > 0 ? 1u : 0u); }
 };

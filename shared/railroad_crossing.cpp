@@ -745,6 +745,7 @@ void ApplyRailroadCrossings(Road& road, const std::vector<CrossingProfile>& prof
         CutOutline(road.outline, cells, height);
         // Keep navigation at rail-head height across the slab and use the same
         // approach bands as pavement. Add cuts even on a two-point straight road.
+        for (auto& lane : road.rampTrafficPaths) CutOutline(lane.points, cells, height, false);
         for (auto& lane : road.trafficPaths) CutOutline(lane.points, cells, height, false);
     }
     for (const auto& profile : profiles)

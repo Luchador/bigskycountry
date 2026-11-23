@@ -116,12 +116,13 @@ TrafficNetwork TrafficNetwork::Build(const WorldDocument& world)
         }
     }
     network.BuildMovements(world);
+    network.BuildHighways(world);
     network.Validate();
     return network;
 }
 bool TrafficNetwork::Validate()
 {
-    laneIndex.clear(); outgoing.clear();
+    laneIndex.clear(); outgoing.clear(); connections.clear(); families.clear();
     std::set<std::uint64_t> ids;
     for (auto& lane : lanes)
     {
@@ -134,8 +135,32 @@ bool TrafficNetwork::Validate()
             if (!std::isfinite(Math::Length(lane.points[i])) || (i && Math::Length(lane.points[i] - lane.points[i - 1]) < 1e-8))
                 return SDL_SetError("Invalid traffic path samples");
         laneIndex.emplace(lane.id, &lane - lanes.data());
+        families[FamilyKey(lane)].push_back(&lane - lanes.data());
         lane.Measure();
         if (!std::isfinite(lane.Length()) || lane.Length() < 0.05) return SDL_SetError("Invalid traffic path length");
+    }
+    for (std::size_t i = 0; i < links.size(); ++i)
+    {
+        auto& link = links[i];
+        const auto* from = FindLane(link.from); const auto* to = FindLane(link.to);
+        if (!from || !to || link.from == link.to || static_cast<unsigned>(link.kind) > 2 ||
+            !std::isfinite(link.fromDistance) || !std::isfinite(link.toDistance) ||
+            link.fromDistance < 0 || link.fromDistance > from->Length() ||
+            link.toDistance < 0 || link.toDistance > to->Length() || link.path.points.size() < 2 ||
+            !std::isfinite(link.path.speedLimit) || link.path.speedLimit <= 0 || link.path.speedLimit > 100)
+            return SDL_SetError("Invalid cooked highway connection");
+        for (std::size_t j = 0; j < link.path.points.size(); ++j)
+            if (!std::isfinite(Math::Length(link.path.points[j])) ||
+                (j && Math::Length(link.path.points[j] - link.path.points[j-1]) < 1e-8))
+                return SDL_SetError("Invalid highway connection samples");
+        if (Math::Length(link.path.points.front()-from->At(link.fromDistance)) > 0.01 ||
+            Math::Length(link.path.points.back()-to->At(link.toDistance)) > 0.01)
+            return SDL_SetError("Disconnected highway connection");
+        link.path.Measure();
+        if (!std::isfinite(link.path.Length()) || link.path.Length() < 0.05 || link.path.Length() > 10000)
+            return SDL_SetError("Invalid highway connection length");
+        link.path.width = std::min(from->width, to->width);
+        connections[link.from].push_back(i);
     }
     ids.clear();
     for (std::size_t i = 0; i < movements.size(); ++i)

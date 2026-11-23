@@ -23,7 +23,7 @@ bool TrafficJunctions::ExitClear(const Request& r) const
     bounds.min = bounds.min-Vector3{3,1,3}; bounds.max = bounds.max+Vector3{3,3,3};
     for (const auto* pawn : world.NearbyPawns(bounds))
     {
-        if (pawn == r.driver->Controlled() || !TrafficDriver::Detects(*pawn)) continue;
+        if (pawn == r.driver->Controlled()) continue;
         const auto p = lane->Project(pawn->GetTransform().position, 0, 16);
         if (std::abs(p.position.y-pawn->GetTransform().position.y) > 2) continue;
         const auto tangent = lane->Tangent(p.distance), side = Math::Normalize(Math::Cross({0,1,0}, tangent));
@@ -46,7 +46,7 @@ bool TrafficJunctions::Intruder(const Request& r) const
     bounds.min = bounds.min-Vector3{3,1,3}; bounds.max = bounds.max+Vector3{3,3,3};
     for (const auto* pawn : world.NearbyPawns(bounds, true))
     {
-        if (pawn == r.driver->Controlled() || !TrafficDriver::Detects(*pawn)) continue;
+        if (pawn == r.driver->Controlled()) continue;
         // Managed requests obey reservations. The player and unmanaged/parked
         // vehicles never do, so their actual and predicted footprints take priority.
         if (const auto it = requests.find(pawn->Handle()); it != requests.end() &&

@@ -9,7 +9,7 @@ class WorldDocument;
 
 bool DrawTrafficLanes(SDL_Renderer* renderer, const TrafficNetwork& network, const CameraView& camera,
                       SDL_Rect viewport, bool plan = false, Vector3 center = {}, double scale = 1,
-                      std::uint64_t selected = 0, const std::set<int>& hiddenRoads = {});
+                      std::uint64_t selected = 0, const std::set<int>& hiddenRoads = {}, const TrafficLane* route = nullptr);
 
 // Geometry changes invalidate this debug view; camera movement does not rebuild paths.
 class EditorTrafficOverlay
