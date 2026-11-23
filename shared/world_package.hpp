@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 4;
+    inline constexpr std::uint32_t version = 5;
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -74,6 +74,7 @@ namespace WorldPackage
         std::vector<Entity> entities;
         std::vector<Asset> assets;
         std::vector<CellRecord> cells;
+        TrafficNetwork traffic; // Lightweight lane paths; independent of geometry residency.
     };
     // Opens only the manifest. Cell payloads can subsequently be loaded independently.
     class Reader

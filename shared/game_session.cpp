@@ -5,6 +5,7 @@
 #include "character.hpp"
 #include "test_pawn_meshes.hpp"
 #include "speedometer.hpp"
+#include "traffic_overlay.hpp"
 #include "world_document.hpp"
 #include "world_renderer.hpp"
 
@@ -18,7 +19,7 @@ namespace
 }
 
 GameSession::GameSession(SDL_Window* window, WorldDocument& document, CookedWorld* streaming)
-    : document(document), world(document), player(world), input(window), streaming(streaming)
+    : document(document), world(document), player(world), input(window), streaming(streaming), traffic(streaming ? TrafficNetwork{} : TrafficNetwork::Build(document))
 {
 }
 
@@ -109,12 +110,13 @@ bool GameSession::FinishStart()
     return true;
 }
 
-std::vector<Vector3> GameSession::PhysicsSources() const
+std::vector<Vector3> GameSession::PhysicsSources(bool includeTraffic) const
 {
     if (!started) return {streaming->Spawns()[spawnIndex].position};
     std::vector<Vector3> sources;
     for (const auto& pawn : world.Pawns())
     {
+        if (!includeTraffic && testDriver && pawn.get() == testDriver->Controlled()) continue;
         if (const auto* character = dynamic_cast<const Character*>(pawn.get()); character && character->IsSeated()) continue;
         const auto position = pawn->GetTransform().position;
         Vector3 velocity{};
@@ -125,6 +127,9 @@ std::vector<Vector3> GameSession::PhysicsSources() const
         const int steps = std::max(1, static_cast<int>(std::ceil(Math::Length(travel) / 32.0)));
         for (int i = 0; i <= steps; ++i) sources.push_back(position + travel * (double(i) / steps));
     }
+    if (includeTraffic && testDriver)
+        for (double d = 0; d <= 120; d += 24)
+            sources.push_back(testDriver->Lane().At(testDriver->Progress() + d));
     return sources;
 }
 
@@ -133,7 +138,10 @@ void GameSession::Stream(Vector3 eye, WorldRenderer& renderer)
     if (!streaming) return;
     const auto sources = PhysicsSources();
     streaming->Update(eye, sources, world.collision, &renderer, g_ProjectSettings.ViewDistance(), g_ProjectSettings.Streaming());
-    collisionReady = std::all_of(sources.begin(), sources.end(), [&](Vector3 p) { return streaming->CollisionReady(p); });
+    const auto playerSources = PhysicsSources(false);
+    collisionReady = std::all_of(playerSources.begin(), playerSources.end(), [&](Vector3 p) { return streaming->CollisionReady(p); });
+    if (testDriver && testDriver->Controlled())
+        testDriver->suspended = !streaming->CollisionReady(testDriver->Controlled()->GetTransform().position, 16);
     if (!started && collisionReady)
     {
         const auto& candidates = streaming->Spawns();
@@ -153,6 +161,88 @@ void GameSession::Stream(Vector3 eye, WorldRenderer& renderer)
         }
         collisionReady = false; // Revalidate around the newly spawned pawns next frame.
     }
+}
+
+const TrafficNetwork& GameSession::Traffic() const
+{
+    return streaming ? streaming->Traffic() : traffic;
+}
+
+void GameSession::RemoveTrafficTest()
+{
+    if (!testDriver) return;
+    const auto* pawn = testDriver->Controlled();
+    const auto handle = pawn ? pawn->Handle() : 0;
+    testDriver.reset();
+    if (handle) world.Remove(handle);
+}
+
+void GameSession::SpawnTrafficTest(const CameraView& view)
+{
+    trafficDebug = true;
+    if (!started) { trafficNotice = "Wait for the world to load."; return; }
+    const auto& network = Traffic();
+    if (network.lanes.empty()) { trafficNotice = "No traffic lanes. Recook this world with the traffic update."; return; }
+    const auto hit = world.collision.Raycast(view.GetPosition(), view.Forward(), 250, true);
+    if (!hit) { trafficNotice = "Aim at a loaded road surface within 250 m."; return; }
+    const auto pick = network.Nearest(hit->position, 2.5);
+    if (!pick) { trafficNotice = "Aim at a through lane; shared single-lane roads are not supported yet."; return; }
+    const auto& lane = network.lanes[pick->lane];
+    const double start = std::max(3.0, pick->distance);
+    if (lane.Length() - start < 15) { trafficNotice = "Choose a lane with at least 15 m remaining."; return; }
+    const auto position = lane.At(start);
+    const auto* playerPawn = player.controller.Controlled();
+    if (!playerPawn || Math::Length(position - playerPawn->GetTransform().position) > 250)
+    { trafficNotice = "Place the test car within 250 m of the player."; return; }
+    if (streaming && !streaming->CollisionReady(position, 32))
+    { trafficNotice = "Move closer and wait for collision to load before placing the test car."; return; }
+    auto car = std::make_unique<Car>();
+    const auto tangent = lane.Tangent(start);
+    ObjectTransform pose{position, {0, std::atan2(tangent.x, tangent.z), 0}};
+    if (!car->PlaceOnGround(world, pose, 3.0)) { trafficNotice = "No supporting road surface at this lane."; return; }
+    const auto frame = pose.ToMeshTransform();
+    for (double z : {-1.5, 0.0, 1.5})
+        if (world.SphereBlocked(frame.Point({0,1.0,z}), 0.9))
+        { trafficNotice = "The test car needs clear space, away from the player and other vehicles."; return; }
+    car->Teleport(pose);
+    RemoveTrafficTest();
+    const auto handle = world.Add(std::move(car));
+    testDriver = std::make_unique<TrafficDriver>(world, lane, start);
+    testDriver->collisionReady = [this](Vector3 p) { return !streaming || streaming->CollisionReady(p, 8); };
+    if (!testDriver->Possess(handle)) { testDriver.reset(); world.Remove(handle); trafficNotice = "Cannot control the test car."; return; }
+    trafficNotice.clear();
+}
+
+bool GameSession::HandleTrafficKey(const SDL_Event& event, const CameraView& view)
+{
+    if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat ||
+        (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_SHIFT))) return false;
+    if (event.key.key == SDLK_F6) SpawnTrafficTest(view);
+    else if (event.key.key == SDLK_F7) { RemoveTrafficTest(); trafficNotice = "Test traffic removed."; }
+    else if (event.key.key == SDLK_F8) trafficDebug = !trafficDebug;
+    else return false;
+    return true;
+}
+
+bool GameSession::DrawTrafficDebug(SDL_Renderer* renderer, const CameraView& view) const
+{
+    if (!trafficDebug) return true;
+    SDL_Rect viewport{}; if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
+    if (!DrawTrafficLanes(renderer, Traffic(), view, viewport, false, {}, 1, testDriver ? testDriver->Lane().id : 0)) return false;
+    SDL_SetRenderDrawColor(renderer, 255, 220, 140, 255);
+    const float x = viewport.w * 0.5f, y = viewport.h * 0.5f;
+    if (!SDL_RenderLine(renderer, x-5, y, x+5, y) || !SDL_RenderLine(renderer, x, y-5, x, y+5)) return false;
+    const SDL_FRect panel{8, float(viewport.h - 76), float(std::min(720, viewport.w - 16)), 68};
+    SDL_SetRenderDrawColor(renderer, 22, 24, 28, 255); if (!SDL_RenderFillRect(renderer, &panel)) return false;
+    SDL_SetRenderDrawColor(renderer, 225, 228, 235, 255);
+    if (!SDL_RenderDebugText(renderer, 16, panel.y+8, "Traffic test: aim + F6 to place | F7 remove | F8 overlay")) return false;
+    if (testDriver)
+    {
+        if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+26, "Road %d | target %.1f mph | %.1f m remaining | %s",
+            testDriver->Lane().roadId, testDriver->TargetSpeed() * 2.2369362921,
+            std::max(0.0, testDriver->Lane().Length() - testDriver->Progress()), testDriver->Reason())) return false;
+    }
+    return SDL_RenderDebugText(renderer, 16, panel.y+44, trafficNotice.c_str());
 }
 
 bool GameSession::Handle(const SDL_Event& event)

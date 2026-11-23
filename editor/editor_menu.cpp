@@ -35,6 +35,7 @@ namespace
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
     constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
                                       {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED},
+                                      {BSC_VIEW_TRAFFIC_LANES, L"Traffic &Lanes"},
                                       {BSC_VIEW_FOG, L"&Fog", MF_CHECKED},
                                       {BSC_VIEW_SHADOWS, L"&Shadows", MF_CHECKED},
                                       {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3"}};
@@ -295,6 +296,14 @@ void EditorMenu::ToggleRoadNames()
 #endif
 }
 
+void EditorMenu::ToggleTrafficLanes()
+{
+    trafficLanes = !trafficLanes;
+#ifdef _WIN32
+    CheckMenuItem(static_cast<HMENU>(viewMenu), BSC_VIEW_TRAFFIC_LANES, MF_BYCOMMAND | (trafficLanes ? MF_CHECKED : MF_UNCHECKED));
+#endif
+}
+
 void EditorMenu::ToggleShadows()
 {
     shadows = !shadows;
@@ -348,6 +357,7 @@ std::optional<EditorCommand> EditorMenu::Command(const SDL_Event& event) const
         {
         case BSC_VIEW_WIREFRAME: return EditorCommand::ToggleWireframe;
         case BSC_VIEW_ROAD_NAMES: return EditorCommand::ToggleRoadNames;
+        case BSC_VIEW_TRAFFIC_LANES: return EditorCommand::ToggleTrafficLanes;
         case BSC_VIEW_SHADOWS: return EditorCommand::ToggleShadows;
         case BSC_VIEW_FOG: return EditorCommand::ToggleFog;
         case BSC_VIEW_VISIBILITY_STATS: return EditorCommand::ToggleVisibilityStatistics;
@@ -384,6 +394,7 @@ namespace
     constexpr BarAction history[] = {{"Undo", EditorCommand::Undo}, {"Redo", EditorCommand::Redo}};
     constexpr BarAction display[] = {{"Wireframe", EditorCommand::ToggleWireframe},
                                      {"Road Names", EditorCommand::ToggleRoadNames},
+                                     {"Traffic Lanes", EditorCommand::ToggleTrafficLanes},
                                      {"Fog", EditorCommand::ToggleFog},
                                      {"Shadows", EditorCommand::ToggleShadows},
                                      {"Visibility Statistics  F3", EditorCommand::ToggleVisibilityStatistics}};
@@ -575,6 +586,7 @@ bool EditorMenu::DrawBar(SDL_Renderer* renderer, int width) const
             !SDL_RenderDebugText(renderer, row.x + 24, row.y + 9, items[i].label)) return false;
         if ((items[i].command == EditorCommand::ToggleWireframe && wireframe) ||
             (items[i].command == EditorCommand::ToggleRoadNames && roadNames) ||
+            (items[i].command == EditorCommand::ToggleTrafficLanes && trafficLanes) ||
             (items[i].command == EditorCommand::ToggleFog && fog) ||
             (items[i].command == EditorCommand::ToggleShadows && shadows) ||
             (items[i].command == EditorCommand::ToggleVisibilityStatistics && visibilityStatistics))

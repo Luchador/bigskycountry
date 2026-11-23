@@ -199,6 +199,7 @@ bool Cook(WorldDocument& world, const std::string& file)
                 }
             }
         };
+        manifest.traffic = TrafficNetwork::Build(world);
         for (const auto& road : world.roads)
         {
             if (road.style.railroad) continue;

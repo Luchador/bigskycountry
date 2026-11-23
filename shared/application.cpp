@@ -157,6 +157,7 @@ namespace
                     gameVisibilityStats = !gameVisibilityStats;
                     continue;
                 }
+                if (game && game->HandleTrafficKey(event, input.IsCameraEnabled() ? static_cast<const CameraView&>(freeCamera) : game->View())) continue;
                 if (game && !input.IsCameraEnabled())
                 {
                     if (!game->Handle(event)) return false;
@@ -282,6 +283,7 @@ namespace
                 }
             }
 
+            if (game && !game->DrawTrafficDebug(renderer, view)) return false;
             if (game && !game->DrawHUD(renderer)) return false;
 
             if ((roadTool && !roadTool->Render(renderer, world, freeCamera)) || !SDL_RenderPresent(renderer))

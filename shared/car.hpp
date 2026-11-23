@@ -2,6 +2,7 @@
 
 #include "vehicle.hpp"
 #include "rigid_body.hpp"
+#include <cmath>
 
 // All distances and speeds use engine meters. These defaults favor quick steering,
 // strong braking and forgiving tire grip while leaving flight under gravity.
@@ -29,6 +30,7 @@ public:
     void Simulate(double seconds, GameWorld& world) override;
     bool BlocksSphere(Vector3 center, double radius) const override;
     double Speed() const override;
+    double SteeringLimit() const { return handling.steeringAngle / (1.0 + std::abs(Speed()) * 0.035); }
     Vector3 Velocity() const { return body.velocity; }
     Vector3 AngularVelocity() const { return body.angularVelocity; }
     bool IsGrounded() const { return groundedWheels != 0; }

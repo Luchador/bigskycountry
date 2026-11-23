@@ -115,6 +115,30 @@ Choose **Special → Spawn Point** to place `assets/models/editor/start.glb` at 
 
 When the game starts, the test car appears at the spawn point and the on-foot player appears beside it. Nearby ground adjusts their resting height; an unsupported placement starts there under gravity. The game keeps its automatic spawn selection when the world has no spawn point. Save and use **File → Cook World** after changing the spawn point so streamed games use the new placement. Cooked format version 3 stores its location and heading as startup metadata; version 2 packages continue to load with automatic startup locations.
 
+### Traffic foundation (milestone 1)
+
+**View → Traffic Lanes** shows directed lane paths in the editor's 2D and 3D
+views. Arrows indicate travel direction; red bars mark path ends. The overlay
+updates when road geometry changes and respects hidden roads.
+
+Build the game/editor and use **File → Cook World** once to include the new lane
+data. In-game, press **F8** to show the lane overlay and crosshair, aim at a lane
+within 250 m of the player, then press **F6** to place a test AI car. **F7** removes
+it. F6 replaces the previous test car when the new placement is valid. These
+controls also work from the **F1** debug camera, and do not change the saved world.
+
+The car uses the existing vehicle physics, slows for curves, and brakes to a stop
+before its lane ends. The initial speed limit is 30 mph. The overlay highlights
+its chosen lane and displays its target speed, remaining distance, and reason for
+slowing/stopping. Keep the placement clear of the player and other vehicles.
+
+This milestone supplies through lanes, including one-way roads and ramps, but
+excludes center turn lanes, shoulders, and shared two-way single-lane roads. A
+lane ends before narrowing away; it does not merge into another lane yet. Roads
+and intersections are not linked into routes yet, so the car stops at road ends
+and intersection mouths. Junction rules, lane changes, car-following, and ambient
+traffic spawning are subsequent milestones. See [traffic implementation](docs/traffic.md).
+
 ### Terrain chunks
 
 Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.

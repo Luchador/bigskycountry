@@ -18,6 +18,7 @@
 #include "edit_history.hpp"
 #include "road_overlay.hpp"
 #include "road_names.hpp"
+#include "traffic_overlay.hpp"
 #include "plan_renderer.hpp"
 #include "plan_selection.hpp"
 #include "road_intersection.hpp"
@@ -246,6 +247,7 @@ private:
     EditorMenu menu;
     RoadOverlay overlay;
     RoadNames roadNames;
+    EditorTrafficOverlay trafficOverlay;
     PlanRenderer planRenderer;
     std::optional<Road> planDraft;
     TransformGizmo gizmo;

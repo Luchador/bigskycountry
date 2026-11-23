@@ -66,7 +66,8 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
     const double speed = Speed();
     const double targetSteering = Commands().right * handling.steeringAngle / (1.0 + std::abs(speed) * 0.035);
     steering = std::lerp(steering, targetSteering, 1.0 - std::exp(-handling.steeringResponse * seconds));
-    const bool braking = !IsPossessed() || Commands().forward * speed < -0.5;
+    const double brake = !IsPossessed() || Commands().forward * speed < -0.5 ? 1.0 : std::clamp(Commands().brake, 0.0, 1.0);
+    const bool holding = Commands().brake >= 0.99 && Math::Length(body.velocity) < 0.5;
 
     for (size_t wheel = 0; wheel < std::size(wheelAnchors); ++wheel)
     {
@@ -95,10 +96,11 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
         const double sideways = Math::Dot(contactVelocity, right);
         const double wheelMass = handling.mass / 4;
         double traction = 0;
-        if (braking || (Commands().handbrake && rear))
+        if (brake > 0 || (Commands().handbrake && rear))
         {
-            const double strength = Commands().handbrake && rear ? handling.handbrake : handling.braking;
-            traction = -std::copysign(std::min(strength, std::abs(longitudinal) / seconds), longitudinal) * wheelMass;
+            const double strength = Commands().handbrake && rear ? handling.handbrake : handling.braking * brake;
+            const double demand = longitudinal / seconds - (holding ? 9.81 * forward.y : 0.0);
+            traction = -std::clamp(demand, -strength, strength) * wheelMass;
         }
         else if (Commands().forward != 0)
         {
@@ -113,7 +115,10 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
         }
         const double grip = load * handling.tireGrip;
         const double lateralGrip = Commands().handbrake && rear ? grip * 0.22 : grip;
-        const double lateral = std::clamp(-sideways * wheelMass * handling.lateralResponse, -lateralGrip, lateralGrip);
+        // A fully applied service brake holds on a slope without setting the
+        // body's pose/velocity. Tire forces still respect the contact grip limit.
+        const double lateral = std::clamp((-sideways * handling.lateralResponse + (holding ? 9.81 * right.y : 0.0)) * wheelMass,
+                                          -lateralGrip, lateralGrip);
         const double force = std::hypot(traction, lateral);
         const double scale = force > grip ? grip / force : 1.0;
         body.AddForce(forward * (traction * scale), hit->position);

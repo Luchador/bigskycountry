@@ -146,6 +146,13 @@ namespace
             w.U64(c.nearTriangles); w.U64(c.distantTriangles);
             w.Count(c.owners.size()); for (auto id : c.owners) w.Id(id);
         }
+        w.Count(m.traffic.lanes.size());
+        for (const auto& lane : m.traffic.lanes)
+        {
+            w.U64(lane.id); w.U32(lane.roadId); w.U32(lane.direction > 0 ? 1 : 0); w.U32(lane.ordinal);
+            w.F64(lane.width); w.F64(lane.speedLimit);
+            w.Count(lane.points.size()); for (auto point : lane.points) w.Vec(point);
+        }
         return w;
     }
     std::vector<char> Read(std::ifstream& in, std::uint64_t bytes, std::uint64_t limit)
@@ -223,6 +230,7 @@ bool Write(const std::string& file, Manifest manifest, std::span<const Cell> cel
             record.owners.assign(owners.begin(), owners.end()); manifest.cells.push_back(record);
         }
         data.close(); if (!data) throw std::runtime_error("Cannot finish chunk payload");
+        if (!manifest.traffic.Validate()) throw std::runtime_error(SDL_GetError());
         auto index = EncodeManifest(manifest);
         if (index.data.size() > maxManifestBytes) throw std::runtime_error("World manifest exceeds limit");
         Writer header; header.data = {'B','S','C','C','H','N','K','\0'}; header.U32(version); header.U64(index.data.size()); header.U64(Hash(index.data));
@@ -315,6 +323,22 @@ bool Reader::Open(const std::string& file)
             for (auto d = r.Count(12); d; --d) { auto id = r.Id(); if (!ids.contains(id)) throw std::runtime_error("Unknown cell owner"); c.owners.push_back(id); }
             if (!keys.insert(c.key).second) throw std::runtime_error("Duplicate cell address");
             m.cells.push_back(std::move(c));
+        }
+        if (fileVersion >= 5)
+        {
+            for (auto n = r.Count(88); n; --n)
+            {
+                TrafficLane lane;
+                lane.id = r.U64();
+                const auto road = r.U32(), forward = r.U32(), ordinal = r.U32();
+                if (road > INT32_MAX || forward > 1 || ordinal >= RoadStyle::maxLanes ||
+                    !ids.contains({SceneKind::Road, road})) throw std::runtime_error("Invalid traffic lane owner");
+                lane.roadId = static_cast<int>(road); lane.direction = forward ? 1 : -1; lane.ordinal = static_cast<int>(ordinal);
+                lane.width = r.F64(); lane.speedLimit = r.F64();
+                for (auto count = r.Count(24); count; --count) lane.points.push_back(r.Vec());
+                m.traffic.lanes.push_back(std::move(lane));
+            }
+            if (!m.traffic.Validate()) throw std::runtime_error(SDL_GetError());
         }
         r.End(); if (28 + bytes + end != static_cast<std::uint64_t>(size)) throw std::runtime_error("Unexpected cooked world length");
         manifest = std::move(m); payloadStart = 28 + bytes; path = file; return true;

@@ -24,6 +24,7 @@ class CookedWorld
                 WorldRenderer *renderer, double radius, const StreamingSettings &settings);
     bool CollisionReady(Vector3 position, double radius = 64) const;
     const std::vector<WorldPackage::Spawn> &Spawns() const;
+    const TrafficNetwork& Traffic() const;
     void Submit(WorldRenderer &renderer, const CameraView &camera, double radius);
     void SubmitLabels(WorldRenderer &renderer, const CameraView &camera);
     bool DrawStatistics(SDL_Renderer *renderer, float y = -1) const;

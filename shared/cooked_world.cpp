@@ -246,6 +246,10 @@ const std::vector<Spawn> &CookedWorld::Spawns() const
 {
     return impl->reader.Index().spawns;
 }
+const TrafficNetwork& CookedWorld::Traffic() const
+{
+    return impl->reader.Index().traffic;
+}
 bool CookedWorld::Load(const WorldDocument &source)
 {
     return LoadPath(source.Path());

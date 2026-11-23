@@ -562,6 +562,52 @@ namespace
             guide([](const RoadStyle&) { return 0.0; }, [](const RoadStyle& s) { return s.HasCenterTurnLane(); });
     }
 
+    // Traffic shares the pavement stations, including banks, skewed mouths and
+    // profile blends. Narrowing/new lanes stop at the full-width boundary until
+    // the later lane-change milestone supplies merge/split movements.
+    void TrafficPaths(Road& road, const RoadPath& path, int side, const std::vector<CrossSection>& stations)
+    {
+        if (road.style.railroad) return;
+        const auto add = [&](int ordinal, int direction, auto offset, auto usable)
+        {
+            RoadTrafficPath run{direction, ordinal, RoadStyle::laneWidth, {}};
+            const auto flush = [&] {
+                if (run.points.size() > 1) road.trafficPaths.push_back(run);
+                run.points.clear();
+            };
+            for (const auto& station : stations)
+            {
+                const double available = path.profile ? path.profile->Mix(station.distance, usable) : usable(road.style);
+                if (available < 1.0 - 1e-8) { flush(); continue; }
+                const double lateral = path.profile ? path.profile->Mix(station.distance, offset) : offset(road.style);
+                const Vector3 p = station.At(lateral);
+                if (run.points.empty() || Math::Length(p - run.points.back()) > 1e-8) run.points.push_back(p);
+            }
+            flush();
+        };
+        const int maximum = road.MaximumLaneCount();
+        if (road.style.oneWay)
+        {
+            if (side > 0) return;
+            for (int lane = 0; lane < maximum; ++lane)
+                add(lane, 1, [=](const RoadStyle& s) { return (s.GetLaneCount() * 0.5 - lane - 0.5) * s.TravelLaneWidth(); },
+                    [=](const RoadStyle& s) { return lane < s.GetLaneCount() ? 1.0 : 0.0; });
+            return;
+        }
+        const auto inside = [&](const RoadStyle& s) {
+            if (s.IsDivided()) return s.HalfSeparation();
+            if (s.HasCenterTurnLane()) return RoadStyle::laneWidth * 0.5;
+            if (s.GetLaneCount() == 3) return side * road.ThreeLaneDividerOffset();
+            return 0.0;
+        };
+        for (int lane = 0; lane < (maximum + 1) / 2; ++lane)
+            add(lane, -side, [&](const RoadStyle& s) { return inside(s) + (lane + 0.5) * RoadStyle::laneWidth; },
+                [&](const RoadStyle& s) {
+                    const double lanes = (s.HalfSeparation() + s.GetLaneCount() * s.TravelLaneWidth() * 0.5 - inside(s)) / RoadStyle::laneWidth;
+                    return s.GetLaneCount() >= 2 && lane + 1 <= lanes + 1e-8 ? 1.0 : 0.0;
+                });
+    }
+
     void AppendLanePoint(std::vector<Vector3>& line, Vector3 point)
     {
         if (line.empty() || line.back() != point) line.push_back(point);
@@ -759,6 +805,7 @@ namespace
             station.lateral = station.lateral * side;
             stations.push_back(station);
         });
+        TrafficPaths(road, path, side, stations);
         const auto shoulderSamples = SampleShoulderOpenings(stations, openings, pavement + road.style.EdgeWidth());
 
         if (lanes >= 2 && !variable)

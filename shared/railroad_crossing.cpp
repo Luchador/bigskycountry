@@ -264,10 +264,11 @@ namespace
             cuts.push_back(t);
     }
     template <class Height>
-    void CutOutline(std::vector<Vector3>& outline, const std::vector<Polygon>& cells, Height height)
+    void CutOutline(std::vector<Vector3>& outline, const std::vector<Polygon>& cells, Height height, bool closed = true)
     {
+        if (outline.size() < 2) return;
         std::vector<Vector3> out;
-        for (size_t i = 0; i < outline.size(); ++i)
+        for (size_t i = 0; i < outline.size() - (closed ? 0 : 1); ++i)
         {
             const auto a = outline[i], b = outline[(i + 1) % outline.size()];
             std::vector<double> cuts{0, 1};
@@ -288,7 +289,7 @@ namespace
                 }
             }
         }
-        if (out.size() > 1 && Math::Length(out.front() - out.back()) < 1e-8)
+        if (closed && out.size() > 1 && Math::Length(out.front() - out.back()) < 1e-8)
             out.pop_back();
         outline = std::move(out);
     }
@@ -698,7 +699,7 @@ std::optional<std::vector<std::array<Vector3, 2>>> PlanRailroadJunction(
     return seams;
 }
 
-void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfile>& profiles)
+void ApplyRailroadCrossings(Road& road, const std::vector<CrossingProfile>& profiles)
 {
     for (const auto& profile : profiles)
     {
@@ -728,20 +729,23 @@ void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfil
             cells.push_back({q[0], q[1], q[2]});
             cells.push_back({q[0], q[2], q[3]});
         }
-        CutOutline(road.outline, cells,
-                   [&](Vector3 p, Vector3 middle)
-                   {
-                       for (size_t i = 0; i < cells.size(); ++i)
-                           if (Inside(middle, cells[i]))
-                           {
-                               const auto& band = bands[i / 2];
-                               const auto& cell = cells[i];
-                               const double w = std::lerp(band.weightLow, band.weightHigh, band.Lateral(p));
-                               p.y = std::lerp(p.y, PlaneY(p, cell[0].position, cell[1].position, cell[2].position), w);
-                               break;
-                           }
-                       return p;
-                   });
+        const auto height = [&](Vector3 p, Vector3 middle)
+        {
+            for (size_t i = 0; i < cells.size(); ++i)
+                if (Inside(middle, cells[i]))
+                {
+                    const auto& band = bands[i / 2];
+                    const auto& cell = cells[i];
+                    const double w = std::lerp(band.weightLow, band.weightHigh, band.Lateral(p));
+                    p.y = std::lerp(p.y, PlaneY(p, cell[0].position, cell[1].position, cell[2].position), w);
+                    break;
+                }
+            return p;
+        };
+        CutOutline(road.outline, cells, height);
+        // Keep navigation at rail-head height across the slab and use the same
+        // approach bands as pavement. Add cuts even on a two-point straight road.
+        for (auto& lane : road.trafficPaths) CutOutline(lane.points, cells, height, false);
     }
     for (const auto& profile : profiles)
         BuildSlab(road, profile);

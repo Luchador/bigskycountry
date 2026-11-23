@@ -552,6 +552,11 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         menu.ToggleRoadNames();
         return;
     }
+    if (command == EditorCommand::ToggleTrafficLanes)
+    {
+        menu.ToggleTrafficLanes();
+        return;
+    }
     if (command == EditorCommand::ToggleShadows)
     {
         menu.ToggleShadows();
@@ -2547,6 +2552,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
         }
     }
 
+    if (menu.TrafficLanesEnabled() && !trafficOverlay.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
     if (menu.RoadNamesEnabled() && !roadNames.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
     if (!planView && !DrawSelectionBox(renderer)) return false;
 

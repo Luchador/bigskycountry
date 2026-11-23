@@ -6,7 +6,7 @@
 #include <vector>
 #include "material_action.hpp"
 
-enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleFog, ToggleShadows, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
+enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleTrafficLanes, ToggleFog, ToggleShadows, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
                            CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint, CreateTownSquare };
 struct RampMenuOptions { bool exit, entrance; };
 struct CurveMenuOptions { bool start = false, finish = false, cancel = false; };
@@ -36,6 +36,8 @@ public:
     void ToggleWireframe();
     bool RoadNamesEnabled() const { return roadNames; }
     void ToggleRoadNames();
+    bool TrafficLanesEnabled() const { return trafficLanes; }
+    void ToggleTrafficLanes();
     bool ShadowsEnabled() const { return shadows; }
     void ToggleShadows();
     bool FogEnabled() const { return fog; }
@@ -49,6 +51,7 @@ private:
     struct ViewportItem { const char* label; EditorCommand command; bool enabled = true; };
     std::array<std::vector<ViewportItem>, 3> viewportItems;
     bool roadNames = true;
+    bool trafficLanes = false;
     bool fog = true;
     bool shadows = true;
     bool visibilityStatistics = false;

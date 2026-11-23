@@ -1,5 +1,6 @@
 #include "game_world.hpp"
 #include "car.hpp"
+#include "pawn_controller.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -26,28 +27,32 @@ Pawn* GameWorld::Find(PawnHandle handle) const
 
 bool GameWorld::Remove(PawnHandle handle)
 {
+    if (auto* pawn = Find(handle); pawn && pawn->controller) pawn->controller->Release();
     return std::erase_if(pawns, [handle](const auto& pawn) { return pawn->Handle() == handle; }) != 0;
 }
 
 void GameWorld::Step(double seconds)
 {
     if (!std::isfinite(seconds) || seconds <= 0) return;
+    for (auto& pawn : pawns) if (pawn->controller) pawn->controller->Update(seconds);
     int steps = 1;
     for (auto& pawn : pawns)
     {
         pawn->previous = pawn->GetTransform();
-        steps = std::max(steps, pawn->SimulationSubsteps(seconds));
+        if (!pawn->controller || pawn->controller->SimulationReady())
+            steps = std::max(steps, pawn->SimulationSubsteps(seconds));
     }
     const double dt = seconds / steps;
     for (int step = 0; step < steps; ++step)
     {
-        for (auto& pawn : pawns) pawn->Simulate(dt, *this);
+        for (auto& pawn : pawns)
+            if (!pawn->controller || pawn->controller->SimulationReady()) pawn->Simulate(dt, *this);
         for (size_t i = 0; i < pawns.size(); ++i)
         {
             auto* car = dynamic_cast<Car*>(pawns[i].get());
-            if (!car) continue;
+            if (!car || (car->controller && !car->controller->SimulationReady())) continue;
             for (size_t j = i + 1; j < pawns.size(); ++j)
-                if (auto* other = dynamic_cast<Car*>(pawns[j].get())) car->ResolveCollision(*other);
+                if (auto* other = dynamic_cast<Car*>(pawns[j].get()); other && (!other->controller || other->controller->SimulationReady())) car->ResolveCollision(*other);
         }
     }
 }

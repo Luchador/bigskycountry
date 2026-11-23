@@ -4,6 +4,7 @@
 
 class GameWorld;
 class PlayerController;
+class PawnController;
 using PawnHandle = std::uint64_t;
 
 enum class PawnInputProfile { OnFoot, Driving };
@@ -12,6 +13,7 @@ enum class PawnCameraMode { FirstPerson, Chase };
 struct PawnInput
 {
     double forward = 0, right = 0, yaw = 0;
+    double brake = 0; // Service brake, independent of throttle and reverse.
     bool sprint = false, jump = false, handbrake = false;
 };
 
@@ -42,8 +44,9 @@ public:
 private:
     friend class GameWorld;
     friend class PlayerController;
+    friend class PawnController;
     PawnHandle handle = 0;
-    const PlayerController* controller = nullptr;
+    PawnController* controller = nullptr;
     PawnInput input{};
     ObjectTransform previous;
     mutable MeshInstance rendered;

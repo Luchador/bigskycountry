@@ -46,4 +46,4 @@ std::optional<CrossingProfile> PlanRailroadCrossing(const Road& road, const Road
 // mesh changes. Empty optional means the tracks are not an at-grade crossing.
 std::optional<std::vector<std::array<Vector3, 2>>> PlanRailroadJunction(
     const Road& first, const Road& second, const CrossingSite& site);
-void ApplyRailroadCrossings(RoadGeometry& road, const std::vector<CrossingProfile>& profiles);
+void ApplyRailroadCrossings(Road& road, const std::vector<CrossingProfile>& profiles);

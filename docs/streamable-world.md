@@ -17,6 +17,12 @@ distant, and collision payloads. Version 1 packages cannot be streamed. Authored
 `.wld` files remain compatible. Recook after world, model, or material changes;
 texture pixel changes only need the usual texture build.
 
+Traffic milestone 1 adds format **v5** with directed lane metadata in the
+manifest. Versions 2–4 remain readable, but need recooking to use the test AI
+vehicle. See [traffic setup and limitations](traffic.md). The test AI requests
+collision along its lane and waits independently if its support is unavailable;
+it does not add a global loading pause for the player.
+
 ## Loading and unloading
 
 A CPU worker reads cells and shared GLB models and builds collision BVHs. The main

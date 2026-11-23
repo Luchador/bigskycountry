@@ -1,37 +1,12 @@
 #include "player_controller.hpp"
 #include "game_world.hpp"
 
-PlayerController::~PlayerController()
-{
-    Release();
-}
-
-Pawn* PlayerController::Controlled() const
-{
-    return world.Find(controlled);
-}
-
 bool PlayerController::Possess(PawnHandle handle)
 {
-    Pawn* target = world.Find(handle);
-    if (!target || target->health <= 0 || (target->controller && target->controller != this)) return false;
-    if (target == Controlled()) return true;
-    Release();
-    controlled = handle;
-    target->controller = this;
-    target->input = {};
-    camera.Possess(*target);
+    const bool changed = !Controlled() || Controlled()->Handle() != handle;
+    if (!PawnController::Possess(handle)) return false;
+    if (changed) camera.Possess(*Controlled());
     return true;
-}
-
-void PlayerController::Release()
-{
-    if (auto* previous = Controlled())
-    {
-        previous->input = {};
-        previous->controller = nullptr;
-    }
-    controlled = 0;
 }
 
 void PlayerController::Input(const GameplayActions& actions)

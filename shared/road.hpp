@@ -1,6 +1,7 @@
 #pragma once
 
 #include "railroad.hpp"
+#include "traffic_network.hpp"
 #include "road_bridge.hpp"
 #include "railroad_crossing.hpp"
 #include <SDL3/SDL_pixels.h>
@@ -339,6 +340,7 @@ struct Road : RoadGeometry
     // World-space centers of the surfaced lanes, sampled in spline order. On multi-lane
     // roads the configured lanes run right to left, followed by any ramp taper lanes.
     std::vector<std::vector<Vector3>> laneCenterlines;
+    std::vector<RoadTrafficPath> trafficPaths; // Full-width through lanes; no shoulders or center turn lanes.
     // Same indices as the outer lane centerlines, including equal-distance bevel stations.
     std::array<std::vector<double>, 2> outerLaneDistances;
     std::array<std::vector<Vector3>, 2> outerLaneCenterlines; // Independent of lane guide runs through tapers.

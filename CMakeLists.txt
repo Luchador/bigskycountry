@@ -125,6 +125,10 @@ add_library(BigSkyApplication STATIC
     shared/world_collision.cpp
     shared/pawn.cpp
     shared/player.cpp
+    shared/pawn_controller.cpp
+    shared/traffic_network.cpp
+    shared/traffic_driver.cpp
+    shared/traffic_overlay.cpp
     shared/player_controller.cpp
     shared/player_camera.cpp
     shared/gameplay_input.cpp

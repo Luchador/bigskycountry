@@ -894,6 +894,7 @@ void Road::Rebuild()
     MarkRebuilt();
     rampSeams.clear();
     laneCenterlines.clear();
+    trafficPaths.clear();
     for (auto& distances : outerLaneDistances) distances.clear();
     for (auto& line : outerLaneCenterlines) line.clear();
     centerline.clear();
@@ -1171,6 +1172,8 @@ void Road::Rebuild()
         moveSurface(edgeTriangles);
         for (auto& lane : laneCenterlines)
             for (Vector3& point : lane) point = frame.Point(point);
+        for (auto& lane : trafficPaths)
+            for (Vector3& point : lane.points) point = frame.Point(point);
         for (auto& lane : outerLaneCenterlines)
             for (Vector3& point : lane) point = frame.Point(point);
         for (auto& [material, strip] : transitionStrips) moveSurface(strip);
