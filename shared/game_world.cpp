@@ -42,6 +42,7 @@ void GameWorld::Step(double seconds)
     stepping = true;
     pairChecks = 0;
     pawnIndex.ResetStatistics();
+    if (prepareControllers) prepareControllers(seconds);
     for (auto& pawn : pawns) if (pawn->controller) pawn->controller->Update(seconds);
     int steps = 1;
     for (auto& pawn : pawns)

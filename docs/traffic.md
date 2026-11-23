@@ -1,9 +1,11 @@
-# Traffic following — milestone 2
+# Traffic intersections — milestone 3
 
 ## Trying it
 
-1. Rebuild the game and editor. Keep your milestone-1 cook; use **File → Cook
-   World** only if you have not cooked traffic lanes yet.
+1. Rebuild the game and editor, save, and use **File → Cook World** again.
+   Select each intersection anchor to set **Traffic control: Stop/Yield/Priority**.
+   Existing intersections default to Stop on every approach. Controls and stop-line
+   paint are independent; both save and support undo/redo.
 2. Enable **View → Traffic Lanes** to inspect directions in either editor view.
 3. In-game, press **F8**, aim the crosshair at a through lane, and press **F6**.
    Choose a loaded road within 250 m of the player, with at least 15 m left before
@@ -16,10 +18,11 @@
    AI traffic, preserving the player and their vehicle.
 
 Green arrows run in the road's authored direction; blue arrows run against it.
-The last spawned car's lane is amber. Red bars mark path ends. The game overlay displays
+The last spawned car's lane and available turns are amber. Purple paths connect
+intersection lanes; entry bars are red (Stop), yellow (Yield), or green (Priority). The game overlay displays
 target speed, bumper gap, desired following gap, and the current driving state
 for the last spawned car. It also reports nearby queries/results and car-pair
-collision checks from the current physics tick. Debug paths
+collision checks from the current physics tick, plus active junction reservations. Debug paths
 are drawn over the scene for inspection, including through occluding geometry.
 
 The initial maximum speed is **30 mph** (`TrafficLane::speedLimit`, stored in
@@ -46,15 +49,62 @@ are valid within a cooked network revision. Editing a road's topology can change
 its local path IDs, so future persisted traffic must also identify the network
 revision. This milestone does not persist NPC state.
 
-Cooked format **v5** stores the directed paths, road IDs, lane ordinals, widths,
+Cooked format **v6** stores the directed paths, road IDs, lane ordinals, widths,
 and initial speed limits in the manifest. The reader validates ownership,
 identity, finite coordinates, dimensions, and nonzero segments. Runtime traffic
 uses this resident metadata without loading/rebuilding authored roads. It is
 additional manifest memory, outside the geometry/asset residency budgets.
-Versions 2–4 still load, but have no traffic data: recook to run traffic.
-Milestone 2 uses the same v5 data; a milestone-1 cook does not need recooking.
-Authored `.wld` syntax is unchanged. The editor caches its debug network until a
-road revision changes; camera movement does not regenerate lanes.
+Version 6 adds stable movement IDs (junction ID/local path ID), source/destination
+lane IDs, approach IDs, controls, turn type, speed caps, and sampled turn paths.
+Conflict lists and lookup indices are derived once on load, not each frame.
+Versions 2–4 still load without traffic lanes; v5 loads with lane following but
+no intersection turns. Recook to enable this milestone. Authored `INTS` v10
+stores the twelve approach controls; older intersections default to Stop.
+The editor caches its overlay until a road revision or control changes.
+
+## Turns and right-of-way
+
+Only explicitly attached intersection approaches are connected. Geometric
+crossings and overpasses never create an implicit traffic connection. Paths join
+actual lane mouths with tangent-continuous cubic curves. Straight movements
+preserve lane order, left turns use the innermost lane, and right turns use the
+outermost lane. U-turns and lane-changing merges are excluded. Each curve is
+checked against the junction pavement with lateral clearance and a curvature
+limit. An unsafe path is omitted rather than crossing an island or a curb.
+Standard, skewed, aligned, and supported Y-intersection turns use these rules;
+full town-square circulation requires a later circulation-path implementation.
+
+`TrafficDriver` chooses a deterministic, varied outgoing movement for each visit.
+Its lookahead includes the current lane, turn, and outgoing lane, so steering
+and following continue across both seams. Turn speeds are capped at 7 m/s
+(about 16 mph), with additional braking for sharper curves. The initial routes
+are local choices, not destination-based navigation.
+
+`TrafficJunctions` collects all requests on the synchronized pre-physics snapshot:
+
+- **Stop:** the front bumper waits before the mouth and speed stays below 0.2 m/s
+  for 0.6 seconds. The earliest stopped arrival goes first. Arrivals within the
+  same 0.2-second bucket yield to the vehicle on their right; opposing left turns
+  yield to through/right turns. A stable handle breaks a full simultaneous cycle.
+- **Yield:** a clear approach can continue without a mandatory stop. It yields to
+  approaching Priority traffic and occupied/conflicting paths.
+- **Priority:** no mandatory stop, but it still yields to occupied paths, blocked
+  exits, player obstructions, and oncoming through traffic when turning left.
+
+Swept turn corridors are precomputed into a conflict table. Shared outgoing
+lanes always conflict. Compatible paths can reserve together; incompatible
+paths cannot. A reservation stays until the car's rear clears the outgoing mouth.
+Before entry, permission is rechecked and can be withdrawn if space disappears.
+Removal/F7 clears stale requests. Cars physically entering unexpectedly also
+block conflicting requests, so another car is not invited into them.
+
+Admission requires room for the whole car and a standing gap beyond the junction,
+loaded collision through the exit, and no nearby static obstruction. Exit checks
+use current vehicle footprints, not predicted queue motion. This avoids entering
+just because a queue might move. The player and unmanaged vehicles are checked
+against the intended path using current and predicted positions. AI perception
+continues braking while driving through; reservations cannot prevent a deliberate
+player impact or a last-moment intrusion inside braking distance.
 
 ## Controllers and physics
 
@@ -111,8 +161,9 @@ is no autonomous recovery or despawning yet. F7 clears the test population.
 ## Boundaries of this milestone
 
 Traffic is manually placed, capped at 64 AI cars, and does not persist between
-sessions. AI-possessed cars cannot be entered. Paths still stop at road ends and
-intersection mouths, including roads connected to another road. Lane-to-lane
-links, turning movements, right-of-way, signals, route choice, merging, and
-ambient population management are not implemented here. This milestone adds
-vehicle following and avoidance; it is not a complete traffic-law simulation.
+sessions. AI-possessed cars cannot be entered. This milestone does not add traffic
+lights or physical sign meshes, lane changes, disappearing-lane merges, ramp/road
+seam routing, roundabout/town-square circulation, destination navigation, or an
+automatic population manager. Paths with no usable continuation still stop at
+their ends. A continuously busy priority road can delay minor-road traffic; there
+is no artificial timeout that lets a waiting vehicle ignore right-of-way.

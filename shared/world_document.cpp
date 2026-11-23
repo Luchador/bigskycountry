@@ -27,7 +27,7 @@ namespace
     using Tag = std::array<char, 4>;
     constexpr Tag worldMagic = {'B', 'S', 'C', 'W'};
     constexpr Uint32 worldVersion = 1;
-    constexpr Uint32 intersectionVersion = 9;
+    constexpr Uint32 intersectionVersion = 10;
     constexpr Tag intersectionTag = {'I', 'N', 'T', 'S'};
     constexpr Tag roadTag = {'R', 'O', 'A', 'D'};
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
@@ -705,6 +705,13 @@ bool WorldDocument::Open(const char* documentPath)
                     item.townIsland = static_cast<TownIsland>(island);
                     if (!item.ValidTownSquare()) return SDL_SetError("Invalid town square dimensions in INTS");
                 }
+                if (section.version >= 10)
+                    for (auto& control : item.trafficControls)
+                    {
+                        int value;
+                        if (!(data >> value) || value < 0 || value > 2) return SDL_SetError("Invalid intersection traffic control in INTS");
+                        control = static_cast<TrafficControl>(value);
+                    }
                 if (!loaded.intersections.emplace(id, std::move(item)).second)
                     return SDL_SetError("Duplicate intersection ID in INTS");
             }
@@ -828,7 +835,13 @@ bool WorldDocument::Save()
         for (double angle : item.skew)
             if (!std::isfinite(angle) || std::abs(angle) > Intersection::maxSkew || !(junctionData << ' ' << angle))
                 return SDL_SetError("Cannot save invalid intersection anchor skew");
-        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << ' ' << item.alignedApproaches.to_ulong() << ' ' << static_cast<int>(item.townIsland) << ' ' << item.islandSize << '\n';
+        junctionData << ' ' << static_cast<int>(item.paint) << ' ' << static_cast<int>(item.shape) << ' ' << item.size << ' ' << item.island << ' ' << item.alignedApproaches.to_ulong() << ' ' << static_cast<int>(item.townIsland) << ' ' << item.islandSize;
+        for (auto control : item.trafficControls)
+        {
+            if (static_cast<unsigned>(control) > 2) return SDL_SetError("Invalid intersection traffic control");
+            junctionData << ' ' << static_cast<int>(control);
+        }
+        junctionData << '\n';
     }
     std::ostringstream meshData;
     if (!WriteMeshes(meshData, meshes))

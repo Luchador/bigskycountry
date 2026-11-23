@@ -20,4 +20,5 @@ public:
 private:
     TrafficNetwork network;
     std::vector<std::pair<int, std::uint64_t>> revisions;
+    std::vector<int> controls;
 };

@@ -392,6 +392,8 @@ std::vector<RoadEditor::Button> RoadEditor::Buttons(const PropertiesInspector& p
         std::vector<Button> buttons{{Action::ToggleStopLine, {12, 73, 194, 28}, "Stop line", properties.stopLine}};
         if (properties.canAlignApproaches)
             buttons.push_back({Action::ToggleAlignedApproaches, {12, 110, 194, 44}, "Align opposite\napproaches", properties.alignedApproaches});
+        static constexpr std::array controls{"Traffic: Stop", "Traffic: Yield", "Traffic: Priority"};
+        buttons.push_back({Action::CycleTrafficControl, {12, 172, 194, 28}, controls.at(static_cast<int>(properties.trafficControl))});
         return buttons;
     }
     if (properties.page == PropertiesPage::Object || properties.page == PropertiesPage::Marker)
@@ -1312,11 +1314,16 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
     case Action::EastWestIntersectionPaint:
     case Action::ToggleIntersectionIsland:
     case Action::ToggleStopLine:
+    case Action::TrafficStop:
+    case Action::TrafficYield:
+    case Action::TrafficPriority:
+    case Action::CycleTrafficControl:
     case Action::SmallerRadius:
     case Action::LargerRadius:
     {
         const auto target = state.Target();
-        const bool editAnchor = action == Action::ToggleStopLine;
+        const bool trafficControl = action == Action::TrafficStop || action == Action::TrafficYield || action == Action::TrafficPriority || action == Action::CycleTrafficControl;
+        const bool editAnchor = action == Action::ToggleStopLine || trafficControl;
         if (target.kind != (editAnchor ? SelectionKind::Anchor : SelectionKind::Intersection)) return;
         auto& item = world.intersections.at(target.index);
         EditSnapshot before(state), after(state);
@@ -1324,7 +1331,13 @@ void RoadEditor::Activate(Action action, WorldDocument& world)
 #ifndef _WIN32
         intersectionPaintOpen = false;
 #endif
-        if (editAnchor) item.stopLines.flip(target.point);
+        if (trafficControl)
+        {
+            auto& control = item.trafficControls.at(target.point);
+            control = action == Action::CycleTrafficControl ? static_cast<TrafficControl>((static_cast<int>(control)+1)%3) :
+                action == Action::TrafficYield ? TrafficControl::Yield : action == Action::TrafficPriority ? TrafficControl::Priority : TrafficControl::Stop;
+        }
+        else if (editAnchor) item.stopLines.flip(target.point);
         else if (action == Action::ToggleIntersectionIsland) item.island = !item.island;
         else if (action == Action::StandardIntersectionPaint) item.paint = IntersectionPaint::Standard;
         else if (action == Action::NorthSouthIntersectionPaint) item.paint = IntersectionPaint::NorthSouth;
@@ -2583,7 +2596,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     const int contentHeight = properties.page == PropertiesPage::Intersection ? (properties.townSquare ? 382 : properties.yIntersection ? 316 : intersectionPaintOpen ? 332 : 246) : properties.page == PropertiesPage::Road ?
         static_cast<int>(RoadStyleBottom(properties)) + (planView ? 102 : 50) :
         properties.page == PropertiesPage::Railroad ? static_cast<int>(RoadStyleBottom(properties)) :
-        properties.page == PropertiesPage::Marker ? 318 : properties.page == PropertiesPage::Object ? 146 : properties.river ? 245 : properties.water ? 205 : properties.materialSlot ? 182 : 110;
+        properties.page == PropertiesPage::Marker ? 318 : properties.page == PropertiesPage::Anchor ? 218 : properties.page == PropertiesPage::Object ? 146 : properties.river ? 245 : properties.water ? 205 : properties.materialSlot ? 182 : 110;
     roadScrollMax = std::max(0, contentHeight - roadPanel.h);
     roadScroll = std::min(roadScroll, roadScrollMax);
     const int width = roadPanel.x + roadPanel.w;

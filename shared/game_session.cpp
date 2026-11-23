@@ -23,6 +23,8 @@ namespace
 GameSession::GameSession(SDL_Window* window, WorldDocument& document, CookedWorld* streaming)
     : document(document), world(document), player(world), input(window), streaming(streaming), traffic(streaming ? TrafficNetwork{} : TrafficNetwork::Build(document))
 {
+    junctionTraffic = std::make_unique<TrafficJunctions>(world, Traffic());
+    world.prepareControllers = [this](double seconds) { junctionTraffic->Update(seconds, trafficDrivers); };
 }
 
 bool GameSession::TryStartAt(Vector3 position, double yaw, bool authored)
@@ -188,6 +190,7 @@ void GameSession::RemoveTrafficTest()
         if (handle) world.Remove(handle);
     }
     trafficDrivers.clear();
+    junctionTraffic->Clear();
 }
 
 void GameSession::SpawnTrafficTest(const CameraView& view, int count)
@@ -247,6 +250,7 @@ bool GameSession::SpawnTrafficCar(const TrafficLane& lane, double start)
     car->Teleport(pose);
     const auto handle = world.Add(std::move(car));
     auto driver = std::make_unique<TrafficDriver>(world, lane, start);
+    driver->SetNetwork(&Traffic());
     driver->collisionReady = [this](Vector3 p) { return !streaming || streaming->CollisionReady(p, 8); };
     if (!driver->Possess(handle)) { driver.reset(); world.Remove(handle); trafficNotice = "Cannot control the test car."; return false; }
     trafficDrivers.push_back(std::move(driver));
@@ -287,8 +291,8 @@ bool GameSession::DrawTrafficDebug(SDL_Renderer* renderer, const CameraView& vie
             spacing, testDriver->Reason())) return false;
     }
     const auto& stats = world.QueryStatistics();
-    if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+44, "Last physics tick: %u nearby queries | %u results | %u car-pair checks",
-        static_cast<unsigned>(stats.queries), static_cast<unsigned>(stats.results), static_cast<unsigned>(world.CollisionPairChecks()))) return false;
+    if (!SDL_RenderDebugTextFormat(renderer, 16, panel.y+44, "Physics: %u nearby queries | %u results | %u car-pair checks | %u junction reservations",
+        static_cast<unsigned>(stats.queries), static_cast<unsigned>(stats.results), static_cast<unsigned>(world.CollisionPairChecks()), static_cast<unsigned>(junctionTraffic->Reservations()))) return false;
     return SDL_RenderDebugText(renderer, 16, panel.y+64, trafficNotice.c_str());
 }
 

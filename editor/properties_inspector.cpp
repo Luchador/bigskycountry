@@ -353,6 +353,7 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
         const auto& junction = world.intersections.at(target.index);
         if (junction.shape == IntersectionShape::TownSquare) result.title = "Town Square " + std::to_string(target.index);
         result.stopLine = junction.stopLines.test(target.point);
+        result.trafficControl = junction.trafficControls.at(target.point);
         result.canAlignApproaches = junction.shape == IntersectionShape::Standard;
         result.alignedApproaches = junction.AlignsOpposite(target.point);
     }

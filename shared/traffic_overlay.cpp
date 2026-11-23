@@ -58,6 +58,28 @@ bool DrawTrafficLanes(SDL_Renderer* renderer, const TrafficNetwork& network, con
         const auto right = Math::Normalize(Math::Cross({0,1,0}, lane.Tangent(lane.Length()))) * (lane.width * 0.45);
         if (!line(end - right, end + right)) return false;
     }
+    for (const auto& move : network.movements)
+    {
+        const auto* from = network.FindLane(move.from); const auto* to = network.FindLane(move.to);
+        if (!from || !to || hiddenRoads.contains(from->roadId) || hiddenRoads.contains(to->roadId)) continue;
+        if (plan)
+        {
+            const double x = viewport.w*0.5/std::max(0.001,scale), z = viewport.h*0.5/std::max(0.001,scale);
+            if (move.path.bounds.max.x < center.x-x || move.path.bounds.min.x > center.x+x ||
+                move.path.bounds.max.z < center.z-z || move.path.bounds.min.z > center.z+z) continue;
+        }
+        else if (BoundsDistanceSquared(move.path.bounds,camera.GetPosition()) > 1000*1000) continue;
+        if (move.from == selected) SDL_SetRenderDrawColor(renderer,255,185,40,255);
+        else SDL_SetRenderDrawColor(renderer,180,135,230,255);
+        for (std::size_t i = 1; i < move.path.points.size(); ++i)
+            if (!line(move.path.points[i-1],move.path.points[i])) return false;
+        const auto start = move.path.At(0);
+        const auto side = Math::Normalize(Math::Cross({0,1,0},move.path.Tangent(0))) * 1.5;
+        if (move.control == TrafficControl::Stop) SDL_SetRenderDrawColor(renderer,255,100,85,255);
+        else if (move.control == TrafficControl::Yield) SDL_SetRenderDrawColor(renderer,255,210,65,255);
+        else SDL_SetRenderDrawColor(renderer,95,235,150,255);
+        if (!line(start-side,start+side)) return false;
+    }
     return true;
 }
 bool EditorTrafficOverlay::Draw(SDL_Renderer* renderer, const WorldDocument& world, const CameraView& camera,
@@ -70,6 +92,13 @@ bool EditorTrafficOverlay::Draw(SDL_Renderer* renderer, const WorldDocument& wor
         const auto& road = world.roads[i]; current.emplace_back(road.id, road.revision);
         if (world.hierarchy.EditorHidden({SceneKind::Road, static_cast<int>(i)})) hidden.insert(road.id);
     }
-    if (current != revisions) { network = TrafficNetwork::Build(world); revisions = std::move(current); }
+    std::vector<int> currentControls;
+    for (const auto& [id,junction] : world.intersections)
+    {
+        currentControls.push_back(id);
+        for (auto control : junction.trafficControls) currentControls.push_back(static_cast<int>(control));
+    }
+    if (current != revisions || currentControls != controls)
+    { network = TrafficNetwork::Build(world); revisions = std::move(current); controls = std::move(currentControls); }
     return DrawTrafficLanes(renderer, network, camera, viewport, plan, center, scale, 0, hidden);
 }

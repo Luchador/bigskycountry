@@ -1025,6 +1025,11 @@ struct WindowsPanels::Impl
                     RoadAction::NorthSouthIntersectionPaint, RoadAction::EastWestIntersectionPaint};
                 PostAction(paint[i]);
             }
+            if (id == IDC_TRAFFIC_CONTROL && i >= 0 && i < 3)
+            {
+                static constexpr RoadAction controls[] = {RoadAction::TrafficStop, RoadAction::TrafficYield, RoadAction::TrafficPriority};
+                PostAction(controls[i]); return;
+            }
             if (id == IDC_ALIGNMENT && i >= 0 && i < 2)
             {
                 PostAction(alignment[i]);
@@ -1092,6 +1097,9 @@ struct WindowsPanels::Impl
         CheckDlgButton(road, IDC_INTERSECTION_ISLAND, properties.island ? BST_CHECKED : BST_UNCHECKED);
         ShowWindow(GetDlgItem(road, IDC_ALIGNED_APPROACHES), properties.page == PropertiesPage::Anchor && properties.canAlignApproaches ? SW_SHOWNA : SW_HIDE);
         CheckDlgButton(road, IDC_ALIGNED_APPROACHES, properties.alignedApproaches ? BST_CHECKED : BST_UNCHECKED);
+        for (int id : {IDC_TRAFFIC_CONTROL_LABEL, IDC_TRAFFIC_CONTROL})
+            ShowWindow(GetDlgItem(road, id), properties.page == PropertiesPage::Anchor ? SW_SHOWNA : SW_HIDE);
+        SendDlgItemMessageW(road, IDC_TRAFFIC_CONTROL, CB_SETCURSEL, static_cast<int>(properties.trafficControl), 0);
         if (GetFocus() != GetDlgItem(road, IDC_INTERSECTION_SIZE)) RestoreField(IDC_INTERSECTION_SIZE);
         LayoutInspectorScroll();
         if (pageChanged)
@@ -1861,6 +1869,7 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     }
     Choices(p.road, IDC_TOWN_ISLAND, {L"No island", L"Square island", L"Circular island"});
     Choices(p.road, IDC_INTERSECTION_PAINT, {L"Standard", L"North/South", L"East/West"});
+    Choices(p.road, IDC_TRAFFIC_CONTROL, {L"Stop", L"Yield", L"Priority"});
     Choices(p.road, IDC_ALIGNMENT, {L"Straight", L"B\u00e9zier"});
     Choices(p.road, IDC_LAYOUT, {L"2 north / 1 south", L"1 north / 2 south", L"Center turn"});
     Choices(p.road, IDC_MEDIAN, {L"Concrete", L"Grass"});

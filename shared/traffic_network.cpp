@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <map>
 
 void TrafficLane::Measure()
 {
@@ -69,10 +70,13 @@ TrafficNetwork TrafficNetwork::Build(const WorldDocument& world)
             if (lane.Length() >= 0.05) network.lanes.push_back(std::move(lane));
         }
     }
+    network.BuildMovements(world);
+    network.Validate();
     return network;
 }
 bool TrafficNetwork::Validate()
 {
+    laneIndex.clear(); outgoing.clear();
     std::set<std::uint64_t> ids;
     for (auto& lane : lanes)
     {
@@ -84,10 +88,56 @@ bool TrafficNetwork::Validate()
         for (std::size_t i = 0; i < lane.points.size(); ++i)
             if (!std::isfinite(Math::Length(lane.points[i])) || (i && Math::Length(lane.points[i] - lane.points[i - 1]) < 1e-8))
                 return SDL_SetError("Invalid traffic path samples");
+        laneIndex.emplace(lane.id, &lane - lanes.data());
         lane.Measure();
         if (!std::isfinite(lane.Length()) || lane.Length() < 0.05) return SDL_SetError("Invalid traffic path length");
     }
+    ids.clear();
+    for (std::size_t i = 0; i < movements.size(); ++i)
+    {
+        auto& m = movements[i];
+        const auto* from = FindLane(m.from); const auto* to = FindLane(m.to);
+        if (!m.id || !ids.insert(m.id).second || m.junction <= 0 || (m.id >> 32) != unsigned(m.junction) ||
+            !from || !to || m.from == m.to || m.fromSide < 0 || m.fromSide >= 12 || m.toSide < 0 || m.toSide >= 12 ||
+            m.fromSide == m.toSide || static_cast<unsigned>(m.control) > 2 || static_cast<unsigned>(m.turn) > 2 ||
+            m.path.points.size() < 2 || !std::isfinite(m.path.speedLimit) || m.path.speedLimit <= 0 || m.path.speedLimit > 100)
+            return SDL_SetError("Invalid cooked intersection movement");
+        for (std::size_t j = 0; j < m.path.points.size(); ++j)
+            if (!std::isfinite(Math::Length(m.path.points[j])) || (j && Math::Length(m.path.points[j]-m.path.points[j-1]) < 1e-8))
+                return SDL_SetError("Invalid intersection path samples");
+        if (Math::Length(m.path.points.front()-from->points.back()) > 0.01 || Math::Length(m.path.points.back()-to->points.front()) > 0.01)
+            return SDL_SetError("Disconnected intersection movement");
+        m.path.Measure();
+        if (!std::isfinite(m.path.Length()) || m.path.Length() < 0.05 || m.path.Length() > 10000)
+            return SDL_SetError("Invalid intersection path length");
+        m.path.width = std::min(from->width,to->width);
+        m.conflicts.clear(); outgoing[m.from].push_back(i);
+    }
+    // Precompute swept-path conflicts once. A 2.8 m corridor includes body width
+    // and turning overhang; shared destinations always conflict (merging traffic).
+    std::map<int, std::vector<std::size_t>> junctions;
+    for (std::size_t i = 0; i < movements.size(); ++i) junctions[movements[i].junction].push_back(i);
+    for (const auto& [id, group] : junctions) for (auto i : group) for (auto j : group)
+    {
+        if (j <= i) continue;
+        auto& a = movements[i]; auto& b = movements[j];
+        bool conflict = a.from == b.from || a.to == b.to;
+        for (double d = 0; !conflict && d <= a.path.Length(); d += 1)
+            conflict = b.path.Project(a.path.At(d)).error < 2.8;
+        if (conflict) { a.conflicts.push_back(j); b.conflicts.push_back(i); }
+    }
+    for (auto& m : movements) std::sort(m.conflicts.begin(), m.conflicts.end());
     return true;
+}
+const TrafficLane* TrafficNetwork::FindLane(std::uint64_t id) const
+{
+    const auto it = laneIndex.find(id);
+    return it == laneIndex.end() ? nullptr : &lanes[it->second];
+}
+const std::vector<std::size_t>& TrafficNetwork::Outgoing(std::uint64_t lane) const
+{
+    static const std::vector<std::size_t> empty;
+    const auto it = outgoing.find(lane); return it == outgoing.end() ? empty : it->second;
 }
 std::optional<TrafficNetwork::Pick> TrafficNetwork::Nearest(Vector3 position, double radius) const
 {

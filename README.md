@@ -115,10 +115,11 @@ Choose **Special → Spawn Point** to place `assets/models/editor/start.glb` at 
 
 When the game starts, the test car appears at the spawn point and the on-foot player appears beside it. Nearby ground adjusts their resting height; an unsupported placement starts there under gravity. The game keeps its automatic spawn selection when the world has no spawn point. Save and use **File → Cook World** after changing the spawn point so streamed games use the new placement. Cooked format version 3 stores its location and heading as startup metadata; version 2 packages continue to load with automatic startup locations.
 
-### Traffic following (milestone 2)
+### Traffic intersections (milestone 3)
 
 **View → Traffic Lanes** shows directed lane paths in the editor's 2D and 3D
-views. Arrows indicate travel direction; red bars mark path ends.
+views. Arrows indicate travel direction; purple curves show intersection turns.
+Entry bars are red for Stop, yellow for Yield, and green for Priority.
 
 In-game, press **F8** to show the lane overlay and crosshair. Aim at a clear lane
 within 250 m of the player and press **F6** to add an AI car. **Shift+F6** adds up
@@ -133,10 +134,22 @@ predicted crossings of their path. The overlay reports the last car's gap and
 state, plus nearby-query and vehicle collision-pair counts. The initial speed
 limit remains 30 mph. Test traffic is not saved in the world.
 
-Milestone 1's cooked lane data is unchanged: an existing v5 cook works without
-recooking. Earlier cooks need **File → Cook World**. Lane changes, intersection
-turns and priority rules, and automatic traffic spawning remain future steps;
-cars still stop at lane ends. See [traffic implementation](docs/traffic.md).
+Select an intersection anchor and set **Traffic control → Stop, Yield, or
+Priority**. This is independent of **Stop line** paint and supports undo/redo.
+Existing worlds default every approach to Stop. For a main road with minor side
+roads, set the main-road approaches to Priority and the side roads to Stop or Yield.
+
+Cars choose a valid outgoing lane, stop and take turns at Stop-controlled
+approaches, yield to priority traffic, and reserve conflicting paths before
+entering. They wait outside when their outgoing lane lacks space. Compatible
+movements can proceed together; left turns yield to oncoming through traffic.
+The player remains an obstacle to yield to rather than an AI reservation holder.
+
+**Save and use File → Cook World again after installing this update**, and after
+editing controls or road connections. Cooked v6 adds turn paths and controls;
+v5 still loads with lane following only. Lane changes, signals, town-square
+circulation, and automatic spawning remain future work. Unsupported connections
+still stop safely at the lane end. See [traffic implementation](docs/traffic.md).
 
 ### Terrain chunks
 
@@ -208,7 +221,7 @@ To start a new road in either view, click a free anchor, then **Shift + left-dra
 
 Three occupied anchors generate a flat T-junction at the intersection elevation. A loop road can use two of those anchors. Connect its first and last points to separate anchors on the same intersection, then connect an approach road to a third anchor. Connecting the fourth side opens it into a four-way crossing. The surface uses the intersection’s pavement material and corner radius. It matches each approach’s shoulders, curbs and transition strips. By default, lane markings and divided-road medians end where the road meets the junction. Wide approaches and large corner radii can move that seam beyond the 10 m anchor. Disconnecting roads updates the surface immediately. An inserted junction also has pavement between its two opposite approaches before a third road is attached. The four anchor markers remain available for editing.
 
-Select the intersection itself to choose **Continue paint markings → Standard, North/South, or East/West**. Standard keeps the junction interior unmarked. The other modes continue the selected pair's edge, center, and lane lines across the pavement, following skewed approaches and endpoint lane settings. North/South uses the local +Z/−Z anchors; East/West uses +X/−X, so the choice rotates with the intersection. Both opposite roads must be connected with paint enabled. Differing lane counts taper the solid markings and omit dashed white dividers, as on ordinary lane transitions. This changes paint only; it does not add a raised median through the junction. Stop-line checkboxes remain independent; clear them on the through approaches if traffic there should not stop. The setting supports undo/redo and is stored in `INTS` version 6 (0 = Standard, 1 = North/South, 2 = East/West). Older worlds default to Standard.
+Select the intersection itself to choose **Continue paint markings → Standard, North/South, or East/West**. Standard keeps the junction interior unmarked. The other modes continue the selected pair's edge, center, and lane lines across the pavement, following skewed approaches and endpoint lane settings. North/South uses the local +Z/−Z anchors; East/West uses +X/−X, so the choice rotates with the intersection. Both opposite roads must be connected with paint enabled. Differing lane counts taper the solid markings and omit dashed white dividers, as on ordinary lane transitions. This changes paint only; it does not add a raised median through the junction. Stop-line checkboxes control paint only. Set **Traffic control → Priority** on through approaches to give them right-of-way, and clear their stop-line paint if appropriate. The setting supports undo/redo and is stored in `INTS` version 6 (0 = Standard, 1 = North/South, 2 = East/West). Older worlds default to Standard.
 
 ### Town squares
 

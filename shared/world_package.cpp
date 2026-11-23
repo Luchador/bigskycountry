@@ -153,6 +153,15 @@ namespace
             w.F64(lane.width); w.F64(lane.speedLimit);
             w.Count(lane.points.size()); for (auto point : lane.points) w.Vec(point);
         }
+        w.Count(m.traffic.movements.size());
+        for (const auto& move : m.traffic.movements)
+        {
+            w.U64(move.id); w.U64(move.from); w.U64(move.to);
+            w.U32(move.junction); w.U32(move.fromSide); w.U32(move.toSide);
+            w.U32(static_cast<unsigned>(move.control)); w.U32(static_cast<unsigned>(move.turn));
+            w.F64(move.path.speedLimit);
+            w.Count(move.path.points.size()); for (auto p : move.path.points) w.Vec(p);
+        }
         return w;
     }
     std::vector<char> Read(std::ifstream& in, std::uint64_t bytes, std::uint64_t limit)
@@ -338,6 +347,20 @@ bool Reader::Open(const std::string& file)
                 for (auto count = r.Count(24); count; --count) lane.points.push_back(r.Vec());
                 m.traffic.lanes.push_back(std::move(lane));
             }
+            if (fileVersion >= 6)
+                for (auto n = r.Count(104); n; --n)
+                {
+                    TrafficMovement move;
+                    move.id = r.U64(); move.from = r.U64(); move.to = r.U64();
+                    const auto junction = r.U32(), from = r.U32(), to = r.U32(), control = r.U32(), turn = r.U32();
+                    if (junction > INT32_MAX || from >= 12 || to >= 12 || control > 2 || turn > 2 ||
+                        !ids.contains({SceneKind::Intersection, junction})) throw std::runtime_error("Invalid traffic movement owner");
+                    move.junction = static_cast<int>(junction); move.fromSide = static_cast<int>(from); move.toSide = static_cast<int>(to);
+                    move.control = static_cast<TrafficControl>(control); move.turn = static_cast<TrafficTurn>(turn);
+                    move.path.speedLimit = r.F64();
+                    for (auto count = r.Count(24); count; --count) move.path.points.push_back(r.Vec());
+                    m.traffic.movements.push_back(std::move(move));
+                }
             if (!m.traffic.Validate()) throw std::runtime_error(SDL_GetError());
         }
         r.End(); if (28 + bytes + end != static_cast<std::uint64_t>(size)) throw std::runtime_error("Unexpected cooked world length");

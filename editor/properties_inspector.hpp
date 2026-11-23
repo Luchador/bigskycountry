@@ -56,6 +56,7 @@ struct PropertiesInspector
     bool hasCollision = true;
     bool water = false, river = false, editingWater = false;
     bool stopLine = false;
+    TrafficControl trafficControl = TrafficControl::Stop;
     bool canAlignApproaches = false, alignedApproaches = false;
     double radius = 0;
     bool yIntersection = false, townSquare = false, island = false;

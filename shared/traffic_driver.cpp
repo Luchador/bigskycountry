@@ -7,7 +7,37 @@
 #include <string_view>
 
 TrafficDriver::TrafficDriver(GameWorld& world, const TrafficLane& lane, double start, TrafficFollowing following)
-    : PawnController(world), lane(lane), following(following), progress(start), lookAhead(lane.At(start)) {}
+    : PawnController(world), source(&lane), lane(lane), following(following), progress(start), lookAhead(lane.At(start)) {}
+
+const TrafficMovement* TrafficDriver::Movement() const
+{
+    return network && movement ? &network->movements[*movement] : nullptr;
+}
+void TrafficDriver::PrepareRoute()
+{
+    const auto* car = Controlled();
+    if (!car) return;
+    const auto projection = lane.Project(car->GetTransform().position, std::max(0.0, progress-5), progress+25);
+    progress = std::max(progress, projection.distance);
+    if (const auto* m = Movement(); m && progress >= exit+3.0)
+    {
+        source = network->FindLane(m->to);
+        progress -= exit; lane = *source; movement.reset(); granted = false; ++visits;
+    }
+    if (!network || movement) return;
+    const auto& choices = network->Outgoing(source->id);
+    if (choices.empty()) return;
+    // Stable, varied destinations for the manual test population. No U-turns or
+    // mid-junction route changes; every choice already respects lane discipline.
+    movement = choices[(car->Handle()+visits) % choices.size()];
+    const auto& m = *Movement();
+    const auto* destination = network->FindLane(m.to);
+    entry = source->Length(); exit = entry + m.path.Length();
+    lane = *source;
+    lane.points.insert(lane.points.end(), m.path.points.begin()+1, m.path.points.end());
+    lane.points.insert(lane.points.end(), destination->points.begin()+1, destination->points.end());
+    lane.Measure(); granted = false;
+}
 
 double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, bool& emergency)
 {
@@ -82,6 +112,7 @@ void TrafficDriver::Update(double seconds)
 {
     auto* car = dynamic_cast<Car*>(Controlled());
     if (!car || seconds <= 0) return;
+    PrepareRoute();
     PawnInput input;
     const auto frame = car->GetTransform().ToMeshTransform();
     const auto projection = lane.Project(frame.origin, std::max(0.0, progress - 5), progress + 25);
@@ -129,6 +160,14 @@ void TrafficDriver::Update(double seconds)
         {
             stopAt = std::min(stopAt, d - bumperMargin - 1); reason = "Obstacle ahead"; break;
         }
+    }
+    if (const auto* move = Movement())
+    {
+        const double turnDistance = std::max(0.0, entry-progress-4);
+        targetSpeed = std::min(targetSpeed, std::sqrt(move->path.speedLimit*move->path.speedLimit + 2*braking*turnDistance));
+        if (progress >= entry && progress < exit+3) targetSpeed = std::min(targetSpeed, move->path.speedLimit);
+        if (!granted && progress < entry) { stopAt = std::min(stopAt, entry-bumperMargin); reason = junctionReason; }
+        else if (progress >= entry && progress < exit) reason = "Crossing intersection";
     }
     const double remaining = stopAt - progress;
     const double stoppingSpeed = std::sqrt(2 * braking * std::max(0.0, remaining - 0.5));

@@ -3,6 +3,7 @@
 #include "pawn.hpp"
 #include "world_collision.hpp"
 #include "pawn_index.hpp"
+#include <functional>
 
 class GameWorld
 {
@@ -12,6 +13,7 @@ public:
     Pawn* Find(PawnHandle handle) const;
     bool Remove(PawnHandle handle);
     void Step(double seconds);
+    std::function<void(double)> prepareControllers; // Runs on the synchronized pre-physics snapshot.
     bool SphereBlocked(Vector3 center, double radius, PawnHandle ignore = 0) const;
     bool CharacterFits(Vector3 feet, PawnHandle ignore = 0) const;
     std::vector<Pawn*> NearbyPawns(const Bounds3& bounds, bool predicted = false) const;

@@ -3,6 +3,7 @@
 #include "game_world.hpp"
 #include "player.hpp"
 #include "traffic_driver.hpp"
+#include "traffic_junctions.hpp"
 
 class WorldRenderer;
 class CookedWorld;
@@ -40,6 +41,7 @@ private:
     TrafficNetwork traffic;
     static constexpr std::size_t maxTrafficCars = 64;
     std::vector<std::unique_ptr<TrafficDriver>> trafficDrivers;
+    std::unique_ptr<TrafficJunctions> junctionTraffic;
     bool trafficDebug = false;
     std::string trafficNotice;
     const TrafficNetwork& Traffic() const;

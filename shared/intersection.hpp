@@ -14,6 +14,7 @@ struct Intersection
     Vector3 position{};
     double cornerRadius = 6.0; // meters
     std::string material = RoadStyle::defaultMaterial;
+    std::array<TrafficControl, IntersectionAnchor::sideCount> trafficControls{}; // Stop by default; independent of paint.
     std::bitset<IntersectionAnchor::sideCount> stopLines{0b1111}; // One setting per anchor, including free anchors.
     static constexpr double stopLineWidth = 0.6; // Meters along the direction of travel.
     static constexpr double anchorDistance = 10.0; // Approach centerlines, in meters from the junction center.

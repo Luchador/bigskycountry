@@ -13,12 +13,19 @@ struct TrafficFollowing
     double braking = 3.0, acceleration = 2.5, responseTime = 1.5;
 };
 
-// Physical lane following and queues; junction entry and lane changes come later.
+// Physical lane following, queues and reserved intersection movements.
 class TrafficDriver : public PawnController
 {
 public:
     TrafficDriver(GameWorld& world, const TrafficLane& lane, double start, TrafficFollowing following = {});
     void Update(double seconds) override;
+    void SetNetwork(const TrafficNetwork* value) { network = value; }
+    void PrepareRoute();
+    const TrafficMovement* Movement() const;
+    double Entry() const { return entry; }
+    double Exit() const { return exit; }
+    bool JunctionGranted() const { return granted; }
+    void JunctionPermission(bool allow, const char* why) { granted = allow; junctionReason = why; }
     bool SimulationReady() const override { return !suspended; }
     const TrafficLane& Lane() const { return lane; }
     double Progress() const { return progress; }
@@ -32,7 +39,14 @@ public:
     bool suspended = false;
 
 private:
-    const TrafficLane& lane;
+    const TrafficLane* source;
+    TrafficLane lane; // Current lane + chosen turn + outgoing lane, for continuous lookahead.
+    const TrafficNetwork* network = nullptr;
+    std::optional<std::size_t> movement;
+    unsigned visits = 0;
+    double entry = 0, exit = 0;
+    bool granted = false;
+    const char* junctionReason = "Approaching junction";
     TrafficFollowing following;
     PawnHandle leader = 0;
     double gap = -1, desiredGap = 0;
