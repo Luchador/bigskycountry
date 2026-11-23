@@ -33,6 +33,17 @@ struct TrafficLane
     Vector3 Tangent(double distance) const;
     struct Projection { double distance = 0, error = 0; Vector3 position; };
     Projection Project(Vector3 point, double from = 0, double to = 1e30) const;
+
+private:
+    // Contiguous segment ranges preserve station-limited queries on loops.
+    // Derived by Measure(), alongside arc lengths; never written to the cook.
+    struct PathNode
+    {
+        Bounds3 bounds;
+        std::size_t first = 0, last = 0, left = 0, right = 0;
+    };
+    std::vector<PathNode> pathNodes;
+    std::size_t BuildPathNode(std::size_t first, std::size_t last);
 };
 
 struct TrafficMovement

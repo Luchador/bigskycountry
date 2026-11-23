@@ -15,6 +15,32 @@ void TrafficLane::Measure()
     distances.assign(points.size(), 0);
     for (std::size_t i = 1; i < points.size(); ++i)
         distances[i] = distances[i - 1] + Math::Length(points[i] - points[i - 1]);
+    pathNodes.clear();
+    if (points.size() > 1) BuildPathNode(1, points.size() - 1);
+}
+std::size_t TrafficLane::BuildPathNode(std::size_t first, std::size_t last)
+{
+    const auto index = pathNodes.size();
+    pathNodes.push_back({});
+    PathNode node;
+    node.first = first; node.last = last;
+    if (last - first < 8)
+    {
+        for (auto i = first - 1; i <= last; ++i) node.bounds.Include(points[i]);
+    }
+    else
+    {
+        const auto middle = first + (last - first) / 2;
+        node.left = BuildPathNode(first, middle);
+        node.right = BuildPathNode(middle + 1, last);
+        for (auto child : {node.left, node.right})
+        {
+            node.bounds.Include(pathNodes[child].bounds.min);
+            node.bounds.Include(pathNodes[child].bounds.max);
+        }
+    }
+    pathNodes[index] = node;
+    return index;
 }
 Vector3 TrafficLane::At(double distance) const
 {
@@ -33,21 +59,40 @@ Vector3 TrafficLane::Tangent(double distance) const
 TrafficLane::Projection TrafficLane::Project(Vector3 point, double from, double to) const
 {
     Projection best{0, std::numeric_limits<double>::infinity(), {}};
-    if (points.size() < 2 || distances.size() != points.size()) return best;
-    const auto first = std::upper_bound(distances.begin(), distances.end(), from);
-    for (std::size_t i = std::clamp<std::size_t>(first - distances.begin(), 1, points.size() - 1);
-         i < points.size() && distances[i - 1] <= to; ++i)
-    {
-        const double lo = std::max(from, distances[i - 1]), hi = std::min(to, distances[i]);
-        const double span = distances[i] - distances[i - 1];
-        if (hi < lo || span < 1e-8) continue;
-        const Vector3 delta = points[i] - points[i - 1];
-        const double t = std::clamp(Math::Dot(point - points[i - 1], delta) / (span * span),
-                                    (lo - distances[i - 1]) / span, (hi - distances[i - 1]) / span);
-        const Vector3 p = points[i - 1] + delta * t;
-        const double error = Math::Length(point - p);
-        if (error < best.error) best = {distances[i - 1] + t * span, error, p};
-    }
+    if (points.size() < 2 || distances.size() != points.size() || pathNodes.empty()) return best;
+    const auto first = std::clamp<std::size_t>(std::upper_bound(distances.begin(), distances.end(), from) - distances.begin(),
+                                              1, points.size() - 1);
+    auto bestSegment = points.size();
+    const auto visit = [&](const auto& self, std::size_t index) -> void {
+        const auto& node = pathNodes[index];
+        if (node.last < first || distances[node.first - 1] > to) return;
+        const double squaredError = best.error * best.error;
+        // A small tolerance keeps pruning conservative at large world coordinates.
+        if (BoundsDistanceSquared(node.bounds, point) > squaredError * (1 + 1e-12) + 1e-12) return;
+        if (node.left)
+        {
+            auto near = node.left, far = node.right;
+            if (BoundsDistanceSquared(pathNodes[far].bounds, point) < BoundsDistanceSquared(pathNodes[near].bounds, point))
+                std::swap(near, far);
+            self(self, near); self(self, far);
+            return;
+        }
+        for (auto i = std::max(first, node.first); i <= node.last && distances[i - 1] <= to; ++i)
+        {
+            const double lo = std::max(from, distances[i - 1]), hi = std::min(to, distances[i]);
+            const double span = distances[i] - distances[i - 1];
+            if (hi < lo || span < 1e-8) continue;
+            const Vector3 delta = points[i] - points[i - 1];
+            const double t = std::clamp(Math::Dot(point - points[i - 1], delta) / (span * span),
+                                        (lo - distances[i - 1]) / span, (hi - distances[i - 1]) / span);
+            const Vector3 p = points[i - 1] + delta * t;
+            const double error = Math::Length(point - p);
+            // Match the original forward scan when two segments are equally near.
+            if (error < best.error || (error == best.error && std::isfinite(error) && i < bestSegment))
+            { best = {distances[i - 1] + t * span, error, p}; bestSegment = i; }
+        }
+    };
+    visit(visit, 0);
     return best;
 }
 TrafficNetwork TrafficNetwork::Build(const WorldDocument& world)
