@@ -22,6 +22,7 @@ public:
     void SetNetwork(const TrafficNetwork* value) { network = value; }
     void PrepareRoute();
     const TrafficMovement* Movement() const;
+    unsigned JunctionVisit() const { return visits; }
     double Entry() const { return entry; }
     double Exit() const { return exit; }
     bool JunctionGranted() const { return granted; }

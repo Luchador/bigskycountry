@@ -77,8 +77,10 @@ void TrafficJunctions::Update(double seconds, const std::vector<std::unique_ptr<
         if (!car || !movement) continue;
         live.insert(car->Handle());
         auto& r = requests[car->Handle()];
-        if (r.move != movement) r = {};
-        r.driver = driver.get(); r.move = movement;
+        // A loop may choose the same movement on the next lap. Release the old
+        // reservation and restart arrival/stop timing for every new visit.
+        if (r.move != movement || r.visit != driver->JunctionVisit()) r = {};
+        r.driver = driver.get(); r.move = movement; r.visit = driver->JunctionVisit();
         r.distance = driver->Entry()-driver->Progress(); r.speed = std::max(0.0,car->Speed());
         r.entered = r.entered || r.distance <= 2.2; // Front bumper has crossed the mouth.
         if (r.distance <= 4.5 && r.speed < 0.2 && !driver->suspended)

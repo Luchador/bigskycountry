@@ -16,6 +16,7 @@ private:
     {
         TrafficDriver* driver = nullptr;
         const TrafficMovement* move = nullptr;
+        unsigned visit = 0;
         double arrived = -1, stopped = 0, distance = 0, speed = 0;
         bool reserved = false, entered = false, eligible = false, exitClear = false;
     };

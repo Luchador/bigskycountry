@@ -97,11 +97,14 @@ bool TrafficNetwork::Validate()
     {
         auto& m = movements[i];
         const auto* from = FindLane(m.from); const auto* to = FindLane(m.to);
+        // A road can loop back to this intersection at a different anchor. Its
+        // incoming and outgoing lane IDs then match; this is not a U-turn.
         if (!m.id || !ids.insert(m.id).second || m.junction <= 0 || (m.id >> 32) != unsigned(m.junction) ||
-            !from || !to || m.from == m.to || m.fromSide < 0 || m.fromSide >= 12 || m.toSide < 0 || m.toSide >= 12 ||
+            !from || !to || m.fromSide < 0 || m.fromSide >= 12 || m.toSide < 0 || m.toSide >= 12 ||
             m.fromSide == m.toSide || static_cast<unsigned>(m.control) > 2 || static_cast<unsigned>(m.turn) > 2 ||
             m.path.points.size() < 2 || !std::isfinite(m.path.speedLimit) || m.path.speedLimit <= 0 || m.path.speedLimit > 100)
-            return SDL_SetError("Invalid cooked intersection movement");
+            return SDL_SetError("Invalid cooked intersection movement (intersection %d, anchors %d -> %d)",
+                m.junction, m.fromSide, m.toSide);
         for (std::size_t j = 0; j < m.path.points.size(); ++j)
             if (!std::isfinite(Math::Length(m.path.points[j])) || (j && Math::Length(m.path.points[j]-m.path.points[j-1]) < 1e-8))
                 return SDL_SetError("Invalid intersection path samples");
