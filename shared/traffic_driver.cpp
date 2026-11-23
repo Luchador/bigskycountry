@@ -12,7 +12,7 @@ namespace
 {
     // Temporary performance diagnostic. Restore true to enable player-car
     // avoidance again; physical collisions and NPC-to-NPC detection stay active.
-    constexpr bool detectPlayerCars = false;
+    constexpr bool detectPlayerCars = true;
 }
 
 bool TrafficDriver::Detects(const Pawn& pawn)
