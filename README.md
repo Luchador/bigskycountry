@@ -6,6 +6,11 @@ The test car uses a rigid body with gravity, angular momentum, four raycast susp
 
 Use **W/S** to accelerate or brake/reverse, **A/D** to steer, **Space** for the handbrake, and **F** to enter or exit a stopped car. Steering becomes less sensitive at speed, with strong grip and roll assistance for arcade handling. The handbrake loosens the rear tires for tighter turns. The chase camera stays level with the horizon and follows heading smoothly.
 
+Brief **A/D** taps make small steering corrections. Keyboard steering starts at
+15% strength and smoothly reaches full strength after holding the same direction
+for 0.5 seconds. Releasing, pressing both keys, or reversing direction resets the
+ramp. The tap strength and rise time are defined in `shared/player_controller.cpp`.
+
 `CarHandling` in `shared/car.hpp` holds mass, center of mass, speed limits, braking, grip, suspension, steering, and roll assistance. `Vehicle::acceleration` controls drive acceleration. Distances are engine meters, speeds are meters per second, and angles are radians. Physics advances inside the existing 60 Hz game step, with smaller substeps for suspension stability and fast impacts. `shared/rigid_body.*` supplies reusable force, torque, integration, and collision-impulse code.
 
 Walking or driving below the original spawn elevation does not reset the player. After an unsupported fall of more than 100 m with no landing surface below, recovery returns the controlled pawn to its most recent supported position and clears its velocity. Drivers stay in their cars. Streamed-world bounds protect landing areas whose collision is not loaded yet; after recovery, physics waits for collision at the return location. The game controls/status bar is at the top of the viewport, with **F3** diagnostics below it. While driving, a bottom-right speedometer shows speed in km/h with a dial and numeric readout; reverse speed is shown as a positive value. It disappears on foot and while using the debug camera.

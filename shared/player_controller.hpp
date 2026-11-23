@@ -14,7 +14,12 @@ public:
     PlayerController& operator=(const PlayerController&) = delete;
     bool Possess(PawnHandle handle) override;
     void Input(const GameplayActions& actions);
+    void Update(double seconds) override;
     void StopInput();
     void ConsumePresses();
     PlayerCamera camera;
+
+private:
+    double SteeringInput() const;
+    double steeringDirection = 0, steeringHeldSeconds = 0;
 };
