@@ -74,11 +74,13 @@ void TrafficDriver::PrepareRoute()
 double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, bool& emergency)
 {
     Bounds3 corridor;
-    for (double d = progress; d < scan; d += 3) corridor.Include(lane.At(d));
-    corridor.Include(lane.At(scan));
+    for (double d = progress; d < scan; d += 3) corridor.Include(DrivingPoint(d));
+    corridor.Include(DrivingPoint(scan));
     corridor.min = corridor.min - Vector3{3,1,3}; corridor.max = corridor.max + Vector3{3,3,3};
     double limit = lane.speedLimit;
     desiredGap = following.standstillGap + following.timeHeadway * speed;
+    const auto ownRight = Math::Normalize(Math::Cross({0,1,0}, lane.Tangent(progress)));
+    const double ownError = Math::Dot(car.GetTransform().position - DrivingPoint(progress), ownRight);
     // The grid uses velocity-swept bounds. Crossing players are candidates before
     // their current body reaches the lane; exact heights reject other decks.
     for (const auto* other : world.NearbyPawns(corridor, true))
@@ -103,7 +105,10 @@ double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, 
             const double time = predictions ? PawnIndex::predictionSeconds * sample / predictions : 0;
             Vector3 position = pose.origin + velocity * time;
             if (sample && driver && !frozen)
-                position = driver->Lane().At(otherStation + std::max(0.0, otherCar ? otherCar->Speed() : 0.0) * time);
+                // Retain tracking error: deciding to pull aside is not the same
+                // as already having moved clear of the approaching vehicle.
+                position = driver->DrivingPoint(otherStation + std::max(0.0, otherCar ? otherCar->Speed() : 0.0) * time)
+                         + (pose.origin - driver->DrivingPoint(otherStation));
             const auto p = sample ? lane.Project(position, std::max(0.0, progress - 6), scan + 8) : current;
             const auto forward = lane.Tangent(p.distance);
             const auto right = Math::Normalize(Math::Cross({0,1,0}, forward));
@@ -113,7 +118,7 @@ double TrafficDriver::FollowingSpeed(const Car& car, double speed, double scan, 
                 std::abs(Math::Dot(pose.x, forward)) + std::abs(Math::Dot(pose.y, forward)) * 0.85 : 0.35;
             const double halfWidth = otherCar ? std::abs(Math::Dot(pose.z, right)) * 2.2 +
                 std::abs(Math::Dot(pose.x, right)) + std::abs(Math::Dot(pose.y, right)) * 0.85 : 0.35;
-            const double lateral = std::abs(Math::Dot(position - p.position, right));
+            const double lateral = std::abs(Math::Dot(position - DrivingPoint(p.distance), right) - ownError);
             if (lateral > 1.0 + halfWidth + 0.25) continue;
             const double along = p.distance - progress + Math::Dot(position - p.position, forward);
             if (along < 0 || along > scan - progress + 6) continue;
@@ -152,15 +157,24 @@ void TrafficDriver::Update(double seconds)
     progress = std::max(progress, projection.distance);
     targetSpeed = 0;
     leader = 0; gap = -1; desiredGap = 0;
-    if (suspended || projection.error > std::max(1.5, lane.width * 0.5 - 0.35) || frame.y.y < 0.6)
+    if (suspended || projection.error > std::max(1.5, lane.WidthAt(progress) * 0.5 - 0.35) || frame.y.y < 0.6)
     {
         reason = suspended ? "Waiting for collision" : "Off lane - stopped";
         input.brake = 1; Command(input); return;
     }
     const double speed = std::max(0.0, car->Speed());
-    const double look = std::clamp(5.0 + speed * 0.85, 5.0, 20.0);
-    lookAhead = lane.At(progress + look);
-    const Vector3 local = frame.Unrotate(lookAhead - frame.origin);
+    UpdatePassing(seconds, speed);
+    // A long lookahead cuts across tight corners on shared narrow pavement.
+    const double look = std::lerp(std::clamp(5.0 + speed * 0.85, 5.0, 20.0),
+        std::clamp(4.0 + speed * 0.5, 4.0, 10.0), Narrowness(progress));
+    lookAhead = DrivingPoint(progress + look);
+    Vector3 local = frame.Unrotate(lookAhead - frame.origin);
+    // Anticipate the body's yaw response to avoid swaying across a narrow road
+    // while straightening up after a turn.
+    const double yaw = Math::Dot(car->AngularVelocity(), frame.y) * 0.35 * Narrowness(progress);
+    const double lateral = local.x * std::cos(yaw) - local.z * std::sin(yaw);
+    local.z = local.x * std::sin(yaw) + local.z * std::cos(yaw);
+    local.x = lateral;
     const double steering = std::atan2(2.0 * 2.7 * local.x, std::max(1.0, local.x * local.x + local.z * local.z));
     input.right = std::clamp(steering / std::max(0.01, car->SteeringLimit()), -1.0, 1.0);
 
@@ -170,6 +184,11 @@ void TrafficDriver::Update(double seconds)
     if (!destination && laneWaitDistance >= 0) stopAt = std::min(stopAt,laneWaitDistance);
     targetSpeed = lane.speedLimit;
     reason = highwayReason ? highwayReason : "Following lane";
+    // Finish recovering the lane center before accelerating out of a tight
+    // turn; narrow pavement leaves little room for an overshoot.
+    const double tracking = Math::Length(frame.origin - DrivingPoint(progress));
+    const double recovery = Narrowness(progress) * std::clamp((tracking - 0.1) / 0.5, 0.0, 1.0);
+    targetSpeed = std::min(targetSpeed, std::lerp(lane.speedLimit, 3.0, recovery));
     // Plan braking for curves, not just the curvature under the car.
     for (double d = 0; d <= 60; d += 3)
     {
@@ -180,11 +199,22 @@ void TrafficDriver::Update(double seconds)
         const double cornerSpeed = std::sqrt(2.0 / std::max(1e-5, curvature));
         const double allowed = std::sqrt(cornerSpeed * cornerSpeed + 2 * braking * std::max(0.0, d - 5));
         if (allowed < targetSpeed) { targetSpeed = allowed; reason = "Slowing for curve"; }
+        const double narrow = Narrowness(progress + d);
+        if (narrow > 0)
+        {
+            const double narrowSpeed = std::lerp(lane.speedLimit, passingHold > 0 ? 4.4704 : 8.9408, narrow);
+            const double allowedNarrow = std::sqrt(narrowSpeed * narrowSpeed + 2 * braking * std::max(0.0, d - 5));
+            if (allowedNarrow < targetSpeed)
+            {
+                targetSpeed = allowedNarrow;
+                reason = passingHold > 0 ? "Passing oncoming traffic" : "Narrow road";
+            }
+        }
     }
     const double scan = std::min(lane.Length(), progress + std::max(18.0, speed * speed / (2 * braking) + speed + 10));
     for (double d = progress; d <= scan; d += 2)
     {
-        const Vector3 p = lane.At(d);
+        const Vector3 p = DrivingPoint(d);
         if (collisionReady && !collisionReady(p))
         {
             stopAt = std::min(stopAt, d - bumperMargin - 4); reason = "Waiting for collision"; break;

@@ -31,7 +31,7 @@ bool TrafficNetwork::LaneChange(const TrafficLane& from, double start, const Tra
         start+length+3 > from.Length()) return false;
     const auto begin = to.Project(from.At(start));
     if (begin.distance < 1 || begin.distance+length+8 > to.Length()) return false;
-    path = {}; path.width = std::min(from.width,to.width);
+    path = {}; path.width = std::min(from.WidthAt(start),to.WidthAt(begin.distance));
     path.speedLimit = std::min(from.speedLimit,to.speedLimit);
     const int count = std::clamp(static_cast<int>(std::ceil(length/2)), 8, 256);
     double last = begin.distance;

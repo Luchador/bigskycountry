@@ -152,6 +152,7 @@ namespace
             w.U64(lane.id); w.U32(lane.roadId); w.U32(lane.direction > 0 ? 1 : 0); w.U32(lane.ordinal);
             w.F64(lane.width); w.F64(lane.speedLimit);
             w.Count(lane.points.size()); for (auto point : lane.points) w.Vec(point);
+            w.Count(lane.widths.size()); for (auto width : lane.widths) w.F64(width);
         }
         w.Count(m.traffic.movements.size());
         for (const auto& move : m.traffic.movements)
@@ -353,6 +354,8 @@ bool Reader::Open(const std::string& file)
                 lane.roadId = static_cast<int>(road); lane.direction = forward ? 1 : -1; lane.ordinal = static_cast<int>(ordinal);
                 lane.width = r.F64(); lane.speedLimit = r.F64();
                 for (auto count = r.Count(24); count; --count) lane.points.push_back(r.Vec());
+                if (fileVersion >= 8)
+                    for (auto count = r.Count(8); count; --count) lane.widths.push_back(r.F64());
                 m.traffic.lanes.push_back(std::move(lane));
             }
             if (fileVersion >= 6)

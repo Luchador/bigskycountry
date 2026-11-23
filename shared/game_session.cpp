@@ -297,7 +297,11 @@ bool GameSession::SpawnTrafficCar(const TrafficLane& lane, double start, bool au
         return fail("Place the test car within 250 m of the player.");
     if (streaming && !streaming->CollisionReady(position, 32))
         return fail("Move closer and wait for collision to load before placing the test car.");
-    auto car = std::make_unique<Car>();
+    CarHandling handling;
+    // Traffic needs enough low-speed steering lock for narrow junctions. The
+    // driver still requests the actual steering angle needed by each curve.
+    handling.steeringAngle = 0.5;
+    auto car = std::make_unique<Car>(handling);
     const auto tangent = lane.Tangent(start);
     ObjectTransform pose{position, {0, std::atan2(tangent.x, tangent.z), 0}};
     if (!car->PlaceOnGround(world, pose, 3.0) || std::abs(pose.position.y-position.y)>0.5)
@@ -324,7 +328,7 @@ bool GameSession::SpawnTrafficCar(const TrafficLane& lane, double start, bool au
             {
                 const double seconds = 2.5*i/samples;
                 auto predicted = other->GetTransform().position+velocity*seconds;
-                if (driver && !frozen) predicted = driver->Lane().At(driver->Progress()+speed*seconds);
+                if (driver && !frozen) predicted = driver->DrivingPoint(driver->Progress()+speed*seconds);
                 const auto delta = predicted-position;
                 if (std::abs(delta.y)<2 && std::hypot(delta.x,delta.z)<6)
                     return fail("Leave more space for nearby or approaching cars.");

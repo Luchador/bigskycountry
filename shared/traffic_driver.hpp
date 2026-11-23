@@ -39,6 +39,7 @@ public:
     double Progress() const { return progress; }
     double TargetSpeed() const { return targetSpeed; }
     Vector3 LookAhead() const { return lookAhead; }
+    Vector3 DrivingPoint(double distance) const; // Includes the current cautious passing offset.
     const char* Reason() const { return reason; }
     PawnHandle Leader() const { return leader; }
     double Gap() const { return gap; } // -1 when no blocker was found.
@@ -75,6 +76,10 @@ private:
     PawnHandle leader = 0;
     double gap = -1, desiredGap = 0;
     double FollowingSpeed(const Car& car, double speed, double scan, bool& emergency);
+    void UpdatePassing(double seconds, double speed);
+    double Narrowness(double distance) const;
+    double PassingWeight(double distance) const;
+    double passingOffset = 0, passingHold = 0, passingCheck = 0, passingTarget = 0;
     double progress = 0, targetSpeed = 0;
     double lastSupportHeight = 0;
     Vector3 lookAhead{};

@@ -24,7 +24,7 @@ namespace
         const auto incoming = from.Tangent(from.Length()), outgoing = to.Tangent(0);
         const double distance = Math::Length(d-a);
         if (distance < 1) return false;
-        for (double factor : {0.4, 0.3, 0.5, 0.65})
+        for (double factor : {0.4, 0.3, 0.5, 0.55, 0.6, 0.65})
         {
             const auto b = a + incoming * (distance * factor), c = d - outgoing * (distance * factor);
             path.points.clear();
@@ -39,7 +39,10 @@ namespace
             for (double s = 0.5; s < path.Length()-0.5; s += 0.5)
             {
                 const auto p = path.At(s), tangent = path.Tangent(s);
-                const auto side = Math::Normalize(Math::Cross({0,1,0}, tangent)) * 1.25;
+                // Shared one-lane approaches have less spare pavement, but
+                // must still fit the 2 m car body with a small edge clearance.
+                const double clearance = std::clamp(path.width * .5 - .15, 1.05, 1.25);
+                const auto side = Math::Normalize(Math::Cross({0,1,0}, tangent)) * clearance;
                 if (!OnPavement(surface, p) || !OnPavement(surface, p-side) || !OnPavement(surface, p+side))
                 { valid = false; break; }
                 // Reject a hairpin that the test car cannot follow at low speed.
@@ -108,8 +111,10 @@ void TrafficNetwork::BuildMovements(const WorldDocument& world)
                     m.id = (std::uint64_t(id) << 32) | ++local; m.junction = id;
                     m.from = from.id; m.to = to.id; m.fromSide = a; m.toSide = b;
                     m.control = junction.trafficControls[a]; m.turn = turn;
-                    m.path.width = std::min(from.width, to.width);
+                    m.path.width = std::min(from.WidthAt(from.Length()), to.WidthAt(0));
                     m.path.speedLimit = std::min({from.speedLimit, to.speedLimit, turn == TrafficTurn::Straight ? 13.4112 : 7.0});
+                    if (turn != TrafficTurn::Straight && m.path.width < 3.5)
+                        m.path.speedLimit = std::min(m.path.speedLimit, 3.0);
                     if (MakeTurn(m.path, from, to, surface->second.geometry)) movements.push_back(std::move(m));
                 }
             }

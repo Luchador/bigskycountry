@@ -349,7 +349,7 @@ struct Road : RoadGeometry
     // World-space centers of the surfaced lanes, sampled in spline order. On multi-lane
     // roads the configured lanes run right to left, followed by any ramp taper lanes.
     std::vector<std::vector<Vector3>> laneCenterlines;
-    std::vector<RoadTrafficPath> trafficPaths; // Full-width through lanes; no shoulders or center turn lanes.
+    std::vector<RoadTrafficPath> trafficPaths; // Directed travel paths, including shared one-lane roads; no center turn lanes.
     // Same indices as the outer lane centerlines, including equal-distance bevel stations.
     std::array<std::vector<double>, 2> outerLaneDistances;
     std::array<std::vector<Vector3>, 2> outerLaneCenterlines; // Independent of lane guide runs through tapers.

@@ -32,10 +32,9 @@ or physics behavior. Profiling timers are disabled when F3 is hidden.
 
 ## Trying it
 
-1. Rebuild the game and editor in **Release**. Automatic population works with the
-   existing milestone 4 cook; no additional recook is needed for this update.
-   If upgrading an older world, save and use **File → Cook World** to add traffic
-   lanes, intersections, ramps and road-end connections.
+1. Rebuild the game and editor in **Release**, then use **File → Cook World**
+   to include two-way traffic on one-lane roads and their changing width profiles.
+   Older cooks still load but do not contain the new one-lane routes.
    Select each intersection anchor to set **Traffic control: Stop/Yield/Priority**.
    Existing intersections default to Stop on every approach. Controls and stop-line
    paint are independent; both save and support undo/redo.
@@ -75,7 +74,9 @@ road's elevation; there is no connection to a road underneath.
 
 Through lanes follow right-hand traffic. Center turn lanes and shoulders are not
 through lanes. One-way roads (including ramps) support one or more lanes. Shared
-two-way single-lane roads are excluded until passing/yielding behavior exists.
+two-way single-lane roads have one directed path in each half of the pavement,
+including roads with paint disabled. The paths blend into wider lane configurations
+without ending at a one/two-lane transition. Added single-lane width is respected.
 New or disappearing lanes are limited to their full-width portions. Drivers merge
 before a disappearing lane's full-width portion ends, and can use newly added
 lanes after they are wide enough. Through-lane paths continue smoothly through
@@ -88,7 +89,7 @@ are valid within a cooked network revision. Editing a road's topology can change
 its local path IDs, so future persisted traffic must also identify the network
 revision. This milestone does not persist NPC state.
 
-Cooked format **v7** stores the directed paths, road IDs, lane ordinals, widths,
+Cooked format **v8** stores the directed paths, road IDs, lane ordinals, widths,
 and initial speed limits in the manifest. The reader validates ownership,
 identity, finite coordinates, dimensions, and nonzero segments. Runtime traffic
 uses this resident metadata without loading/rebuilding authored roads. It is
@@ -97,11 +98,36 @@ Version 6 adds stable movement IDs (junction ID/local path ID), source/destinati
 lane IDs, approach IDs, controls, turn type, speed caps, and sampled turn paths.
 Conflict lists and lookup indices are derived once on load, not each frame.
 Version 7 adds directed road-end and ramp links, source/destination lane stations,
-connection kind, and sampled taper paths. Older packages still load; v5 has lanes
+connection kind, and sampled taper paths. Version 8 adds optional per-sample
+directional widths, so narrow-road behavior applies only to narrow sections.
+Older packages still load; v5 has lanes
 and v6 adds intersections, but neither contains highway connections. Recook to
 enable the complete milestone. Authored `INTS` v10
 stores the twelve approach controls; older intersections default to Stop.
 The editor caches its overlay until a road revision or control changes.
+
+## Passing on one-lane roads
+
+Cars normally keep to their right-hand half of the shared pavement. On the default
+5 m road they slow to 20 mph, then to 10 mph for nearby oncoming cars (including
+the player's vehicle). These are maximum targets; curves, queues, obstructions,
+and junction rules can require a lower speed or a stop.
+
+During an encounter, each driver can ease up to 0.45 m farther right and returns
+after both cars pass. This can put part of the car over the pavement edge. The
+shift requires loaded, nearly level supporting ground across the car's width and
+no static obstacle ahead. If the verge is absent or blocked, cars keep their
+normal path and use the existing collision-avoidance brakes when necessary.
+They do not steer off a bridge or into a ditch to force a pass. Close passing does
+not permit overtaking a same-direction queue or crossing the opposing route.
+
+The offset fades out before intersection mouths so reserved turning paths remain
+valid. Narrow turns are capped at 3 m/s (about 7 mph); traffic has additional
+low-speed steering lock and waits to recover its path before accelerating out.
+Width and caution blend through lane-count transitions. Oncoming detection
+uses the existing local pawn index and runs at 5 Hz only near narrow sections;
+steering remains smooth each simulation tick. Ordinary one-way ramps retain their
+existing single path and behavior.
 
 ## Turns and right-of-way
 

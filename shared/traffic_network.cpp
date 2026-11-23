@@ -56,6 +56,15 @@ Vector3 TrafficLane::Tangent(double distance) const
 {
     return Math::Normalize(At(distance + 0.5) - At(distance - 0.5));
 }
+double TrafficLane::WidthAt(double distance) const
+{
+    if (widths.size() != points.size() || widths.size() < 2 || distances.size() != points.size()) return width;
+    distance = std::clamp(distance, 0.0, Length());
+    const auto next = std::upper_bound(distances.begin(), distances.end(), distance);
+    const auto i = std::clamp<std::size_t>(next - distances.begin(), 1, points.size() - 1);
+    const double span = distances[i] - distances[i - 1];
+    return std::lerp(widths[i - 1], widths[i], span > 0 ? (distance - distances[i - 1]) / span : 0);
+}
 TrafficLane::Projection TrafficLane::Project(Vector3 point, double from, double to) const
 {
     Projection best{0, std::numeric_limits<double>::infinity(), {}};
@@ -109,8 +118,12 @@ TrafficNetwork TrafficNetwork::Build(const WorldDocument& world)
             TrafficLane lane;
             lane.id = (std::uint64_t(road.id) << 32) | local;
             lane.roadId = road.id; lane.direction = source.direction; lane.ordinal = source.ordinal;
-            lane.width = source.width; lane.points = source.points;
-            if (lane.direction < 0) std::reverse(lane.points.begin(), lane.points.end());
+            lane.width = source.width; lane.points = source.points; lane.widths = source.widths;
+            if (lane.direction < 0)
+            {
+                std::reverse(lane.points.begin(), lane.points.end());
+                std::reverse(lane.widths.begin(), lane.widths.end());
+            }
             lane.Measure();
             if (lane.Length() >= 0.05) network.lanes.push_back(std::move(lane));
         }
@@ -131,6 +144,9 @@ bool TrafficNetwork::Validate()
             !std::isfinite(lane.width) || lane.width < 2 || lane.width > 100 || !std::isfinite(lane.speedLimit) ||
             lane.speedLimit <= 0 || lane.speedLimit > 100 || lane.points.size() < 2)
             return SDL_SetError("Invalid cooked traffic lane");
+        if ((!lane.widths.empty() && lane.widths.size() != lane.points.size()) ||
+            std::ranges::any_of(lane.widths, [](double w) { return !std::isfinite(w) || w < 2 || w > 100; }))
+            return SDL_SetError("Invalid cooked traffic lane widths");
         for (std::size_t i = 0; i < lane.points.size(); ++i)
             if (!std::isfinite(Math::Length(lane.points[i])) || (i && Math::Length(lane.points[i] - lane.points[i - 1]) < 1e-8))
                 return SDL_SetError("Invalid traffic path samples");
@@ -159,7 +175,7 @@ bool TrafficNetwork::Validate()
         link.path.Measure();
         if (!std::isfinite(link.path.Length()) || link.path.Length() < 0.05 || link.path.Length() > 10000)
             return SDL_SetError("Invalid highway connection length");
-        link.path.width = std::min(from->width, to->width);
+        link.path.width = std::min(from->WidthAt(link.fromDistance), to->WidthAt(link.toDistance));
         connections[link.from].push_back(i);
     }
     ids.clear();
@@ -183,7 +199,7 @@ bool TrafficNetwork::Validate()
         m.path.Measure();
         if (!std::isfinite(m.path.Length()) || m.path.Length() < 0.05 || m.path.Length() > 10000)
             return SDL_SetError("Invalid intersection path length");
-        m.path.width = std::min(from->width,to->width);
+        m.path.width = std::min(from->WidthAt(from->Length()),to->WidthAt(0));
         m.conflicts.clear(); outgoing[m.from].push_back(i);
     }
     // Precompute swept-path conflicts once. A 2.8 m corridor includes body width

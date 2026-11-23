@@ -7,14 +7,17 @@
 
 namespace
 {
-    void Append(std::vector<Vector3>& points, Vector3 p)
-    { if (points.empty() || Math::Length(points.back()-p) > 1e-8) points.push_back(p); }
-    void Slice(std::vector<Vector3>& points, const TrafficLane& path, double from, double to)
+    void Append(TrafficLane& lane, Vector3 p, double width)
     {
-        Append(points,path.At(from));
+        if (lane.points.empty() || Math::Length(lane.points.back()-p) > 1e-8)
+        { lane.points.push_back(p); lane.widths.push_back(width); }
+    }
+    void Slice(TrafficLane& lane, const TrafficLane& path, double from, double to)
+    {
+        Append(lane,path.At(from),path.WidthAt(from));
         auto i = std::upper_bound(path.distances.begin(),path.distances.end(),from);
-        for (; i != path.distances.end() && *i < to; ++i) Append(points,path.points[i-path.distances.begin()]);
-        Append(points,path.At(to));
+        for (; i != path.distances.end() && *i < to; ++i) Append(lane,path.points[i-path.distances.begin()],path.WidthAt(*i));
+        Append(lane,path.At(to),path.WidthAt(to));
     }
 }
 
@@ -23,10 +26,10 @@ void TrafficDriver::JoinRoute(const TrafficLane& path, const TrafficLane& to, do
     maneuver = path; destination = &to; destinationStation = end;
     laneWaitDistance = -1;
     entry = start; exit = start+path.Length();
-    lane = *source; lane.points.clear();
-    Slice(lane.points,*source,0,start);
-    for (auto p : path.points) Append(lane.points,p);
-    Slice(lane.points,to,end,to.Length());
+    lane = *source; lane.points.clear(); lane.widths.clear();
+    Slice(lane,*source,0,start);
+    Slice(lane,path,0,path.Length());
+    Slice(lane,to,end,to.Length());
     lane.speedLimit = std::min(source->speedLimit,to.speedLimit);
     lane.Measure();
 }
@@ -173,7 +176,7 @@ bool TrafficDriver::GapAvailable(const TrafficLane& path, const TrafficLane& to,
         {
             const double t=duration*i/16, at=path.Length()*i/16;
             auto q=pose.origin+velocity*t;
-            if (driver && !frozen) q=driver->Lane().At(driver->Progress()+std::max(0.0,otherCar ? otherCar->Speed() : 0.0)*t);
+            if (driver && !frozen) q=driver->DrivingPoint(driver->Progress()+std::max(0.0,otherCar ? otherCar->Speed() : 0.0)*t);
             const auto own=path.At(at), tangent=path.Tangent(at), right=Math::Normalize(Math::Cross({0,1,0},tangent));
             const auto delta=q-own;
             if (std::abs(delta.y)<2 && std::abs(Math::Dot(delta,right))<width+1.2 &&

@@ -115,6 +115,14 @@ Choose **Special → Spawn Point** to place `assets/models/editor/start.glb` at 
 
 When the game starts, the test car appears at the spawn point and the on-foot player appears beside it. Nearby ground adjusts their resting height; an unsupported placement starts there under gravity. The game keeps its automatic spawn selection when the world has no spawn point. Save and use **File → Cook World** after changing the spawn point so streamed games use the new placement. Cooked format version 3 stores its location and heading as startup metadata; version 2 packages continue to load with automatic startup locations.
 
+### Traffic on one-lane roads
+
+Two-way one-lane roads now support NPC traffic in both directions, including
+unpainted roads. Cars keep right, slow down when meeting oncoming vehicles, and
+can ease slightly onto a supported verge for clearance. One/two-lane transitions
+remain connected. Rebuild in Release and **recook the world** to generate these
+routes. See [traffic implementation](docs/traffic.md#passing-on-one-lane-roads).
+
 ### Traffic intersections (milestone 3)
 
 **View → Traffic Lanes** shows directed lane paths in the editor's 2D and 3D
