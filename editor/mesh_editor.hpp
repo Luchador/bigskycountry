@@ -22,20 +22,37 @@ public:
 
 private:
     SDL_FRect View() const;
+    SDL_FRect Panel() const;
+    SDL_FRect Divider() const;
+    SDL_FRect SlotClip() const;
+    SDL_FRect LODButton() const;
     SDL_FRect Slot(std::size_t i) const;
     SDL_FRect Clear(std::size_t i) const;
     void Frame();
+    void ClampScroll();
+    void SetResizeCursor(bool active);
+    void CancelPointer();
+    bool HandleMenu(const SDL_Event& event);
+    bool DrawMenu();
     void DestroyThumbnails();
     bool UpdateThumbnails();
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     std::unique_ptr<WorldRenderer> preview;
     MeshInstance instance;
+    MeshInstance vertexInstance; // Private, untextured preview; never changes the asset.
     TextureCatalog* catalog = nullptr;
     std::string path, status;
     CameraView camera;
     double yaw = 0, pitch = 0, distance = 3;
     float scroll = 0;
+    float panelWidth = 280, panelDragStart = 280;
+    std::optional<float> panelGrab;
+    SDL_Cursor* resizeCursor = nullptr;
+    enum class ViewMode { Lit, VertexColors };
+    ViewMode viewMode = ViewMode::Lit;
+    bool menuOpen = false;
+    int menuRow = 0;
     int previewLOD = -1; // Auto, then each authored LOD.
     std::optional<SDL_FPoint> orbit;
     std::optional<std::size_t> hover;

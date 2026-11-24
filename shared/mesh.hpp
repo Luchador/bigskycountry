@@ -78,6 +78,8 @@ struct Mesh
     void UpdateBounds();
     std::string assetPath; // Relative to assets/models.
     std::vector<MeshVertex> vertices;
+    // Imported COLOR_0, before material tint. Optional; used by mesh inspection.
+    std::vector<SDL_FColor> vertexColors;
     std::vector<std::uint32_t> indices; // Triangle list; front winding matches the world renderer.
     std::vector<MeshPart> parts; // Imported primitive ranges, including their generated back faces.
     std::shared_ptr<MeshMaterials> materials;

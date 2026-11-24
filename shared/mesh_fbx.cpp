@@ -39,6 +39,7 @@ namespace
                 for (std::size_t i = 0; i < count * 3u; i += 3)
                 {
                     MeshVertex face[3]{};
+                    SDL_FColor colors[3]{};
                     for (std::size_t j = 0; j < 3; ++j)
                     {
                         const auto index = triangles[i + (mirrored && j ? 3 - j : j)];
@@ -54,18 +55,23 @@ namespace
                             v.uv = {float(uv.x), float(1 - uv.y)};
                         }
                         const auto color = source.vertex_color.exists ? ufbx_get_vertex_vec4(&source.vertex_color, index) : ufbx_vec4{1, 1, 1, 1};
+                        colors[j] = {float(color.x), float(color.y), float(color.z), 1};
                         v.color = {float(color.x * tint.x), float(color.y * tint.y), float(color.z * tint.z), 1};
                         if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) ||
                             !std::isfinite(v.uv.x) || !std::isfinite(v.uv.y) || !std::isfinite(v.color.r) ||
-                            !std::isfinite(v.color.g) || !std::isfinite(v.color.b))
+                            !std::isfinite(v.color.g) || !std::isfinite(v.color.b) ||
+                            !std::isfinite(colors[j].r) || !std::isfinite(colors[j].g) || !std::isfinite(colors[j].b))
                             return SDL_SetError("Non-finite FBX vertex");
                     }
                     mesh.vertices.insert(mesh.vertices.end(), std::begin(face), std::end(face));
+                    mesh.vertexColors.insert(mesh.vertexColors.end(), std::begin(colors), std::end(colors));
                     if (twoSided)
                     {
                         for (auto& v : face) v.normal = v.normal * -1;
                         std::swap(face[1], face[2]);
+                        std::swap(colors[1], colors[2]);
                         mesh.vertices.insert(mesh.vertices.end(), std::begin(face), std::end(face));
+                        mesh.vertexColors.insert(mesh.vertexColors.end(), std::begin(colors), std::end(colors));
                     }
                 }
             }
@@ -93,12 +99,16 @@ namespace
         }
         if (mesh.vertices.empty()) return SDL_SetError("No triangles in FBX LOD %zu", level);
         mesh.indices.resize(mesh.vertices.size());
-        const ufbx_vertex_stream stream{mesh.vertices.data(), mesh.vertices.size(), sizeof(MeshVertex)};
+        const ufbx_vertex_stream streams[] = {
+            {mesh.vertices.data(), mesh.vertices.size(), sizeof(MeshVertex)},
+            {mesh.vertexColors.data(), mesh.vertexColors.size(), sizeof(SDL_FColor)}};
         ufbx_error error{};
-        const auto count = ufbx_generate_indices(&stream, 1, mesh.indices.data(), mesh.indices.size(), nullptr, &error);
+        const auto count = ufbx_generate_indices(streams, 2, mesh.indices.data(), mesh.indices.size(), nullptr, &error);
         if (!count) return SDL_SetError("Could not index FBX vertices: %s", error.description.data);
         mesh.vertices.resize(count);
         mesh.vertices.shrink_to_fit();
+        mesh.vertexColors.resize(count);
+        mesh.vertexColors.shrink_to_fit();
         mesh.UpdateBounds();
         return true;
     }

@@ -156,6 +156,8 @@ namespace
             v.normal = Math::Normalize(normalTransform.Direction({n[0], n[1], n[2]}));
             v.uv = {st[0], st[1]};
 
+            mesh.vertexColors.push_back({rgba[0], rgba[1], rgba[2], 1});
+
             if (p.material && p.material->has_pbr_metallic_roughness)
             {
                 const auto& factor = p.material->pbr_metallic_roughness.base_color_factor;
@@ -197,6 +199,7 @@ namespace
                 auto back = mesh.vertices[i];
                 back.normal = back.normal * -1;
                 mesh.vertices.push_back(back);
+                mesh.vertexColors.push_back(mesh.vertexColors[i]);
             }
             const size_t end = mesh.indices.size();
             for (size_t i = firstIndex; i < end; i += 3)
