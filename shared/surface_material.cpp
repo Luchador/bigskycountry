@@ -39,7 +39,7 @@ std::size_t SurfaceMaterialCache::Bytes() const
 }
 std::size_t SurfaceMaterialCache::TextureCount() const
 {
-    return std::count_if(textures.begin(), textures.end(), [](const auto& e) { return e.second && e.first.first.front() != ':'; });
+    return std::count_if(textures.begin(), textures.end(), [](const auto& e) { return e.second && e.first.path.front() != ':'; });
 }
 void SurfaceMaterialCache::Run()
 {
@@ -55,7 +55,7 @@ void SurfaceMaterialCache::Run()
         Completion done; done.job = request;
         try
         {
-            if (!done.image.Load(DdsTexture::CookedPath(request.key.first, request.key.second), request.key.second))
+            if (!done.image.Load(DdsTexture::CookedPath(request.key.path, request.key.format, request.key.preserveCoverage), request.key.format))
                 done.error = SDL_GetError();
         }
         catch (const std::exception& e) { done.error = e.what(); }
@@ -118,7 +118,7 @@ void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
             else
             {
                 textures.try_emplace(done->job.key); // Failed maps use neutral fallback until Refresh.
-                SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Streaming texture '%s': %s", done->job.key.first.c_str(), done->error.c_str());
+                SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Streaming texture '%s': %s", done->job.key.path.c_str(), done->error.c_str());
             }
         }
     }
@@ -133,7 +133,7 @@ void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
         auto victim = textures.end();
         for (auto it = textures.begin(); it != textures.end(); ++it)
         {
-            if (!it->second || it->first.first.front() == ':' || it->second->lastUsed + 1 >= frame) continue;
+            if (!it->second || it->first.path.front() == ':' || it->second->lastUsed + 1 >= frame) continue;
             if (bytes <= budget) continue;
             if (victim == textures.end() || it->second->lastUsed < victim->second->lastUsed) victim = it;
         }
@@ -145,7 +145,7 @@ void SurfaceMaterialCache::BeginFrame(SDL_GPUDevice* target, std::size_t budget)
     if (bindingsChanged) materials.clear();
 }
 
-const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path, MaterialSlot slot, bool whiteEmission)
+const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path, MaterialSlot slot, bool whiteEmission, bool preserveCoverage)
 {
     // Both layers share the same texture formats, cache entries and neutral maps.
     if (slot == MaterialSlot::OuterBaseColor) slot = MaterialSlot::BaseColor;
@@ -157,7 +157,7 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
     const auto format = formats[index];
     // ':' cannot occur in an asset path. Give each neutral map its own cache key.
     const auto key = path.empty() ? (whiteEmission ? ":white" : ":" + std::to_string(index)) : path;
-    const TextureKey textureKey{key, format};
+    const TextureKey textureKey{key, format, preserveCoverage && !path.empty()};
     if (asynchronous && !path.empty() && !textures.contains(textureKey))
     {
         requested[textureKey] = frame;
@@ -181,7 +181,7 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
         {
             const bool editor = location == AssetRoot::Project;
             const std::string source = root + path;
-            const std::string cooked = DdsTexture::CookedPath(path, format);
+            const std::string cooked = DdsTexture::CookedPath(path, format, preserveCoverage);
             SDL_PathInfo src{}, dds{};
             loaded = (!editor || (SDL_GetPathInfo(source.c_str(), &src) && SDL_GetPathInfo(cooked.c_str(), &dds) &&
                                   dds.modify_time >= src.modify_time)) && image.Load(cooked, format);
@@ -190,7 +190,7 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
                 // Preview newly added or edited source maps before the next cook.
                 std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> pixels(
                     TextureLoader::LoadImageFile(source), SDL_DestroySurface);
-                loaded = pixels && image.FromImage(pixels.get(), format);
+                loaded = pixels && image.FromImage(pixels.get(), format, preserveCoverage);
             }
         }
         if (loaded) Publish(textureKey, std::move(image));
@@ -246,7 +246,8 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         {
             const auto slot = static_cast<MaterialSlot>(i);
             if (!definition.Uses(slot)) continue;
-            material.maps[i] = Map(definition.textures[i], slot, material.type == MaterialType::Unlit && slot == MaterialSlot::Emissive);
+            material.maps[i] = Map(definition.textures[i], slot, material.type == MaterialType::Unlit && slot == MaterialSlot::Emissive,
+                                   material.type == MaterialType::Foliage && (slot == MaterialSlot::BaseColor || slot == MaterialSlot::Opacity));
             if (!material.maps[i]) return nullptr;
         }
         it->second = material;
@@ -258,7 +259,8 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         {
             const auto slot = static_cast<MaterialSlot>(i);
             if (definition.Uses(slot))
-                it->second->maps[i] = Map(definition.textures[i], slot, definition.type == MaterialType::Unlit && slot == MaterialSlot::Emissive);
+                it->second->maps[i] = Map(definition.textures[i], slot, definition.type == MaterialType::Unlit && slot == MaterialSlot::Emissive,
+                                        definition.type == MaterialType::Foliage && (slot == MaterialSlot::BaseColor || slot == MaterialSlot::Opacity));
         }
     }
     if (it->second) Touch(*it->second);

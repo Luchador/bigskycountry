@@ -32,13 +32,13 @@ namespace
     }();
 }
 
-std::string DdsTexture::CookedPath(const std::string& source, Format format)
+std::string DdsTexture::CookedPath(const std::string& source, Format format, bool preserveCoverage)
 {
     // A source can supply several material slots with different channel layouts.
     const char* folder = format == Format::BaseColor ? "BC7_UNORM_SRGB" :
                          format == Format::Packed ? "BC7_UNORM" :
                          format == Format::Normal ? "BC5_UNORM" : "BC4_UNORM";
-    return AssetPaths::Root(AssetRoot::Cooked) + "textures/" + folder + "/" + source + ".dds";
+    return AssetPaths::Root(AssetRoot::Cooked) + "textures/" + (preserveCoverage ? "foliage/" : "") + folder + "/" + source + ".dds";
 }
 
 SDL_Surface* DdsTexture::LoadColorSurface(const std::string& source)
@@ -110,13 +110,19 @@ void DdsTexture::Solid(Format expected, std::array<Uint8, 4> rgba)
     mips = {{1, 1, 0, std::vector<Uint8>(rgba.begin(), rgba.begin() + Channels())}};
 }
 
-bool DdsTexture::FromImage(SDL_Surface* rgba, Format expected)
+bool DdsTexture::FromImage(SDL_Surface* rgba, Format expected, bool preserveCoverage)
 {
-    if (!rgba || rgba->format != SDL_PIXELFORMAT_RGBA32 || rgba->w > 16384 || rgba->h > 16384)
+    if (!rgba || rgba->format != SDL_PIXELFORMAT_RGBA32 || rgba->w <= 0 || rgba->h <= 0 || rgba->w > 16384 || rgba->h > 16384)
         return SDL_SetError("Invalid material source image");
     blocks.clear();
     mips.clear();
     format = expected;
+    if (preserveCoverage)
+    {
+        if (format != Format::BaseColor && format != Format::Scalar)
+            return SDL_SetError("Coverage mipmaps require base color or opacity");
+        return CoverageMips(rgba);
+    }
     std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> scaled(nullptr, SDL_DestroySurface);
     for (;;)
     {
@@ -141,6 +147,118 @@ bool DdsTexture::FromImage(SDL_Surface* rgba, Format expected)
         rgba = scaled.get();
         if (!rgba) return false;
     }
+}
+
+bool DdsTexture::CoverageMips(SDL_Surface* rgba)
+{
+    const Uint32 channels = Channels(), alpha = channels - 1;
+    Uint32 width = rgba->w, height = rgba->h;
+    std::vector<float> data(size_t(width) * height * channels);
+    for (Uint32 y = 0; y < height; ++y)
+    {
+        const auto* row = static_cast<const Uint8*>(rgba->pixels) + size_t(y) * rgba->pitch;
+        for (Uint32 x = 0; x < width; ++x)
+            for (Uint32 c = 0; c < channels; ++c)
+                data[(size_t(y) * width + x) * channels + c] = c == alpha ? row[x * 4 + c] / 255.f : linearColor[row[x * 4 + c]];
+    }
+    const auto quantize = [](float value) { return std::round(std::clamp(value, 0.f, 1.f) * 255.f) / 255.f; };
+    const auto coverage = [&](float scale)
+    {
+        std::size_t covered = 0;
+        // Sample four positions per texel, with the same repeat and bilinear
+        // filtering as the renderer. Counting texel centers alone underestimates
+        // how quickly tiny leaf silhouettes disappear between texel centers.
+        for (Uint32 y = 0; y < height; ++y)
+            for (Uint32 x = 0; x < width; ++x)
+            {
+                const auto a = [&](Uint32 px, Uint32 py) {
+                    return quantize(data[(size_t(py % height) * width + px % width) * channels + alpha] * scale);
+                };
+                const float a00 = a(x, y), a10 = a(x + 1, y), a01 = a(x, y + 1), a11 = a(x + 1, y + 1);
+                for (float v : {.25f, .75f})
+                    for (float u : {.25f, .75f})
+                        covered += std::lerp(std::lerp(a00, a10, u), std::lerp(a01, a11, u), v) >= .5f;
+            }
+        return double(covered) / (double(width) * height * 4);
+    };
+    const double target = coverage(1);
+    for (;;)
+    {
+        float scale = 1;
+        if (!mips.empty() && target > 0 && target < 1)
+        {
+            double bestError = std::abs(coverage(1) - target);
+            float low = 0, high = 1;
+            while (high < 256 && coverage(high) < target) high *= 2;
+            const auto consider = [&](float candidate, double value) {
+                const double error = std::abs(value - target);
+                if (error < bestError || (error == bestError && std::abs(candidate - 1) < std::abs(scale - 1)))
+                { scale = candidate; bestError = error; }
+            };
+            consider(high, coverage(high));
+            for (int i = 0; i < 12; ++i)
+            {
+                const float middle = (low + high) * .5f;
+                const double value = coverage(middle);
+                consider(middle, value);
+                if (value < target) low = middle; else high = middle;
+            }
+        }
+        auto& mip = mips.emplace_back(Mip{width, height, 0, {}});
+        mip.pixels.resize(data.size());
+        for (size_t i = 0; i < data.size(); ++i)
+        {
+            float value = data[i];
+            if (i % channels == alpha) value *= scale;
+            else value = value <= .0031308f ? value * 12.92f : 1.055f * std::pow(value, 1 / 2.4f) - .055f;
+            mip.pixels[i] = static_cast<Uint8>(std::round(std::clamp(value, 0.f, 1.f) * 255.f));
+        }
+        if (width == 1 && height == 1) return true;
+        const Uint32 nextWidth = std::max(1u, width / 2), nextHeight = std::max(1u, height / 2);
+        std::vector<float> next(size_t(nextWidth) * nextHeight * channels);
+        // Area filtering also covers the last row/column of odd-sized images.
+        // Keep unscaled float data for the next level: coverage corrections must
+        // not compound, and small nonzero alpha must survive quantization.
+        for (Uint32 y = 0; y < nextHeight; ++y)
+            for (Uint32 x = 0; x < nextWidth; ++x)
+            {
+                const double x0 = double(x) * width / nextWidth, x1 = double(x + 1) * width / nextWidth;
+                const double y0 = double(y) * height / nextHeight, y1 = double(y + 1) * height / nextHeight;
+                for (Uint32 sy = Uint32(y0); sy < std::ceil(y1) && sy < height; ++sy)
+                    for (Uint32 sx = Uint32(x0); sx < std::ceil(x1) && sx < width; ++sx)
+                    {
+                        const float weight = float((std::min(x1, double(sx + 1)) - std::max(x0, double(sx))) *
+                                                   (std::min(y1, double(sy + 1)) - std::max(y0, double(sy))) / ((x1 - x0) * (y1 - y0)));
+                        for (Uint32 c = 0; c < channels; ++c)
+                            next[(size_t(y) * nextWidth + x) * channels + c] += data[(size_t(sy) * width + sx) * channels + c] * weight;
+                    }
+            }
+        data = std::move(next);
+        width = nextWidth; height = nextHeight;
+    }
+}
+
+bool DdsTexture::SaveMipSource(const std::string& file) const
+{
+    if (mips.empty() || !blocks.empty() || (format != Format::BaseColor && format != Format::Scalar))
+        return SDL_SetError("Expected uncompressed foliage mipmaps");
+    // DX10 DDS, tightly packed rows; texconv keeps an existing complete chain.
+    std::array<Uint32, 37> header{};
+    header[0] = 0x20534444; header[1] = 124; header[2] = 0x2100f;
+    header[3] = mips[0].height; header[4] = mips[0].width; header[5] = mips[0].width * Channels();
+    header[7] = static_cast<Uint32>(mips.size());
+    header[19] = 32; header[20] = 4; header[21] = 0x30315844; // DX10
+    header[27] = mips.size() > 1 ? 0x401008 : 0x1000;
+    header[32] = format == Format::BaseColor ? 29 : 61; // RGBA8 sRGB or R8 linear.
+    header[33] = 3; header[35] = 1; // Texture2D, one layer.
+    for (auto& value : header) value = SDL_Swap32LE(value);
+    SDL_IOStream* out = SDL_IOFromFile(file.c_str(), "wb");
+    if (!out) return false;
+    bool written = SDL_WriteIO(out, header.data(), sizeof(header)) == sizeof(header);
+    for (const auto& mip : mips)
+        if (written) written = SDL_WriteIO(out, mip.pixels.data(), mip.pixels.size()) == mip.pixels.size();
+    const bool closed = SDL_CloseIO(out);
+    return written && closed;
 }
 
 std::size_t DdsTexture::DataBytes() const

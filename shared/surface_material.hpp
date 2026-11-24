@@ -5,6 +5,7 @@
 #include "material.hpp"
 #include "world_lighting.hpp"
 #include <map>
+#include <compare>
 #include <optional>
 #include <utility>
 #include <thread>
@@ -52,14 +53,20 @@ public:
 
 private:
     void ClearTextures();
-    const SurfaceMaterialTexture* Map(const std::string& path, MaterialSlot slot, bool whiteEmission);
+    const SurfaceMaterialTexture* Map(const std::string& path, MaterialSlot slot, bool whiteEmission, bool preserveCoverage = false);
     const AssetRoot location;
     const std::string root;
     SDL_GPUDevice* device = nullptr;
     SDL_GPUSampler* sampler = nullptr;
     unsigned revision = 0, imageRevision = 0;
     std::map<std::string, std::optional<SurfaceMaterial>> materials;
-    using TextureKey = std::pair<std::string, DdsTexture::Format>;
+    struct TextureKey
+    {
+        std::string path;
+        DdsTexture::Format format;
+        bool preserveCoverage = false;
+        auto operator<=>(const TextureKey&) const = default;
+    };
     std::map<TextureKey, std::optional<SurfaceMaterialTexture>> textures;
     std::map<std::string, std::optional<Material>> definitions;
     std::uint64_t frame = 0, epoch = 0;
