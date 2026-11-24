@@ -75,6 +75,7 @@ add_library(BigSkyApplication STATIC
     shared/marker.cpp
     "${cjson_SOURCE_DIR}/cJSON.c"
     shared/project_settings.cpp
+    shared/runtime_config.cpp
     shared/asset_paths.cpp
     shared/material.cpp
     shared/dds_texture.cpp
@@ -256,6 +257,19 @@ else()
 endif()
 target_include_directories(BigSkyCountryEditor PRIVATE "${ttf2mesh_SOURCE_DIR}")
 target_link_libraries(BigSkyCountryEditor PRIVATE BigSkyApplication)
+
+# Both executables in a configuration share one editable config.ini. Keep it
+# outside cooked/, whose contents are regenerated/pruned by the asset build.
+add_custom_target(BigSkyRuntimeConfig
+    COMMAND "${CMAKE_COMMAND}" "-Dsource=${CMAKE_CURRENT_SOURCE_DIR}/config.ini"
+            "-Ddestination=$<TARGET_FILE_DIR:BigSkyCountry>/config.ini"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_config.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-Dsource=${CMAKE_CURRENT_SOURCE_DIR}/config.ini"
+            "-Ddestination=$<TARGET_FILE_DIR:BigSkyCountryEditor>/config.ini"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_config.cmake"
+    VERBATIM)
+add_dependencies(BigSkyCountry BigSkyRuntimeConfig)
+add_dependencies(BigSkyCountryEditor BigSkyRuntimeConfig)
 
 # Migrate the previous layout before globbing, including assets authored only in a build.
 if(CMAKE_CURRENT_BINARY_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)

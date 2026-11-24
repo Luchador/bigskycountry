@@ -1,5 +1,29 @@
 My project Big Sky Country
 
+## Graphics configuration
+
+The game and editor read `config.ini` beside their executables at startup. The
+build creates it from the repository's template if missing and preserves edits
+on subsequent builds. For a Ninja build, edit `build/config.ini`; for a Visual
+Studio Release build, edit `build/Release/config.ini`. Both executables in that
+directory share the setting for 3D views, including the editor's mesh preview.
+
+```ini
+[Graphics]
+MSAA=4
+```
+
+Use `0` to disable antialiasing, `2` for 2x MSAA, or `4` for 4x MSAA (the default).
+Restart the application after editing. Missing or invalid values use 4x. When
+the GPU cannot support the requested color/depth sample count, the renderer uses
+the next lower supported setting and logs the fallback. The software renderer
+remains single-sampled.
+
+With MSAA enabled, Foliage and Alpha Cutout materials use alpha-to-coverage.
+The shader converts opacity to a sample mask while keeping each surviving
+sample opaque, so the resolved world composites correctly over the sky. Shadow
+maps retain their existing cutout test. UI text and panels stay at native resolution.
+
 ## Vehicle physics
 
 The test car uses a rigid body with gravity, angular momentum, four raycast suspension contacts, and a rounded collision hull. Drive up a ramp to launch; the car carries its takeoff velocity and rotation into the air, then lands through the suspension and chassis contacts. Tire forces act only at grounded wheels. Roads, terrain, and world meshes provide static collision, and simulated cars exchange collision impulses.

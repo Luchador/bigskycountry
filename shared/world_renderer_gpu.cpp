@@ -1,6 +1,7 @@
 #include "world_renderer.hpp"
 #include "camera_view.hpp"
 #include "editor_colors.hpp"
+#include "runtime_config.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -16,6 +17,10 @@
 #include "wireframe_frag_spirv.hpp"
 #include "material_frag_dxil.hpp"
 #include "material_frag_spirv.hpp"
+#include "material_msaa2_dxil.hpp"
+#include "material_msaa2_spirv.hpp"
+#include "material_msaa4_dxil.hpp"
+#include "material_msaa4_spirv.hpp"
 #include "shadow_vert_dxil.hpp"
 #include "shadow_vert_spirv.hpp"
 #include "shadow_frag_dxil.hpp"
@@ -64,6 +69,7 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    if (multisampleColor) SDL_ReleaseGPUTexture(device, multisampleColor);
     if (spotBuffer) SDL_ReleaseGPUBuffer(device, spotBuffer);
     if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
     if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
@@ -91,6 +97,7 @@ WorldRenderer::~WorldRenderer()
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, translucentPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, cutoutPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, foliagePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
     }
@@ -99,18 +106,32 @@ WorldRenderer::~WorldRenderer()
 #ifdef BIGSKY_WORLD_GPU
 bool WorldRenderer::CreatePipelines()
 {
-    for (auto format : {SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT})
+    const int requested = RuntimeConfig::Get().msaa;
+    const auto colorFormat = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    // Color and depth/stencil must agree. Prefer the requested quality, then
+    // fall back to lower counts rather than dropping to the software renderer.
+    for (const auto count : {SDL_GPU_SAMPLECOUNT_4, SDL_GPU_SAMPLECOUNT_2, SDL_GPU_SAMPLECOUNT_1})
     {
-        if (SDL_GPUTextureSupportsFormat(device, format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+        const int samples = count == SDL_GPU_SAMPLECOUNT_4 ? 4 : count == SDL_GPU_SAMPLECOUNT_2 ? 2 : 0;
+        if (samples > requested || !SDL_GPUTextureSupportsSampleCount(device, colorFormat, count)) continue;
+        for (auto format : {SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT})
         {
-            depthFormat = format;
-            break;
+            if (SDL_GPUTextureSupportsFormat(device, format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET) &&
+                SDL_GPUTextureSupportsSampleCount(device, format, count))
+            {
+                depthFormat = format;
+                sampleCount = count;
+                break;
+            }
         }
+        if (depthFormat != SDL_GPU_TEXTUREFORMAT_INVALID) break;
     }
     if (depthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
     {
         return SDL_SetError("No supported depth-stencil format for world rendering");
     }
+    if (MsaaSamples() != requested)
+        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Requested MSAA %d; using %d for supported color/depth formats", requested, MsaaSamples());
 
     SDL_GPUShader* vs = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "VSMain", world_vert_dxil, world_vert_spirv, 0, 1);
     if (!vs)
@@ -143,6 +164,7 @@ bool WorldRenderer::CreatePipelines()
     pipeline.target_info.num_color_targets = 1;
     pipeline.target_info.has_depth_stencil_target = true;
     pipeline.target_info.depth_stencil_format = depthFormat;
+    pipeline.multisample_state.sample_count = sampleCount;
     pipeline.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
     pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     pipeline.rasterizer_state.enable_depth_clip = true;
@@ -176,8 +198,15 @@ bool WorldRenderer::CreatePipelines()
 
     if (texturedPipeline)
     {
+        const auto dxil = sampleCount == SDL_GPU_SAMPLECOUNT_4 ? std::span<const Uint8>(material_msaa4_dxil) :
+                          sampleCount == SDL_GPU_SAMPLECOUNT_2 ? std::span<const Uint8>(material_msaa2_dxil) : std::span<const Uint8>(material_frag_dxil);
+        const auto spirv = sampleCount == SDL_GPU_SAMPLECOUNT_4 ? std::span<const Uint8>(material_msaa4_spirv) :
+                           sampleCount == SDL_GPU_SAMPLECOUNT_2 ? std::span<const Uint8>(material_msaa2_spirv) : std::span<const Uint8>(material_frag_spirv);
+        // Shader alpha-to-coverage keeps alpha=1 in covered samples, necessary
+        // for compositing this initially transparent target over SDL's sky.
+        cutoutPipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-        foliagePipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        if (cutoutPipeline) foliagePipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     }
 
@@ -280,6 +309,11 @@ bool WorldRenderer::CreatePipelines()
             SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
             texturedPipeline = nullptr;
         }
+        if (cutoutPipeline)
+        {
+            SDL_ReleaseGPUGraphicsPipeline(device, cutoutPipeline);
+            cutoutPipeline = nullptr;
+        }
         if (foliagePipeline)
         {
             SDL_ReleaseGPUGraphicsPipeline(device, foliagePipeline);
@@ -313,6 +347,7 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         {
             SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Using software world depth buffer: %s", SDL_GetError());
             device = nullptr;
+            sampleCount = SDL_GPU_SAMPLECOUNT_1;
         }
     }
 #endif
@@ -338,12 +373,26 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = info.num_levels = 1;
+        info.sample_count = sampleCount;
         SDL_GPUTexture* depth = SDL_CreateGPUTexture(device, &info);
 
         if (!depth)
         {
             SDL_DestroyTexture(color);
             return false;
+        }
+        SDL_GPUTexture* multisampled = nullptr;
+        if (sampleCount != SDL_GPU_SAMPLECOUNT_1)
+        {
+            info.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+            info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+            multisampled = SDL_CreateGPUTexture(device, &info);
+            if (!multisampled)
+            {
+                SDL_ReleaseGPUTexture(device, depth);
+                SDL_DestroyTexture(color);
+                return false;
+            }
         }
 
         if (depthTarget)
@@ -352,6 +401,8 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         }
 
         depthTarget = depth;
+        if (multisampleColor) SDL_ReleaseGPUTexture(device, multisampleColor);
+        multisampleColor = multisampled;
     }
     else
     {
@@ -360,8 +411,8 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
 
     if (colorTarget) SDL_DestroyTexture(colorTarget);
     else if (device)
-        SDL_Log("World renderer: %s on %s", SDL_GetGPUDeviceDriver(device),
-                SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown adapter"));
+        SDL_Log("World renderer: %s on %s; MSAA %d", SDL_GetGPUDeviceDriver(device),
+                SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown adapter"), MsaaSamples());
     else
         SDL_Log("World renderer: CPU rasterizer (SDL renderer: %s)", SDL_GetRendererName(renderer));
 
@@ -538,9 +589,13 @@ bool WorldRenderer::DrawGPU()
     }
 
     SDL_GPUColorTargetInfo color{};
-    color.texture = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    auto* resolved = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    const bool foreground = foregroundStart < vertices.size();
+    color.texture = multisampleColor ? multisampleColor : resolved;
     color.load_op = SDL_GPU_LOADOP_CLEAR; // Transparent pixels reveal the sky.
-    color.store_op = SDL_GPU_STOREOP_STORE;
+    color.store_op = multisampleColor && !foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+    color.resolve_texture = resolved;
+    color.cycle_resolve_texture = true;
     color.cycle = true;
     SDL_GPUDepthStencilTargetInfo depth{};
     depth.texture = depthTarget;
@@ -548,7 +603,7 @@ bool WorldRenderer::DrawGPU()
     depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     depth.cycle = true;
 
-    if (!color.texture)
+    if (!resolved)
     {
         return SDL_SetError("World color target has no GPU texture");
     }
@@ -663,7 +718,8 @@ bool WorldRenderer::DrawGPU()
         auto* pipeline = surfacePipeline;
         if (wire) pipeline = wireframePipeline;
         else if (material) pipeline = material->type == MaterialType::Unlit ? translucentPipeline :
-                                      material->type == MaterialType::Foliage ? foliagePipeline : texturedPipeline;
+                                      material->type == MaterialType::Foliage ? foliagePipeline :
+                                      material->type == MaterialType::AlphaCutout ? cutoutPipeline : texturedPipeline;
         if (pipeline != bound)
         {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
@@ -717,11 +773,13 @@ bool WorldRenderer::DrawGPU()
     }
 
     SDL_EndGPURenderPass(pass);
-    if (foregroundStart < vertices.size())
+    if (foreground)
     {
         // Keep the scene color and start a fresh depth buffer for the gizmo.
         color.load_op = SDL_GPU_LOADOP_LOAD;
         color.cycle = false;
+        // Retain the multisample scene through the gizmo pass and resolve once.
+        if (multisampleColor) color.store_op = SDL_GPU_STOREOP_RESOLVE;
         pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
         if (!pass)
         {

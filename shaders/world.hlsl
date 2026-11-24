@@ -306,8 +306,32 @@ float3 DecodeNormalXY(float2 channels)
     return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 }
 
-float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace) : SV_Target0
+#ifdef BSC_MSAA_SAMPLES
+uint AlphaToCoverage(float alpha, float2 position)
 {
+    // Keep the authored 0.5 silhouette and smooth it over approximately one
+    // pixel. This works with the foliage coverage-preserving mip chain.
+    float coverage = saturate((alpha - 0.5) / max(fwidth(alpha), 1.0 / 255.0) + 0.5);
+    uint covered = uint(coverage * BSC_MSAA_SAMPLES + 0.5);
+    uint mask = (1u << covered) - 1u;
+    uint2 pixel = uint2(position);
+    uint rotation = (pixel.x + 3u * pixel.y) & (BSC_MSAA_SAMPLES - 1u);
+    // Rotate a nested mask spatially, without time-dependent noise. Use explicit
+    // coverage rather than writing fractional alpha: SDL later composites the
+    // resolved target over the sky, so surviving samples must have alpha=1.
+    return ((mask << rotation) | (mask >> (BSC_MSAA_SAMPLES - rotation))) & ((1u << BSC_MSAA_SAMPLES) - 1u);
+}
+#endif
+
+float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
+#ifdef BSC_MSAA_SAMPLES
+                  , out uint sampleCoverage : SV_Coverage
+#endif
+                  ) : SV_Target0
+{
+#ifdef BSC_MSAA_SAMPLES
+    sampleCoverage = (1u << BSC_MSAA_SAMPLES) - 1u;
+#endif
     ClipVisibility(input);
     if (unlit)
     {
@@ -318,7 +342,16 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace) : SV_Tar
         return float4(ToDisplay(c), alpha);
     }
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
-    if (alphaCutout) clip(base.a * alphaOrOuterNormal.Sample(opacitySampler, input.uv).r - 0.5);
+    if (alphaCutout)
+    {
+        float opacity = base.a * alphaOrOuterNormal.Sample(opacitySampler, input.uv).r;
+#ifdef BSC_MSAA_SAMPLES
+        sampleCoverage = AlphaToCoverage(opacity, input.position.xy);
+        if (sampleCoverage == 0) discard;
+#else
+        clip(opacity - 0.5);
+#endif
+    }
     float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;
     float3 layerColor = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb;
     float3 surfaceNormal = DecodeNormalXY(normalMap.Sample(normalSampler, input.uv));

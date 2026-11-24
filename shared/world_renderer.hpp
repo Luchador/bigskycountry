@@ -57,6 +57,7 @@ public:
     bool DrawCacheStatistics(SDL_Renderer* target, float y = 36) const;
     std::size_t TextureBytes() const { return materialCache.Bytes(); }
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
+    int MsaaSamples() const { return sampleCount == SDL_GPU_SAMPLECOUNT_4 ? 4 : sampleCount == SDL_GPU_SAMPLECOUNT_2 ? 2 : 0; }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
                double viewDistance = 0, bool shadows = false);
     // Spot positions supplied here are in world space. Rebuilt each frame, never cached with meshes.
@@ -205,9 +206,12 @@ private:
 
     SDL_GPUDevice* device = nullptr; // Borrowed from the SDL renderer.
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUSampleCount sampleCount = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture* multisampleColor = nullptr;
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
     SDL_GPUGraphicsPipeline* texturedPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* cutoutPipeline = nullptr;
     SDL_GPUGraphicsPipeline* foliagePipeline = nullptr;
     SDL_GPUGraphicsPipeline* translucentPipeline = nullptr;
     SDL_GPUGraphicsPipeline* wireframePipeline = nullptr;
