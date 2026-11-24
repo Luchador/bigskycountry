@@ -80,6 +80,7 @@ void Car::SubmitLights(WorldRenderer& renderer, double interpolation, bool headl
 {
     const auto pose = InterpolatedTransform(interpolation).ToMeshTransform();
     const bool braking = BrakeLightsOn();
+
     for (double side : {-1.0, 1.0})
     {
         const auto lamp = [&](bool front)
@@ -88,6 +89,7 @@ void Car::SubmitLights(WorldRenderer& renderer, double interpolation, bool headl
             const SDL_FColor color = front ? SDL_FColor{1,.95f,.8f,1} : SDL_FColor{1,.012f,.004f,1};
             const Vector3 a = pose.Point({x-.16,.65,z}), b = pose.Point({x+.16,.65,z});
             const Vector3 c = pose.Point({x+.16,.85,z}), d = pose.Point({x-.16,.85,z});
+
             // Match the existing lens faces, lifted 5 mm to avoid depth fighting.
             if (front)
             {
@@ -99,15 +101,25 @@ void Car::SubmitLights(WorldRenderer& renderer, double interpolation, bool headl
                 renderer.SubmitEmissiveTriangle(a,c,b,color);
                 renderer.SubmitEmissiveTriangle(a,d,c,color);
             }
+
             const double inner = Math::DegreesToRadians(front ? 12.0 : 35.0);
             const double outer = Math::DegreesToRadians(front ? 25.0 : 60.0);
+
             renderer.SubmitSpotLight({pose.Point({x,.75,z}),
                 Math::Normalize(pose.Direction(front ? Vector3{0,-.07,1} : Vector3{0,-.2,-1})),
-                front ? Vector3{2000,1900,1600} : Vector3{20,.24,.08},
-                front ? 80.0 : 8.0, std::cos(inner), std::cos(outer)});
+                front ? headlightColor : taillightColor,
+                front ? 80.0 : 8.0, std::cos(inner), std::cos(outer)}); // Headlight, taillight range
         };
-        if (headlightsOn) lamp(true);
-        if (braking) lamp(false);
+
+        if (headlightsOn) 
+        {
+            lamp(true);
+        }
+
+        if (braking) 
+        {
+            lamp(false);
+        }
     }
 }
 
@@ -115,7 +127,12 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
 {
     const auto frame = body.Pose().ToMeshTransform();
     groundedWheels = 0;
-    if (!hasCollision) return;
+
+    if (!hasCollision) 
+    {
+        return;
+    }
+
     Vector3 groundNormal{};
     const double speed = Speed();
     const double targetSteering = Commands().right * handling.steeringAngle / (1.0 + std::abs(speed) * 0.035);
@@ -127,12 +144,21 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
     {
         const Vector3 anchor = frame.Point(wheelAnchors[wheel]);
         const auto hit = world.collision.Raycast(anchor, frame.y * -1.0, handling.suspensionLength + handling.wheelRadius);
-        if (!hit || frame.y.y <= 0.1 || Math::Dot(hit->normal, frame.y) < 0.45) continue;
+
+        if (!hit || frame.y.y <= 0.1 || Math::Dot(hit->normal, frame.y) < 0.45) 
+        {
+            continue;
+        }
+
         const double compression = handling.suspensionLength + handling.wheelRadius - hit->distance;
         const double normalSpeed = Math::Dot(body.PointVelocity(anchor), hit->normal);
-        const double load = std::clamp(handling.springStrength * compression - handling.suspensionDamping * normalSpeed,
-                                       0.0, handling.mass * 20.0);
-        if (load <= 0) continue;
+        const double load = std::clamp(handling.springStrength * compression - handling.suspensionDamping * normalSpeed, 0.0, handling.mass * 20.0);
+
+        if (load <= 0) 
+        {
+            continue;
+        }
+
         ++groundedWheels;
         groundNormal = groundNormal + hit->normal;
         body.AddForce(hit->normal * load, anchor);
@@ -140,16 +166,19 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
         Vector3 forward = Math::Normalize(frame.z - hit->normal * Math::Dot(frame.z, hit->normal));
         Vector3 right = Math::Cross(hit->normal, forward);
         const bool rear = wheel < 2;
+
         if (!rear)
         {
             forward = forward * std::cos(steering) + right * std::sin(steering);
             right = Math::Cross(hit->normal, forward);
         }
+
         const Vector3 contactVelocity = body.PointVelocity(hit->position);
         const double longitudinal = Math::Dot(contactVelocity, forward);
         const double sideways = Math::Dot(contactVelocity, right);
         const double wheelMass = handling.mass / 4;
         double traction = 0;
+
         if (brake > 0 || (Commands().handbrake && rear))
         {
             const double strength = Commands().handbrake && rear ? handling.handbrake : handling.braking * brake;
@@ -167,21 +196,27 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
             const double drag = std::min(0.5 + std::abs(longitudinal) * 0.015, std::abs(longitudinal) / seconds);
             traction = -std::copysign(drag * wheelMass, longitudinal);
         }
+
         const double grip = load * handling.tireGrip;
         const double lateralGrip = Commands().handbrake && rear ? grip * 0.22 : grip;
         // A fully applied service brake holds on a slope without setting the
         // body's pose/velocity. Tire forces still respect the contact grip limit.
-        const double lateral = std::clamp((-sideways * handling.lateralResponse + (holding ? 9.81 * right.y : 0.0)) * wheelMass,
-                                          -lateralGrip, lateralGrip);
+        const double lateral = std::clamp((-sideways * handling.lateralResponse + (holding ? 9.81 * right.y : 0.0)) * wheelMass, -lateralGrip, lateralGrip);
         const double force = std::hypot(traction, lateral);
         const double scale = force > grip ? grip / force : 1.0;
+
         body.AddForce(forward * (traction * scale), hit->position);
         // Keep a little cornering lean while giving the arcade car more rollover
         // resistance. Longitudinal tire forces still produce normal brake/drive pitch.
         const double height = Math::Dot(body.Center() - hit->position, hit->normal) * handling.lateralForceHeight;
         body.AddForce(right * (lateral * scale), hit->position + hit->normal * height);
     }
-    if (!groundedWheels) return;
+
+    if (!groundedWheels) 
+    {
+        return;
+    }
+
     const Vector3 normal = Math::Normalize(groundNormal);
     const double contactFraction = groundedWheels / 4.0;
     const double targetYaw = std::clamp(speed * std::tan(steering) / 2.7, -1.25, 1.25);
@@ -189,6 +224,7 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
     const double assist = Commands().handbrake ? handling.yawAssist * 0.35 : handling.yawAssist;
     const double yawAcceleration = std::clamp(yawError * assist, -5.0, 5.0) * contactFraction;
     const double yawInverseInertia = Math::Dot(normal, body.InverseInertia(normal));
+
     body.AddTorque(normal * (yawAcceleration / yawInverseInertia));
     // Resist excessive body roll on the ground. Pitch remains free to follow
     // ramps through the suspension, and no leveling torque is applied in flight.
@@ -199,26 +235,40 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
 
 void Car::ResolveWorldContacts(GameWorld& world)
 {
-    if (!hasCollision) return;
+    if (!hasCollision) 
+    {
+        return;
+    }
+
     const auto nearby = world.NearbyPawns(PawnIndex::Around(body.Center(), 4));
+
     for (int pass = 0; pass < 3; ++pass)
     {
         for (Vector3 local : hull)
         {
             Vector3 center = body.Pose().ToMeshTransform().Point(local);
-            if (const auto hit = world.collision.SphereContact(center, hullRadius))
+            if (const auto hit = world.collision.SphereContact(center, hullRadius)) 
+            {
                 body.ResolveContact(*hit, 0.05, 0.65);
+            }
+
             // Characters remain kinematic obstacles. Seated occupants have no
             // collision, while another walking character can stop the chassis.
             for (const auto* pawn : nearby)
             {
                 const auto* character = dynamic_cast<const Character*>(pawn);
-                if (!character || !character->hasCollision || character->IsSeated()) continue;
+
+                if (!character || !character->hasCollision || character->IsSeated()) 
+                {
+                    continue;
+                }
+
                 center = body.Pose().ToMeshTransform().Point(local);
                 const auto feet = character->GetTransform().position;
                 const Vector3 nearest{feet.x, std::clamp(center.y, feet.y + 0.35, feet.y + 1.45), feet.z};
                 const Vector3 offset = center - nearest;
                 const double distance = Math::Length(offset);
+
                 if (distance < hullRadius + 0.35 && distance > 1e-8)
                 {
                     const Vector3 normal = offset * (1.0 / distance);
@@ -231,7 +281,11 @@ void Car::ResolveWorldContacts(GameWorld& world)
 
 void Car::Simulate(double seconds, GameWorld& world)
 {
-    if (GetTransform() != body.Pose()) body.Teleport(GetTransform());
+    if (GetTransform() != body.Pose()) 
+    {
+        body.Teleport(GetTransform());
+    }
+
     ApplyWheelForces(seconds, world);
     body.angularVelocity = body.angularVelocity * std::exp(-0.08 * seconds);
     body.Integrate(seconds);
@@ -241,8 +295,16 @@ void Car::Simulate(double seconds, GameWorld& world)
 
 void Car::ResolveCollision(Car& other)
 {
-    if (!hasCollision || !other.hasCollision) return;
-    if (Math::Length(body.Center() - other.body.Center()) > 5.5) return;
+    if (!hasCollision || !other.hasCollision) 
+    {
+        return;
+    }
+
+    if (Math::Length(body.Center() - other.body.Center()) > 5.5) 
+    {
+        return;
+    }
+
     for (int pass = 0; pass < 2; ++pass)
     {
         for (Vector3 a : hull)
@@ -259,34 +321,50 @@ void Car::ResolveCollision(Car& other)
             }
         }
     }
+
     SetTransform(body.Pose());
     other.SetTransform(other.body.Pose());
 }
 
 bool Car::PlaceOnGround(GameWorld& world, ObjectTransform& transform, double drop) const
 {
-    if (!hasCollision) return false;
+    if (!hasCollision) 
+    {
+        return false;
+    }
+
     ObjectTransform horizontal = transform;
     horizontal.rotation.x = horizontal.rotation.z = 0;
     const auto frame = horizontal.ToMeshTransform();
     std::array<Vector3, 4> contact;
     constexpr Vector3 wheels[] = {{-0.85, 0, -1.35}, {0.85, 0, -1.35}, {-0.85, 0, 1.35}, {0.85, 0, 1.35}};
+
     for (size_t i = 0; i < contact.size(); ++i)
     {
         const auto hit = world.collision.Ground(frame.Point(wheels[i]), 0.4, drop);
-        if (!hit) return false;
+
+        if (!hit) 
+        {
+            return false;
+        }
+
         contact[i] = hit->position;
     }
+
     const double rear = (contact[0].y + contact[1].y) * 0.5;
     const double front = (contact[2].y + contact[3].y) * 0.5;
     const double left = (contact[0].y + contact[2].y) * 0.5;
     const double right = (contact[1].y + contact[3].y) * 0.5;
     transform.position.y = (front + rear) * 0.5;
-    const Vector3 normal = Math::Normalize(Vector3{0,1,0} - frame.z * ((front - rear) / 2.7)
-                                            - frame.x * ((right - left) / 1.7));
+
+    const Vector3 normal = Math::Normalize(Vector3{0,1,0} - frame.z * ((front - rear) / 2.7) - frame.x * ((right - left) / 1.7));
     transform.rotation = horizontal.rotation;
     const Vector3 tiltAxis = Math::Cross({0,1,0}, normal);
+
     if (Math::Length(tiltAxis) > 1e-10)
+    {
         transform.Rotate(Math::Normalize(tiltAxis), std::acos(std::clamp(normal.y, -1.0, 1.0)));
+    }
+
     return true;
 }

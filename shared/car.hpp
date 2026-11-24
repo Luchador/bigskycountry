@@ -25,6 +25,9 @@ class WorldRenderer;
 class Car : public Vehicle
 {
 public:
+    Vector3 headlightColor = {1000, 950, 800};
+    Vector3 taillightColor = {20, 0.24, 0.08};
+
     explicit Car(CarHandling handling = {});
     std::unique_ptr<BSCObject> Clone() const override { return std::make_unique<Car>(*this); }
     void Teleport(const ObjectTransform& transform) override;
