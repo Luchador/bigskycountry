@@ -8,6 +8,7 @@
 #include "windows_panels.hpp"
 #endif
 #ifndef _WIN32
+#include "browser_splitter.hpp"
 #include "camera_toolbar.hpp"
 #include "outliner_splitter.hpp"
 #include "sdl_transform_panel.hpp"
@@ -172,11 +173,14 @@ private:
     SDL_Rect scene{};
 #ifndef _WIN32
     void LayoutSidebar(int windowWidth, std::optional<int> dragHeight = {});
-    void SetSplitterCursor(bool active);
-    SDL_Rect browserPanel{}, roadPanel{}, transformArea{}, outlineArea{}, splitterArea{};
+    void SetSplitterCursor(bool active, bool horizontal = false);
+    SDL_Rect browserPanel{}, roadPanel{}, transformArea{}, outlineArea{}, splitterArea{}, browserSplitterArea{};
     OutlinerSplitter outlinerSplit;
+    BrowserSplitter browserSplit;
     std::optional<float> splitterGrab;
+    bool draggingBrowser = false;
     SDL_Cursor* resizeCursor = nullptr; // Released by SDL on video shutdown.
+    SDL_Cursor* browserResizeCursor = nullptr;
     SdlOutliner outlinePanel;
     SdlTransformPanel transformPanel;
     SdlProjectSettings projectSettings;

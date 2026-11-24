@@ -64,7 +64,12 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
     {
         const auto properties = SDL_CreateProperties();
         SDL_SetPointerProperty(properties, SDL_PROP_WINDOW_CREATE_PARENT_POINTER, owner);
+        // SDL's Windows utility flag creates a hidden substitute owner, ignoring
+        // the supplied main editor. A regular owned window stays above that editor.
+#ifndef _WIN32
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_UTILITY_BOOLEAN, true);
+#endif
+        SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
         SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 900);
@@ -94,7 +99,9 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
     imagesDirty = true;
     Frame();
     SDL_SetWindowTitle(window, ("Mesh Editor - " + relative).c_str());
-    SDL_ShowWindow(window); SDL_RaiseWindow(window);
+    SDL_ShowWindow(window);
+    if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(window);
+    SDL_RaiseWindow(window);
     return true;
 }
 

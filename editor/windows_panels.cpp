@@ -1,6 +1,7 @@
 #include "windows_panels.hpp"
 #include "project_settings_field.hpp"
 #include "outliner_splitter.hpp"
+#include "browser_splitter.hpp"
 #include "marker.hpp"
 #include "properties_inspector.hpp"
 #include "windows_material_editor.hpp"
@@ -117,9 +118,12 @@ struct WindowsPanels::Impl
     HWND frame = nullptr, view = nullptr, toolbar = nullptr, models = nullptr, road = nullptr;
     WindowsOutliner outline;
     HWND splitter = nullptr;
+    HWND browserSplitter = nullptr;
     OutlinerSplitter outlinerSplit;
+    BrowserSplitter browserSplit;
     RECT sidebar{};
     int splitterGrab = 0;
+    int browserGrab = 0;
     HACCEL shortcuts = nullptr;
     Uint32 actions = 0, speedEvent = 0, wheelEvent = 0, pressEvent = 0, toolbarEvent = 0;
     Uint32 transformEvent = 0, modelDropEvent = 0;
@@ -363,10 +367,11 @@ struct WindowsPanels::Impl
     static LRESULT CALLBACK SplitterProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR data)
     {
         auto& self = *reinterpret_cast<Impl*>(data);
+        const bool content = hwnd == self.browserSplitter;
         switch (msg)
         {
         case WM_SETCURSOR:
-            SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+            SetCursor(LoadCursorW(nullptr, content ? IDC_SIZEWE : IDC_SIZENS));
             return TRUE;
         case WM_SIZE:
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -380,7 +385,7 @@ struct WindowsPanels::Impl
             RECT rect{};
             GetClientRect(hwnd, &rect);
             FillRect(dc, &rect, WindowsTheme::Brush(EditorTheme::chrome));
-            const SIZE grip = DialogSize(self.road, 18, 1);
+            const SIZE grip = content ? DialogSize(self.models, 1, 18) : DialogSize(self.road, 18, 1);
             const LONG x = (rect.right - grip.cx) / 2, y = (rect.bottom - grip.cy) / 2;
             RECT handle{x, y, x + grip.cx, y + grip.cy};
             FillRect(dc, &handle, WindowsTheme::Brush(EditorTheme::disabled));
@@ -388,7 +393,8 @@ struct WindowsPanels::Impl
             return 0;
         }
         case WM_LBUTTONDOWN:
-            self.splitterGrab = GET_Y_LPARAM(l);
+            if (content) self.browserGrab = GET_X_LPARAM(l);
+            else self.splitterGrab = GET_Y_LPARAM(l);
             SetCapture(hwnd);
             return 0;
         case WM_MOUSEMOVE:
@@ -399,7 +405,8 @@ struct WindowsPanels::Impl
                 {
                     POINT pointer{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
                     MapWindowPoints(hwnd, self.frame, &pointer, 1);
-                    self.LayoutSidebar(pointer.y - self.sidebar.top - self.splitterGrab);
+                    if (content) self.Layout(pointer.x - self.browserGrab);
+                    else self.LayoutSidebar(pointer.y - self.sidebar.top - self.splitterGrab);
                 }
                 if (msg == WM_LBUTTONUP || !(w & MK_LBUTTON)) ReleaseCapture();
             }
@@ -414,7 +421,7 @@ struct WindowsPanels::Impl
         return DefSubclassProc(hwnd, msg, w, l);
     }
 
-    void Layout()
+    void Layout(std::optional<int> browserWidth = {})
     {
         RECT rect{};
         GetClientRect(frame, &rect);
@@ -423,13 +430,23 @@ struct WindowsPanels::Impl
             return;
         }
         const int top = std::min<int>(DialogSize(toolbar, 0, TOOLBAR_HEIGHT).cy, rect.bottom);
-        const int left = DialogSize(models, BROWSER_WIDTH, 0).cx, right = DialogSize(road, ROAD_PANEL_WIDTH, 0).cx;
+        const int right = std::min<int>(DialogSize(road, ROAD_PANEL_WIDTH, 0).cx, rect.right / 2);
+        const int bar = std::min<int>(DialogSize(models, 4, 0).cx, rect.right - right);
+        const int left = browserSplit.Width(rect.right - right - bar, DialogSize(models, BROWSER_WIDTH, 0).cx,
+                                           DialogSize(models, 160, 0).cx, browserWidth);
+        if (browserWidth)
+        {
+            RECT current{};
+            GetClientRect(models, &current);
+            if (current.right == left) return;
+        }
         const int h = rect.bottom - top;
         SetWindowPos(toolbar, nullptr, 0, 0, rect.right, top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
         MoveWindow(models, 0, top, left, h, TRUE);
+        MoveWindow(browserSplitter, left, top, bar, h, TRUE);
         sidebar = {rect.right - right, top, rect.right, rect.bottom};
         LayoutSidebar();
-        MoveWindow(view, left, top, std::max<int>(1, rect.right - left - right), std::max(1, h), TRUE);
+        MoveWindow(view, left + bar, top, std::max<int>(1, rect.right - left - bar - right), std::max(1, h), TRUE);
 
         auto moveTool = [&](int id, int rightOffset, int y, int w, int height)
         {
@@ -493,10 +510,21 @@ struct WindowsPanels::Impl
         const SIZE inset = DialogSize(models, 7, 6);
         const int width = std::max<int>(1, panel.right - 2 * inset.cx);
         const int bottom = panel.bottom - inset.cy;
-        const int modelTop = DialogSize(models, 0, BROWSER_MODEL_LIST_TOP).cy;
+        const SIZE refresh = DialogSize(models, 42, 15);
+        MoveWindow(GetDlgItem(models, IDC_REFRESH), panel.right - inset.cx - refresh.cx,
+                   DialogSize(models, 0, 5).cy, refresh.cx, refresh.cy, TRUE);
+        MoveWindow(GetDlgItem(models, IDC_BROWSER_TABS), inset.cx, DialogSize(models, 0, 24).cy,
+                   width, DialogSize(models, 0, 21).cy, TRUE);
+        const int top = DialogSize(models, 0, BROWSER_PAGE_TOP).cy;
+        const SIZE preview = DialogSize(models, 130, 64);
+        const int previewHeight = std::max(1, std::min<int>(width * preview.cy / std::max(1L, preview.cx),
+                                                      std::max(1, bottom - top) / 3));
+        MoveWindow(GetDlgItem(models, IDC_PREVIEW), inset.cx, top, width, previewHeight, TRUE);
+        const int statusTop = top + previewHeight + DialogSize(models, 0, 4).cy;
+        MoveWindow(GetDlgItem(models, IDC_PREVIEW_STATUS), inset.cx, statusTop, width, DialogSize(models, 0, 13).cy, TRUE);
+        const int modelTop = statusTop + DialogSize(models, 0, 23).cy;
         MoveWindow(GetDlgItem(models, IDC_MODELS), inset.cx, modelTop, width, std::max(1, bottom - modelTop), TRUE);
 
-        const int top = DialogSize(models, 0, BROWSER_PAGE_TOP).cy;
         const int treeHeight = std::clamp((bottom - top) / 3, 1, static_cast<int>(DialogSize(models, 0, 92).cy));
         MoveWindow(GetDlgItem(models, IDC_TEXTURE_FOLDERS), inset.cx, top, width, treeHeight, TRUE);
         int listTop = top + treeHeight + inset.cy;
@@ -1543,7 +1571,7 @@ struct WindowsPanels::Impl
         }
         if (msg == WM_ACTIVATEAPP && !w)
         {
-            if (GetCapture() == self.splitter) ReleaseCapture();
+            if (GetCapture() == self.splitter || GetCapture() == self.browserSplitter) ReleaseCapture();
             if (!self.draggedModel.empty()) self.CancelModelDrag();
             if (!self.pressedTexture.empty()) self.CancelTextureDrag(GetDlgItem(self.models, IDC_TEXTURES));
         }
@@ -1846,6 +1874,14 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     if (!p.splitter || !SetWindowSubclass(p.splitter, Impl::SplitterProc, 1, reinterpret_cast<DWORD_PTR>(&p)))
     {
         WinError("Cannot create Outliner splitter");
+        return nullptr;
+    }
+
+    p.browserSplitter = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"Resize Content Browser",
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_NOTIFY, 0, 0, 0, 0, p.frame, nullptr, module, nullptr);
+    if (!p.browserSplitter || !SetWindowSubclass(p.browserSplitter, Impl::SplitterProc, 1, reinterpret_cast<DWORD_PTR>(&p)))
+    {
+        WinError("Cannot create Content Browser splitter");
         return nullptr;
     }
 

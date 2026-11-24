@@ -119,7 +119,7 @@ The optional `OBJS` version 5 section stores one record per object. Each record 
 
 ### Mesh editor
 
-Double-click a GLB or FBX model in the Content Browser's **Models** tab to open a floating **Mesh Editor**. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The main editor remains usable while this window is open.
+Double-click a GLB or FBX model in the Content Browser's **Models** tab to open a floating **Mesh Editor** above the main editor. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The mesh window stays above its owner, and the main editor remains usable for browsing and dragging materials while it is open. Opening another model also restores the mesh window if it was minimized.
 
 The right panel lists the model's named material slots. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
 
@@ -349,6 +349,8 @@ For a control point, X is roll about the tangent, Y is yaw about world up, and Z
 ### Editor controls on Windows
 
 The editor uses a dark charcoal theme. New panels and controls should use the UI color roles in `editor/editor_theme.hpp`. For a native Windows dialog, call `WindowsTheme::ApplyDialog` during `WM_INITDIALOG` to theme its standard controls. Viewport selection colors are defined in `shared/editor_colors.hpp`.
+
+Drag the vertical divider along the Content Browser's right edge to adjust its width. Both **Models** and **Textures** use the chosen width, including their folder lists and previews. Resizing the main window retains this width when space permits; a minimum viewport width prevents the browser from covering the editing area.
 
 Drag a GLB or FBX model from the **Models** tab into the 3D viewport to place a **Prop**. The lowest part of the model sits at the height of the nearest road or terrain triangle under the cursor. On empty ground it sits at Y = 0. If the ray misses the ground, its pivot lands 20 m along the cursor ray. The new prop is selected. Use **W** to move it, **E** to rotate it, or **Delete** to remove it. Placement, transforms and deletion save to the world and support **Ctrl+Z** and **Ctrl+Y**.
 
