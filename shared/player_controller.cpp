@@ -6,8 +6,8 @@
 
 namespace
 {
-    constexpr double keyboardSteeringTapStrength = 0.15;
-    constexpr double keyboardSteeringRiseSeconds = 0.5;
+    constexpr double keyboardSteeringTapStrength = 0.25;
+    constexpr double keyboardSteeringRiseSeconds = 0.4;
 }
 
 bool PlayerController::Possess(PawnHandle handle)

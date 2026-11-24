@@ -490,36 +490,39 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
-    const char* controls = "WASD: walk   Mouse: look   Shift: sprint   Space: jump   F: enter car";
-    std::string status;
     const auto* vehicle = dynamic_cast<const Vehicle*>(player.controller.Controlled());
-    if (vehicle)
+    if (consoleVisible)
     {
-        controls = "W/S: accelerate, brake/reverse   A/D: steer   Space: handbrake   Mouse: look   F: exit";
+        const char* controls = "WASD: walk   Mouse: look   Shift: sprint   Space: jump   F: enter car";
+        std::string status;
+        if (vehicle)
+        {
+            controls = "W/S: accelerate, brake/reverse   A/D: steer   Space: handbrake   Mouse: look   F: exit";
+        }
+        else if (player.NearbyVehicle()) status = "Press F to enter the car";
+        if (!player.Notice().empty()) status = player.Notice();
+        if (debugCamera)
+        {
+            controls = "F1: return to player   WASD/QE: fly   Right mouse: look   Wheel: speed";
+            status = "Debug camera";
+        }
+        else if (!input.IsCaptured())
+        {
+            controls = "Click to resume   Escape: quit";
+            status = "Mouse released";
+        }
+        else if (status.empty()) status = "Escape: release mouse   F1: debug camera";
+        if (streaming && (!started || !collisionReady))
+            status = streaming->Error().empty() ? "Loading nearby collision..." : "Collision unavailable. Recook the world and restart.";
+        constexpr float y = 0;
+        const SDL_FRect background{0,y,float(viewport.w),56};
+        const bool console = SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
+               SDL_RenderFillRect(renderer, &background) &&
+               SDL_SetRenderDrawColor(renderer, 225,228,235,255) &&
+               SDL_RenderDebugText(renderer, 12, y + 9, controls) &&
+               SDL_RenderDebugText(renderer, 12, y + 30, status.c_str());
+        if (!console) return false;
     }
-    else if (player.NearbyVehicle()) status = "Press F to enter the car";
-    if (!player.Notice().empty()) status = player.Notice();
-    if (debugCamera)
-    {
-        controls = "F1: return to player   WASD/QE: fly   Right mouse: look   Wheel: speed";
-        status = "Debug camera";
-    }
-    else if (!input.IsCaptured())
-    {
-        controls = "Click to resume   Escape: quit";
-        status = "Mouse released";
-    }
-    else if (status.empty()) status = "Escape: release mouse   F1: debug camera";
-    if (streaming && (!started || !collisionReady))
-        status = streaming->Error().empty() ? "Loading nearby collision..." : "Collision unavailable. Recook the world and restart.";
-    constexpr float y = 0;
-    const SDL_FRect background{0,y,float(viewport.w),56};
-    const bool console = SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
-           SDL_RenderFillRect(renderer, &background) &&
-           SDL_SetRenderDrawColor(renderer, 225,228,235,255) &&
-           SDL_RenderDebugText(renderer, 12, y + 9, controls) &&
-           SDL_RenderDebugText(renderer, 12, y + 30, status.c_str());
-    if (!console) return false;
     char fpsText[32] = "FPS: --";
     if (framesPerSecond > 0) SDL_snprintf(fpsText, sizeof(fpsText), "FPS: %.1f", framesPerSecond);
     const float fpsWidth = static_cast<float>(SDL_strlen(fpsText)) * 8.f + 12.f;

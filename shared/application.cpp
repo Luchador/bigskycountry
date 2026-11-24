@@ -164,6 +164,15 @@ namespace
                     frameProfiler.Reset();
                     continue;
                 }
+                // The ` / ~ key works with or without Shift, including while
+                // the mouse is released or the debug camera is active.
+                if (game && event.type == SDL_EVENT_KEY_DOWN && SDL_GetWindowFromEvent(&event) == window &&
+                    event.key.scancode == SDL_SCANCODE_GRAVE &&
+                    !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
+                {
+                    if (!event.key.repeat) game->ToggleConsole();
+                    continue;
+                }
                 if (game && game->HandleTrafficKey(event, input.IsCameraEnabled() ? static_cast<const CameraView&>(freeCamera) : game->View())) continue;
                 if (game && !input.IsCameraEnabled())
                 {
