@@ -158,11 +158,15 @@ float3 ToDisplay(float3 c)
     return lerp(12.92 * c, 1.055 * pow(c, 1.0 / 2.4) - 0.055, step(0.0031308, c));
 }
 
-// SDL places storage buffers after sampled textures in each shader's set.
+// SDL exposes storage buffers as raw SRVs on Direct3D 12 (zero structure
+// stride). Use byte-addressed reads on both backends, with explicit 16-byte
+// record offsets. Tile masks stay integer bits, including patterns that
+// represent floating-point denormals or NaNs.
+// Storage buffers follow sampled textures in each shader's resource set.
 #ifdef BSC_MATERIAL
-StructuredBuffer<float4> spotData : register(t7, space2);
+ByteAddressBuffer spotData : register(t7, space2);
 #else
-StructuredBuffer<float4> spotData : register(t1, space2);
+ByteAddressBuffer spotData : register(t1, space2);
 #endif
 
 void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float gloss, float metal,
@@ -173,7 +177,7 @@ void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float
     uint tileStart = uint(spotControl.z)*3 + (tile.y*uint(spotControl.x)+tile.x)*uint(spotControl.w);
     for (uint group=0; group<uint(spotControl.w); ++group)
     {
-        uint4 mask = asuint(spotData[tileStart+group]);
+        uint4 mask = spotData.Load4((tileStart+group)*16);
         [unroll] for (uint word=0; word<4; ++word)
         {
             uint bits = mask[word];
@@ -181,10 +185,12 @@ void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float
             {
                 uint bit = firstbitlow(bits);
                 bits &= bits-1;
-                uint light = (group*128+word*32+bit)*3;
-                float4 position = spotData[light];
-                float4 direction = spotData[light+1];
-                float4 intensity = spotData[light+2];
+                uint light = group*128+word*32+bit;
+                if (light >= uint(spotControl.z)) continue;
+                uint byteOffset = light*48; // Three float4 records per light.
+                float4 position = asfloat(spotData.Load4(byteOffset));
+                float4 direction = asfloat(spotData.Load4(byteOffset+16));
+                float4 intensity = asfloat(spotData.Load4(byteOffset+32));
                 float3 toLight = position.xyz + view;
                 float distanceSquared = dot(toLight,toLight);
                 if (distanceSquared >= position.w*position.w || distanceSquared < 1e-8) continue;
