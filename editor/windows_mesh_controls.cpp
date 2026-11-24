@@ -12,11 +12,12 @@
 
 namespace
 {
-    constexpr UINT lit = 47001, colors = 47002, frameMesh = 47003;
+    constexpr UINT lit = 47001, colors = 47002, alpha = 47003, frameMesh = 47004;
     constexpr WindowsMenu::MenuItem viewTitle{0, L"&View", 0, true};
     constexpr WindowsMenu::MenuItem viewItems[] = {
         {lit, L"&Lit", MF_CHECKED, false, true},
         {colors, L"&Vertex Colors", MF_ENABLED, false, true},
+        {alpha, L"Vertex &Alpha", MF_ENABLED, false, true},
         {frameMesh, L"&Frame Mesh\tF"}
     };
     void Caption(HWND window, const std::string& text)
@@ -174,8 +175,9 @@ void WindowsMeshControls::Sync(std::size_t level)
     Caption(GetDlgItem(panel, IDC_MESH_STATS), std::to_string(mesh.materials->slots.size()) + " slots | " +
         std::to_string(mesh.Level(level).indices.size() / 3) + " tris | LOD " + std::to_string(level));
     Caption(GetDlgItem(panel, IDC_MESH_STATUS), editor.status);
-    CheckMenuRadioItem(GetSubMenu(GetMenu(frame), 0), lit, colors,
-        editor.viewMode == MeshEditorWindow::ViewMode::Lit ? lit : colors, MF_BYCOMMAND);
+    CheckMenuRadioItem(GetSubMenu(GetMenu(frame), 0), lit, alpha,
+        editor.viewMode == MeshEditorWindow::ViewMode::Lit ? lit :
+        editor.viewMode == MeshEditorWindow::ViewMode::VertexColors ? colors : alpha, MF_BYCOMMAND);
     UpdateRemove();
 }
 
@@ -333,11 +335,11 @@ LRESULT CALLBACK WindowsMeshControls::FrameProc(HWND window, UINT message, WPARA
     }
     if (message == WM_COMMAND && l == 0)
     {
-        if (LOWORD(w) == lit || LOWORD(w) == colors)
+        if (LOWORD(w) == lit || LOWORD(w) == colors || LOWORD(w) == alpha)
         {
-            self.editor.viewMode = LOWORD(w) == lit ? MeshEditorWindow::ViewMode::Lit : MeshEditorWindow::ViewMode::VertexColors;
-            self.editor.dirty = true;
-            CheckMenuRadioItem(GetSubMenu(GetMenu(window), 0), lit, colors, LOWORD(w), MF_BYCOMMAND);
+            self.editor.SetViewMode(LOWORD(w) == lit ? MeshEditorWindow::ViewMode::Lit :
+                LOWORD(w) == colors ? MeshEditorWindow::ViewMode::VertexColors : MeshEditorWindow::ViewMode::VertexAlpha);
+            CheckMenuRadioItem(GetSubMenu(GetMenu(window), 0), lit, alpha, LOWORD(w), MF_BYCOMMAND);
             return 0;
         }
         if (LOWORD(w) == frameMesh) { self.editor.Frame(); return 0; }

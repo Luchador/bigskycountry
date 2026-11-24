@@ -13,7 +13,9 @@ namespace
     // A larger preview space keeps the world's 0.1 m near plane tiny relative to
     // the mesh, even when zooming inside its original bounding sphere.
     constexpr double previewRadius = 100;
-    constexpr SDL_FRect viewMenu{4, 0, 60, menuHeight}, viewOptions{4, menuHeight, 196, 52};
+    constexpr std::array viewLabels{"Lit", "Vertex Colors", "Vertex Alpha"};
+    constexpr int viewCount = int(viewLabels.size());
+    constexpr SDL_FRect viewMenu{4, 0, 60, menuHeight}, viewOptions{4, menuHeight, 196, menuHeight * viewCount};
     bool Fill(SDL_Renderer* r, SDL_FRect box, SDL_Color c)
     { return EditorTheme::SetColor(r, c) && SDL_RenderFillRect(r, &box); }
     bool Text(SDL_Renderer* r, float x, float y, const std::string& s, SDL_Color c = EditorTheme::text)
@@ -22,7 +24,7 @@ namespace
     { return text.size() <= count ? text : count < 4 ? text.substr(0, count) : text.substr(0, count - 3) + "..."; }
     std::size_t Characters(float width) { return static_cast<std::size_t>(std::max(0.f, width) / 8); }
 
-    std::shared_ptr<Mesh> VertexPreview(const Mesh& source)
+    std::shared_ptr<Mesh> VertexPreview(const Mesh& source, bool alpha)
     {
         auto mesh = std::make_shared<Mesh>();
         mesh->bounds = source.bounds;
@@ -31,11 +33,14 @@ namespace
         const bool imported = source.vertexColors.size() == source.vertices.size();
         for (std::size_t i = 0; i < mesh->vertices.size(); ++i)
         {
-            mesh->vertices[i].color = imported ? source.vertexColors[i] : source.vertices[i].color;
-            mesh->vertices[i].color.a = 1;
+            const auto color = imported ? source.vertexColors[i] : source.vertices[i].color;
+            // Show alpha as an opaque grayscale surface, never as transparency.
+            // Keep the original mesh and its per-LOD inspection data untouched.
+            const float value = std::clamp(color.a, 0.f, 1.f);
+            mesh->vertices[i].color = alpha ? SDL_FColor{value, value, value, 1} : SDL_FColor{color.r, color.g, color.b, 1};
         }
         mesh->lodDistances = source.lodDistances;
-        for (const auto& lod : source.lods) mesh->lods.push_back({VertexPreview(*lod.mesh), lod.threshold});
+        for (const auto& lod : source.lods) mesh->lods.push_back({VertexPreview(*lod.mesh, alpha), lod.threshold});
         return mesh;
     }
 }
@@ -260,10 +265,21 @@ void MeshEditorWindow::CancelPointer()
     SetResizeCursor(false);
 }
 
+void MeshEditorWindow::SetViewMode(ViewMode mode)
+{
+    if (viewMode == mode) return;
+    // Both inspection modes use the same instance key. Discard the previous
+    // preview and all its resident LODs before changing the displayed channel.
+    if (preview) preview->Forget(&vertexInstance);
+    vertexInstance = {};
+    viewMode = mode;
+    dirty = true;
+}
+
 bool MeshEditorWindow::HandleMenu(const SDL_Event& event)
 {
     const auto choose = [&] {
-        viewMode = menuRow == 0 ? ViewMode::Lit : ViewMode::VertexColors;
+        SetViewMode(static_cast<ViewMode>(std::clamp(menuRow, 0, viewCount - 1)));
         menuOpen = false;
         dirty = true;
     };
@@ -277,7 +293,8 @@ bool MeshEditorWindow::HandleMenu(const SDL_Event& event)
         }
         if (!menuOpen) return false;
         if (event.key.key == SDLK_ESCAPE) menuOpen = false;
-        else if (event.key.key == SDLK_UP || event.key.key == SDLK_DOWN) menuRow = 1 - menuRow;
+        else if (event.key.key == SDLK_UP) menuRow = (menuRow + viewCount - 1) % viewCount;
+        else if (event.key.key == SDLK_DOWN) menuRow = (menuRow + 1) % viewCount;
         else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) choose();
         dirty = true;
         return true;
@@ -322,12 +339,12 @@ bool MeshEditorWindow::DrawMenu()
         !Text(renderer, 12, 9, "View")) return false;
     if (!menuOpen) return true;
     if (!Fill(renderer, viewOptions, EditorTheme::chrome)) return false;
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < viewCount; ++i)
     {
         const SDL_FRect row{viewOptions.x, viewOptions.y + i * menuHeight, viewOptions.w, menuHeight};
         if ((menuRow == i && !Fill(renderer, row, EditorTheme::selected)) ||
             !Text(renderer, row.x + 8, row.y + 9, int(viewMode) == i ? "*" : "") ||
-            !Text(renderer, row.x + 28, row.y + 9, i == 0 ? "Lit" : "Vertex Colors")) return false;
+            !Text(renderer, row.x + 28, row.y + 9, viewLabels[i])) return false;
     }
     return true;
 }
@@ -496,8 +513,8 @@ bool MeshEditorWindow::Draw()
                           -std::cos(yaw) * std::cos(pitch) * distance} * previewRadius, {});
     const WorldLighting lights{{Math::Normalize(Vector3{-0.4, 0.7, -0.6}), {2.0, 1.9, 1.8}},
                                {Math::Normalize(Vector3{0.6, 0.2, 0.7}), {0.35, 0.4, 0.5}}, {0.22, 0.22, 0.24}};
-    const bool colors = viewMode == ViewMode::VertexColors;
-    if (colors && !vertexInstance.mesh) vertexInstance = {VertexPreview(*instance.mesh), instance.transform};
+    const bool colors = viewMode != ViewMode::Lit;
+    if (colors && !vertexInstance.mesh) vertexInstance = {VertexPreview(*instance.mesh, viewMode == ViewMode::VertexAlpha), instance.transform};
     // Unit ambient and no directional light reproduce the raw linear colors,
     // with normal display encoding and the same depth-tested, cached GPU path.
     const WorldLighting colorLights{{{0, 1, 0}, {0, 0, 0}}, {{0, 1, 0}, {0, 0, 0}}, {1, 1, 1}};

@@ -156,7 +156,7 @@ namespace
             v.normal = Math::Normalize(normalTransform.Direction({n[0], n[1], n[2]}));
             v.uv = {st[0], st[1]};
 
-            mesh.vertexColors.push_back({rgba[0], rgba[1], rgba[2], 1});
+            mesh.vertexColors.push_back({rgba[0], rgba[1], rgba[2], rgba[3]});
 
             if (p.material && p.material->has_pbr_metallic_roughness)
             {
@@ -169,7 +169,7 @@ namespace
 
             v.color = {rgba[0], rgba[1], rgba[2], 1};
 
-            if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) || !std::isfinite(st[0]) || !std::isfinite(st[1]) || !std::isfinite(rgba[0]) || !std::isfinite(rgba[1]) || !std::isfinite(rgba[2]))
+            if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) || !std::isfinite(st[0]) || !std::isfinite(st[1]) || !std::isfinite(rgba[0]) || !std::isfinite(rgba[1]) || !std::isfinite(rgba[2]) || !std::isfinite(rgba[3]))
             {
                 return SDL_SetError("Non-finite mesh vertex");
             }

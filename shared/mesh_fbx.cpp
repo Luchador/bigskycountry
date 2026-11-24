@@ -55,12 +55,12 @@ namespace
                             v.uv = {float(uv.x), float(1 - uv.y)};
                         }
                         const auto color = source.vertex_color.exists ? ufbx_get_vertex_vec4(&source.vertex_color, index) : ufbx_vec4{1, 1, 1, 1};
-                        colors[j] = {float(color.x), float(color.y), float(color.z), 1};
+                        colors[j] = {float(color.x), float(color.y), float(color.z), float(color.w)};
                         v.color = {float(color.x * tint.x), float(color.y * tint.y), float(color.z * tint.z), 1};
                         if (!std::isfinite(Math::Length(v.position)) || !std::isfinite(Math::Length(v.normal)) ||
                             !std::isfinite(v.uv.x) || !std::isfinite(v.uv.y) || !std::isfinite(v.color.r) ||
                             !std::isfinite(v.color.g) || !std::isfinite(v.color.b) ||
-                            !std::isfinite(colors[j].r) || !std::isfinite(colors[j].g) || !std::isfinite(colors[j].b))
+                            !std::isfinite(colors[j].r) || !std::isfinite(colors[j].g) || !std::isfinite(colors[j].b) || !std::isfinite(colors[j].a))
                             return SDL_SetError("Non-finite FBX vertex");
                     }
                     mesh.vertices.insert(mesh.vertices.end(), std::begin(face), std::end(face));

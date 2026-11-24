@@ -63,7 +63,8 @@ private:
     float panelWidth = 280, panelDragStart = 280;
     std::optional<float> panelGrab;
     SDL_Cursor* resizeCursor = nullptr;
-    enum class ViewMode { Lit, VertexColors };
+    enum class ViewMode { Lit, VertexColors, VertexAlpha };
+    void SetViewMode(ViewMode mode);
     ViewMode viewMode = ViewMode::Lit;
     bool menuOpen = false;
     int menuRow = 0;
