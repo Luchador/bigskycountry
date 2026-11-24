@@ -9,6 +9,8 @@ FetchContent_Declare(SDL3
     URL_HASH SHA256=f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f
 )
 FetchContent_MakeAvailable(SDL3)
+include(cmake/sdl_d3d12.cmake)
+bigsky_fix_sdl_d3d12()
 
 # cgltf 1.15 (MIT); shared by model loading in the editor and game.
 FetchContent_Declare(cgltf
