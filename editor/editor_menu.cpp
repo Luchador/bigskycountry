@@ -451,7 +451,7 @@ std::optional<OutlineOp> EditorMenu::OpenFolderMenu(void* frame, int screenX, in
 
 std::optional<MaterialAction> EditorMenu::OpenMaterialMenu(SDL_Window* window, int screenX, int screenY, bool onMaterial)
 {
-    constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Add New Material"};
+    constexpr static MenuItem add{BSC_ADD_MATERIAL, L"&Create New Material"};
     constexpr static MenuItem actions[] = {{BSC_DUPLICATE_MATERIAL, L"&Duplicate\tCtrl+D"},
                                           {BSC_RENAME_MATERIAL, L"&Rename\tF2"},
                                           {BSC_DELETE_MATERIAL, L"D&elete\tDelete"}};

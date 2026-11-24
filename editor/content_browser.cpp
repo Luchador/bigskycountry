@@ -350,6 +350,13 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
         {
             const auto i = folderRows[index];
             const auto& folder = folders[i];
+            if (event.button.button == SDL_BUTTON_RIGHT)
+            {
+                textures.SelectFolder(folder);
+                selectedTexture.clear();
+                textureScroll = 0;
+                assetListFocused = false;
+            }
             const int indent = folder.empty() ? 0 : 1 + static_cast<int>(std::count(folder.begin(), folder.end(), '/'));
             const bool branch = i + 1 < folders.size() && (folder.empty() || folders[i + 1].starts_with(folder + "/"));
             if (event.button.button == SDL_BUTTON_LEFT && branch &&
@@ -373,7 +380,9 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
                 selectedTexture.clear();
                 textureScroll = 0;
             }
-            return {};
+            // Continue to the creation menu on right-click without expanding
+            // or collapsing this folder.
+            if (event.button.button != SDL_BUTTON_RIGHT) return {};
         }
     }
     if (!models && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT &&
@@ -391,7 +400,7 @@ std::string ContentBrowser::HandlePointer(const SDL_Event& event, SDL_FPoint loc
         }
         else popup = MaterialPopup::AddMenu;
         materialMenuRow = 0;
-        const float w = std::min(154.0f, static_cast<float>(width));
+        const float w = std::min(popup == MaterialPopup::ActionsMenu ? 154.0f : 176.0f, static_cast<float>(width));
         const float h = popup == MaterialPopup::ActionsMenu ? 78.0f : 26.0f;
         popupBounds = {std::clamp(local.x, 0.0f, width - w), std::max(0.0f, std::min(local.y, height - h)), w, h};
         return {};
@@ -833,7 +842,7 @@ bool ContentBrowser::DrawMaterialPopup(SDL_Renderer* renderer) const
         return true;
     }
     if (!Text(renderer, popupBounds.x + 6, popupBounds.y + 8,
-              popup == MaterialPopup::Name && renameMaterial ? "Rename Material" : "Add New Material", ink)) return false;
+              popup == MaterialPopup::Name && renameMaterial ? "Rename Material" : "Create New Material", ink)) return false;
     if (popup == MaterialPopup::AddMenu) return true;
     const auto [x, y, w, h] = popupBounds;
     if (!Fill(renderer, {x + 5, y + 28, w - 10, 23}, replaceName ? EditorTheme::selected : EditorTheme::field) ||

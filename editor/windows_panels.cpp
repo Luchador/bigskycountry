@@ -686,7 +686,33 @@ struct WindowsPanels::Impl
         {
             TVHITTESTINFO hit{};
             hit.pt = local;
-            if (TreeView_HitTest(tree, &hit)) return false;
+            auto item = TreeView_HitTest(tree, &hit);
+            if (at.x == -1 && at.y == -1)
+            {
+                item = TreeView_GetSelection(tree);
+                RECT row{};
+                if (!item || !TreeView_GetItemRect(tree, item, &row, TRUE)) return false;
+                at = {row.left, row.bottom};
+                ClientToScreen(tree, &at);
+            }
+            if (item)
+            {
+                TVITEMW row{};
+                row.mask = TVIF_PARAM;
+                row.hItem = item;
+                if (!TreeView_GetItem(tree, &row)) return false;
+                auto& catalog = browser->Textures();
+                const auto index = static_cast<std::size_t>(row.lParam);
+                if (index >= catalog.Folders().size()) return false;
+                // Right-click targets the folder under the pointer, even when a
+                // different folder was selected. Leave its expansion state alone.
+                const auto folder = catalog.Folders()[index];
+                TreeView_SelectItem(tree, item);
+                catalog.SelectFolder(folder);
+                PopulateTextures();
+                ShowBrowserTab();
+                SetFocus(tree);
+            }
         }
         else if (source != models || local.y < DialogSize(models, 0, BROWSER_PAGE_TOP).cy) return false;
 
@@ -699,7 +725,7 @@ struct WindowsPanels::Impl
             }
             auto& catalog = browser->Textures();
             std::string name = catalog.NewMaterialName();
-            while (auto input = WindowsNameDialog::Prompt(frame, L"Add New Material", name))
+            while (auto input = WindowsNameDialog::Prompt(frame, L"Create New Material", name))
             {
                 name = *input;
                 std::string created, error;
@@ -710,7 +736,7 @@ struct WindowsPanels::Impl
                     SetFocus(list);
                     break;
                 }
-                MessageBoxW(frame, Wide(error).c_str(), L"Add New Material", MB_OK | MB_ICONWARNING);
+                MessageBoxW(frame, Wide(error).c_str(), L"Create New Material", MB_OK | MB_ICONWARNING);
             }
         }
         return true;
