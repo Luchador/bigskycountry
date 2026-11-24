@@ -25,7 +25,7 @@ private:
     std::array<SDL_Texture*, materialSlotCount> thumbs{};
     bool dirty = false, imagesDirty = false, sphereDirty = false, typeMenu = false;
     std::optional<SDL_FPoint> orbitPoint;
-    std::optional<int> activeSlider; // RGB channels followed by the translucency multiplier.
+    std::optional<int> activeSlider; // RGB, translucency/subsurface strength, alpha cutoff.
     std::string dragged;
     std::optional<MaterialSlot> hover;
 };

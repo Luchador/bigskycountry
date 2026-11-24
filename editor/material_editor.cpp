@@ -16,6 +16,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     material = std::move(next);
     previewFactor = material.translucency;
     previewSubsurface = material.subsurfaceStrength;
+    previewAlphaCutoff = material.alphaCutoff;
     previewTint = material.emissiveTint;
     previewDirty = true;
     return true;
@@ -109,6 +110,22 @@ bool MaterialEditor::SetSubsurface(float value)
     next.subsurfaceStrength = value;
     const bool saved = value == material.subsurfaceStrength || Commit(std::move(next));
     PreviewSubsurface(material.subsurfaceStrength);
+    return saved;
+}
+
+void MaterialEditor::PreviewAlphaCutoff(float value)
+{
+    if (value == previewAlphaCutoff) return;
+    previewAlphaCutoff = value;
+    previewDirty = true;
+}
+
+bool MaterialEditor::SetAlphaCutoff(float value)
+{
+    auto next = material;
+    next.alphaCutoff = value;
+    const bool saved = value == material.alphaCutoff || Commit(std::move(next));
+    PreviewAlphaCutoff(material.alphaCutoff);
     return saved;
 }
 

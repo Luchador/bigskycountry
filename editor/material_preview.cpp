@@ -128,7 +128,7 @@ namespace
         SDL_Surface *base, *normal, *orm, *emissive, *opacity, *outerBase, *outerNormal, *outerOrm, *subsurface;
         MaterialType type;
         SDL_FColor tint;
-        float factor, subsurfaceStrength;
+        float factor, subsurfaceStrength, alphaCutoff;
         Vector3 toEye;
         const Vector3 light = Math::Normalize({-.48, .68, .72});
         const Vector3 half = Math::Normalize(light + toEye);
@@ -150,7 +150,7 @@ namespace
                 return;
             }
             auto albedo = Sample<4, true>(base, u, v, {.48f, .48f, .48f, 1});
-            if (Material::IsCutout(type) && albedo[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0] < .5f)
+            if (Material::IsCutout(type) && albedo[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0] < alphaCutoff)
                 return;
             n = UnitNormal(n);
             auto packed = Sample<3>(orm, u, v, {1, .5f, 0, 1});
@@ -284,7 +284,7 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
                         image(material.type == MaterialType::Unlit ? MaterialSlot::Translucency : MaterialSlot::Opacity),
                         image(MaterialSlot::OuterBaseColor), image(MaterialSlot::OuterNormal), image(MaterialSlot::OuterORM),
                         image(MaterialSlot::Subsurface), material.type,
-                        Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), Subsurface(), toEye};
+                        Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), Subsurface(), AlphaCutoff(), toEye};
     constexpr auto background = EditorTheme::field;
     SDL_FillSurfaceRect(&target, nullptr, SDL_MapSurfaceRGB(&target, background.r, background.g, background.b));
     static const Mesh sphere = BuildSphere();

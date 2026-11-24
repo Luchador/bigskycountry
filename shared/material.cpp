@@ -129,6 +129,8 @@ bool Material::Load(const std::string& requestedFile)
         if (!ReadUnit(factor, material.translucency)) return SDL_SetError("Invalid translucency multiplier");
     if (const auto* strength = cJSON_GetObjectItemCaseSensitive(json.get(), "subsurfaceStrength"))
         if (!ReadUnit(strength, material.subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
+    if (const auto* cutoff = cJSON_GetObjectItemCaseSensitive(json.get(), "alphaCutoff"))
+        if (!ReadUnit(cutoff, material.alphaCutoff)) return SDL_SetError("Invalid alpha cutoff");
     const auto* maps = cJSON_GetObjectItemCaseSensitive(json.get(), "textures");
     if (maps && !cJSON_IsObject(maps))
         return SDL_SetError("Invalid material texture list");
@@ -162,6 +164,10 @@ bool Material::Save(const std::string& requestedFile) const
     const auto unit = [](float v) { return v >= 0 && v <= 1; };
     if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
     if (!unit(subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
+    if (!unit(alphaCutoff)) return SDL_SetError("Invalid alpha cutoff");
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "alphaCutoff");
+    if (IsCutout(type) || alphaCutoff != .5f)
+        if (!cJSON_AddNumberToObject(json.get(), "alphaCutoff", alphaCutoff)) return SDL_OutOfMemory();
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "subsurfaceStrength");
     if (type == MaterialType::Foliage || subsurfaceStrength != .5f)
         if (!cJSON_AddNumberToObject(json.get(), "subsurfaceStrength", subsurfaceStrength)) return SDL_OutOfMemory();

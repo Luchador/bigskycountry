@@ -14,7 +14,7 @@ public:
     // Read the full-resolution RGBA image used by the sky sprites.
     static SDL_Surface* LoadColorSurface(const std::string& source);
     bool Load(const std::string& path, Format expected);
-    // Foliage preserves coverage at the shader's 0.5 cutoff (alpha for color, red for opacity).
+    // Foliage preserves coverage at the default 0.5 cutoff (alpha for color, red for opacity).
     bool FromImage(SDL_Surface* rgba, Format expected, bool preserveCoverage = false);
     // Encoder input with the complete, already-filtered mip chain. No GPU required.
     bool SaveMipSource(const std::string& file) const;

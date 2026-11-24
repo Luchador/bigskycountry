@@ -255,7 +255,7 @@ bool WorldRenderer::CreatePipelines()
             }
         auto* shadowVS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_VERTEX, "ShadowVS", shadow_vert_dxil, shadow_vert_spirv, 0, 1);
         auto* shadowPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "ShadowPS", shadow_frag_dxil, shadow_frag_spirv);
-        auto* cutoutPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "ShadowCutoutPS", shadow_cutout_dxil, shadow_cutout_spirv, 2);
+        auto* cutoutPS = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "ShadowCutoutPS", shadow_cutout_dxil, shadow_cutout_spirv, 2, 1);
         if (shadowVS && shadowPS && cutoutPS && shadowFormat != SDL_GPU_TEXTUREFORMAT_INVALID)
         {
             SDL_GPUGraphicsPipelineCreateInfo shadow{};
@@ -478,7 +478,12 @@ bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
                 const bool cutout = material && Material::IsCutout(material->type);
                 auto* pipeline = cutout ? shadowCutoutPipeline : shadowPipeline;
                 if (bound != pipeline) SDL_BindGPUGraphicsPipeline(pass, bound = pipeline);
-                if (cutout) materialCache.BindShadow(*material, pass);
+                if (cutout)
+                {
+                    materialCache.BindShadow(*material, pass);
+                    const SDL_FColor properties{material->alphaCutoff, 0, 0, 0};
+                    SDL_PushGPUFragmentUniformData(commands, 0, &properties, sizeof(properties));
+                }
                 SDL_DrawGPUPrimitives(pass, static_cast<Uint32>(end-first), 1, static_cast<Uint32>(first), 0);
             };
             for (const auto& batch : residentDraws)

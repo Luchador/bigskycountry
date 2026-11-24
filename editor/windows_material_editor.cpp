@@ -71,10 +71,12 @@ void WindowsMaterialEditor::Layout()
     const bool transition = editor.Current().type == MaterialType::Transition;
     const bool foliage = editor.Current().type == MaterialType::Foliage;
     const bool vertexAO = Material::SupportsVertexAlphaAO(editor.Current().type);
+    const bool cutout = Material::IsCutout(editor.Current().type);
     const int pad = Units(window, 6, true), side = Units(window, transition || foliage ? 180 : 144, true);
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
-    const int top = Units(window, vertexAO ? 60 : 42, false), clear = Units(window, 28, true);
+    const int propertiesTop = Units(window, vertexAO ? 60 : 42, false);
+    const int top = propertiesTop + (cutout ? Units(window, 34, false) : 0), clear = Units(window, 28, true);
     const int rows = transition || foliage ? 6 : 5;
     const int footer = foliage ? Units(window, 32, false) : 0;
     const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad - footer) / rows));
@@ -83,6 +85,10 @@ void WindowsMaterialEditor::Layout()
     MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 96, false), FALSE);
     ShowWindow(GetDlgItem(window, IDC_MAT_VERTEX_AO), vertexAO ? SW_SHOWNA : SW_HIDE);
     MoveWindow(GetDlgItem(window, IDC_MAT_VERTEX_AO), x, Units(window, 39, false), width, Units(window, 13, false), FALSE);
+    for (int id : {IDC_MAT_CUTOFF_LABEL, IDC_MAT_CUTOFF})
+        ShowWindow(GetDlgItem(window, id), cutout ? SW_SHOWNA : SW_HIDE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_CUTOFF_LABEL), x, propertiesTop, width, Units(window, 12, false), FALSE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_CUTOFF), x, propertiesTop + Units(window, 14, false), width, Units(window, 18, false), FALSE);
     int row = 0;
     const bool unlit = editor.Current().type == MaterialType::Unlit;
     for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
@@ -125,7 +131,16 @@ void WindowsMaterialEditor::Sync()
         EnableWindow(GetDlgItem(window, IDC_MAT_CLEAR_FIRST + i), !path.empty());
     }
     SyncFactor();
+    SyncCutoff();
     Layout();
+}
+
+void WindowsMaterialEditor::SyncCutoff()
+{
+    wchar_t label[40];
+    swprintf(label, 40, L"Alpha cutoff %.2f", editor.AlphaCutoff());
+    SetDlgItemTextW(window, IDC_MAT_CUTOFF_LABEL, label);
+    SendDlgItemMessageW(window, IDC_MAT_CUTOFF, TBM_SETPOS, TRUE, std::lround(editor.AlphaCutoff() * 100));
 }
 
 void WindowsMaterialEditor::SyncFactor()
@@ -265,6 +280,7 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         self.window = hwnd;
         WindowsTheme::ApplyDialog(hwnd);
         SendDlgItemMessageW(hwnd, IDC_MAT_FACTOR, TBM_SETRANGE, FALSE, MAKELPARAM(0, 100));
+        SendDlgItemMessageW(hwnd, IDC_MAT_CUTOFF, TBM_SETRANGE, FALSE, MAKELPARAM(0, 100));
         for (const auto& type : materialTypes)
         {
             const auto label = WindowsNameDialog::Wide(type.label);
@@ -290,6 +306,16 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         self->Paint(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
         return TRUE;
     case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(l) == GetDlgItem(hwnd, IDC_MAT_CUTOFF))
+        {
+            const float value = SendDlgItemMessageW(hwnd, IDC_MAT_CUTOFF, TBM_GETPOS, 0, 0) / 100.f;
+            if (LOWORD(w) == TB_THUMBTRACK) self->editor.PreviewAlphaCutoff(value);
+            else if (!self->editor.SetAlphaCutoff(value))
+                MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+            self->SyncCutoff();
+            InvalidateRect(GetDlgItem(hwnd, IDC_MAT_PREVIEW), nullptr, FALSE);
+            return TRUE;
+        }
         if (reinterpret_cast<HWND>(l) != GetDlgItem(hwnd, IDC_MAT_FACTOR)) return FALSE;
         {
             const float value = SendDlgItemMessageW(hwnd, IDC_MAT_FACTOR, TBM_GETPOS, 0, 0) / 100.f;

@@ -40,9 +40,10 @@ namespace
     struct Surface
     {
         bool foliage = false, invisible = false;
+        float alphaCutoff = .5f;
         std::shared_ptr<const Mask> colorAlpha, opacity;
         bool Opaque(SDL_FPoint uv) const
-        { return !invisible && (colorAlpha ? colorAlpha->Sample(uv) : 1) * (opacity ? opacity->Sample(uv) : 1) >= .5f; }
+        { return !invisible && (colorAlpha ? colorAlpha->Sample(uv) : 1) * (opacity ? opacity->Sample(uv) : 1) >= alphaCutoff; }
     };
     std::vector<Surface> Surfaces(const std::vector<MeshMaterialSlot>& slots, const std::atomic<bool>& cancel)
     {
@@ -82,6 +83,7 @@ namespace
             surface.invisible = material.type == MaterialType::Unlit;
             if (Material::IsCutout(material.type))
             {
+                surface.alphaCutoff = material.alphaCutoff;
                 surface.colorAlpha = load(material.textures[std::size_t(MaterialSlot::BaseColor)], 3);
                 surface.opacity = load(material.textures[std::size_t(MaterialSlot::Opacity)], 0);
             }

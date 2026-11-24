@@ -22,6 +22,9 @@ public:
     void PreviewSubsurface(float value);
     bool SetSubsurface(float value);
     float Subsurface() const { return previewSubsurface; }
+    void PreviewAlphaCutoff(float value);
+    bool SetAlphaCutoff(float value);
+    float AlphaCutoff() const { return previewAlphaCutoff; }
     const Material& Current() const { return material; }
     bool Orbit(double deltaX, double deltaY, double viewportSpan);
     SDL_Surface* Preview(int pixelWidth, int pixelHeight);
@@ -36,6 +39,7 @@ private:
     Material material;
     float previewFactor = 1;
     float previewSubsurface = .5f;
+    float previewAlphaCutoff = .5f;
     std::array<float, 3> previewTint{1, 1, 1};
     double yaw = 0.0, pitch = 0.0;
     bool previewDirty = true;

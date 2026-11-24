@@ -41,8 +41,12 @@ BSC_COMBINED Texture2D<float4> colorMap : register(t0, space2);
 BSC_COMBINED SamplerState colorSampler : register(s0, space2);
 BSC_COMBINED Texture2D<float4> opacityMap : register(t1, space2);
 BSC_COMBINED SamplerState opacitySampler : register(s1, space2);
+cbuffer CutoutProperties : register(b0, space3)
+{
+    float4 cutout; // Alpha cutoff in x.
+};
 void ShadowCutoutPS(Fragment input)
 {
     clip(input.lit-.5);
-    clip(colorMap.Sample(colorSampler,input.uv).a * opacityMap.Sample(opacitySampler,input.uv).r - .5);
+    clip(colorMap.Sample(colorSampler,input.uv).a * opacityMap.Sample(opacitySampler,input.uv).r - cutout.x);
 }

@@ -11,7 +11,7 @@ namespace
         SDL_FRect view, type, vertexAO{};
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
         SDL_FRect tint{};
-        std::array<SDL_FRect, 4> sliders{};
+        std::array<SDL_FRect, 5> sliders{};
         Layout(SDL_Window* window, const Material& material)
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
@@ -23,11 +23,13 @@ namespace
             type = {split + 10, 32, panelWidth - 20, 25};
             const float aoHeight = Material::SupportsVertexAlphaAO(material.type) ? 28.f : 0.f;
             if (aoHeight > 0) vertexAO = {split + 10, 65, panelWidth - 20, 20};
+            const float cutoffHeight = Material::IsCutout(material.type) ? 44.f : 0.f;
+            if (cutoffHeight > 0) sliders[4] = {split + 10, 86 + aoHeight, panelWidth - 20, 18};
             const bool unlit = material.type == MaterialType::Unlit;
-            const float rowHeight = foliage ? (windowHeight - 120.f - aoHeight) / 6 :
-                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f - aoHeight) / (transition ? 6 : 5);
+            const float rowHeight = foliage ? (windowHeight - 120.f - aoHeight - cutoffHeight) / 6 :
+                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f - aoHeight - cutoffHeight) / (transition ? 6 : 5);
             const float step = std::min(80.f, rowHeight);
-            float y = 68 + aoHeight;
+            float y = 68 + aoHeight + cutoffHeight;
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
                 if (!material.Uses(static_cast<MaterialSlot>(i))) continue;
@@ -125,6 +127,7 @@ void SdlMaterialEditor::FinishDrag()
         editor.PreviewTint(editor.Current().emissiveTint);
         editor.PreviewTranslucency(editor.Current().translucency);
         editor.PreviewSubsurface(editor.Current().subsurfaceStrength);
+        editor.PreviewAlphaCutoff(editor.Current().alphaCutoff);
         sphereDirty = true;
         activeSlider.reset();
     }
@@ -296,15 +299,18 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
         else
         {
             const bool foliage = editor.Current().type == MaterialType::Foliage;
-            if (editor.Current().type == MaterialType::Unlit || foliage)
-                for (int i = foliage ? 3 : 0; i < int(layout.sliders.size()); ++i)
-                    if (SDL_PointInRectFloat(&p, &layout.sliders[i]))
-                    {
-                        activeSlider = i;
-                        SDL_CaptureMouse(true);
-                        AdjustSlider(p.x, false);
-                        return true;
-                    }
+            for (int i = 0; i < int(layout.sliders.size()); ++i)
+            {
+                const bool visible = i == 4 ? Material::IsCutout(editor.Current().type) :
+                    editor.Current().type == MaterialType::Unlit || (foliage && i == 3);
+                if (visible && SDL_PointInRectFloat(&p, &layout.sliders[i]))
+                {
+                    activeSlider = i;
+                    SDL_CaptureMouse(true);
+                    AdjustSlider(p.x, false);
+                    return true;
+                }
+            }
             for (std::size_t i = 0; i < layout.clear.size(); ++i)
                 if (SDL_PointInRectFloat(&p, &layout.clear[i]) && !editor.Current().textures[i].empty())
                     Report(editor.SetTexture(static_cast<MaterialSlot>(i), {}));
@@ -318,7 +324,13 @@ void SdlMaterialEditor::AdjustSlider(float x, bool commit)
     const int index = *activeSlider;
     const auto bar = Layout(window, editor.Current()).sliders[index];
     const float fraction = std::clamp((x - bar.x) / (bar.w - 1), 0.f, 1.f);
-    if (index == 3)
+    if (index == 4)
+    {
+        const float value = std::round(fraction * 100) / 100;
+        if (commit) Report(editor.SetAlphaCutoff(value));
+        else editor.PreviewAlphaCutoff(value);
+    }
+    else if (index == 3)
     {
         const float value = std::round(fraction * 100) / 100;
         if (editor.Current().type == MaterialType::Foliage)
@@ -446,6 +458,15 @@ bool SdlMaterialEditor::Draw()
                 !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
                 !Fill(renderer, {bar.x + value * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
         }
+    }
+    if (Material::IsCutout(editor.Current().type))
+    {
+        const auto bar = layout.sliders[4];
+        char label[40];
+        SDL_snprintf(label, sizeof(label), "Alpha cutoff %.2f", editor.AlphaCutoff());
+        if (!Text(renderer, bar.x, bar.y - 16, label, text) ||
+            !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
+            !Fill(renderer, {bar.x + editor.AlphaCutoff() * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
     }
     if (typeMenu)
         for (int i = 0; i < int(materialTypes.size()); ++i)

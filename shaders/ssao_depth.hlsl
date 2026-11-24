@@ -2,7 +2,7 @@
 
 cbuffer DepthLimits : register(b0, space3)
 {
-    float4 limits; // max radial distance squared (includes the sampling radius)
+    float4 limits; // max radial distance squared (includes the sampling radius), alpha cutoff
 };
 #ifdef __spirv__
 #define BSC_COMBINED [[vk::combinedImageSampler]]
@@ -24,5 +24,5 @@ void CutoutPS(WorldFragment input)
 {
     DepthPS(input);
     float alpha = baseMap.Sample(baseSampler, input.uv).a * opacityMap.Sample(opacitySampler, input.uv).r;
-    clip(alpha - .5); // Same cutout test as the shadow maps, including foliage backs.
+    clip(alpha - limits.y); // Same cutout test as the shadow maps, including foliage backs.
 }

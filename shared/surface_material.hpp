@@ -29,6 +29,7 @@ struct SurfaceMaterial
     std::uint64_t lastUsed = 0;
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     float subsurfaceStrength = .5f;
+    float alphaCutoff = .5f;
     bool hasSubsurfaceMap = false;
     bool useVertexAlphaAO = false;
     // Linear radiance: apply atmosphere before the final display conversion.

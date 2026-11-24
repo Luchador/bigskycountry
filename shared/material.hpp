@@ -31,6 +31,7 @@ struct Material
     std::array<float, 3> emissiveTint{1, 1, 1}; // Display (sRGB) picker values.
     float translucency = 1;
     float subsurfaceStrength = .5f; // Thin-leaf transmission from directional lights, 0..1.
+    float alphaCutoff = .5f; // Cutout/foliage keeps base alpha * opacity at or above this value, 0..1.
     bool useVertexAlphaAO = false; // Multiply ORM ambient visibility by mesh vertex alpha.
     static bool IsCutout(MaterialType type) { return type == MaterialType::AlphaCutout || type == MaterialType::Foliage; }
     static bool SupportsVertexAlphaAO(MaterialType type)

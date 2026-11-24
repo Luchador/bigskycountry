@@ -80,7 +80,14 @@ For leaves, select **Foliage** in the Material Editor and assign that material t
 the leaf slots in the Mesh Editor. Foliage renders both sides, uses the same
 alpha cutout as **Alpha cutout**, and casts masked shadows. A combined color/opacity
 image goes in **Base color**; leave **Opacity** empty unless a separate grayscale
-mask is needed. The two alpha sources multiply, with a cutoff of 0.5.
+mask is needed. The two alpha sources multiply. **Alpha cutoff** is available on
+**Alpha cutout** and **Foliage** materials: 0.00–1.00 in 0.01 steps, default 0.50.
+Lower values keep more of the mask; higher values remove more. Zero disables
+the cutout, and one keeps only fully opaque samples. The sphere previews changes
+while dragging; releasing the slider saves the value to the material. Meshes,
+shadows, SSAO, MSAA alpha-to-coverage, and future vertex AO bakes use this cutoff.
+Existing materials without an `alphaCutoff` field retain 0.50. Rebuild assets
+after editing materials for the game, and rebake vertex AO if the mask changed.
 
 **Subsurface strength** (0–1, default 0.5) controls a thin-leaf approximation of
 light transmission from the sun and moon. **Subsurface** is optional: RGB supplies
@@ -498,7 +505,7 @@ In the Content Browser’s **Textures** tab, select a folder to browse its textu
 
 Renaming preserves existing assignments in saved worlds, undo history, and the game through small `.bmat.redirect` files beside the source materials. They are hidden from the Content Browser and copied to `build/cooked` during a build. Keep these files in source control with the renamed material. Former names remain reserved while their redirects exist; renaming a material back to one of its own former names is supported. An open Material Editor follows a rename and closes when its material is deleted. Rebuild the game after asset changes to update and prune cooked copies.
 
-Double-click a material to open its floating **Material Editor**. Hold the left mouse button and drag in its preview viewport to orbit the sphere. Drag textures from any Content Browser folder onto the **Base color**, **Normal**, **ORM**, **Emissive**, or **Opacity** thumbnail. Use **Clear** to remove a map. The sphere updates and the material saves after each change. ORM uses red for occlusion, green for roughness, and blue for metalness. **Alpha cutout** discards pixels where base-color alpha multiplied by the opacity map’s red channel is below 0.5. **Standard** and **Terrain** both render the whole surface and use the same texture slots. Materials reference the original textures by their paths and share the same decoded images.
+Double-click a material to open its floating **Material Editor**. Hold the left mouse button and drag in its preview viewport to orbit the sphere. Drag textures from any Content Browser folder onto the **Base color**, **Normal**, **ORM**, **Emissive**, or **Opacity** thumbnail. Use **Clear** to remove a map. The sphere updates and the material saves after each change. ORM uses red for occlusion, green for roughness, and blue for metalness. **Alpha cutout** discards pixels where base-color alpha multiplied by the opacity map’s red channel is below the material’s **Alpha cutoff** (default 0.50). **Standard** and **Terrain** both render the whole surface and use the same texture slots. Materials reference the original textures by their paths and share the same decoded images.
 
 Choose **Unlit** for a surface whose color stays constant as the world lighting changes. Its **Emissive** map is multiplied by the **Emissive tint**, which defaults to white. The **Translucency** map’s red channel multiplied by the slider sets opacity. A black texel is invisible, and a white texel at the default slider value of **1.00** is opaque. Both slots use white when empty, so the tint and slider also work on their own.
 

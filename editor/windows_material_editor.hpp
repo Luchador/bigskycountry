@@ -20,6 +20,7 @@ private:
     void Layout();
     void Sync();
     void SyncFactor();
+    void SyncCutoff();
     void Paint(const DRAWITEMSTRUCT& draw);
     MaterialEditor editor;
     HWND window = nullptr;

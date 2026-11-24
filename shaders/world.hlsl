@@ -271,7 +271,7 @@ cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;
     uint alphaCutout, unlit, transition, foliage;
-    float4 subsurfaceProperties; // Strength, has subsurface map, use vertex alpha AO, padding.
+    float4 subsurfaceProperties; // Strength, has subsurface map, use vertex alpha AO, alpha cutoff.
 };
 
 float3 DecodeNormalXY(float2 channels)
@@ -281,11 +281,13 @@ float3 DecodeNormalXY(float2 channels)
 }
 
 #ifdef BSC_MSAA_SAMPLES
-uint AlphaToCoverage(float alpha, float2 position)
+uint AlphaToCoverage(float alpha, float cutoff, float2 position)
 {
-    // Keep the authored 0.5 silhouette and smooth it over approximately one
-    // pixel. This works with the foliage coverage-preserving mip chain.
-    float coverage = saturate((alpha - 0.5) / max(fwidth(alpha), 1.0 / 255.0) + 0.5);
+    // Smooth the material's cutoff over approximately one pixel. At zero the
+    // cutout is disabled; at one only fully opaque samples survive.
+    float coverage = saturate((alpha - cutoff) / max(fwidth(alpha), 1.0 / 255.0) + 0.5);
+    if (cutoff <= 0) coverage = 1;
+    else if (cutoff >= 1) coverage = alpha >= 1 ? 1 : 0;
     uint covered = uint(coverage * BSC_MSAA_SAMPLES + 0.5);
     uint mask = (1u << covered) - 1u;
     uint2 pixel = uint2(position);
@@ -320,10 +322,10 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
     {
         float opacity = base.a * alphaOrOuterNormal.Sample(opacitySampler, input.uv).r;
 #ifdef BSC_MSAA_SAMPLES
-        sampleCoverage = AlphaToCoverage(opacity, input.position.xy);
+        sampleCoverage = AlphaToCoverage(opacity, subsurfaceProperties.w, input.position.xy);
         if (sampleCoverage == 0) discard;
 #else
-        clip(opacity - 0.5);
+        clip(opacity - subsurfaceProperties.w);
 #endif
     }
     float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;

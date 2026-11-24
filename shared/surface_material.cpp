@@ -240,6 +240,7 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         material.type = definition.type;
         material.useVertexAlphaAO = Material::SupportsVertexAlphaAO(definition.type) && definition.useVertexAlphaAO;
         material.subsurfaceStrength = definition.subsurfaceStrength;
+        material.alphaCutoff = definition.alphaCutoff;
         material.hasSubsurfaceMap = !definition.textures[static_cast<size_t>(MaterialSlot::Subsurface)].empty();
         const auto& tint = definition.emissiveTint;
         material.tint = Srgb::ToLinear({tint[0], tint[1], tint[2], definition.translucency});
@@ -285,11 +286,11 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     for (size_t i = 0; i < slots.size(); ++i)
         bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, firstSampler, bindings.data(), bindings.size());
-    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, vertexAO, padding; };
+    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, vertexAO, alphaCutoff; };
     static_assert(sizeof(Properties) == 48);
     const Properties params{material.tint, Material::IsCutout(material.type), unlit, transition, foliage,
                             material.subsurfaceStrength, material.hasSubsurfaceMap ? 1.f : 0.f,
-                            material.useVertexAlphaAO ? 1.f : 0.f, 0};
+                            material.useVertexAlphaAO ? 1.f : 0.f, material.alphaCutoff};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
@@ -314,7 +315,7 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
                 sample(MaterialSlot::Translucency)[0] * tint.a};
     }
     auto color = sample(MaterialSlot::BaseColor);
-    if (Material::IsCutout(type) && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
+    if (Material::IsCutout(type) && color[3] * sample(MaterialSlot::Opacity)[0] < alphaCutoff)
         return {};
     auto orm = sample(MaterialSlot::ORM);
     auto mappedNormal = DecodeNormalXY(sample(MaterialSlot::Normal));

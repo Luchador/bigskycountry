@@ -207,8 +207,6 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
     if (!pass) return false;
     constexpr double farDistance = 152; // Fade ends at 150 m, plus 2 m sampling radius.
     const double distance = viewDistance > 0 ? std::min(viewDistance, farDistance) : farDistance;
-    const SDL_FColor limits{float(distance*distance),0,0,0};
-    SDL_PushGPUFragmentUniformData(commands, 0, &limits, sizeof(limits));
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x),float(v.y),float(v.z),w}; };
     SDL_FColor cameraData[]{axis(camera->Right()*scaleX), axis(camera->Up()*scaleY),
                             axis(camera->Forward(),float(worldNearDepth)), {}, {}, {}};
@@ -225,6 +223,8 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
         const bool cutout = material && Material::IsCutout(material->type);
         auto* pipeline = !cutout ? ssaoDepthPipeline : material->type == MaterialType::Foliage ? ssaoFoliagePipeline : ssaoCutoutPipeline;
         SDL_BindGPUGraphicsPipeline(pass,pipeline);
+        const SDL_FColor limits{float(distance*distance), cutout ? material->alphaCutoff : .5f, 0, 0};
+        SDL_PushGPUFragmentUniformData(commands, 0, &limits, sizeof(limits));
         if (cutout) materialCache.BindShadow(*material,pass);
         SDL_DrawGPUPrimitives(pass,static_cast<Uint32>(end-first),1,static_cast<Uint32>(first),0);
     };
