@@ -7,7 +7,7 @@ struct GameplayActions
 {
     PawnInput pawn;
     double lookX = 0, lookY = 0;
-    bool interact = false;
+    bool interact = false, toggleLights = false;
 };
 
 class GameplayInput
@@ -22,7 +22,7 @@ public:
 
 private:
     SDL_Window* window;
-    bool captured = false, interact = false, jump = false;
+    bool captured = false, interact = false, jump = false, toggleLights = false;
     double lookX = 0, lookY = 0;
     std::array<bool, SDL_SCANCODE_COUNT> held{};
 };

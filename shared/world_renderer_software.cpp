@@ -140,7 +140,7 @@ bool WorldRenderer::DrawSoftware()
             const auto& face = vertices[first];
             const bool lit = face.lit && !wire;
             // A uniformly colored flat triangle needs just one lighting evaluation.
-            const bool flatColor = lit && !material && a.normal == b.normal && a.normal == c.normal &&
+            const bool flatColor = lit && face.lit != 2 && lights.spots.empty() && !material && a.normal == b.normal && a.normal == c.normal &&
                 a.color.r == b.color.r && a.color.g == b.color.g && a.color.b == b.color.b &&
                 a.color.r == c.color.r && a.color.g == c.color.g && a.color.b == c.color.b;
             SDL_FColor flat{};
@@ -242,7 +242,9 @@ bool WorldRenderer::DrawSoftware()
                         color = {float((u*a.color.r + v*b.color.r + w*c.color.r) / sum),
                                  float((u*a.color.g + v*b.color.g + w*c.color.g) / sum),
                                  float((u*a.color.b + v*b.color.b + w*c.color.b) / sum), 1};
-                        if (lit) color = lights.ShadeLinear(Math::Normalize(a.normal*u + b.normal*v + c.normal*w), {}, color);
+                        if (lit && face.lit != 2)
+                            color = lights.ShadeLinear(Math::Normalize(a.normal*u + b.normal*v + c.normal*w),
+                                                       (a.view*u + b.view*v + c.view*w) * (1.0 / sum), color);
                     }
                     if (lit)
                     {

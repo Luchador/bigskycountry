@@ -1,5 +1,6 @@
 #include "player_controller.hpp"
 #include "game_world.hpp"
+#include "car.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -27,6 +28,8 @@ void PlayerController::Input(const GameplayActions& actions)
     camera.Look(actions.lookX, actions.lookY);
     if (auto* pawn = Controlled())
     {
+        if (actions.toggleLights)
+            if (auto* car = dynamic_cast<Car*>(pawn)) car->ToggleHeadlights();
         const bool pendingJump = pawn->input.jump;
         pawn->input = actions.pawn;
         // Preserve an edge across render frames that have no simulation step.

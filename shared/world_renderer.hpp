@@ -59,6 +59,9 @@ public:
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
                double viewDistance = 0, bool shadows = false);
+    // Spot positions supplied here are in world space. Rebuilt each frame, never cached with meshes.
+    void SubmitSpotLight(SpotLight light);
+    void SubmitEmissiveTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor linearColor);
     void BeginUnlit() { shadowEnd = vertices.size(); lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
@@ -86,6 +89,12 @@ private:
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();
+    // Three float4s per light followed by per-tile light bitsets, packed as uint4s.
+    std::vector<SDL_FColor> BuildSpotLightData() const;
+    static constexpr int lightTilePixels = 64;
+    static constexpr size_t maxSpotLights = 512;
+    SDL_GPUBuffer* spotBuffer = nullptr;
+    Uint32 spotBufferBytes = 0;
     bool PrepareShadowTarget(int resolution);
     bool DrawShadows(SDL_GPUCommandBuffer* commands);
     bool DrawSoftware();

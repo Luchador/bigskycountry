@@ -475,7 +475,7 @@ void GameSession::Update(double seconds, const CameraView* externalView)
     UpdateTrafficPopulation(seconds,externalView ? *externalView : View());
 }
 
-void GameSession::Submit(WorldRenderer& renderer) const
+void GameSession::Submit(WorldRenderer& renderer, double sunElevation) const
 {
     if (testGround.mesh) renderer.SubmitWorldMesh(testGround);
     for (const auto& pawn : world.Pawns())
@@ -483,6 +483,11 @@ void GameSession::Submit(WorldRenderer& renderer) const
         if (!debugCamera && player.HidePawn(pawn->Handle())) continue;
         if (const auto* character = dynamic_cast<const Character*>(pawn.get()); character && character->IsSeated()) continue;
         renderer.SubmitWorldMesh(pawn->RenderInstance(accumulator / fixedStep));
+        if (const auto* car = dynamic_cast<const Car*>(pawn.get()))
+        {
+            const bool automatic = dynamic_cast<const TrafficDriver*>(car->Controller()) != nullptr;
+            car->SubmitLights(renderer, accumulator / fixedStep, automatic ? sunElevation < 0 : car->HeadlightsOn());
+        }
     }
 }
 
@@ -497,7 +502,7 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const
         std::string status;
         if (vehicle)
         {
-            controls = "W/S: accelerate, brake/reverse   A/D: steer   Space: handbrake   Mouse: look   F: exit";
+            controls = "W/S: accelerate, brake/reverse   A/D: steer   Space: handbrake   Mouse: look   L: lights   F: exit";
         }
         else if (player.NearbyVehicle()) status = "Press F to enter the car";
         if (!player.Notice().empty()) status = player.Notice();

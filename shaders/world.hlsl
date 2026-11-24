@@ -3,7 +3,7 @@ struct WorldVertex
     float4 position : TEXCOORD0;
     float4 color : TEXCOORD1;
     float2 uv : TEXCOORD2;
-    float4 normal : TEXCOORD3; // .w selects scene lighting or unlit editor colors.
+    float4 normal : TEXCOORD3; // .w: 0 editor colors, 1 scene lighting, 2 emissive surface.
     float4 tangent : TEXCOORD4; // .w is the sign of the bitangent.
     float3 view : TEXCOORD5;
 };
@@ -67,6 +67,7 @@ cbuffer WorldLights : register(b0, space3)
     float4 shadowControl;   // cascade count, inverse map size, moon flag, horizon fade
     float4 shadowForward;
     float4 visibility; // radius squared, inverse focal length, viewport half width/height
+    float4 spotControl; // tile columns, tile size, light count, uint4 groups per tile
 };
 
 #ifdef __spirv__
@@ -157,8 +158,50 @@ float3 ToDisplay(float3 c)
     return lerp(12.92 * c, 1.055 * pow(c, 1.0 / 2.4) - 0.055, step(0.0031308, c));
 }
 
+// SDL places storage buffers after sampled textures in each shader's set.
+#ifdef BSC_MATERIAL
+StructuredBuffer<float4> spotData : register(t7, space2);
+#else
+StructuredBuffer<float4> spotData : register(t1, space2);
+#endif
+
+void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float gloss, float metal,
+                     inout float3 diffuse, inout float3 specular)
+{
+    if (spotControl.z == 0) return;
+    uint2 tile = uint2(pixel / spotControl.y);
+    uint tileStart = uint(spotControl.z)*3 + (tile.y*uint(spotControl.x)+tile.x)*uint(spotControl.w);
+    for (uint group=0; group<uint(spotControl.w); ++group)
+    {
+        uint4 mask = asuint(spotData[tileStart+group]);
+        [unroll] for (uint word=0; word<4; ++word)
+        {
+            uint bits = mask[word];
+            while (bits != 0)
+            {
+                uint bit = firstbitlow(bits);
+                bits &= bits-1;
+                uint light = (group*128+word*32+bit)*3;
+                float4 position = spotData[light];
+                float4 direction = spotData[light+1];
+                float4 intensity = spotData[light+2];
+                float3 toLight = position.xyz + view;
+                float distanceSquared = dot(toLight,toLight);
+                if (distanceSquared >= position.w*position.w || distanceSquared < 1e-8) continue;
+                toLight *= rsqrt(distanceSquared);
+                float cone = saturate((-dot(toLight,direction.xyz)-direction.w)*intensity.w);
+                if (cone == 0) continue;
+                cone = cone*cone*(3-2*cone);
+                float fade = 1-distanceSquared/(position.w*position.w);
+                float3 radiance = intensity.xyz*(cone*fade*fade/(1+distanceSquared));
+                Illuminate(toLight,radiance,normal,eye,gloss,metal,diffuse,specular);
+            }
+        }
+    }
+}
+
 // Keep the software renderer's WorldLighting::Shade in sync.
-float3 ShadeSurface(float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission)
+float3 ShadeSurface(float2 pixel, float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission)
 {
     float3 diffuse = skyAmbient.rgb * orm.r;
     float3 specular = 0;
@@ -166,6 +209,7 @@ float3 ShadeSurface(float3 normal, float3 geometricNormal, float3 view, float3 b
     float shadow = ShadowVisibility(geometricNormal,view);
     Illuminate(sunDirection.xyz, sunRadiance.rgb * (shadowControl.z == 0 ? shadow : 1), normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     Illuminate(moonDirection.xyz, moonRadiance.rgb * (shadowControl.z != 0 ? shadow : 1), normal, eye, 1 - orm.g, orm.b, diffuse, specular);
+    IlluminateSpots(pixel,view,normal,eye,1-orm.g,orm.b,diffuse,specular);
     float3 c = emission + base * diffuse + lerp(0.08, base, orm.b) * specular;
     return c;
 }
@@ -207,7 +251,8 @@ float4 PSMain(WorldFragment input) : SV_Target0
 {
     ClipVisibility(input);
     if (input.normal.w == 0) return input.color;
-    float3 c = ShadeSurface(UnitVector(input.normal.xyz), UnitVector(input.normal.xyz), input.view, input.color.rgb, float3(1, 1, 0), 0);
+    if (input.normal.w == 2) return float4(ToDisplay(ApplyFog(input.color.rgb,input.view)),input.color.a);
+    float3 c = ShadeSurface(input.position.xy, UnitVector(input.normal.xyz), UnitVector(input.normal.xyz), input.view, input.color.rgb, float3(1, 1, 0), 0);
     return float4(ToDisplay(ApplyFog(c, input.view)), input.color.a);
 }
 
@@ -224,6 +269,7 @@ float4 WireframePS(WorldFragment input) : SV_Target0
     return onEdge ? float4(input.color.rgb, 1.0) : 0;
 }
 
+#ifdef BSC_MATERIAL
 BSC_COMBINED Texture2D<float4> baseColorMap : register(t1, space2);
 BSC_COMBINED Texture2D<float2> normalMap : register(t2, space2);
 BSC_COMBINED Texture2D<float4> ormMap : register(t3, space2);
@@ -279,8 +325,10 @@ float4 MaterialPS(WorldFragment input) : SV_Target0
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
     float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
-    float3 c = ShadeSurface(mapped, n, input.view, base.rgb, orm, glow);
+    float3 c = ShadeSurface(input.position.xy, mapped, n, input.view, base.rgb, orm, glow);
     if (input.normal.w != 0) c = ApplyFog(c, input.view);
     // SDL composites the world into a display-encoded color target.
     return float4(ToDisplay(c), 1);
 }
+
+#endif // BSC_MATERIAL

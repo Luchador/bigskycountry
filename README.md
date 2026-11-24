@@ -6,6 +6,20 @@ The test car uses a rigid body with gravity, angular momentum, four raycast susp
 
 Use **W/S** to accelerate or brake/reverse, **A/D** to steer, **Space** for the handbrake, and **F** to enter or exit a stopped car. Steering becomes less sensitive at speed, with strong grip and roll assistance for arcade handling. The handbrake loosens the rear tires for tighter turns. The chase camera stays level with the horizon and follows heading smoothly.
 
+Each car has two headlights and two red brake lights. While driving, press **L**
+to toggle the player's headlights (off initially). NPC headlights switch on when
+the sun falls below the horizon and off at dawn. Brake lights respond to the
+service brake, braking with W/S against the direction of travel, or the handbrake;
+coasting and an unoccupied car's passive parking brake leave them off.
+
+The lamps illuminate nearby pavement and objects with soft-edged spotlights:
+80 m forward beams and dimmer 8 m rear beams. Their placement, color, intensity,
+cone angles, and range are in `Car::SubmitLights` in `shared/car.cpp`. Light
+positions follow the interpolated vehicle pose. These local lights do not cast
+additional shadows; sun/moon cascaded shadows are unchanged. The GPU uses 64-pixel
+tiles to restrict lighting work to beams affecting each screen region, with room
+for all 64 NPCs plus the player. No world recook is needed for this update.
+
 Brief **A/D** taps make small steering corrections. Keyboard steering starts at
 25% strength and smoothly reaches full strength after holding the same direction
 for 0.4 seconds. Releasing, pressing both keys, or reversing direction resets the

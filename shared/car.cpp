@@ -3,6 +3,7 @@
 #include "game_world.hpp"
 #include "test_pawn_meshes.hpp"
 #include "spatial_index.hpp"
+#include "world_renderer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -64,6 +65,52 @@ Bounds3 Car::CollisionBounds() const
     return WorldBounds({{-1,0,-2.2},{1,1.7,2.2}}, GetTransform().ToMeshTransform());
 }
 
+double Car::BrakeDemand() const
+{
+    return Commands().forward * Speed() < -0.5 ? 1.0 : std::clamp(Commands().brake, 0.0, 1.0);
+}
+
+bool Car::BrakeLightsOn() const
+{
+    // Unoccupied cars apply a passive parking brake, which should not light their lamps.
+    return IsPossessed() && (BrakeDemand() > 0 || Commands().handbrake);
+}
+
+void Car::SubmitLights(WorldRenderer& renderer, double interpolation, bool headlightsOn) const
+{
+    const auto pose = InterpolatedTransform(interpolation).ToMeshTransform();
+    const bool braking = BrakeLightsOn();
+    for (double side : {-1.0, 1.0})
+    {
+        const auto lamp = [&](bool front)
+        {
+            const double x = side * .61, z = front ? 2.175 : -2.175;
+            const SDL_FColor color = front ? SDL_FColor{1,.95f,.8f,1} : SDL_FColor{1,.012f,.004f,1};
+            const Vector3 a = pose.Point({x-.16,.65,z}), b = pose.Point({x+.16,.65,z});
+            const Vector3 c = pose.Point({x+.16,.85,z}), d = pose.Point({x-.16,.85,z});
+            // Match the existing lens faces, lifted 5 mm to avoid depth fighting.
+            if (front)
+            {
+                renderer.SubmitEmissiveTriangle(a,b,c,color);
+                renderer.SubmitEmissiveTriangle(a,c,d,color);
+            }
+            else
+            {
+                renderer.SubmitEmissiveTriangle(a,c,b,color);
+                renderer.SubmitEmissiveTriangle(a,d,c,color);
+            }
+            const double inner = Math::DegreesToRadians(front ? 12.0 : 35.0);
+            const double outer = Math::DegreesToRadians(front ? 25.0 : 60.0);
+            renderer.SubmitSpotLight({pose.Point({x,.75,z}),
+                Math::Normalize(pose.Direction(front ? Vector3{0,-.07,1} : Vector3{0,-.2,-1})),
+                front ? Vector3{2000,1900,1600} : Vector3{20,.24,.08},
+                front ? 80.0 : 8.0, std::cos(inner), std::cos(outer)});
+        };
+        if (headlightsOn) lamp(true);
+        if (braking) lamp(false);
+    }
+}
+
 void Car::ApplyWheelForces(double seconds, GameWorld& world)
 {
     const auto frame = body.Pose().ToMeshTransform();
@@ -73,7 +120,7 @@ void Car::ApplyWheelForces(double seconds, GameWorld& world)
     const double speed = Speed();
     const double targetSteering = Commands().right * handling.steeringAngle / (1.0 + std::abs(speed) * 0.035);
     steering = std::lerp(steering, targetSteering, 1.0 - std::exp(-handling.steeringResponse * seconds));
-    const double brake = !IsPossessed() || Commands().forward * speed < -0.5 ? 1.0 : std::clamp(Commands().brake, 0.0, 1.0);
+    const double brake = !IsPossessed() ? 1.0 : BrakeDemand();
     const bool holding = Commands().brake >= 0.99 && Math::Length(body.velocity) < 0.5;
 
     for (size_t wheel = 0; wheel < std::size(wheelAnchors); ++wheel)

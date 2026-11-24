@@ -26,13 +26,14 @@
 namespace
 {
     SDL_GPUShader* CreateWorldShader(SDL_GPUDevice* device, SDL_GPUShaderStage stage, const char* entry,
-                                     std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers = 0, Uint32 uniforms = 0)
+                                     std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers = 0, Uint32 uniforms = 0, Uint32 storageBuffers = 0)
     {
         SDL_GPUShaderCreateInfo info{};
         info.stage = stage;
         info.entrypoint = entry;
         info.num_samplers = samplers;
         info.num_uniform_buffers = uniforms;
+        info.num_storage_buffers = storageBuffers;
         const auto formats = SDL_GetGPUShaderFormats(device);
         if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
         {
@@ -63,6 +64,7 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    if (spotBuffer) SDL_ReleaseGPUBuffer(device, spotBuffer);
     if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
     if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
     if (shadowPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
@@ -114,7 +116,7 @@ bool WorldRenderer::CreatePipelines()
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 1, 1);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 1, 1, 1);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
@@ -155,9 +157,9 @@ bool WorldRenderer::CreatePipelines()
     ds.back_stencil_state = ds.front_stencil_state;
     surfacePipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
 
-    const auto materialPipeline = [&](const char* entry, std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers, Uint32 uniforms = 0) -> SDL_GPUGraphicsPipeline*
+    const auto materialPipeline = [&](const char* entry, std::span<const Uint8> dxil, std::span<const Uint8> spirv, Uint32 samplers, Uint32 uniforms = 0, Uint32 storageBuffers = 0) -> SDL_GPUGraphicsPipeline*
     {
-        auto* shader = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, entry, dxil, spirv, samplers, uniforms);
+        auto* shader = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, entry, dxil, spirv, samplers, uniforms, storageBuffers);
         if (!shader) return nullptr;
         auto material = pipeline;
         material.fragment_shader = shader;
@@ -168,7 +170,7 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
     }
 
     if (texturedPipeline)
@@ -181,7 +183,7 @@ bool WorldRenderer::CreatePipelines()
         blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
         blend.color_blend_op = blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
         ds.enable_depth_write = false;
-        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2);
+        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
         color.blend_state = {};
         ds.enable_depth_write = true;
     }
@@ -484,6 +486,21 @@ bool WorldRenderer::DrawGPU()
         vertexBuffer = replacement;
         bufferBytes = capacity;
     }
+    const auto spotData = BuildSpotLightData();
+    const Uint32 spotBytes = static_cast<Uint32>(spotData.size() * sizeof(SDL_FColor));
+    if (spotBytes > std::numeric_limits<Uint32>::max() - total) return SDL_SetError("World light upload exceeds GPU limit");
+    const Uint32 spotOffset = total;
+    total += spotBytes;
+    if (spotBytes > spotBufferBytes)
+    {
+        const Uint32 capacity = grow(spotBytes, spotBufferBytes);
+        const SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, capacity, 0};
+        auto* replacement = SDL_CreateGPUBuffer(device, &info);
+        if (!replacement) return false;
+        if (spotBuffer) SDL_ReleaseGPUBuffer(device, spotBuffer);
+        spotBuffer = replacement;
+        spotBufferBytes = capacity;
+    }
     if (total > uploadBytes)
     {
         const auto capacity = grow(total, uploadBytes);
@@ -499,6 +516,7 @@ bool WorldRenderer::DrawGPU()
         auto* mapped = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device, upload, true));
         if (!mapped) return false;
         if (bytes) std::memcpy(mapped, vertices.data(), bytes);
+        std::memcpy(mapped + spotOffset, spotData.data(), spotBytes);
         for (const auto& item : uploads)
             std::memcpy(mapped + item.offset,
                 reinterpret_cast<const Uint8*>(item.geometry->pendingUpload.data()) + item.destination, item.size);
@@ -542,6 +560,7 @@ bool WorldRenderer::DrawGPU()
             SDL_UploadToGPUBuffer(copy, &src, &dst, cycle);
         };
         if (bytes) send(vertexBuffer, 0, 0, bytes, true);
+        send(spotBuffer, spotOffset, 0, spotBytes, true);
         for (const auto& item : uploads) send(item.geometry->buffer, item.offset, item.destination, item.size, false);
         SDL_EndGPUCopyPass(copy);
     }
@@ -569,9 +588,9 @@ bool WorldRenderer::DrawGPU()
         SDL_FColor sunDirection, sunRadiance, moonDirection, moonRadiance, ambient;
         SDL_FColor fogDensity, fogAir, fogZenith, fogOpposite, fogSunward, fogSun;
         std::array<SDL_FColor, 4> shadowX, shadowY, shadowZ, shadowParams;
-        SDL_FColor shadowControl, shadowForward, visibility;
+        SDL_FColor shadowControl, shadowForward, visibility, spotControl;
     };
-    static_assert(sizeof(LightingData) == 30*sizeof(SDL_FColor));
+    static_assert(sizeof(LightingData) == 31*sizeof(SDL_FColor));
     LightingData lighting{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
                                 pack(lights.moon.radiance), pack(lights.ambient), fogDensity,
                                 {fog ? float(fog->airDensity) : 0.f, 0, 0, 0},
@@ -593,8 +612,11 @@ bool WorldRenderer::DrawGPU()
         lighting.shadowForward = pack(camera->Forward());
     }
     lighting.visibility = {float(viewDistance * viewDistance), float(1 / focal), float(viewport.w) * .5f, float(viewport.h) * .5f};
+    lighting.spotControl = {float((viewport.w + lightTilePixels - 1) / lightTilePixels), float(lightTilePixels),
+                            float(lights.spots.size()), float((lights.spots.size() + 127) / 128)};
     const SDL_GPUTextureSamplerBinding shadowBinding{shadowTarget, shadowSampler};
     SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+    SDL_BindGPUFragmentStorageBuffers(pass, 0, &spotBuffer, 1);
     SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
     // Form the origin-to-eye offset in double before packing the shader uniforms.
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x), float(v.y), float(v.z), w}; };
@@ -692,6 +714,8 @@ bool WorldRenderer::DrawGPU()
         }
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, &spotBuffer, 1);
+        lighting.spotControl = {};
         lighting.visibility = {}; // Editor foreground handles remain visible at any distance.
         SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
         source = nullptr; // Bindings are local to a render pass.

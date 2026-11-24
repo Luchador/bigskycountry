@@ -20,6 +20,8 @@ struct CarHandling
     double yawAssist = 4, antiRoll = 5;
 };
 
+class WorldRenderer;
+
 class Car : public Vehicle
 {
 public:
@@ -37,8 +39,14 @@ public:
     bool IsGrounded() const { return groundedWheels != 0; }
     bool PlaceOnGround(GameWorld& world, ObjectTransform& transform, double drop) const;
     void ResolveCollision(Car& other);
+    void ToggleHeadlights() { headlights = !headlights; }
+    bool HeadlightsOn() const { return headlights; }
+    bool BrakeLightsOn() const;
+    void SubmitLights(WorldRenderer& renderer, double interpolation, bool headlightsOn) const;
 
 private:
+    bool headlights = false;
+    double BrakeDemand() const;
     CarHandling handling;
     RigidBody body;
     double steering = 0;

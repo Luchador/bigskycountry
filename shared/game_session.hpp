@@ -23,7 +23,7 @@ public:
     void Stream(Vector3 eye, WorldRenderer& renderer);
     void Update(double seconds, const CameraView* externalView = nullptr);
     const CameraView& View() const { return started ? player.controller.camera.View() : loadingCamera; }
-    void Submit(WorldRenderer& renderer) const;
+    void Submit(WorldRenderer& renderer, double sunElevation) const;
     bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const;
     void ToggleConsole() { consoleVisible = !consoleVisible; }
     void SetProfiling(bool enabled) { world.profiling = enabled; }

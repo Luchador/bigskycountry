@@ -280,7 +280,7 @@ namespace
                 if (const Road* preview = roadTool ? roadTool->PreviewRoad() : nullptr)
                     worldRenderer.SubmitRoad(*preview, preview->style.material, false);
 
-                if (game) game->Submit(worldRenderer);
+                if (game) game->Submit(worldRenderer, sky.Lighting().sun.direction.y);
 
                 if (roadTool && roadTool->WireframeEnabled()) worldRenderer.WireframeSubmittedGeometry();
                 worldRenderer.BeginUnlit();

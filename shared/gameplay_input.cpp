@@ -3,7 +3,7 @@
 void GameplayInput::Clear()
 {
     held.fill(false);
-    interact = jump = false;
+    interact = jump = toggleLights = false;
     lookX = lookY = 0;
 }
 
@@ -36,6 +36,7 @@ bool GameplayInput::Handle(const SDL_Event& event)
         {
             interact = interact || key == SDL_SCANCODE_F;
             jump = jump || key == SDL_SCANCODE_SPACE;
+            if (key == SDL_SCANCODE_L) toggleLights = !toggleLights;
         }
     }
     return true;
@@ -54,8 +55,9 @@ GameplayActions GameplayInput::Read(PawnInputProfile profile)
         result.lookX = lookX;
         result.lookY = lookY;
         result.interact = interact;
+        result.toggleLights = profile == PawnInputProfile::Driving && toggleLights;
     }
-    interact = jump = false;
+    interact = jump = toggleLights = false;
     lookX = lookY = 0;
     return result;
 }

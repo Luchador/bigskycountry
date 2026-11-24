@@ -47,8 +47,8 @@ function(bigsky_shader filename profile entry stem dxil_name spirv_name)
     add_custom_command(
         OUTPUT "${dxil}" "${spirv}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
-        COMMAND "${dxc}" -T "${profile}" -E "${entry}" -WX -O3 -Qstrip_debug -Qstrip_reflect -Fh "${dxil}" -Vn "${dxil_name}" "${source}"
-        COMMAND "${dxc}" -spirv -T "${profile}" -E "${entry}" -WX -O3 -Fh "${spirv}" -Vn "${spirv_name}" "${source}"
+        COMMAND "${dxc}" -T "${profile}" -E "${entry}" ${ARGN} -WX -O3 -Qstrip_debug -Qstrip_reflect -Fh "${dxil}" -Vn "${dxil_name}" "${source}"
+        COMMAND "${dxc}" -spirv -T "${profile}" -E "${entry}" ${ARGN} -WX -O3 -Fh "${spirv}" -Vn "${spirv_name}" "${source}"
         DEPENDS "${source}" "${dxc}"
         COMMENT "Compiling ${filename} (${entry}, DXIL and SPIR-V)"
         VERBATIM
@@ -65,7 +65,7 @@ bigsky_shader(shadow.hlsl ps_6_0 ShadowCutoutPS shadow_cutout shadow_cutout_dxil
 bigsky_shader(world.hlsl vs_6_0 VSMain world_vert world_vert_dxil world_vert_spirv)
 bigsky_shader(world.hlsl ps_6_0 PSMain world_frag world_frag_dxil world_frag_spirv)
 bigsky_shader(world.hlsl ps_6_0 WireframePS wireframe_frag wireframe_frag_dxil wireframe_frag_spirv)
-bigsky_shader(world.hlsl ps_6_0 MaterialPS material_frag material_frag_dxil material_frag_spirv)
+bigsky_shader(world.hlsl ps_6_0 MaterialPS material_frag material_frag_dxil material_frag_spirv -D BSC_MATERIAL=1)
 bigsky_shader(plan.hlsl vs_6_0 VSMain plan_vert plan_vert_dxil plan_vert_spirv)
 bigsky_shader(plan.hlsl ps_6_0 PSMain plan_frag plan_frag_dxil plan_frag_spirv)
 target_include_directories(BigSkyApplication PRIVATE "${output_dir}")

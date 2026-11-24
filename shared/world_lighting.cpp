@@ -29,8 +29,21 @@ SDL_FColor Srgb::ToDisplay(SDL_FColor c)
     return {ToDisplay(c.r), ToDisplay(c.g), ToDisplay(c.b), c.a};
 }
 
+Vector3 SpotLight::Radiance(Vector3 surfaceToEye) const
+{
+    const Vector3 toLight = position + surfaceToEye;
+    const double distanceSquared = Math::Dot(toLight, toLight);
+    if (distanceSquared >= range * range || distanceSquared < 1e-8) return {};
+    const double cosine = -Math::Dot(toLight, direction) / std::sqrt(distanceSquared);
+    double cone = std::clamp((cosine - outerCos) / std::max(innerCos - outerCos, 1e-5), 0.0, 1.0);
+    cone = cone * cone * (3 - 2 * cone);
+    const double fade = 1 - distanceSquared / (range * range);
+    return intensity * (cone * fade * fade / (1 + distanceSquared));
+}
+
 SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor base, Vector3 orm, Vector3 emission) const
 {
+    const Vector3 surfaceToEye = view;
     const double gloss = 1.0 - orm.y;
     if (gloss > 0.0) view = Math::Normalize(view);
     Vector3 diffuse = ambient * orm.x;
@@ -49,6 +62,11 @@ SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor b
     };
     illuminate(sun);
     illuminate(moon);
+    for (const auto& spot : spots)
+    {
+        const auto radiance = spot.Radiance(surfaceToEye);
+        if (radiance != Vector3{}) illuminate({Math::Normalize(spot.position + surfaceToEye), radiance});
+    }
     const auto channel = [&](float albedo, double d, double s, double e)
     {
         return static_cast<float>(e + albedo * d + std::lerp(0.08, double(albedo), orm.z) * s);
