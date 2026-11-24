@@ -91,6 +91,7 @@ add_library(BigSkyApplication STATIC
     shared/vehicle.cpp
     shared/object_io.cpp
     shared/mesh_ao.cpp
+    shared/mesh_collision.cpp
     shared/mesh.cpp
     shared/mesh_import.cpp
     shared/mesh_fbx.cpp
@@ -214,6 +215,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/mesh_ao_baker.cpp
     editor/mesh_ao_editor.cpp
     editor/mesh_editor.cpp
+    editor/mesh_collision_editor.cpp
     editor/material_preview.cpp
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
@@ -248,7 +250,7 @@ if(WIN32)
         endif()
     endif()
     target_sources(BigSkyCountryEditor PRIVATE editor/windows_material_editor.cpp editor/windows_mesh_controls.cpp editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/panels.rc)
-    set_source_files_properties(editor/windows_material_editor.cpp editor/windows_mesh_controls.cpp editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/editor_menu.cpp editor/mesh_editor.cpp editor/mesh_ao_editor.cpp editor/mesh_ao_baker.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
+    set_source_files_properties(editor/windows_material_editor.cpp editor/windows_mesh_controls.cpp editor/windows_panels.cpp editor/windows_outliner.cpp editor/windows_name_dialog.cpp editor/windows_theme.cpp editor/editor_menu.cpp editor/mesh_editor.cpp editor/mesh_ao_editor.cpp editor/mesh_ao_baker.cpp editor/mesh_collision_editor.cpp PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE;NOMINMAX")
     target_include_directories(BigSkyCountryEditor PRIVATE editor)
     if(MSVC)
         target_sources(BigSkyCountryEditor PRIVATE editor/editor.manifest)

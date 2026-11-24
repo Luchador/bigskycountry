@@ -1,7 +1,9 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "scene_hierarchy.hpp"
 #include <limits>
+#include <optional>
 
 class FreeCamera;
 class WorldDocument;
@@ -19,7 +21,8 @@ public:
     ViewportPicker(const FreeCamera& camera, SDL_Rect scene, SDL_FPoint mouse);
     bool TestTriangle(Vector3 a, Vector3 b, Vector3 c);
     bool TestRoad(const RoadGeometry& road);
-    void TestPlacementSurfaces(const WorldDocument& world);
+    // Props may also rest on other objects; infrastructure creation still uses roads/terrain only.
+    std::optional<SceneKey> TestPlacementSurfaces(const WorldDocument& world, bool includeObjects = false);
     // Place the model base on the nearest tested surface or ground, or its pivot on the ray.
     Vector3 PlacementPosition(double modelBaseY = 0.0) const;
     bool TestMesh(const MeshInstance& instance);

@@ -37,6 +37,12 @@ std::size_t MeshBytes(const std::shared_ptr<const Mesh> &mesh)
             for (const auto& level : ao->alpha) bytes += level.capacity() * sizeof(float);
         }
     }
+    if (mesh->collision)
+    {
+        bytes += sizeof(MeshCollisionState) + mesh->collision->file.capacity();
+        const auto collision = MeshCollision::Current(*mesh);
+        bytes += sizeof(MeshCollisionData) + collision->shapes.capacity() * sizeof(CollisionShape);
+    }
     if (mesh->materials)
     {
         bytes += sizeof(MeshMaterials) + mesh->materials->slots.capacity() * sizeof(MeshMaterialSlot) + mesh->materials->file.capacity();

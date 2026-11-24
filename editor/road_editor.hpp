@@ -108,7 +108,7 @@ private:
     void FocusSelection(const WorldDocument& world, FreeCamera& camera);
     void AssignMaterial(WorldDocument& world, const std::string& path, const FreeCamera& camera,
                         std::optional<SDL_FPoint> viewportPoint, bool strip = false);
-    void PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position);
+    void PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position, int folder = 0);
     void PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer, const std::string& path);
     void OpenViewportMenu(WorldDocument& world, FreeCamera& camera);
     void BeginDraft(WorldDocument& world);

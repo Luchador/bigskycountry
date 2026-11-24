@@ -77,10 +77,17 @@ void WorldCollision::AddTriangle(Vector3 a, Vector3 b, Vector3 c)
     triangles.push_back({a, b, c, Math::Normalize(normal), bounds});
 }
 
-void WorldCollision::AddMesh(const MeshInstance& instance)
+void WorldCollision::AddMesh(const MeshInstance& instance, bool useMeshCollision)
 {
     if (!instance.mesh) return;
     const auto& mesh = *instance.mesh;
+    const auto collision = MeshCollision::Current(mesh);
+    if (useMeshCollision && collision->mode == MeshCollisionMode::None) return;
+    if (useMeshCollision && collision->mode == MeshCollisionMode::Simple)
+    {
+        for (const auto& shape : collision->shapes) capsules.push_back(MeshCollision::Capsule(shape, instance.transform));
+        return;
+    }
     const bool mirrored = instance.transform.Determinant() < 0;
     for (size_t i = 0; i < mesh.indices.size(); i += 3)
     {
@@ -96,6 +103,8 @@ void WorldCollision::Build(const WorldDocument& world)
     ClearChunks();
     triangles.clear();
     nodes.clear();
+    capsules.clear();
+    capsuleNodes.clear();
     const auto road = [&](const RoadGeometry& geometry) {
         const auto surface = [&](const auto& faces) {
             for (const auto& t : faces) AddTriangle(t[0].position, t[1].position, t[2].position);
@@ -114,7 +123,7 @@ void WorldCollision::Build(const WorldDocument& world)
     for (const auto& item : world.roads) road(item);
     for (const auto& [id, item] : world.IntersectionSurfaces()) road(item.geometry);
     for (const auto& mesh : world.meshes) AddMesh(mesh);
-    for (const auto& chunk : world.Terrain()) AddMesh(chunk->Instance());
+    for (const auto& chunk : world.Terrain()) AddMesh(chunk->Instance(), false);
     for (const auto& object : world.Objects())
         if (object->hasCollision && !object->EditorOnly()) AddMesh(object->Instance());
     Finish();
@@ -124,6 +133,8 @@ void WorldCollision::Finish()
 {
     nodes.clear();
     if (!triangles.empty()) BuildNode(0, triangles.size());
+    capsuleNodes.clear();
+    if (!capsules.empty()) BuildCapsuleNode(0, capsules.size());
     chunksDirty = true; // Include the updated local tree in the aggregate bounds.
 }
 
@@ -157,6 +168,8 @@ void WorldCollision::IndexChunks() const
     orderedChunks.clear();
     chunkNodes.clear();
     bounds = nodes.empty() ? Bounds3{} : nodes.front().bounds;
+    if (!capsuleNodes.empty())
+    { bounds.Include(capsuleNodes.front().bounds.min); bounds.Include(capsuleNodes.front().bounds.max); }
     for (const auto& [key, chunk] : chunks)
     {
         const auto& childBounds = chunk->Bounds();
@@ -304,6 +317,7 @@ std::optional<WorldCollision::Hit> WorldCollision::Raycast(Vector3 origin, Vecto
     if (distance < 0 || Math::Length(direction) <= 0) return hit;
     direction = Math::Normalize(direction);
     if (!nodes.empty()) Trace(0, origin, direction, walkableOnly, hit, distance);
+    if (!capsuleNodes.empty()) TraceCapsules(0, origin, direction, walkableOnly, hit, distance);
     IndexChunks();
     if (!chunkNodes.empty()) TraceChunks(0, origin, direction, walkableOnly, hit, distance);
     return hit;
@@ -340,6 +354,9 @@ bool WorldCollision::Overlap(size_t index, Vector3 center, double radius) const
 bool WorldCollision::SphereBlocked(Vector3 center, double radius) const
 {
     if (!nodes.empty() && Overlap(0, center, radius)) return true;
+    std::optional<BodyContact> contact;
+    if (!capsuleNodes.empty()) ContactCapsules(0, center, radius, true, contact);
+    if (contact) return true;
     IndexChunks();
     return !chunkNodes.empty() && OverlapChunks(0, center, radius);
 }
@@ -373,6 +390,7 @@ std::optional<BodyContact> WorldCollision::SphereContact(Vector3 center, double 
 {
     std::optional<BodyContact> contact;
     if (!nodes.empty()) Contact(0, center, radius, contact);
+    if (!capsuleNodes.empty()) ContactCapsules(0, center, radius, false, contact);
     IndexChunks();
     if (!chunkNodes.empty()) ContactChunks(0, center, radius, contact);
     return contact;
@@ -381,10 +399,75 @@ std::optional<BodyContact> WorldCollision::SphereContact(Vector3 center, double 
 std::size_t WorldCollision::MemoryBytes() const
 {
     return sizeof(*this) + triangles.capacity() * sizeof(Triangle) + nodes.capacity() * sizeof(Node) +
+        capsules.capacity() * sizeof(CollisionCapsule) + capsuleNodes.capacity() * sizeof(Node) +
         orderedChunks.capacity() * sizeof(Chunk) + chunkNodes.capacity() * sizeof(Node);
 }
 const Bounds3& WorldCollision::Bounds() const
 {
     IndexChunks();
     return bounds;
+}
+
+size_t WorldCollision::BuildCapsuleNode(size_t first, size_t count)
+{
+    Bounds3 box;
+    for (size_t i = first; i < first + count; ++i)
+    { const auto b = capsules[i].Bounds(); box.Include(b.min); box.Include(b.max); }
+    const size_t index = capsuleNodes.size();
+    capsuleNodes.push_back({box, first, count});
+    if (count <= 8) return index;
+    const auto extent = box.max - box.min;
+    int axis = extent.x > extent.y ? 0 : 1;
+    if (extent.z > Axis(extent, axis)) axis = 2;
+    const size_t middle = first + count / 2;
+    std::nth_element(capsules.begin() + first, capsules.begin() + middle, capsules.begin() + first + count,
+        [axis](const auto& a, const auto& b) { return Axis(a.a + a.b, axis) < Axis(b.a + b.b, axis); });
+    const auto left = BuildCapsuleNode(first, middle - first), right = BuildCapsuleNode(middle, first + count - middle);
+    capsuleNodes[index].left = left; capsuleNodes[index].right = right; capsuleNodes[index].count = 0;
+    return index;
+}
+
+void WorldCollision::TraceCapsules(size_t index, Vector3 origin, Vector3 direction, bool walkableOnly,
+                                   std::optional<Hit>& hit, double& distance) const
+{
+    const auto& node = capsuleNodes[index];
+    if (!RayBounds(node.bounds, origin, direction, distance)) return;
+    if (!node.count)
+    {
+        TraceCapsules(node.left, origin, direction, walkableOnly, hit, distance);
+        TraceCapsules(node.right, origin, direction, walkableOnly, hit, distance);
+        return;
+    }
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+        if (const auto next = capsules[i].Raycast(origin, direction, distance, walkableOnly))
+        { distance = next->distance; hit = Hit{origin + direction * distance, next->normal, distance}; }
+}
+
+void WorldCollision::ContactCapsules(size_t index, Vector3 center, double radius, bool blocking,
+                                     std::optional<BodyContact>& result) const
+{
+    const auto& node = capsuleNodes[index];
+    if (!SphereBounds(node.bounds, center, radius)) return;
+    if (!node.count)
+    {
+        ContactCapsules(node.left, center, radius, blocking, result);
+        ContactCapsules(node.right, center, radius, blocking, result);
+        return;
+    }
+    for (size_t i = node.first; i < node.first + node.count; ++i)
+    {
+        const auto& capsule = capsules[i];
+        const auto nearest = capsule.ClosestAxisPoint(center), offset = center - nearest;
+        const double distance = Math::Length(offset), penetration = radius + capsule.radius - distance;
+        if (penetration <= (blocking ? .005 : 0)) continue;
+        auto normal = distance > 1e-10 ? offset * (1 / distance) : Vector3{1, 0, 0};
+        if (distance <= 1e-10 && Math::Length(capsule.b - capsule.a) > 1e-10)
+        {
+            const auto axis = Math::Normalize(capsule.b - capsule.a);
+            normal = Math::Normalize(Math::Cross(axis, std::abs(axis.x) < .9 ? Vector3{1, 0, 0} : Vector3{0, 1, 0}));
+        }
+        const auto point = nearest + normal * capsule.radius;
+        if (blocking && normal.y >= .65 && point.y <= center.y - radius + .06) continue;
+        if (!result || penetration > result->penetration) result = BodyContact{point, normal, penetration};
+    }
 }

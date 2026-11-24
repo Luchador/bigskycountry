@@ -30,7 +30,7 @@ bigsky_stage("${asset_root}/fonts/OpenSans-Semibold.ttf" "fonts/OpenSans-Semibol
 
 foreach(model IN LISTS model_sources)
     string(TOLOWER "${model}" lower)
-    if(lower MATCHES "\\.(glb|fbx)$" OR lower MATCHES "\\.(glb|fbx)\\.(bmesh|bao)$")
+    if(lower MATCHES "\\.(glb|fbx)$" OR lower MATCHES "\\.(glb|fbx)\\.(bmesh|bao|bcollision)$")
         bigsky_stage("${asset_root}/models/${model}" "models/${model}")
     endif()
 endforeach()

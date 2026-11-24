@@ -65,6 +65,7 @@ struct MeshPart
     std::size_t firstIndex, indexCount, slot;
 };
 
+struct MeshCollisionState;
 struct MeshAOState;
 struct MeshAOData;
 
@@ -87,6 +88,7 @@ struct Mesh
     // Shared, editable vertex-alpha overrides, including every authored LOD.
     std::shared_ptr<MeshAOState> ambientOcclusion;
     std::size_t aoLevel = 0;
+    std::shared_ptr<MeshCollisionState> collision;
     std::vector<std::uint32_t> indices; // Triangle list; front winding matches the world renderer.
     std::vector<MeshPart> parts; // Imported primitive ranges, including their generated back faces.
     std::shared_ptr<MeshMaterials> materials;

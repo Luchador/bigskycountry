@@ -12,6 +12,7 @@
 
 namespace
 {
+    constexpr UINT collisionFirst = 47010;
     constexpr UINT lit = 47001, colors = 47002, alpha = 47003, frameMesh = 47004, bakeAO = 47005;
     constexpr WindowsMenu::MenuItem viewTitle{0, L"&View", 0, true};
     constexpr WindowsMenu::MenuItem viewItems[] = {
@@ -22,6 +23,17 @@ namespace
     };
     constexpr WindowsMenu::MenuItem toolsTitle{0, L"&Tools", 0, true};
     constexpr WindowsMenu::MenuItem toolsItems[] = {{bakeAO, L"&Bake AO..."}};
+    constexpr WindowsMenu::MenuItem collisionTitle{0, L"&Collision", 0, true};
+    constexpr WindowsMenu::MenuItem collisionItems[] = {
+        {collisionFirst, L"&Show Collision", MF_ENABLED, false, true},
+        {collisionFirst + 1, L"&Detailed", MF_CHECKED, false, true},
+        {collisionFirst + 2, L"S&imple", MF_ENABLED, false, true},
+        {collisionFirst + 3, L"&None", MF_ENABLED, false, true},
+        {collisionFirst + 4, L"Add &Capsule"},
+        {collisionFirst + 5, L"Add S&phere"},
+        {collisionFirst + 6, L"D&uplicate Shape\tCtrl+D"},
+        {collisionFirst + 7, L"D&elete Shape\tDel"}
+    };
     void Caption(HWND window, const std::string& text)
     {
         const auto wide = WindowsNameDialog::Wide(text);
@@ -73,7 +85,8 @@ SDL_Window* WindowsMeshControls::Create(SDL_Window* parent)
     HMENU menu = CreateMenu();
     if (!menu) { SDL_SetError("Cannot create mesh editor menu"); return nullptr; }
     if (!WindowsMenu::AddSubmenu(menu, viewTitle, viewItems) ||
-        !WindowsMenu::AddSubmenu(menu, toolsTitle, toolsItems) || !SetMenu(frame, menu))
+        !WindowsMenu::AddSubmenu(menu, toolsTitle, toolsItems) ||
+        !WindowsMenu::AddSubmenu(menu, collisionTitle, collisionItems) || !SetMenu(frame, menu))
     {
         DestroyMenu(menu);
         SDL_SetError("Cannot attach mesh editor menu");
@@ -137,13 +150,27 @@ void WindowsMeshControls::Layout()
 void WindowsMeshControls::Reload()
 {
     SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_RESETCONTENT, 0, 0);
-    SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Automatic"));
-    for (std::size_t i = 0; i <= editor.instance.mesh->lods.size(); ++i)
+    Caption(GetDlgItem(panel, IDC_MESH_TITLE), editor.showCollision ? "Collision shapes" : "Material slots");
+    Caption(GetDlgItem(panel, IDC_MESH_HELP), editor.showCollision ? "W: move   E: rotate   S: scale" : "Drag materials here");
+    Caption(GetDlgItem(panel, IDC_MESH_LOD_LABEL), editor.showCollision ? "Collision mode" : "Preview LOD");
+    Caption(GetDlgItem(panel, IDC_MESH_REMOVE), editor.showCollision ? "Delete shape" : "Remove material");
+    Caption(hint, editor.showCollision ? "Drag handles | Ctrl+D: duplicate | Esc: cancel | Ctrl+Z/Y: undo/redo" : "LMB: orbit   Wheel: zoom   F: frame");
+    if (editor.showCollision)
     {
-        const auto label = L"LOD " + std::to_wstring(i);
-        SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        for (const auto* label : {L"Detailed", L"Simple", L"None"})
+            SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
+        SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_SETCURSEL, int(editor.collisionDraft.mode), 0);
     }
-    SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_SETCURSEL, editor.previewLOD + 1, 0);
+    else
+    {
+        SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Automatic"));
+        for (std::size_t i = 0; i <= editor.instance.mesh->lods.size(); ++i)
+        {
+            const auto label = L"LOD " + std::to_wstring(i);
+            SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+        SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_SETCURSEL, editor.previewLOD + 1, 0);
+    }
     SendDlgItemMessageW(panel, IDC_MESH_SLOTS, LB_RESETCONTENT, 0, 0);
     RefreshSlots();
     Sync(0);
@@ -156,14 +183,21 @@ void WindowsMeshControls::RefreshSlots()
     const auto selected = SendMessageW(list, LB_GETCURSEL, 0, 0), top = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
     SendMessageW(list, WM_SETREDRAW, FALSE, 0);
     SendMessageW(list, LB_RESETCONTENT, 0, 0);
-    for (const auto& slot : editor.instance.mesh->materials->slots)
+    for (std::size_t i = 0; i < editor.RowCount(); ++i)
     {
         // Native list text also provides the accessible name and keyboard search.
-        const auto label = WindowsNameDialog::Wide(slot.name + " - " + (slot.material.empty() ? "Unassigned" : slot.material));
+        std::string text;
+        if (editor.showCollision) text = editor.ShapeLabel(i);
+        else
+        {
+            const auto& slot = editor.instance.mesh->materials->slots[i];
+            text = slot.name + " - " + (slot.material.empty() ? "Unassigned" : slot.material);
+        }
+        const auto label = WindowsNameDialog::Wide(text);
         SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
     }
-    SendMessageW(list, LB_SETCURSEL, selected, 0);
-    SendMessageW(list, LB_SETTOPINDEX, std::max<LRESULT>(0, top), 0);
+    SendMessageW(list, LB_SETCURSEL, editor.showCollision ? (editor.selectedShape ? LRESULT(*editor.selectedShape) : -1) : selected, 0);
+    if (!editor.showCollision) SendMessageW(list, LB_SETTOPINDEX, std::max<LRESULT>(0, top), 0);
     SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     InvalidateSlots();
     UpdateRemove();
@@ -175,8 +209,14 @@ void WindowsMeshControls::InvalidateSlots()
 void WindowsMeshControls::Sync(std::size_t level)
 {
     const auto& mesh = *editor.instance.mesh;
-    Caption(GetDlgItem(panel, IDC_MESH_STATS), std::to_string(mesh.materials->slots.size()) + " slots | " +
-        std::to_string(mesh.Level(level).indices.size() / 3) + " tris | LOD " + std::to_string(level));
+    const char* tool = editor.collisionGizmo.mode == GizmoMode::Translate ? "Move" : editor.collisionGizmo.mode == GizmoMode::Rotate ? "Rotate" : "Scale";
+    Caption(GetDlgItem(panel, IDC_MESH_STATS), editor.showCollision ? std::to_string(editor.RowCount()) + " shapes | " + tool +
+        (editor.collisionDraft.mode != MeshCollisionMode::Simple ? " | Shapes inactive" : "") :
+        std::to_string(mesh.materials->slots.size()) + " slots | " + std::to_string(mesh.Level(level).indices.size() / 3) + " tris | LOD " + std::to_string(level));
+    const auto collision = GetSubMenu(GetMenu(frame), 2);
+    CheckMenuItem(collision, collisionFirst, MF_BYCOMMAND | (editor.showCollision ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuRadioItem(collision, collisionFirst + 1, collisionFirst + 3, collisionFirst + 1 + int(editor.collisionDraft.mode), MF_BYCOMMAND);
+    for (int command : {6, 7}) EnableMenuItem(collision, collisionFirst + command, MF_BYCOMMAND | (editor.selectedShape ? MF_ENABLED : MF_GRAYED));
     Caption(GetDlgItem(panel, IDC_MESH_STATUS), editor.status);
     CheckMenuRadioItem(GetSubMenu(GetMenu(frame), 0), lit, alpha,
         editor.viewMode == MeshEditorWindow::ViewMode::Lit ? lit :
@@ -190,11 +230,17 @@ void WindowsMeshControls::UpdateRemove()
     const bool assigned = editor.instance.mesh && selected >= 0 &&
         static_cast<std::size_t>(selected) < editor.instance.mesh->materials->slots.size() &&
         !editor.instance.mesh->materials->slots[selected].material.empty();
-    EnableWindow(GetDlgItem(panel, IDC_MESH_REMOVE), assigned);
+    EnableWindow(GetDlgItem(panel, IDC_MESH_REMOVE), editor.showCollision ? editor.selectedShape.has_value() : assigned);
 }
 
 void WindowsMeshControls::RemoveMaterial()
 {
+    if (editor.showCollision)
+    {
+        editor.CollisionCommand(7);
+        if (GetFocus() == GetDlgItem(panel, IDC_MESH_REMOVE)) SetFocus(GetDlgItem(panel, IDC_MESH_SLOTS));
+        return;
+    }
     const auto selected = SendDlgItemMessageW(panel, IDC_MESH_SLOTS, LB_GETCURSEL, 0, 0);
     if (selected >= 0 && editor.instance.mesh && static_cast<std::size_t>(selected) < editor.instance.mesh->materials->slots.size())
         editor.Drop(static_cast<std::size_t>(selected), {});
@@ -214,7 +260,7 @@ bool WindowsMeshControls::ContainsScreen(float x, float y) const
 
 std::optional<std::size_t> WindowsMeshControls::SlotAtScreen(float x, float y) const
 {
-    if (!panel || resizing || menuActive || !IsWindowVisible(frame) || IsIconic(frame)) return {};
+    if (!panel || editor.showCollision || resizing || menuActive || !IsWindowVisible(frame) || IsIconic(frame)) return {};
     POINT point{LONG(std::lround(x)), LONG(std::lround(y))};
     const HWND list = GetDlgItem(panel, IDC_MESH_SLOTS);
     if (WindowFromPoint(point) != list) return {};
@@ -236,6 +282,16 @@ bool WindowsMeshControls::HandleMessage(MSG& message)
     if (message.message == WM_KEYDOWN && !menuActive)
     {
         const bool dropdown = SendDlgItemMessageW(panel, IDC_MESH_LOD, CB_GETDROPPEDSTATE, 0, 0) != 0;
+        if (!dropdown && editor.showCollision)
+        {
+            SDL_Keycode key = 0;
+            if (message.wParam >= 'A' && message.wParam <= 'Z') key = SDLK_A + message.wParam - 'A';
+            else if (message.wParam == VK_ESCAPE) key = SDLK_ESCAPE;
+            else if (message.wParam == VK_DELETE) key = SDLK_DELETE;
+            const SDL_Keymod mods = (GetKeyState(VK_CONTROL) & 0x8000 ? SDL_KMOD_CTRL : 0) |
+                (GetKeyState(VK_MENU) & 0x8000 ? SDL_KMOD_ALT : 0);
+            if (editor.CollisionKey(key, mods)) { CancelResize(true); return true; }
+        }
         if (!dropdown && message.wParam == VK_ESCAPE)
         {
             CancelResize(true); editor.CancelPointer();
@@ -253,7 +309,27 @@ bool WindowsMeshControls::HandleMessage(MSG& message)
 
 void WindowsMeshControls::PaintSlot(const DRAWITEMSTRUCT& draw)
 {
-    if (!editor.instance.mesh || draw.itemID >= editor.instance.mesh->materials->slots.size()) return;
+    if (!editor.instance.mesh || draw.itemID >= editor.RowCount()) return;
+    if (editor.showCollision)
+    {
+        FillRect(draw.hDC, &draw.rcItem, WindowsTheme::Brush(editor.selectedShape == draw.itemID ? EditorTheme::selected : EditorTheme::list));
+        SetBkMode(draw.hDC, TRANSPARENT); SetTextColor(draw.hDC, WindowsTheme::Color(EditorTheme::text));
+        RECT line{draw.rcItem.left + Scale(8), draw.rcItem.top + Scale(5), draw.rcItem.right - Scale(8), draw.rcItem.top + Scale(25)};
+        constexpr UINT flags = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
+        DrawTextW(draw.hDC, WindowsNameDialog::Wide(editor.ShapeLabel(draw.itemID)).c_str(), -1, &line, flags);
+        const auto& shape = editor.collisionDraft.shapes[draw.itemID];
+        char text[96]; SDL_snprintf(text, sizeof(text), "Radius: %.3f m", shape.transform.scale.x * .5);
+        line.top += Scale(22); line.bottom += Scale(22);
+        DrawTextW(draw.hDC, WindowsNameDialog::Wide(text).c_str(), -1, &line, flags);
+        if (shape.type == CollisionShapeType::Capsule)
+        {
+            SDL_snprintf(text, sizeof(text), "Total length: %.3f m", shape.transform.scale.x + shape.transform.scale.y);
+            line.top += Scale(22); line.bottom += Scale(22);
+            DrawTextW(draw.hDC, WindowsNameDialog::Wide(text).c_str(), -1, &line, flags);
+        }
+        if ((draw.itemState & ODS_FOCUS) && !(draw.itemState & ODS_NOFOCUSRECT)) DrawFocusRect(draw.hDC, &draw.rcItem);
+        return;
+    }
     const bool selected = (draw.itemState & ODS_SELECTED) || editor.hover == draw.itemID;
     const auto& slot = editor.instance.mesh->materials->slots[draw.itemID];
     FillRect(draw.hDC, &draw.rcItem, WindowsTheme::Brush(selected ? EditorTheme::selected : EditorTheme::list));
@@ -297,10 +373,20 @@ INT_PTR CALLBACK WindowsMeshControls::PanelProc(HWND window, UINT message, WPARA
     if (message == WM_COMMAND)
     {
         if (LOWORD(w) == IDC_MESH_REMOVE && HIWORD(w) == BN_CLICKED) self->RemoveMaterial();
-        else if (LOWORD(w) == IDC_MESH_SLOTS && HIWORD(w) == LBN_SELCHANGE) self->UpdateRemove();
+        else if (LOWORD(w) == IDC_MESH_SLOTS && HIWORD(w) == LBN_SELCHANGE)
+        {
+            if (self->editor.showCollision)
+            {
+                const auto row = SendDlgItemMessageW(window, IDC_MESH_SLOTS, LB_GETCURSEL, 0, 0);
+                self->editor.SelectShape(row < 0 ? std::nullopt : std::optional<std::size_t>(row));
+            }
+            self->UpdateRemove();
+        }
         else if (LOWORD(w) == IDC_MESH_LOD && HIWORD(w) == CBN_SELCHANGE)
         {
-            self->editor.previewLOD = int(SendDlgItemMessageW(window, IDC_MESH_LOD, CB_GETCURSEL, 0, 0)) - 1;
+            const int row = int(SendDlgItemMessageW(window, IDC_MESH_LOD, CB_GETCURSEL, 0, 0));
+            if (self->editor.showCollision && row >= 0) self->editor.SetCollisionMode(MeshCollisionMode(row));
+            else self->editor.previewLOD = row - 1;
             self->editor.dirty = true;
         }
         return TRUE;
@@ -345,6 +431,8 @@ LRESULT CALLBACK WindowsMeshControls::FrameProc(HWND window, UINT message, WPARA
             CheckMenuRadioItem(GetSubMenu(GetMenu(window), 0), lit, alpha, LOWORD(w), MF_BYCOMMAND);
             return 0;
         }
+        if (LOWORD(w) >= collisionFirst && LOWORD(w) <= collisionFirst + 7)
+        { self.editor.CollisionCommand(LOWORD(w) - collisionFirst); return 0; }
         if (LOWORD(w) == frameMesh) { self.editor.Frame(); return 0; }
         if (LOWORD(w) == bakeAO) { self.editor.OpenAO(); return 0; }
     }

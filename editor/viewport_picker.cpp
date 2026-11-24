@@ -65,14 +65,28 @@ ViewportPicker::ViewportPicker(const FreeCamera& view, SDL_Rect scene, SDL_FPoin
 {
 }
 
-void ViewportPicker::TestPlacementSurfaces(const WorldDocument& world)
+std::optional<SceneKey> ViewportPicker::TestPlacementSurfaces(const WorldDocument& world, bool includeObjects)
 {
+    std::optional<SceneKey> hit;
     for (int i = 0; i < static_cast<int>(world.roads.size()); ++i)
-        if (!world.hierarchy.EditorHidden({SceneKind::Road, i})) TestRoad(world.roads[i]);
+        if (!world.hierarchy.EditorHidden({SceneKind::Road, i}) && TestRoad(world.roads[i]))
+            hit = SceneKey{SceneKind::Road, i};
     for (const auto& [id, junction] : world.IntersectionSurfaces())
-        if (!world.hierarchy.EditorHidden({SceneKind::Intersection, id})) TestRoad(junction.geometry);
+        if (!world.hierarchy.EditorHidden({SceneKind::Intersection, id}) && TestRoad(junction.geometry))
+            hit = SceneKey{SceneKind::Intersection, id};
     for (int i = 0; i < static_cast<int>(world.Terrain().size()); ++i)
-        if (!world.hierarchy.EditorHidden({SceneKind::Terrain, i})) TestMesh(world.Terrain()[i]->Instance());
+        if (!world.hierarchy.EditorHidden({SceneKind::Terrain, i}) && TestMesh(world.Terrain()[i]->Instance()))
+            hit = SceneKey{SceneKind::Terrain, i};
+    if (includeObjects)
+    {
+        for (int i = 0; i < static_cast<int>(world.meshes.size()); ++i)
+            if (!world.hierarchy.EditorHidden({SceneKind::Mesh, i}) && TestMesh(world.meshes[i]))
+                hit = SceneKey{SceneKind::Mesh, i};
+        for (int i = 0; i < static_cast<int>(world.Objects().size()); ++i)
+            if (!world.hierarchy.EditorHidden({SceneKind::Object, i}) && TestMesh(world.Objects()[i]->Instance()))
+                hit = SceneKey{SceneKind::Object, i};
+    }
+    return hit;
 }
 
 bool ViewportPicker::TestTriangle(Vector3 a, Vector3 b, Vector3 c)

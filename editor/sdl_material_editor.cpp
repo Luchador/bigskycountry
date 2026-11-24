@@ -76,13 +76,14 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_UTILITY_BOOLEAN, true);
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
-        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 660);
-        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 460);
+        constexpr int width = 1320, height = 920;
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
         int x, y, w, h;
         SDL_GetWindowPosition(owner, &x, &y);
         SDL_GetWindowSize(owner, &w, &h);
-        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, x + std::max(0, (w - 660) * 2 / 3));
-        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, y + std::max(0, (h - 460) / 2));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, x + std::max(0, (w - width) * 2 / 3));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, y + std::max(0, (h - height) / 2));
         window = SDL_CreateWindowWithProperties(props);
         SDL_DestroyProperties(props);
         if (!window)

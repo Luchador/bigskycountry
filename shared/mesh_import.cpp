@@ -1,6 +1,7 @@
 #include "mesh.hpp"
 #include "mesh_materials.hpp"
 #include "mesh_ao.hpp"
+#include "mesh_collision.hpp"
 #include "mesh_fbx.hpp"
 
 #define CGLTF_IMPLEMENTATION
@@ -367,7 +368,7 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
         lod.mesh->assetPath = name;
         lod.mesh->materials = mesh->materials;
     }
-    if (!MeshAO::Bind(*mesh, location)) return nullptr;
+    if (!MeshAO::Bind(*mesh, location) || !MeshCollision::Bind(*mesh, location)) return nullptr;
     loaded.emplace(name, mesh);
     return mesh;
 }

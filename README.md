@@ -172,15 +172,50 @@ if (!barn)
 
 The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
 
+Dragging a model from the Content Browser into the 3D viewport places its base on the nearest visible road, intersection, terrain, or object beneath the pointer and adds it to that surface's immediate Outliner folder. Hidden items are ignored. A drop onto empty ground goes into the world root. Placement and folder assignment form one undoable action and are saved together.
+
 The optional `OBJS` version 5 section stores one record per object. Each record contains the type, quoted model path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record adds its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–4 also load, with collision enabled by default. Older markers use their original mesh colors and white text. A vehicle record adds its acceleration in meters per second squared. Every version 5 record ends with a collision flag (0 or 1). Existing `MESH` placements keep their original transform, including any shear.
 
 ### Mesh editor
 
 Double-click a GLB or FBX model in the Content Browser's **Models** tab to open a floating **Mesh Editor** above the main editor. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The mesh window stays above its owner, and the main editor remains usable for browsing and dragging materials while it is open. Opening another model also restores the mesh window if it was minimized.
 
+The Mesh Editor opens at **1800 × 1200**. Both it and the Material Editor start at twice their previous width and height; controls retain their normal size, leaving more room for the previews. Both windows remain resizable.
+
 The right panel lists the model's named material slots. Drag its left divider to adjust the panel width; names and drop targets resize with it. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
 
 The mesh window's **View** menu offers **Lit** (the default shaded material preview), **Vertex Colors** (untextured RGB vertex colors), and **Vertex Alpha** (the vertex alpha channel as opaque grayscale: 0 is black, 1 is white). Vertex Alpha can inspect SpeedTree AO baked into vertex alpha. Both inspection modes omit lighting, material tint, and SSAO. Vertex Alpha also displays AO authored with the mesh editor bake tool. Imported FBX and GLB vertex alpha is retained separately from surface opacity; missing vertex colors or RGB-only colors default to alpha 1 (white). These are preview settings and do not change material assignments or world instances. All modes support automatic and manually selected LODs. **Alt+V** opens the menu; arrow keys and **Enter** select a mode, and **Esc** dismisses it. The mouse wheel can zoom well inside the mesh's bounding sphere for close inspection; **F** returns to the original framing.
+
+**Collision → Add Capsule / Add Sphere** adds a simple collider and switches the
+mesh to **Simple** collision. Use **Show Collision** to switch the right panel
+between materials/LODs and collision shapes. Click a shape in that panel or its
+volume in the viewport to select it. The wire overlay stays visible through the
+model; selected shapes are orange. Empty-space dragging still orbits the camera.
+
+- **W / E / S:** move, rotate, or scale using the main editor's transform gizmos.
+  Move/rotate use world axes; scale follows the shape's local axes.
+- Capsules run along local Y. Y scales their straight section; X/Z scale their
+  radius together. Spheres scale uniformly with any handle. The center scale box
+  scales all dimensions together (right/up enlarges; left/down shrinks).
+- **Ctrl+D** duplicates a selected shape; **Delete** removes it. **Esc** cancels a
+  handle drag, otherwise deselects. **Ctrl+Z / Ctrl+Y** undo/redo collision edits
+  while this mesh remains open. Ctrl while rotating snaps to 5 degrees.
+- **Detailed** keeps the existing LOD0 triangle collision and remains the default
+  for existing meshes. **Simple** uses only the authored shapes (an empty list
+  means no collision). **None** disables this mesh's collision. Switching modes
+  retains the shape list; the overlay can show inactive shapes for editing.
+
+Each completed edit saves to `<model>.bcollision` alongside the source GLB/FBX;
+no world save is required. Placed objects, static mesh instances, and all their
+visual LODs share these settings. Terrain surfaces retain triangle collision,
+and an object's **Has Collision = false** still disables its collision. Rebuild
+to copy the sidecar into cooked assets, then **Cook World** to refresh dependency
+hashes and streaming bounds. Collision shapes use analytic capsule/sphere queries,
+with a BVH and the existing streamed collision budgets. Instance translation,
+rotation, scale and mirroring are supported; nonuniform instance scaling
+conservatively widens the radius to prevent gaps. Prefer uniform placement scale
+for an exact match. Re-exporting the visual mesh preserves these independently
+authored shapes; check their fit if the source model's size or origin changes.
 
 **Tools → Bake AO...** opens a modeless bake window with native Windows controls.
 **Bake AO** calculates ambient visibility for every vertex of every LOD in the

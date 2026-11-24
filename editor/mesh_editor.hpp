@@ -1,7 +1,9 @@
 #pragma once
 #include "material_editor.hpp"
 #include "world_renderer.hpp"
-#include "camera_view.hpp"
+#include "free_camera.hpp"
+#include "transform_gizmo.hpp"
+#include "mesh_collision.hpp"
 #include <optional>
 
 class MeshAOEditor;
@@ -33,6 +35,29 @@ public:
 
 private:
     void OpenAO();
+    void UpdateCamera();
+    void CollisionCommand(int command);
+    void SetCollisionMode(MeshCollisionMode mode);
+    bool CollisionKey(SDL_Keycode key, SDL_Keymod mods);
+    bool CollisionPointerDown(SDL_FPoint point);
+    void CollisionPointerMove(SDL_FPoint point);
+    void FinishCollisionDrag(bool commit);
+    bool CommitCollision(const MeshCollisionData& next, bool history = true);
+    void SyncCollision();
+    void SelectShape(std::optional<std::size_t> index);
+    std::size_t RowCount() const;
+    std::string ShapeLabel(std::size_t index) const;
+    std::optional<GizmoPlacement> CollisionGizmoPlacement() const;
+    void DrawCollision();
+    TransformGizmo collisionGizmo;
+    MeshCollisionData collisionDraft;
+    MeshCollision::Snapshot collisionSnapshot;
+    std::vector<MeshCollisionData> collisionUndo, collisionRedo;
+    std::optional<std::size_t> selectedShape;
+    std::optional<int> collisionHover;
+    std::optional<GizmoDrag> collisionDrag;
+    ObjectTransform collisionDragStart;
+    bool showCollision = false;
     std::unique_ptr<MeshAOEditor> aoEditor;
     std::shared_ptr<const MeshAOData> aoSnapshot;
 #ifdef _WIN32
@@ -62,7 +87,7 @@ private:
     MeshInstance vertexInstance; // Private, untextured preview; never changes the asset.
     TextureCatalog* catalog = nullptr;
     std::string path, status;
-    CameraView camera;
+    FreeCamera camera;
     double yaw = 0, pitch = 0, distance = 3;
     float scroll = 0;
     float panelWidth = 280, panelDragStart = 280;
@@ -72,7 +97,7 @@ private:
     void SetViewMode(ViewMode mode);
     ViewMode viewMode = ViewMode::Lit;
     bool menuOpen = false;
-    bool toolsMenu = false;
+    int activeMenu = 0; // View, Tools, Collision.
     int menuRow = 0;
     int previewLOD = -1; // Auto, then each authored LOD.
     std::optional<SDL_FPoint> orbit;

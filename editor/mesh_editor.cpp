@@ -18,7 +18,9 @@ namespace
     constexpr std::array viewLabels{"Lit", "Vertex Colors", "Vertex Alpha"};
     constexpr int viewCount = int(viewLabels.size());
     constexpr SDL_FRect viewMenu{4, 0, 60, menuHeight}, viewOptions{4, menuHeight, 196, menuHeight * viewCount};
-    constexpr SDL_FRect toolsButton{64, 0, 68, menuHeight}, toolsOptions{64, menuHeight, 196, menuHeight};
+    constexpr std::array collisionLabels{"Show Collision", "Detailed", "Simple", "None", "Add Capsule", "Add Sphere", "Duplicate Shape", "Delete Shape"};
+    constexpr std::array<SDL_FRect, 3> menuButtons{{viewMenu, {64, 0, 68, menuHeight}, {132, 0, 100, menuHeight}}};
+    constexpr std::array<SDL_FRect, 3> menuOptions{{viewOptions, {64, menuHeight, 196, menuHeight}, {132, menuHeight, 220, menuHeight * 8}}};
     bool Fill(SDL_Renderer* r, SDL_FRect box, SDL_Color c)
     { return EditorTheme::SetColor(r, c) && SDL_RenderFillRect(r, &box); }
     bool Text(SDL_Renderer* r, float x, float y, const std::string& s, SDL_Color c = EditorTheme::text)
@@ -110,6 +112,7 @@ void MeshEditorWindow::DestroyThumbnails()
 void MeshEditorWindow::Close()
 {
     aoEditor.reset(); aoSnapshot.reset();
+    collisionUndo.clear(); collisionRedo.clear();
     CancelPointer();
     hover.reset(); menuOpen = false;
     SDL_DestroyCursor(resizeCursor); resizeCursor = nullptr;
@@ -124,11 +127,13 @@ void MeshEditorWindow::Close()
     renderer = nullptr; window = nullptr;
     instance = {};
     vertexInstance = {};
+    collisionSnapshot.reset(); collisionDraft = {}; selectedShape.reset();
     catalog = nullptr;
 }
 
 void MeshEditorWindow::Frame()
 {
+    CancelPointer();
     yaw = 0.75; pitch = 0.12; distance = 1.8;
     dirty = true;
 }
@@ -150,12 +155,13 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, true);
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
         SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
-        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 900);
-        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 600);
+        constexpr int width = 1800, height = 1200;
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
         int x, y, w, h;
         SDL_GetWindowPosition(owner, &x, &y); SDL_GetWindowSize(owner, &w, &h);
-        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, x + std::max(0, (w - 900) * 2 / 3));
-        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, y + std::max(0, (h - 600) / 2));
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, x + std::max(0, (w - width) * 2 / 3));
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, y + std::max(0, (h - height) / 2));
         window = SDL_CreateWindowWithProperties(properties);
         SDL_DestroyProperties(properties);
         if (!window) return false;
@@ -183,6 +189,11 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
     vertexInstance = {};
     instance = {std::move(mesh), {}};
     aoSnapshot = MeshAO::Current(*instance.mesh);
+    collisionGizmo.Load(assets);
+    collisionGizmo.mode = GizmoMode::Translate;
+    collisionUndo.clear(); collisionRedo.clear(); selectedShape.reset(); collisionHover.reset();
+    collisionSnapshot = MeshCollision::Current(*instance.mesh); collisionDraft = *collisionSnapshot;
+    showCollision = false;
     // Normalize only the preview placement, preserving the source mesh and UVs.
     const auto center = (instance.mesh->bounds.min + instance.mesh->bounds.max) * 0.5;
     const double radius = std::max(1e-6, Math::Length(instance.mesh->bounds.max - center));
@@ -220,7 +231,7 @@ std::optional<std::size_t> MeshEditorWindow::SlotAtScreen(float x, float y) cons
 #ifdef _WIN32
     return controls ? controls->SlotAtScreen(x, y) : std::nullopt;
 #else
-    if (!window || menuOpen || panelGrab || !instance.mesh || !instance.mesh->materials) return {};
+    if (!window || showCollision || menuOpen || panelGrab || !instance.mesh || !instance.mesh->materials) return {};
     int wx, wy; SDL_GetWindowPosition(window, &wx, &wy);
     const SDL_FPoint point{x - wx, y - wy};
     const auto clip = SlotClip();
@@ -247,7 +258,7 @@ void MeshEditorWindow::Hover(std::optional<std::size_t> slot)
 
 bool MeshEditorWindow::Drop(std::size_t slot, const std::string& material)
 {
-    if (!instance.mesh) return false;
+    if (!instance.mesh || showCollision) return false;
     const bool ok = MeshMaterialIO::Assign(*instance.mesh, slot, material);
     status = ok ? "Saved" : SDL_GetError();
     if (ok) imagesDirty = true;
@@ -257,7 +268,7 @@ bool MeshEditorWindow::Drop(std::size_t slot, const std::string& material)
 
 void MeshEditorWindow::ClampScroll()
 {
-    const float count = instance.mesh && instance.mesh->materials ? float(instance.mesh->materials->slots.size()) : 0;
+    const float count = instance.mesh && instance.mesh->materials ? float(RowCount()) : 0;
     scroll = std::clamp(scroll, 0.f, std::max(0.f, count * rowHeight - SlotClip().h));
 }
 
@@ -269,6 +280,7 @@ void MeshEditorWindow::SetResizeCursor(bool active)
 
 void MeshEditorWindow::CancelPointer()
 {
+    FinishCollisionDrag(false);
     if (orbit || panelGrab) SDL_CaptureMouse(false);
     orbit.reset(); panelGrab.reset();
     SetResizeCursor(false);
@@ -296,23 +308,28 @@ void MeshEditorWindow::OpenAO()
 bool MeshEditorWindow::HandleMenu(const SDL_Event& event)
 {
     const auto choose = [&] {
-        if (toolsMenu) OpenAO();
+        if (activeMenu == 1) OpenAO();
+        else if (activeMenu == 2) CollisionCommand(menuRow);
         else SetViewMode(static_cast<ViewMode>(std::clamp(menuRow, 0, viewCount - 1)));
         menuOpen = false; dirty = true;
     };
-    const auto open = [&](bool tools) {
-        CancelPointer(); menuOpen = !menuOpen || toolsMenu != tools;
-        toolsMenu = tools; menuRow = tools ? 0 : int(viewMode); dirty = true;
+    const auto open = [&](int menu) {
+        CancelPointer(); menuOpen = !menuOpen || activeMenu != menu;
+        activeMenu = menu; menuRow = menu == 0 ? int(viewMode) : 0; dirty = true;
     };
-    const auto options = toolsMenu ? toolsOptions : viewOptions;
-    const int count = toolsMenu ? 1 : viewCount;
+    const auto options = menuOptions[activeMenu];
+    const int count = activeMenu == 2 ? 8 : activeMenu == 1 ? 1 : viewCount;
     if (event.type == SDL_EVENT_KEY_DOWN)
     {
-        if (!event.key.repeat && (event.key.mod & SDL_KMOD_ALT) && (event.key.key == SDLK_V || event.key.key == SDLK_T))
-        { open(event.key.key == SDLK_T); return true; }
+        if (!event.key.repeat && (event.key.mod & SDL_KMOD_ALT))
+        {
+            if (event.key.key == SDLK_V) { open(0); return true; }
+            if (event.key.key == SDLK_T) { open(1); return true; }
+            if (event.key.key == SDLK_C) { open(2); return true; }
+        }
         if (!menuOpen) return false;
         if (event.key.key == SDLK_ESCAPE) menuOpen = false;
-        else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) open(!toolsMenu);
+        else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) open((activeMenu + (event.key.key == SDLK_LEFT ? 2 : 1)) % 3);
         else if (event.key.key == SDLK_UP) menuRow = (menuRow + count - 1) % count;
         else if (event.key.key == SDLK_DOWN) menuRow = (menuRow + 1) % count;
         else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) choose();
@@ -321,9 +338,9 @@ bool MeshEditorWindow::HandleMenu(const SDL_Event& event)
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
-        if (event.button.button == SDL_BUTTON_LEFT &&
-            (SDL_PointInRectFloat(&point, &viewMenu) || SDL_PointInRectFloat(&point, &toolsButton)))
-        { open(SDL_PointInRectFloat(&point, &toolsButton)); return true; }
+        if (event.button.button == SDL_BUTTON_LEFT)
+            for (int i = 0; i < 3; ++i)
+                if (SDL_PointInRectFloat(&point, &menuButtons[i])) { open(i); return true; }
         if (menuOpen)
         {
             if (event.button.button == SDL_BUTTON_LEFT && SDL_PointInRectFloat(&point, &options))
@@ -345,17 +362,20 @@ bool MeshEditorWindow::DrawMenu()
 {
     const auto panel = Panel();
     if (!Fill(renderer, {0, 0, panel.x + panel.w, menuHeight}, EditorTheme::menuBar) ||
-        (menuOpen && !Fill(renderer, toolsMenu ? toolsButton : viewMenu, EditorTheme::selected)) ||
-        !Text(renderer, 12, 9, "View") || !Text(renderer, 72, 9, "Tools")) return false;
+        (menuOpen && !Fill(renderer, menuButtons[activeMenu], EditorTheme::selected)) ||
+        !Text(renderer, 12, 9, "View") || !Text(renderer, 72, 9, "Tools") || !Text(renderer, 140, 9, "Collision")) return false;
     if (!menuOpen) return true;
-    const auto options = toolsMenu ? toolsOptions : viewOptions;
+    const auto options = menuOptions[activeMenu];
     if (!Fill(renderer, options, EditorTheme::chrome)) return false;
-    for (int i = 0; i < (toolsMenu ? 1 : viewCount); ++i)
+    const int count = activeMenu == 2 ? 8 : activeMenu == 1 ? 1 : viewCount;
+    for (int i = 0; i < count; ++i)
     {
         const SDL_FRect row{options.x, options.y + i * menuHeight, options.w, menuHeight};
+        const bool checked = activeMenu == 0 ? int(viewMode) == i : activeMenu == 2 &&
+            (i == 0 ? showCollision : i >= 1 && i <= 3 && int(collisionDraft.mode) == i - 1);
         if ((menuRow == i && !Fill(renderer, row, EditorTheme::selected)) ||
-            !Text(renderer, row.x + 8, row.y + 9, !toolsMenu && int(viewMode) == i ? "*" : "") ||
-            !Text(renderer, row.x + 28, row.y + 9, toolsMenu ? "Bake AO..." : viewLabels[i])) return false;
+            !Text(renderer, row.x + 8, row.y + 9, checked ? "*" : "") ||
+            !Text(renderer, row.x + 28, row.y + 9, activeMenu == 2 ? collisionLabels[i] : activeMenu == 1 ? "Bake AO..." : viewLabels[i])) return false;
     }
     return true;
 }
@@ -386,6 +406,7 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
 #endif
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
+        if (CollisionKey(event.key.key, event.key.mod)) return true;
         if (event.key.key == SDLK_ESCAPE)
         {
             if (panelGrab || orbit)
@@ -404,7 +425,7 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
 #ifndef _WIN32
     const auto panel = Panel(), divider = Divider();
 #endif
-    if (event.type == SDL_EVENT_MOUSE_WHEEL)
+    if (event.type == SDL_EVENT_MOUSE_WHEEL && !collisionDrag)
     {
         const SDL_FPoint point{event.wheel.mouse_x, event.wheel.mouse_y};
         if (SDL_PointInRectFloat(&point, &view))
@@ -422,7 +443,8 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
 #ifdef _WIN32
-        if (SDL_PointInRectFloat(&point, &view)) { orbit = point; SDL_CaptureMouse(true); }
+        if (SDL_PointInRectFloat(&point, &view))
+        { if (!CollisionPointerDown(point)) { orbit = point; SDL_CaptureMouse(true); } }
 #else
         const auto button = LODButton(), clip = SlotClip();
         if (SDL_PointInRectFloat(&point, &divider))
@@ -431,19 +453,22 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
             panelDragStart = panelWidth;
             SDL_CaptureMouse(true); SetResizeCursor(true);
         }
-        else if (SDL_PointInRectFloat(&point, &view)) { orbit = point; SDL_CaptureMouse(true); }
+        else if (SDL_PointInRectFloat(&point, &view))
+        { if (!CollisionPointerDown(point)) { orbit = point; SDL_CaptureMouse(true); } }
         else if (SDL_PointInRectFloat(&point, &button))
         {
-            ++previewLOD;
-            if (previewLOD > int(instance.mesh->lods.size())) previewLOD = -1;
+            if (showCollision) SetCollisionMode(MeshCollisionMode((int(collisionDraft.mode) + 1) % 3));
+            else { ++previewLOD; if (previewLOD > int(instance.mesh->lods.size())) previewLOD = -1; }
             dirty = true;
         }
         else if (SDL_PointInRectFloat(&point, &clip))
         {
-            for (std::size_t i = 0; i < instance.mesh->materials->slots.size(); ++i)
+            for (std::size_t i = 0; i < RowCount(); ++i)
             {
-                const auto clear = Clear(i);
-                if (SDL_PointInRectFloat(&point, &clear)) Drop(i, {});
+                const auto clear = Clear(i), row = Slot(i);
+                if (showCollision && SDL_PointInRectFloat(&point, &row))
+                { SelectShape(i); if (SDL_PointInRectFloat(&point, &clear)) CollisionCommand(7); break; }
+                if (!showCollision && SDL_PointInRectFloat(&point, &clear)) Drop(i, {});
             }
         }
 #endif
@@ -451,6 +476,13 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
     if (event.type == SDL_EVENT_MOUSE_MOTION)
     {
         const SDL_FPoint point{event.motion.x, event.motion.y};
+        if (collisionDrag)
+        {
+            CollisionPointerMove(point);
+            if (!(event.motion.state & SDL_BUTTON_LMASK)) FinishCollisionDrag(true);
+            return true;
+        }
+        if (!orbit && !panelGrab) CollisionPointerMove(point);
         if (!(event.motion.state & SDL_BUTTON_LMASK)) CancelPointer();
 #ifndef _WIN32
         if (panelGrab)
@@ -473,7 +505,11 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
         SetResizeCursor(panelGrab || (!orbit && SDL_PointInRectFloat(&point, &divider)));
 #endif
     }
-    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) CancelPointer();
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
+    {
+        if (collisionDrag) { CollisionPointerMove({event.button.x, event.button.y}); FinishCollisionDrag(true); }
+        CancelPointer();
+    }
     return true; // Utility-window input must never edit or navigate the world.
 }
 
@@ -510,6 +546,7 @@ bool MeshEditorWindow::Draw()
         vertexInstance = {}; dirty = true;
     }
     if (!window || (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN))) return true;
+    if (collisionSnapshot != MeshCollision::Current(*instance.mesh)) { CancelPointer(); collisionUndo.clear(); collisionRedo.clear(); SyncCollision(); }
     if (Material::Revision() != materialRevision || instance.mesh->materials->revision != assignmentRevision) imagesDirty = true;
     if (!dirty && !imagesDirty) return true;
     if (!UpdateThumbnails()) return false;
@@ -528,8 +565,7 @@ bool MeshEditorWindow::Draw()
     EditorTheme::SetColor(renderer, EditorTheme::field); SDL_RenderClear(renderer);
     const SDL_Rect viewport{0, int(std::lround(view.y * sy)), int(std::lround(view.w * sx)), int(std::lround(view.h * sy))};
     SDL_SetRenderViewport(renderer, &viewport);
-    camera.LookAt(Vector3{std::sin(yaw) * std::cos(pitch) * distance, std::sin(pitch) * distance,
-                          -std::cos(yaw) * std::cos(pitch) * distance} * previewRadius, {});
+    UpdateCamera();
     const WorldLighting lights{{Math::Normalize(Vector3{-0.4, 0.7, -0.6}), {2.0, 1.9, 1.8}},
                                {Math::Normalize(Vector3{0.6, 0.2, 0.7}), {0.35, 0.4, 0.5}}, {0.22, 0.22, 0.24}};
     const bool colors = viewMode != ViewMode::Lit;
@@ -541,6 +577,7 @@ bool MeshEditorWindow::Draw()
     const auto& shown = colors ? vertexInstance : instance;
     const auto level = preview->MeshLOD(shown, previewLOD);
     preview->SubmitWorldMesh(shown, {}, WorldRenderer::MeshUVs::Authored, {1, 1, 1, 1}, previewLOD);
+    DrawCollision();
     if (!preview->End()) return false;
     // Large previews may need several budgeted upload frames before becoming visible.
     dirty = preview->PreparedVertices() != 0 || preview->UploadedBytes() != 0;
@@ -552,23 +589,33 @@ bool MeshEditorWindow::Draw()
     Fill(renderer, divider, EditorTheme::chrome);
     Fill(renderer, {divider.x + 2, divider.y + (divider.h - 32) / 2, 2, 32}, EditorTheme::disabled);
     Fill(renderer, panel, EditorTheme::panel);
-    Text(renderer, panel.x + 10, panel.y + 14, "Material slots");
-    Text(renderer, panel.x + 10, panel.y + 32, "Drag materials here");
-    Text(renderer, panel.x + 10, panel.y + 50, Fit(std::to_string(instance.mesh->materials->slots.size()) + " slots | " +
-         std::to_string(instance.mesh->Level(level).indices.size() / 3) + " tris", Characters(panel.w - 20)));
+    Text(renderer, panel.x + 10, panel.y + 14, showCollision ? "Collision shapes" : "Material slots");
+    Text(renderer, panel.x + 10, panel.y + 32, showCollision ? "W: move  E: rotate  S: scale" : "Drag materials here");
+    Text(renderer, panel.x + 10, panel.y + 50, Fit(showCollision ? std::to_string(RowCount()) + " shapes | Ctrl+D: duplicate" :
+         std::to_string(RowCount()) + " slots | " + std::to_string(instance.mesh->Level(level).indices.size() / 3) + " tris", Characters(panel.w - 20)));
     const auto button = LODButton();
     Fill(renderer, button, EditorTheme::button);
-    Text(renderer, button.x + 8, button.y + 10, Fit((previewLOD < 0 ? "Auto: " : "Preview: ") +
-         std::string("LOD ") + std::to_string(level) + " / " + std::to_string(instance.mesh->lods.size()), Characters(button.w - 16)));
+    constexpr const char* modeLabels[]{"Detailed", "Simple", "None"};
+    Text(renderer, button.x + 8, button.y + 10, Fit(showCollision ? std::string("Collision: ") + modeLabels[int(collisionDraft.mode)] :
+         (previewLOD < 0 ? "Auto: " : "Preview: ") + std::string("LOD ") + std::to_string(level) + " / " + std::to_string(instance.mesh->lods.size()), Characters(button.w - 16)));
     const auto area = SlotClip();
     const SDL_Rect clip{int(area.x), int(area.y), int(area.w), int(area.h)};
     SDL_SetRenderClipRect(renderer, &clip);
     const auto& slots = instance.mesh->materials->slots;
-    for (std::size_t i = 0; i < slots.size(); ++i)
+    for (std::size_t i = 0; i < RowCount(); ++i)
     {
         const auto box = Slot(i), clear = Clear(i);
         if (box.y + box.h < area.y || box.y >= area.y + area.h) continue;
-        Fill(renderer, box, hover == i ? EditorTheme::selected : EditorTheme::list);
+        Fill(renderer, box, (showCollision ? selectedShape == i : hover == i) ? EditorTheme::selected : EditorTheme::list);
+        if (showCollision)
+        {
+            const auto& shape = collisionDraft.shapes[i]; char label[96];
+            SDL_snprintf(label, sizeof(label), "Radius %.3f m", shape.transform.scale.x * .5);
+            Text(renderer, box.x + 6, box.y + 7, ShapeLabel(i)); Text(renderer, box.x + 6, box.y + 29, Fit(label, Characters(box.w - 12)));
+            if (shape.type == CollisionShapeType::Capsule)
+            { SDL_snprintf(label, sizeof(label), "Length %.3f m", shape.transform.scale.y + shape.transform.scale.x); Text(renderer, box.x + 6, box.y + 51, Fit(label, Characters(box.w - 48))); }
+            Fill(renderer, clear, EditorTheme::button); Text(renderer, clear.x + 9, clear.y + 8, "X"); continue;
+        }
         const SDL_FRect image{box.x + 5, box.y + 24, 50, 50};
         if (thumbnails[i]) SDL_RenderTexture(renderer, thumbnails[i], nullptr, &image);
         else { Fill(renderer, image, EditorTheme::field); Text(renderer, image.x + 20, image.y + 20, "M"); }
@@ -579,7 +626,7 @@ bool MeshEditorWindow::Draw()
         Fill(renderer, clear, EditorTheme::button); Text(renderer, clear.x + 9, clear.y + 8, "X");
     }
     SDL_SetRenderClipRect(renderer, nullptr);
-    Text(renderer, 10, view.y + view.h - 22, Fit("LMB: orbit  Wheel: zoom  F: frame", Characters(view.w - 20)));
+    Text(renderer, 10, view.y + view.h - 22, Fit(showCollision ? "LMB: select/drag  Empty space: orbit  Wheel: zoom  Esc: cancel" : "LMB: orbit  Wheel: zoom  F: frame", Characters(view.w - 20)));
     Text(renderer, panel.x + 10, panel.y + panel.h - 22, Fit(status, Characters(panel.w - 20)));
     return DrawMenu() && SDL_RenderPresent(renderer);
 #endif

@@ -1,4 +1,5 @@
 #include "world_package.hpp"
+#include "mesh_collision.hpp"
 #include "world_lighting.hpp"
 #include "spatial_index.hpp"
 #include "marker.hpp"
@@ -158,6 +159,12 @@ bool Cook(WorldDocument& world, const std::string& file)
             Entity e; e.id = world.StableId(key); e.folder = world.hierarchy.Parent(key); e.bounds = bounds; e.name = std::move(name); e.material = material;
             if (e.bounds.Empty()) e.bounds.Include({});
             if (instance) { e.transform = instance->transform; if (instance->mesh) e.model = instance->mesh->assetPath; }
+            if (instance && instance->mesh && (key.kind == SceneKind::Object || key.kind == SceneKind::Mesh))
+            {
+                const auto collision = MeshCollision::Current(*instance->mesh);
+                e.hasCollision = collision->mode == MeshCollisionMode::Detailed ||
+                    (collision->mode == MeshCollisionMode::Simple && !collision->shapes.empty());
+            }
             asset(AssetKind::Model, e.model); asset(AssetKind::Material, material);
             if (material.empty() && instance && instance->mesh && instance->mesh->materials)
                 for (const auto& slot : instance->mesh->materials->slots) asset(AssetKind::Material, slot.material);
@@ -223,7 +230,7 @@ bool Cook(WorldDocument& world, const std::string& file)
             entity({SceneKind::Intersection, id}, bounds, {}, nullptr, junction.material);
             if (it != world.IntersectionSurfaces().end()) roadMesh({SceneKind::Intersection, static_cast<std::uint64_t>(id)}, it->second.geometry, junction.material);
         }
-        auto meshBounds = [](const MeshInstance& m) { return m.mesh ? WorldBounds(m.mesh->bounds, m.transform) : Bounds3{}; };
+        auto meshBounds = [](const MeshInstance& m) { return MeshCollision::Bounds(m); };
         for (std::size_t i = 0; i < world.meshes.size(); ++i) entity({SceneKind::Mesh, int(i)}, meshBounds(world.meshes[i]), {}, &world.meshes[i], {});
         for (std::size_t i = 0; i < world.Objects().size(); ++i)
         {
@@ -233,14 +240,14 @@ bool Cook(WorldDocument& world, const std::string& file)
             entity({SceneKind::Object, int(i)}, meshBounds(object.Instance()), {}, &object.Instance(), marker ? marker->material : "");
             auto& e = manifest.entities.back(); e.type = object.Type(); e.pose = object.GetTransform();
             e.health = object.health; e.invincible = object.invincible;
-            e.hasCollision = object.hasCollision;
+            e.hasCollision = e.hasCollision && object.hasCollision;
             if (const auto* vehicle = dynamic_cast<const Vehicle*>(&object)) e.acceleration = vehicle->acceleration;
             if (marker) { e.markerText = marker->Text(); e.markerColor = marker->textColor; }
         }
         for (std::size_t i = 0; i < world.Terrain().size(); ++i)
         {
             const auto& chunk = *world.Terrain()[i]; const SceneKey key{SceneKind::Terrain, int(i)};
-            entity(key, meshBounds(chunk.Instance()), chunk.River() ? "River" : chunk.Lake() ? "Lake" : "Terrain", &chunk.Instance(), chunk.material);
+            entity(key, chunk.Instance().mesh ? WorldBounds(chunk.Instance().mesh->bounds, chunk.Instance().transform) : Bounds3{}, chunk.River() ? "River" : chunk.Lake() ? "Lake" : "Terrain", &chunk.Instance(), chunk.material);
             auto bake = [&](const MeshInstance& instance, bool terrain, const std::string& material) {
                 if (!instance.mesh) return;
                 asset(AssetKind::Material, material);

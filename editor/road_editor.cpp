@@ -1232,15 +1232,16 @@ void RoadEditor::PlaceProp(WorldDocument& world, const FreeCamera& camera, SDL_F
         return;
     }
     ViewportPicker picker(camera, scene, pointer);
-    picker.TestPlacementSurfaces(world);
+    const auto surface = picker.TestPlacementSurfaces(world, true);
+    const int folder = surface ? world.hierarchy.Parent(*surface) : 0;
 
     // Respect the model's authored pivot, including meshes centered above or below it.
     double baseY = mesh->vertices[mesh->indices.front()].position.y;
     for (auto i : mesh->indices) baseY = std::min(baseY, mesh->vertices[i].position.y);
-    PlaceObject(world, ObjectType::Prop, path, picker.PlacementPosition(baseY));
+    PlaceObject(world, ObjectType::Prop, path, picker.PlacementPosition(baseY), folder);
 }
 
-void RoadEditor::PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position)
+void RoadEditor::PlaceObject(WorldDocument& world, ObjectType type, const std::string& path, Vector3 position, int folder)
 {
     if (waterEdit && (!FinishWaterEditing(world) || !Save(world))) return;
     const int index = static_cast<int>(world.Objects().size());
@@ -1250,8 +1251,9 @@ void RoadEditor::PlaceObject(WorldDocument& world, ObjectType type, const std::s
         status = SDL_GetError();
         return;
     }
+    world.hierarchy.Move({{SceneKind::Object, index}}, folder);
     state.SelectRows({{SceneKind::Object, index}});
-    history.Record(-1, std::move(before), EditSnapshot(state), EditHistory::ObjectEdit{index, 0, {}});
+    history.Record(-1, std::move(before), EditSnapshot(state), EditHistory::ObjectEdit{index, folder, {}});
     Save(world);
 }
 

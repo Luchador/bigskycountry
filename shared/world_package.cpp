@@ -196,7 +196,7 @@ std::uint64_t AssetHash(AssetKind kind, const std::string& path, AssetRoot root)
     auto hash = FileHash(kind == AssetKind::Material ? Material::ResolveFile(file) : file);
     if (kind == AssetKind::Model)
     {
-        for (const auto* extension : {".bmesh", ".bao"})
+        for (const auto* extension : {".bmesh", ".bao", ".bcollision"})
         {
             const auto sidecar = FileHash(file + extension);
             if (sidecar) hash = (hash ^ sidecar) * 1099511628211ull;

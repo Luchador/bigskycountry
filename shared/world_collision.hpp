@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mesh.hpp"
+#include "mesh_collision.hpp"
 #include "rigid_body.hpp"
 #include <optional>
 #include <map>
@@ -18,7 +19,9 @@ public:
         double distance;
     };
     void Build(const WorldDocument& world);
-    void AddMesh(const MeshInstance& instance);
+    // Terrain surfaces always retain triangle collision, even when their source
+    // asset has simple shapes for use as an object.
+    void AddMesh(const MeshInstance& instance, bool useMeshCollision = true);
     void Finish();
     void Attach(std::uint64_t key, std::shared_ptr<const WorldCollision> chunk);
     void Detach(std::uint64_t key);
@@ -38,6 +41,11 @@ private:
     struct Node { Bounds3 bounds; size_t first = 0, count = 0, left = 0, right = 0; };
     std::vector<Triangle> triangles;
     std::vector<Node> nodes;
+    std::vector<CollisionCapsule> capsules;
+    std::vector<Node> capsuleNodes;
+    size_t BuildCapsuleNode(size_t first, size_t count);
+    void TraceCapsules(size_t node, Vector3 origin, Vector3 direction, bool walkableOnly, std::optional<Hit>& hit, double& distance) const;
+    void ContactCapsules(size_t node, Vector3 center, double radius, bool blocking, std::optional<BodyContact>& result) const;
     // A second BVH rejects distant streamed chunks before consulting their
     // triangle trees. Rebuild once after a batch of attachment changes, never
     // for each car or physics substep. Chunks are immutable while attached.
