@@ -13,7 +13,7 @@ namespace
     unsigned materialRevision = 0, imageRevision = 0;
     using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
     constexpr std::array<const char*, materialSlotCount> keys{"baseColor", "normal", "orm", "emissive", "opacity", "translucency",
-                                                            "outerBaseColor", "outerNormal", "outerOrm"};
+                                                            "outerBaseColor", "outerNormal", "outerOrm", "subsurface"};
 
     bool ReadUnit(const cJSON* value, float& channel)
     {
@@ -120,6 +120,8 @@ bool Material::Load(const std::string& requestedFile)
     }
     if (const auto* factor = cJSON_GetObjectItemCaseSensitive(json.get(), "translucencyMultiplier"))
         if (!ReadUnit(factor, material.translucency)) return SDL_SetError("Invalid translucency multiplier");
+    if (const auto* strength = cJSON_GetObjectItemCaseSensitive(json.get(), "subsurfaceStrength"))
+        if (!ReadUnit(strength, material.subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
     const auto* maps = cJSON_GetObjectItemCaseSensitive(json.get(), "textures");
     if (maps && !cJSON_IsObject(maps))
         return SDL_SetError("Invalid material texture list");
@@ -149,6 +151,10 @@ bool Material::Save(const std::string& requestedFile) const
         return SDL_OutOfMemory();
     const auto unit = [](float v) { return v >= 0 && v <= 1; };
     if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
+    if (!unit(subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "subsurfaceStrength");
+    if (type == MaterialType::Foliage || subsurfaceStrength != .5f)
+        if (!cJSON_AddNumberToObject(json.get(), "subsurfaceStrength", subsurfaceStrength)) return SDL_OutOfMemory();
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "emissiveTint");
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "translucencyMultiplier");
     if (type == MaterialType::Unlit || emissiveTint != std::array{1.f, 1.f, 1.f} || translucency != 1)

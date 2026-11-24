@@ -16,12 +16,14 @@ namespace
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
             const bool transition = material.type == MaterialType::Transition;
-            const float panelWidth = transition ? 256.f : 224.f;
+            const bool foliage = material.type == MaterialType::Foliage;
+            const float panelWidth = foliage ? 280.f : transition ? 256.f : 224.f;
             const float split = float(windowWidth) - panelWidth;
             view = {0, 0, split, float(windowHeight)};
             type = {split + 10, 32, panelWidth - 20, 25};
             const bool unlit = material.type == MaterialType::Unlit;
-            const float rowHeight = unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f) / (transition ? 6 : 5);
+            const float rowHeight = foliage ? (windowHeight - 120.f) / 6 :
+                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f) / (transition ? 6 : 5);
             const float step = std::min(80.f, rowHeight);
             float y = 68;
             for (std::size_t i = 0; i < slots.size(); ++i)
@@ -38,7 +40,7 @@ namespace
                     y += 4;
                 }
             }
-            sliders[3] = {split + 10, y + 18, 204, 18};
+            sliders[3] = {split + 10, y + 18, panelWidth - 20, 18};
         }
         std::optional<MaterialSlot> Slot(SDL_FPoint p) const
         {
@@ -119,6 +121,7 @@ void SdlMaterialEditor::FinishDrag()
     {
         editor.PreviewTint(editor.Current().emissiveTint);
         editor.PreviewTranslucency(editor.Current().translucency);
+        editor.PreviewSubsurface(editor.Current().subsurfaceStrength);
         sphereDirty = true;
         activeSlider.reset();
     }
@@ -287,8 +290,9 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
             typeMenu = true;
         else
         {
-            if (editor.Current().type == MaterialType::Unlit)
-                for (int i = 0; i < int(layout.sliders.size()); ++i)
+            const bool foliage = editor.Current().type == MaterialType::Foliage;
+            if (editor.Current().type == MaterialType::Unlit || foliage)
+                for (int i = foliage ? 3 : 0; i < int(layout.sliders.size()); ++i)
                     if (SDL_PointInRectFloat(&p, &layout.sliders[i]))
                     {
                         activeSlider = i;
@@ -312,8 +316,16 @@ void SdlMaterialEditor::AdjustSlider(float x, bool commit)
     if (index == 3)
     {
         const float value = std::round(fraction * 100) / 100;
-        if (commit) Report(editor.SetTranslucency(value));
-        else editor.PreviewTranslucency(value);
+        if (editor.Current().type == MaterialType::Foliage)
+        {
+            if (commit) Report(editor.SetSubsurface(value));
+            else editor.PreviewSubsurface(value);
+        }
+        else
+        {
+            if (commit) Report(editor.SetTranslucency(value));
+            else editor.PreviewTranslucency(value);
+        }
     }
     else
     {
@@ -401,19 +413,21 @@ bool SdlMaterialEditor::Draw()
         if (!path.empty() && (!Fill(renderer, c, button) || !Text(renderer, c.x + 1, c.y + 7, "Clear", text)))
             return false;
     }
-    if (editor.Current().type == MaterialType::Unlit)
+    const bool foliage = editor.Current().type == MaterialType::Foliage;
+    if (editor.Current().type == MaterialType::Unlit || foliage)
     {
         const auto& color = editor.Tint();
         const auto byte = [](float c) { return static_cast<Uint8>(std::lround(c * 255)); };
-        if (!Text(renderer, layout.type.x, layout.tint.y + 4, "Emissive tint", text) ||
-            !Fill(renderer, layout.tint, {byte(color[0]), byte(color[1]), byte(color[2]), 255})) return false;
+        if (!foliage && (!Text(renderer, layout.type.x, layout.tint.y + 4, "Emissive tint", text) ||
+            !Fill(renderer, layout.tint, {byte(color[0]), byte(color[1]), byte(color[2]), 255}))) return false;
         char label[40];
-        SDL_snprintf(label, sizeof(label), "Translucency %.2f", editor.Translucency());
-        for (int i = 0; i < 4; ++i)
+        const float strength = foliage ? editor.Subsurface() : editor.Translucency();
+        SDL_snprintf(label, sizeof(label), foliage ? "Subsurface strength %.2f" : "Translucency %.2f", strength);
+        for (int i = foliage ? 3 : 0; i < 4; ++i)
         {
             const auto bar = layout.sliders[i];
             const bool factor = i == 3;
-            const float value = factor ? editor.Translucency() : color[i];
+            const float value = factor ? strength : color[i];
             if (!Text(renderer, layout.type.x, factor ? bar.y - 16 : bar.y + 3,
                       factor ? label : std::string(1, "RGB"[i]), text) ||
                 !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||

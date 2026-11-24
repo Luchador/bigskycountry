@@ -138,6 +138,10 @@ upgraded worlds with this editor or newer: older editors do not maintain EIDS.
 
 ## Package version 2
 
+The current writer uses version 9, adding the subsurface texture dependency to
+each asset record. Readers still accept versions 2–8, which have nine texture
+slots; the new slot defaults to empty. Recook after changing foliage materials.
+
 All integers are explicitly little-endian; no compiler struct layouts are stored.
 Floats use IEEE-754 bit patterns. Strings are length-prefixed UTF-8. Counts are
 uint32; offsets, byte sizes, fingerprints, and stable ID values are uint64.

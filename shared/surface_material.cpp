@@ -151,6 +151,8 @@ const SurfaceMaterialTexture* SurfaceMaterialCache::Map(const std::string& path,
     if (slot == MaterialSlot::OuterBaseColor) slot = MaterialSlot::BaseColor;
     if (slot == MaterialSlot::OuterNormal) slot = MaterialSlot::Normal;
     if (slot == MaterialSlot::OuterORM) slot = MaterialSlot::ORM;
+    // Subsurface RGB is sRGB color; its alpha is a linear transmission mask.
+    if (slot == MaterialSlot::Subsurface) slot = MaterialSlot::BaseColor;
     const auto index = static_cast<size_t>(slot);
     const auto format = formats[index];
     // ':' cannot occur in an asset path. Give each neutral map its own cache key.
@@ -236,6 +238,8 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         }
         SurfaceMaterial material;
         material.type = definition.type;
+        material.subsurfaceStrength = definition.subsurfaceStrength;
+        material.hasSubsurfaceMap = !definition.textures[static_cast<size_t>(MaterialSlot::Subsurface)].empty();
         const auto& tint = definition.emissiveTint;
         material.tint = Srgb::ToLinear({tint[0], tint[1], tint[2], definition.translucency});
         for (size_t i = 0; i < materialSlotCount; ++i)
@@ -272,12 +276,16 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     constexpr std::array standardSlots{Slot::BaseColor, Slot::Normal, Slot::ORM, Slot::Emissive, Slot::Opacity, Slot::ORM};
     constexpr std::array transitionSlots{Slot::BaseColor, Slot::Normal, Slot::ORM, Slot::OuterBaseColor, Slot::OuterNormal, Slot::OuterORM};
     constexpr std::array unlitSlots{Slot::Emissive, Slot::Emissive, Slot::Emissive, Slot::Emissive, Slot::Translucency, Slot::Emissive};
-    const auto& slots = transition ? transitionSlots : unlit ? unlitSlots : standardSlots;
+    constexpr std::array foliageSlots{Slot::BaseColor, Slot::Normal, Slot::ORM, Slot::Emissive, Slot::Opacity, Slot::Subsurface};
+    const bool foliage = material.type == MaterialType::Foliage;
+    const auto& slots = foliage ? foliageSlots : transition ? transitionSlots : unlit ? unlitSlots : standardSlots;
     for (size_t i = 0; i < slots.size(); ++i)
         bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, firstSampler, bindings.data(), bindings.size());
-    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, padding; };
-    const Properties params{material.tint, material.type == MaterialType::AlphaCutout, unlit, transition, 0};
+    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, padding[2]; };
+    static_assert(sizeof(Properties) == 48);
+    const Properties params{material.tint, Material::IsCutout(material.type), unlit, transition, foliage,
+                            material.subsurfaceStrength, material.hasSubsurfaceMap ? 1.f : 0.f, {}};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
@@ -290,7 +298,7 @@ void SurfaceMaterialCache::BindShadow(const SurfaceMaterial& material, SDL_GPURe
 }
 
 SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed) const
+                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
@@ -302,7 +310,7 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
                 sample(MaterialSlot::Translucency)[0] * tint.a};
     }
     auto color = sample(MaterialSlot::BaseColor);
-    if (type == MaterialType::AlphaCutout && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
+    if (Material::IsCutout(type) && color[3] * sample(MaterialSlot::Opacity)[0] < 0.5f)
         return {};
     auto orm = sample(MaterialSlot::ORM);
     auto mappedNormal = DecodeNormalXY(sample(MaterialSlot::Normal));
@@ -319,7 +327,15 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
     // Re-orthogonalize the projected U axis against the interpolated shading normal.
     tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
     const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
-    const Vector3 mapped = Math::Normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
+    Vector3 mapped = Math::Normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
+    Vector3 transmission{};
+    if (type == MaterialType::Foliage)
+    {
+        if (backFace) mapped = mapped * -1;
+        const auto subsurface = hasSubsurfaceMap ? sample(MaterialSlot::Subsurface) :
+                                                   std::array{color[0], color[1], color[2], 1.f};
+        transmission = Vector3{subsurface[0], subsurface[1], subsurface[2]} * (subsurface[3] * subsurfaceStrength);
+    }
     return lights.ShadeLinear(mapped, view, {color[0], color[1], color[2], 1}, {orm[0], orm[1], orm[2]},
-                        {glow[0], glow[1], glow[2]});
+                        {glow[0], glow[1], glow[2]}, transmission);
 }

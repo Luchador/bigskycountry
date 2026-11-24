@@ -125,10 +125,10 @@ namespace
 
     struct Shader
     {
-        SDL_Surface *base, *normal, *orm, *emissive, *opacity, *outerBase, *outerNormal, *outerOrm;
+        SDL_Surface *base, *normal, *orm, *emissive, *opacity, *outerBase, *outerNormal, *outerOrm, *subsurface;
         MaterialType type;
         SDL_FColor tint;
-        float factor;
+        float factor, subsurfaceStrength;
         Vector3 toEye;
         const Vector3 light = Math::Normalize({-.48, .68, .72});
         const Vector3 half = Math::Normalize(light + toEye);
@@ -150,7 +150,7 @@ namespace
                 return;
             }
             auto albedo = Sample<4, true>(base, u, v, {.48f, .48f, .48f, 1});
-            if (type == MaterialType::AlphaCutout && albedo[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0] < .5f)
+            if (Material::IsCutout(type) && albedo[3] * Sample<1>(opacity, u, v, {1, 1, 1, 1})[0] < .5f)
                 return;
             n = UnitNormal(n);
             auto packed = Sample<3>(orm, u, v, {1, .5f, 0, 1});
@@ -177,6 +177,9 @@ namespace
                 n = UnitNormal(tangent * detail.x + bitangent * detail.y + n * detail.z);
             }
             const auto glow = Sample<3, true>(emissive, u, v, {0, 0, 0, 1});
+            const auto scatter = Sample<4, true>(subsurface, u, v, {albedo[0], albedo[1], albedo[2], 1});
+            const double backlight = type == MaterialType::Foliage ?
+                2.6 * std::max(0.0, -Math::Dot(n, light)) * subsurfaceStrength * scatter[3] : 0;
             const double ao = packed[0], rough = std::max(.085, double(packed[1])), metal = packed[2];
             const double nl = std::max(0., Math::Dot(n, light)), nv = std::clamp(Math::Dot(n, toEye), .001, 1.);
             const double nh = std::max(0., Math::Dot(n, half));
@@ -196,7 +199,7 @@ namespace
                 const double f0 = .04 * (1 - metal) + albedo[c] * metal;
                 const double f = f0 + (1 - f0) * fresnelWeight;
                 const double diffuse = albedo[c] * (1 - metal) * (1 - f);
-                pixel[2 - c] = display.Encode(glow[c] + ao * (ambient * diffuse + studio * f0) +
+                pixel[2 - c] = display.Encode(glow[c] + scatter[c] * backlight + ao * (ambient * diffuse + studio * f0) +
                                        2.6 * nl * (diffuse / pi + distribution * visibility * f));
             }
         }
@@ -280,7 +283,8 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
                         image(MaterialSlot::ORM),       image(MaterialSlot::Emissive),
                         image(material.type == MaterialType::Unlit ? MaterialSlot::Translucency : MaterialSlot::Opacity),
                         image(MaterialSlot::OuterBaseColor), image(MaterialSlot::OuterNormal), image(MaterialSlot::OuterORM),
-                        material.type, Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), toEye};
+                        image(MaterialSlot::Subsurface), material.type,
+                        Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), Subsurface(), toEye};
     constexpr auto background = EditorTheme::field;
     SDL_FillSurfaceRect(&target, nullptr, SDL_MapSurfaceRGB(&target, background.r, background.g, background.b));
     static const Mesh sphere = BuildSphere();

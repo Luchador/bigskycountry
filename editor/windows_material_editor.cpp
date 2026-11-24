@@ -69,19 +69,21 @@ void WindowsMaterialEditor::Layout()
     RECT area{};
     GetClientRect(window, &area);
     const bool transition = editor.Current().type == MaterialType::Transition;
-    const int pad = Units(window, 6, true), side = Units(window, transition ? 165 : 144, true);
+    const bool foliage = editor.Current().type == MaterialType::Foliage;
+    const int pad = Units(window, 6, true), side = Units(window, transition || foliage ? 180 : 144, true);
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
     const int top = Units(window, 42, false), clear = Units(window, 28, true);
-    const int rows = transition ? 6 : 5;
-    const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad) / rows));
+    const int rows = transition || foliage ? 6 : 5;
+    const int footer = foliage ? Units(window, 32, false) : 0;
+    const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad - footer) / rows));
     MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 96, false), FALSE);
     int row = 0;
     const bool unlit = editor.Current().type == MaterialType::Unlit;
     for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
-        ShowWindow(GetDlgItem(window, id), unlit ? SW_SHOWNA : SW_HIDE);
+        ShowWindow(GetDlgItem(window, id), (unlit || (foliage && id != IDC_MAT_TINT)) ? SW_SHOWNA : SW_HIDE);
     for (int i = 0; i < int(materialSlotCount); ++i)
     {
         const bool visible = editor.Current().Uses(static_cast<MaterialSlot>(i));
@@ -97,7 +99,7 @@ void WindowsMaterialEditor::Layout()
         if (unlit && i == int(MaterialSlot::Emissive))
             MoveWindow(GetDlgItem(window, IDC_MAT_TINT), x, top + step * row++, width, Units(window, 20, false), FALSE);
     }
-    if (unlit)
+    if (unlit || foliage)
     {
         const int y = top + step * row;
         MoveWindow(GetDlgItem(window, IDC_MAT_FACTOR_LABEL), x, y, width, Units(window, 12, false), FALSE);
@@ -125,9 +127,11 @@ void WindowsMaterialEditor::Sync()
 void WindowsMaterialEditor::SyncFactor()
 {
     wchar_t label[40];
-    swprintf(label, 40, L"Translucency %.2f", editor.Translucency());
+    const bool foliage = editor.Current().type == MaterialType::Foliage;
+    const float value = foliage ? editor.Subsurface() : editor.Translucency();
+    swprintf(label, 40, foliage ? L"Subsurface strength %.2f" : L"Translucency %.2f", value);
     SetDlgItemTextW(window, IDC_MAT_FACTOR_LABEL, label);
-    SendDlgItemMessageW(window, IDC_MAT_FACTOR, TBM_SETPOS, TRUE, std::lround(editor.Translucency() * 100));
+    SendDlgItemMessageW(window, IDC_MAT_FACTOR, TBM_SETPOS, TRUE, std::lround(value * 100));
 }
 
 void WindowsMaterialEditor::RefreshImages()
@@ -285,8 +289,13 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         if (reinterpret_cast<HWND>(l) != GetDlgItem(hwnd, IDC_MAT_FACTOR)) return FALSE;
         {
             const float value = SendDlgItemMessageW(hwnd, IDC_MAT_FACTOR, TBM_GETPOS, 0, 0) / 100.f;
-            if (LOWORD(w) == TB_THUMBTRACK) self->editor.PreviewTranslucency(value);
-            else if (!self->editor.SetTranslucency(value))
+            const bool foliage = self->editor.Current().type == MaterialType::Foliage;
+            if (LOWORD(w) == TB_THUMBTRACK)
+            {
+                if (foliage) self->editor.PreviewSubsurface(value);
+                else self->editor.PreviewTranslucency(value);
+            }
+            else if (!(foliage ? self->editor.SetSubsurface(value) : self->editor.SetTranslucency(value)))
                 MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
             self->SyncFactor();
             InvalidateRect(GetDlgItem(hwnd, IDC_MAT_PREVIEW), nullptr, FALSE);

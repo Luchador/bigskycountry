@@ -15,6 +15,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     yaw = pitch = 0.0;
     material = std::move(next);
     previewFactor = material.translucency;
+    previewSubsurface = material.subsurfaceStrength;
     previewTint = material.emissiveTint;
     previewDirty = true;
     return true;
@@ -81,6 +82,22 @@ bool MaterialEditor::SetTranslucency(float value)
     next.translucency = value;
     const bool saved = value == material.translucency || Commit(std::move(next));
     PreviewTranslucency(material.translucency);
+    return saved;
+}
+
+void MaterialEditor::PreviewSubsurface(float value)
+{
+    if (value == previewSubsurface) return;
+    previewSubsurface = value;
+    previewDirty = true;
+}
+
+bool MaterialEditor::SetSubsurface(float value)
+{
+    auto next = material;
+    next.subsurfaceStrength = value;
+    const bool saved = value == material.subsurfaceStrength || Commit(std::move(next));
+    PreviewSubsurface(material.subsurfaceStrength);
     return saved;
 }
 

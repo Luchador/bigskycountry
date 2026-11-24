@@ -27,9 +27,11 @@ struct SurfaceMaterial
     MaterialType type{};
     std::uint64_t lastUsed = 0;
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
+    float subsurfaceStrength = .5f;
+    bool hasSubsurfaceMap = false;
     // Linear radiance: apply atmosphere before the final display conversion.
     SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                     Vector3 tangent, float handedness, Vector3 view, float vertexRed) const;
+                     Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace = false) const;
 };
 
 // One cache per renderer/device. Different materials can reference the same texture.

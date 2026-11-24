@@ -36,6 +36,23 @@ Walking or driving below the original spawn elevation does not reset the player.
 
 ## Material textures
 
+For leaves, select **Foliage** in the Material Editor and assign that material to
+the leaf slots in the Mesh Editor. Foliage renders both sides, uses the same
+alpha cutout as **Alpha cutout**, and casts masked shadows. A combined color/opacity
+image goes in **Base color**; leave **Opacity** empty unless a separate grayscale
+mask is needed. The two alpha sources multiply, with a cutoff of 0.5.
+
+**Subsurface strength** (0–1, default 0.5) controls a thin-leaf approximation of
+light transmission from the sun and moon. **Subsurface** is optional: RGB supplies
+the transmitted color (sRGB), and alpha supplies the amount (linear). RGB-only
+images use full amount. With no map, transmission uses the base color. Black
+RGB or zero alpha prevents transmission, useful for twigs in a leaf atlas.
+This slot accepts an appropriately packed SpeedTree subsurface map. Keep opaque
+trunks on **Standard**. Directional shadows attenuate transmission; headlights
+retain ordinary surface lighting. These settings work in the game, editor, mesh
+preview, and material preview. Build assets after changing material assignments
+and recook the world before testing the game.
+
 New roads and roads loaded from older worlds use `surfaces/roads/M_Asphalt01.bmat`. Its base color, normal, and ORM textures belong in `assets/textures/surfaces/roads/`. To change one road, drag a material from the Content Browser’s **Textures** tab onto its **Pavement material** thumbnail or directly onto the road in the 3D viewport. The game and editor wrap it along the road spline. U repeats once across each travel lane. V starts at the first control point and repeats every 5 m of 3D centerline length, including elevation changes. The pattern continues onto the shoulders. Markings, curbs, and medians use their own colors.
 
 For a road with **Road edges** set to **Transition strip**, drag a **Transition** material onto the separate **Transition strip material** thumbnail. This also works when all selected roads have transition strips. In the Material Editor, assign base color, normal, and ORM for each side. The inner set meets the pavement or shoulder at vertex red 1. The outer set meets the terrain at red 0. Both sets use the road UVs and blend across the 1.0 m strip. An unassigned strip displays its red-to-black mask.

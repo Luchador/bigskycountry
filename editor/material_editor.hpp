@@ -18,6 +18,9 @@ public:
     void PreviewTranslucency(float value);
     bool SetTranslucency(float value);
     float Translucency() const { return previewFactor; }
+    void PreviewSubsurface(float value);
+    bool SetSubsurface(float value);
+    float Subsurface() const { return previewSubsurface; }
     const Material& Current() const { return material; }
     bool Orbit(double deltaX, double deltaY, double viewportSpan);
     SDL_Surface* Preview(int pixelWidth, int pixelHeight);
@@ -31,6 +34,7 @@ private:
     std::string path;
     Material material;
     float previewFactor = 1;
+    float previewSubsurface = .5f;
     std::array<float, 3> previewTint{1, 1, 1};
     double yaw = 0.0, pitch = 0.0;
     bool previewDirty = true;

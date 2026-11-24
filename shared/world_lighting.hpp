@@ -29,7 +29,7 @@ struct WorldLighting
     SDL_FColor Shade(Vector3 normal, Vector3 view, SDL_FColor linearBase,
                      Vector3 orm = {1, 1, 0}, Vector3 emission = {}) const;
     SDL_FColor ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor linearBase,
-                           Vector3 orm = {1, 1, 0}, Vector3 emission = {}) const;
+                           Vector3 orm = {1, 1, 0}, Vector3 emission = {}, Vector3 transmission = {}) const;
 };
 
 namespace Srgb

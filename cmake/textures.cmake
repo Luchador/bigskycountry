@@ -50,7 +50,7 @@ foreach(source IN LISTS texture_sources)
         # An edit can add or remove a role-specific cook without renaming any files.
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${texture_root}/${source}")
         file(READ "${texture_root}/${source}" material)
-        foreach(slot IN ITEMS baseColor normal orm emissive opacity translucency outerBaseColor outerNormal outerOrm)
+        foreach(slot IN ITEMS baseColor normal orm emissive opacity translucency outerBaseColor outerNormal outerOrm subsurface)
             string(JSON map ERROR_VARIABLE missing GET "${material}" textures "${slot}")
             if(NOT missing AND CMAKE_HOST_WIN32)
                 string(TOLOWER "${map}" lower_map)

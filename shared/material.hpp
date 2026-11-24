@@ -3,7 +3,7 @@
 #include <array>
 #include <string>
 
-enum class MaterialType { Standard, AlphaCutout, Terrain, Unlit, Transition, Count };
+enum class MaterialType { Standard, AlphaCutout, Terrain, Unlit, Transition, Foliage, Count };
 struct MaterialTypeInfo
 {
     const char* key;
@@ -14,14 +14,15 @@ inline constexpr std::array<MaterialTypeInfo, static_cast<std::size_t>(MaterialT
     {"alphaCutout", "Alpha cutout"},
     {"terrain", "Terrain"},
     {"unlit", "Unlit"},
-    {"transition", "Transition"}
+    {"transition", "Transition"},
+    {"foliage", "Foliage"}
 }};
 
-enum class MaterialSlot { BaseColor, Normal, ORM, Emissive, Opacity, Translucency, OuterBaseColor, OuterNormal, OuterORM, Count };
+enum class MaterialSlot { BaseColor, Normal, ORM, Emissive, Opacity, Translucency, OuterBaseColor, OuterNormal, OuterORM, Subsurface, Count };
 inline constexpr std::size_t materialSlotCount = static_cast<std::size_t>(MaterialSlot::Count);
 inline constexpr std::array<const char*, materialSlotCount> materialSlotLabels{
     "Base color", "Normal", "ORM", "Emissive", "Opacity", "Translucency",
-    "Outer base color", "Outer normal", "Outer ORM"
+    "Outer base color", "Outer normal", "Outer ORM", "Subsurface"
 };
 
 struct Material
@@ -29,10 +30,14 @@ struct Material
     MaterialType type = MaterialType::Standard;
     std::array<float, 3> emissiveTint{1, 1, 1}; // Display (sRGB) picker values.
     float translucency = 1;
+    float subsurfaceStrength = .5f; // Thin-leaf transmission from directional lights, 0..1.
+    static bool IsCutout(MaterialType type) { return type == MaterialType::AlphaCutout || type == MaterialType::Foliage; }
     bool Uses(MaterialSlot slot) const
     {
         if (type == MaterialType::Transition)
-            return slot <= MaterialSlot::ORM || (slot >= MaterialSlot::OuterBaseColor && slot < MaterialSlot::Count);
+            return slot <= MaterialSlot::ORM || (slot >= MaterialSlot::OuterBaseColor && slot <= MaterialSlot::OuterORM);
+        if (type == MaterialType::Foliage)
+            return slot < MaterialSlot::Translucency || slot == MaterialSlot::Subsurface;
         return type == MaterialType::Unlit ? slot == MaterialSlot::Emissive || slot == MaterialSlot::Translucency
                                            : slot < MaterialSlot::Translucency;
     }

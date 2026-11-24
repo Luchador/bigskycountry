@@ -207,7 +207,7 @@ void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float
 }
 
 // Keep the software renderer's WorldLighting::Shade in sync.
-float3 ShadeSurface(float2 pixel, float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission)
+float3 ShadeSurface(float2 pixel, float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission, float3 transmission = 0)
 {
     float3 diffuse = skyAmbient.rgb * orm.r;
     float3 specular = 0;
@@ -217,6 +217,10 @@ float3 ShadeSurface(float2 pixel, float3 normal, float3 geometricNormal, float3 
     Illuminate(moonDirection.xyz, moonRadiance.rgb * (shadowControl.z != 0 ? shadow : 1), normal, eye, 1 - orm.g, orm.b, diffuse, specular);
     IlluminateSpots(pixel,view,normal,eye,1-orm.g,orm.b,diffuse,specular);
     float3 c = emission + base * diffuse + lerp(0.08, base, orm.b) * specular;
+    // Thin-sheet subsurface approximation: tinted light transmitted through the
+    // back of a leaf. Occluders still attenuate it through the cascaded shadows.
+    c += transmission * (sunRadiance.rgb * (shadowControl.z == 0 ? shadow : 1) * saturate(-dot(normal, sunDirection.xyz)) +
+                         moonRadiance.rgb * (shadowControl.z != 0 ? shadow : 1) * saturate(-dot(normal, moonDirection.xyz)));
     return c;
 }
 
@@ -292,7 +296,8 @@ BSC_COMBINED SamplerState opacitySampler : register(s5, space2);
 cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;
-    uint alphaCutout, unlit, transition;
+    uint alphaCutout, unlit, transition, foliage;
+    float4 subsurfaceProperties; // Strength, has subsurface map, padding.
 };
 
 float3 DecodeNormalXY(float2 channels)
@@ -301,7 +306,7 @@ float3 DecodeNormalXY(float2 channels)
     return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 }
 
-float4 MaterialPS(WorldFragment input) : SV_Target0
+float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace) : SV_Target0
 {
     ClipVisibility(input);
     if (unlit)
@@ -331,7 +336,20 @@ float4 MaterialPS(WorldFragment input) : SV_Target0
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
     float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
-    float3 c = ShadeSurface(input.position.xy, mapped, n, input.view, base.rgb, orm, glow);
+    float3 transmission = 0;
+    float3 shadowNormal = n;
+    if (foliage)
+    {
+        // Flip the complete tangent-space result on backs, not just its Z axis.
+        if (!frontFace) { mapped = -mapped; n = -n; }
+        float4 subsurface = subsurfaceProperties.y != 0 ? outerOrmMap.Sample(outerOrmSampler, input.uv) : float4(base.rgb, 1);
+        transmission = subsurface.rgb * (subsurface.a * subsurfaceProperties.x);
+        float3 shadowLight = shadowControl.z == 0 ? sunDirection.xyz : moonDirection.xyz;
+        // Bias toward the shadow light on either side of a leaf. The ordinary
+        // backface early-out would otherwise let transmitted light ignore shade.
+        shadowNormal = dot(n, shadowLight) < 0 ? -n : n;
+    }
+    float3 c = ShadeSurface(input.position.xy, mapped, shadowNormal, input.view, base.rgb, orm, glow, transmission);
     if (input.normal.w != 0) c = ApplyFog(c, input.view);
     // SDL composites the world into a display-encoded color target.
     return float4(ToDisplay(c), 1);

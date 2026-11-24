@@ -41,7 +41,7 @@ Vector3 SpotLight::Radiance(Vector3 surfaceToEye) const
     return intensity * (cone * fade * fade / (1 + distanceSquared));
 }
 
-SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor base, Vector3 orm, Vector3 emission) const
+SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor base, Vector3 orm, Vector3 emission, Vector3 transmission) const
 {
     const Vector3 surfaceToEye = view;
     const double gloss = 1.0 - orm.y;
@@ -62,6 +62,11 @@ SDL_FColor WorldLighting::ShadeLinear(Vector3 normal, Vector3 view, SDL_FColor b
     };
     illuminate(sun);
     illuminate(moon);
+    // Thin leaves transmit light from the opposite hemisphere. Spotlights retain
+    // the ordinary surface response; only the sun and moon contribute here.
+    const Vector3 backlight = sun.radiance * std::max(0.0, -Math::Dot(normal, sun.direction)) +
+                             moon.radiance * std::max(0.0, -Math::Dot(normal, moon.direction));
+    emission = emission + Vector3{transmission.x * backlight.x, transmission.y * backlight.y, transmission.z * backlight.z};
     for (const auto& spot : spots)
     {
         const auto radiance = spot.Radiance(surfaceToEye);

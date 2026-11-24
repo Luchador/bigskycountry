@@ -208,6 +208,7 @@ private:
     SDL_GPUTexture* depthTarget = nullptr;
     SDL_GPUGraphicsPipeline* surfacePipeline = nullptr;
     SDL_GPUGraphicsPipeline* texturedPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* foliagePipeline = nullptr;
     SDL_GPUGraphicsPipeline* translucentPipeline = nullptr;
     SDL_GPUGraphicsPipeline* wireframePipeline = nullptr;
     SDL_GPUGraphicsPipeline* outlinePipeline = nullptr;

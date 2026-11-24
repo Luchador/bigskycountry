@@ -318,12 +318,18 @@ bool Reader::Open(const std::string& file)
         }
         for (const auto& e : m.entities) for (auto d : e.dependencies) if (!ids.contains(d)) throw std::runtime_error("Missing entity dependency");
         std::set<std::pair<AssetKind, std::string>> assetKeys;
-        for (auto n = r.Count(52); n; --n)
+        for (auto n = r.Count(fileVersion >= 9 ? 56 : 52); n; --n)
         {
             Asset a; const auto k = r.U32(); if (k > 1) throw std::runtime_error("Invalid asset kind"); a.kind = static_cast<AssetKind>(k); a.path = r.String(); a.hash = r.U64();
             // Asset paths must stay inside their roots.
             if (a.path.empty() || a.path.find("..") != a.path.npos || a.path.find(':') != a.path.npos || a.path.front() == '/' || a.path.find('\\') != a.path.npos || !assetKeys.emplace(a.kind, a.path).second) throw std::runtime_error("Invalid dependency path");
-            for (auto& s : a.textures) { s = r.String(); if (!s.empty() && !Material::ValidTexturePath(s)) throw std::runtime_error("Invalid texture dependency"); }
+            const std::size_t slots = fileVersion >= 9 ? materialSlotCount : 9;
+            for (std::size_t i = 0; i < slots; ++i)
+            {
+                auto& s = a.textures[i];
+                s = r.String();
+                if (!s.empty() && !Material::ValidTexturePath(s)) throw std::runtime_error("Invalid texture dependency");
+            }
             m.assets.push_back(std::move(a));
         }
         std::set<CellKey> keys; std::uint64_t end = 0;

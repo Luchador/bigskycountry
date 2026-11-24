@@ -91,6 +91,7 @@ WorldRenderer::~WorldRenderer()
         SDL_ReleaseGPUGraphicsPipeline(device, outlinePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, translucentPipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, foliagePipeline);
         SDL_ReleaseGPUGraphicsPipeline(device, wireframePipeline);
     }
 }
@@ -174,6 +175,13 @@ bool WorldRenderer::CreatePipelines()
     }
 
     if (texturedPipeline)
+    {
+        pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        foliagePipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    }
+
+    if (foliagePipeline)
     {
         // Accumulate premultiplied color in the initially transparent world target.
         auto& blend = color.blend_state;
@@ -271,6 +279,11 @@ bool WorldRenderer::CreatePipelines()
         {
             SDL_ReleaseGPUGraphicsPipeline(device, texturedPipeline);
             texturedPipeline = nullptr;
+        }
+        if (foliagePipeline)
+        {
+            SDL_ReleaseGPUGraphicsPipeline(device, foliagePipeline);
+            foliagePipeline = nullptr;
         }
         if (surfacePipeline)
         {
@@ -410,7 +423,7 @@ bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
             SDL_GPUGraphicsPipeline* bound = nullptr;
             const auto draw = [&](size_t first, size_t end, const SurfaceMaterial* material) {
                 if (first >= end || (material && material->type == MaterialType::Unlit)) return;
-                const bool cutout = material && material->type == MaterialType::AlphaCutout;
+                const bool cutout = material && Material::IsCutout(material->type);
                 auto* pipeline = cutout ? shadowCutoutPipeline : shadowPipeline;
                 if (bound != pipeline) SDL_BindGPUGraphicsPipeline(pass, bound = pipeline);
                 if (cutout) materialCache.BindShadow(*material, pass);
@@ -649,7 +662,8 @@ bool WorldRenderer::DrawGPU()
     const auto bindPipeline = [&](const SurfaceMaterial* material, bool wire) {
         auto* pipeline = surfacePipeline;
         if (wire) pipeline = wireframePipeline;
-        else if (material) pipeline = material->type == MaterialType::Unlit ? translucentPipeline : texturedPipeline;
+        else if (material) pipeline = material->type == MaterialType::Unlit ? translucentPipeline :
+                                      material->type == MaterialType::Foliage ? foliagePipeline : texturedPipeline;
         if (pipeline != bound)
         {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
