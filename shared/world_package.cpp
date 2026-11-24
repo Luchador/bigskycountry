@@ -193,11 +193,14 @@ std::uint64_t FileHash(const std::string& file)
 std::uint64_t AssetHash(AssetKind kind, const std::string& path, AssetRoot root)
 {
     const auto file = AssetPaths::Root(root) + (kind == AssetKind::Model ? "models/" : "textures/") + path;
-    const auto hash = FileHash(kind == AssetKind::Material ? Material::ResolveFile(file) : file);
+    auto hash = FileHash(kind == AssetKind::Material ? Material::ResolveFile(file) : file);
     if (kind == AssetKind::Model)
     {
-        const auto sidecar = FileHash(file + ".bmesh");
-        if (sidecar) return (hash ^ sidecar) * 1099511628211ull;
+        for (const auto* extension : {".bmesh", ".bao"})
+        {
+            const auto sidecar = FileHash(file + extension);
+            if (sidecar) hash = (hash ^ sidecar) * 1099511628211ull;
+        }
     }
     return hash;
 }

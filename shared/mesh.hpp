@@ -65,6 +65,9 @@ struct MeshPart
     std::size_t firstIndex, indexCount, slot;
 };
 
+struct MeshAOState;
+struct MeshAOData;
+
 struct Mesh
 {
     static constexpr std::size_t maxLODCount = 16;
@@ -81,6 +84,9 @@ struct Mesh
     // Imported RGBA vertex colors, before material tint. Alpha can contain baked AO.
     // Optional inspection data; it does not control surface opacity.
     std::vector<SDL_FColor> vertexColors;
+    // Shared, editable vertex-alpha overrides, including every authored LOD.
+    std::shared_ptr<MeshAOState> ambientOcclusion;
+    std::size_t aoLevel = 0;
     std::vector<std::uint32_t> indices; // Triangle list; front winding matches the world renderer.
     std::vector<MeshPart> parts; // Imported primitive ranges, including their generated back faces.
     std::shared_ptr<MeshMaterials> materials;

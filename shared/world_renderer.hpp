@@ -162,6 +162,7 @@ private:
         std::string material;
         std::uint64_t revision = 0, lastFrame = 0, uploadFrame = 0, choiceFrame = 0;
         std::weak_ptr<const Mesh> mesh;
+        std::shared_ptr<const MeshAOData> ambientOcclusion;
         MeshTransform transform;
         bool moving = false;
         MeshUVs mapping = MeshUVs::Authored;

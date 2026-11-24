@@ -211,7 +211,8 @@ bool WorldRenderer::DrawSoftware()
                         const float red = material->type == MaterialType::Transition ?
                             float((u*a.color.r + v*b.color.r + w*c.color.r) / sum) : 1.f;
                         auto color = material->ShadeLinear(float(tu), float(tv), footprint, lights, normal,
-                                                           face.tangent, face.handedness, view, red, backFace);
+                            face.tangent, face.handedness, view, red, backFace,
+                            float((u*a.color.a + v*b.color.a + w*c.color.a) / sum));
                         if (color.a == 0) continue;
                         if (fog && lit) color = fog->Apply(color, view, camera->GetPosition().y);
                         color = Srgb::ToDisplay(color);

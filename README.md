@@ -180,7 +180,42 @@ Double-click a GLB or FBX model in the Content Browser's **Models** tab to open 
 
 The right panel lists the model's named material slots. Drag its left divider to adjust the panel width; names and drop targets resize with it. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
 
-The mesh window's **View** menu offers **Lit** (the default shaded material preview), **Vertex Colors** (untextured RGB vertex colors), and **Vertex Alpha** (the vertex alpha channel as opaque grayscale: 0 is black, 1 is white). Vertex Alpha can inspect SpeedTree AO baked into vertex alpha. Both inspection modes omit lighting, material tint, and SSAO. Imported FBX and GLB vertex alpha is retained separately from surface opacity; missing vertex colors or RGB-only colors default to alpha 1 (white). These are preview settings and do not change material assignments or world instances. All modes support automatic and manually selected LODs. **Alt+V** opens the menu; arrow keys and **Enter** select a mode, and **Esc** dismisses it. The mouse wheel can zoom well inside the mesh's bounding sphere for close inspection; **F** returns to the original framing.
+The mesh window's **View** menu offers **Lit** (the default shaded material preview), **Vertex Colors** (untextured RGB vertex colors), and **Vertex Alpha** (the vertex alpha channel as opaque grayscale: 0 is black, 1 is white). Vertex Alpha can inspect SpeedTree AO baked into vertex alpha. Both inspection modes omit lighting, material tint, and SSAO. Vertex Alpha also displays AO authored with the mesh editor bake tool. Imported FBX and GLB vertex alpha is retained separately from surface opacity; missing vertex colors or RGB-only colors default to alpha 1 (white). These are preview settings and do not change material assignments or world instances. All modes support automatic and manually selected LODs. **Alt+V** opens the menu; arrow keys and **Enter** select a mode, and **Esc** dismisses it. The mouse wheel can zoom well inside the mesh's bounding sphere for close inspection; **F** returns to the original framing.
+
+**Tools → Bake AO...** opens a modeless bake window with native Windows controls.
+**Bake AO** calculates ambient visibility for every vertex of every LOD in the
+background. **Cancel Bake** leaves the previous bake intact; **Clear AO** saves
+white alpha (1) on every LOD, including meshes with imported AO. Inspect results
+with **View → Vertex Alpha**. Baking preserves RGB vertex colors and UVs.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Samples per vertex | 64 | 16–1024 rays; more samples reduce noise and take longer. |
+| Occlusion radius | 3 m | Maximum distance at which another surface blocks ambient light. |
+| Strength | 1 | 0 disables occlusion; values above 1 deepen it (maximum 4). |
+| Surface bias | 0.01 m | Ray start offset to avoid self-intersections; must be smaller than the radius. |
+| Sample both sides of foliage | On | Samples both sides of vertices assigned to Foliage materials. |
+
+Radius and bias use model-space meters, before placement scaling. Each LOD is
+baked against its own geometry using a triangle acceleration structure. Assigned
+Foliage and Alpha Cutout materials use their base-color alpha and opacity masks
+when testing occluders, so empty space on leaf cards does not block the rays.
+Assign materials before baking. The bake includes only this mesh, not the ground
+or nearby world objects.
+
+Foliage multiplies vertex alpha by ORM ambient occlusion (red), with SSAO applied
+additionally where enabled. This affects ambient light, not cutout opacity,
+alpha-to-coverage, direct lighting, or emission. Imported vertex alpha works too;
+meshes without alpha default to 1. Standard and other material types retain their
+existing behavior. Changes update the mesh preview and placed instances.
+
+AO is saved automatically in a versioned `.bao` file beside the source model
+(e.g. `oak01.fbx.bao`); keep it with the model and `.bmesh` material assignments.
+The source FBX/GLB is unchanged. All LOD geometry is fingerprinted so re-exports
+that change vertex positions, normals, UVs or topology ignore an obsolete bake.
+Rebuild assets to copy `.bao` files into `build/cooked/models`, then recook the
+world before testing the game. No world-format change is required.
+
 
 Assignments save immediately to `model.glb.bmesh` or `model.fbx.bmesh` next to the model in `assets/models`. The original model is unchanged. These are shared model settings, not world edits or world undo actions; keep the sidecar in source control alongside the model. Rebuilding copies it to `build/cooked/models`. Recook the world after changing assignments so its material dependencies and asset fingerprints are current. Models without a sidecar continue to load as before.
 

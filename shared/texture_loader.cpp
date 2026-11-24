@@ -1,4 +1,5 @@
 #include "texture_loader.hpp"
+#include <mutex>
 #include "dds_texture.hpp"
 #include "material.hpp"
 #include <SDL3_image/SDL_image.h>
@@ -251,7 +252,15 @@ SDL_Surface* TextureLoader::LoadImageFile(const std::string& path)
     {
         // Keep PNG thumbnails in straight alpha on every platform.
         const bool png = extension && (SDL_strcasecmp(extension, ".png") == 0 || SDL_strcasecmp(extension, ".apng") == 0);
-        source.reset(png ? SDL_LoadPNG(path.c_str()) : IMG_Load(path.c_str()));
+        if (png) source.reset(SDL_LoadPNG(path.c_str()));
+        else
+        {
+            // SDL_image's Windows WIC backend shares its factory. Serialize its
+            // initialization/use when an AO worker and the browser load together.
+            static std::mutex decoderMutex;
+            std::lock_guard lock(decoderMutex);
+            source.reset(IMG_Load(path.c_str()));
+        }
     }
     if (!source) return nullptr;
     if (source->format != SDL_PIXELFORMAT_RGBA32)

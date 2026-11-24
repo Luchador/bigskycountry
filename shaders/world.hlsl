@@ -347,6 +347,9 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
     float3 shadowNormal = n;
     if (foliage)
     {
+        // Vertex alpha is baked ambient visibility, independent of cutout
+        // opacity and alpha-to-coverage. Combine it with the ORM red channel.
+        orm.r *= saturate(input.color.a);
         // Flip the complete tangent-space result on backs, not just its Z axis.
         if (!frontFace) { mapped = -mapped; n = -n; }
         float4 subsurface = subsurfaceProperties.y != 0 ? outerOrmMap.Sample(outerOrmSampler, input.uv) : float4(base.rgb, 1);

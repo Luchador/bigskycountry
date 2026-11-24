@@ -1,4 +1,5 @@
 #include "cooked_world.hpp"
+#include "mesh_ao.hpp"
 #include "world_renderer.hpp"
 #include "world_collision.hpp"
 #include "camera_view.hpp"
@@ -26,6 +27,15 @@ std::size_t MeshBytes(const std::shared_ptr<const Mesh> &mesh)
         const auto& level = *lod.mesh;
         bytes += sizeof(Mesh) + level.assetPath.capacity() + level.vertices.capacity() * sizeof(MeshVertex) + level.vertexColors.capacity() * sizeof(SDL_FColor) +
             level.indices.capacity() * sizeof(std::uint32_t) + level.parts.capacity() * sizeof(MeshPart);
+    }
+    if (mesh->ambientOcclusion)
+    {
+        bytes += sizeof(MeshAOState) + mesh->ambientOcclusion->file.capacity();
+        if (const auto ao = MeshAO::Current(*mesh))
+        {
+            bytes += sizeof(MeshAOData) + ao->alpha.capacity() * sizeof(std::vector<float>);
+            for (const auto& level : ao->alpha) bytes += level.capacity() * sizeof(float);
+        }
     }
     if (mesh->materials)
     {

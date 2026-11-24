@@ -1,4 +1,5 @@
 #include "world_renderer.hpp"
+#include "mesh_ao.hpp"
 #include "camera_view.hpp"
 #include "terrain_chunk.hpp"
 #include "editor_colors.hpp"
@@ -282,6 +283,7 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         return;
     }
     const Mesh& mesh = *instance.mesh;
+    const auto ao = MeshAO::Current(mesh);
     if (!packingOrigin && !BoundsNeeded(mesh.bounds, &instance.transform)) return;
     const auto normalMatrix = instance.transform.NormalTransform();
     const auto worldNormal = [&](Vector3 n) {
@@ -300,9 +302,13 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
                                    instance.transform.Point(c.position)};
         const auto uv = mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) : std::array{a.uv, b.uv, c.uv};
         const auto start = vertices.size();
-        const auto color = [&](SDL_FColor c) { return SDL_FColor{c.r * tint.r, c.g * tint.g, c.b * tint.b, c.a}; };
-        SubmitMaterialTriangle(positions, {color(a.color), color(b.color), color(c.color)}, uv, &normals);
         const auto& path = material.empty() ? mesh.MaterialAt(i) : material;
+        const auto color = [&](const MeshVertex& vertex) {
+            const auto c = vertex.color;
+            const float alpha = path.empty() ? c.a : MeshAO::Alpha(mesh, &vertex - mesh.vertices.data(), ao);
+            return SDL_FColor{c.r * tint.r, c.g * tint.g, c.b * tint.b, alpha};
+        };
+        SubmitMaterialTriangle(positions, {color(a), color(b), color(c)}, uv, &normals);
         if (!path.empty())
         {
             if (!materialRanges.empty() && materialRanges.back().end == start && materialRanges.back().path == path)
@@ -380,10 +386,13 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
             {
                 const auto uv = geometry.mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) :
                     std::array{a.uv, b.uv, c.uv};
-                const auto color = [&](SDL_FColor c) {
-                    return SDL_FColor{c.r * geometry.tint.r, c.g * geometry.tint.g, c.b * geometry.tint.b, c.a};
+                const auto& path = geometry.material.empty() ? mesh.MaterialAt(i) : geometry.material;
+                const auto color = [&](const MeshVertex& vertex) {
+                    const auto c = vertex.color;
+                    const float alpha = path.empty() ? c.a : MeshAO::Alpha(mesh, &vertex - mesh.vertices.data(), geometry.ambientOcclusion);
+                    return SDL_FColor{c.r * geometry.tint.r, c.g * geometry.tint.g, c.b * geometry.tint.b, alpha};
                 };
-                SubmitMaterialTriangle(positions, {color(a.color), color(b.color), color(c.color)}, uv, &normals);
+                SubmitMaterialTriangle(positions, {color(a), color(b), color(c)}, uv, &normals);
             }
             else
             {
@@ -475,6 +484,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
     auto& entry = resident[{&source, level}];
     const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
     const auto revision = instance.mesh->materials ? instance.mesh->materials->revision : 0;
+    const auto ao = MeshAO::Current(*instance.mesh);
     if (sameMesh && entry->transform != instance.transform)
     {
         // Stream moving placements. Once stationary, bake the new transform once.
@@ -485,7 +495,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
         emit();
         return;
     }
-    if (!sameMesh || entry->moving || entry->revision != revision ||
+    if (!sameMesh || entry->moving || entry->revision != revision || entry->ambientOcclusion != ao ||
         entry->material != material || entry->mapping != mapping ||
         entry->tint.r != tint.r || entry->tint.g != tint.g || entry->tint.b != tint.b)
     {
@@ -494,6 +504,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
         entry->meshOwned = true;
         entry->mesh = instance.mesh;
         entry->revision = revision;
+        entry->ambientOcclusion = ao;
         entry->transform = instance.transform;
         entry->material = material;
         entry->mapping = mapping;

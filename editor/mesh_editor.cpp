@@ -1,5 +1,7 @@
 #include "mesh_editor.hpp"
 #include "mesh_materials.hpp"
+#include "mesh_ao_editor.hpp"
+#include "mesh_ao.hpp"
 #include "editor_theme.hpp"
 #include <algorithm>
 #include <cmath>
@@ -16,6 +18,7 @@ namespace
     constexpr std::array viewLabels{"Lit", "Vertex Colors", "Vertex Alpha"};
     constexpr int viewCount = int(viewLabels.size());
     constexpr SDL_FRect viewMenu{4, 0, 60, menuHeight}, viewOptions{4, menuHeight, 196, menuHeight * viewCount};
+    constexpr SDL_FRect toolsButton{64, 0, 68, menuHeight}, toolsOptions{64, menuHeight, 196, menuHeight};
     bool Fill(SDL_Renderer* r, SDL_FRect box, SDL_Color c)
     { return EditorTheme::SetColor(r, c) && SDL_RenderFillRect(r, &box); }
     bool Text(SDL_Renderer* r, float x, float y, const std::string& s, SDL_Color c = EditorTheme::text)
@@ -31,12 +34,13 @@ namespace
         mesh->vertices = source.vertices;
         mesh->indices = source.indices;
         const bool imported = source.vertexColors.size() == source.vertices.size();
+        const auto ao = MeshAO::Current(source);
         for (std::size_t i = 0; i < mesh->vertices.size(); ++i)
         {
             const auto color = imported ? source.vertexColors[i] : source.vertices[i].color;
             // Show alpha as an opaque grayscale surface, never as transparency.
             // Keep the original mesh and its per-LOD inspection data untouched.
-            const float value = std::clamp(color.a, 0.f, 1.f);
+            const float value = MeshAO::Alpha(source, i, ao);
             mesh->vertices[i].color = alpha ? SDL_FColor{value, value, value, 1} : SDL_FColor{color.r, color.g, color.b, 1};
         }
         mesh->lodDistances = source.lodDistances;
@@ -50,6 +54,7 @@ MeshEditorWindow::~MeshEditorWindow() { Close(); }
 
 bool MeshEditorWindow::Focused() const
 {
+    if (aoEditor && aoEditor->Focused()) return true;
 #ifdef _WIN32
     return controls && controls->Focused();
 #else
@@ -59,7 +64,7 @@ bool MeshEditorWindow::Focused() const
 
 #ifdef _WIN32
 bool MeshEditorWindow::HandleNativeMessage(void* message)
-{ return controls && controls->HandleMessage(*static_cast<MSG*>(message)); }
+{ return (aoEditor && aoEditor->HandleNativeMessage(message)) || (controls && controls->HandleMessage(*static_cast<MSG*>(message))); }
 #endif
 
 SDL_FRect MeshEditorWindow::Panel() const
@@ -104,6 +109,7 @@ void MeshEditorWindow::DestroyThumbnails()
 
 void MeshEditorWindow::Close()
 {
+    aoEditor.reset(); aoSnapshot.reset();
     CancelPointer();
     hover.reset(); menuOpen = false;
     SDL_DestroyCursor(resizeCursor); resizeCursor = nullptr;
@@ -169,12 +175,14 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
         resizeCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
         preview = std::make_unique<WorldRenderer>(AssetRoot::Project);
     }
+    aoEditor.reset();
     CancelPointer();
     hover.reset(); menuOpen = false;
     preview->Forget(&instance);
     preview->Forget(&vertexInstance);
     vertexInstance = {};
     instance = {std::move(mesh), {}};
+    aoSnapshot = MeshAO::Current(*instance.mesh);
     // Normalize only the preview placement, preserving the source mesh and UVs.
     const auto center = (instance.mesh->bounds.min + instance.mesh->bounds.max) * 0.5;
     const double radius = std::max(1e-6, Math::Length(instance.mesh->bounds.max - center));
@@ -196,6 +204,7 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
 
 bool MeshEditorWindow::ContainsScreen(float x, float y) const
 {
+    if (aoEditor && aoEditor->ContainsScreen(x, y)) return true;
 #ifdef _WIN32
     return controls && controls->ContainsScreen(x, y);
 #else
@@ -276,81 +285,84 @@ void MeshEditorWindow::SetViewMode(ViewMode mode)
     dirty = true;
 }
 
+void MeshEditorWindow::OpenAO()
+{
+    CancelPointer();
+    if (!aoEditor) aoEditor = std::make_unique<MeshAOEditor>();
+    if (!aoEditor->Open(window, instance.mesh))
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Bake AO", SDL_GetError(), window);
+}
+
 bool MeshEditorWindow::HandleMenu(const SDL_Event& event)
 {
     const auto choose = [&] {
-        SetViewMode(static_cast<ViewMode>(std::clamp(menuRow, 0, viewCount - 1)));
-        menuOpen = false;
-        dirty = true;
+        if (toolsMenu) OpenAO();
+        else SetViewMode(static_cast<ViewMode>(std::clamp(menuRow, 0, viewCount - 1)));
+        menuOpen = false; dirty = true;
     };
+    const auto open = [&](bool tools) {
+        CancelPointer(); menuOpen = !menuOpen || toolsMenu != tools;
+        toolsMenu = tools; menuRow = tools ? 0 : int(viewMode); dirty = true;
+    };
+    const auto options = toolsMenu ? toolsOptions : viewOptions;
+    const int count = toolsMenu ? 1 : viewCount;
     if (event.type == SDL_EVENT_KEY_DOWN)
     {
-        if (!event.key.repeat && event.key.key == SDLK_V && (event.key.mod & SDL_KMOD_ALT))
-        {
-            CancelPointer();
-            menuOpen = !menuOpen; menuRow = int(viewMode); dirty = true;
-            return true;
-        }
+        if (!event.key.repeat && (event.key.mod & SDL_KMOD_ALT) && (event.key.key == SDLK_V || event.key.key == SDLK_T))
+        { open(event.key.key == SDLK_T); return true; }
         if (!menuOpen) return false;
         if (event.key.key == SDLK_ESCAPE) menuOpen = false;
-        else if (event.key.key == SDLK_UP) menuRow = (menuRow + viewCount - 1) % viewCount;
-        else if (event.key.key == SDLK_DOWN) menuRow = (menuRow + 1) % viewCount;
+        else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) open(!toolsMenu);
+        else if (event.key.key == SDLK_UP) menuRow = (menuRow + count - 1) % count;
+        else if (event.key.key == SDLK_DOWN) menuRow = (menuRow + 1) % count;
         else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) choose();
-        dirty = true;
-        return true;
+        dirty = true; return true;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
-        if (SDL_PointInRectFloat(&point, &viewMenu) && event.button.button == SDL_BUTTON_LEFT)
-        {
-            CancelPointer();
-            menuOpen = !menuOpen; menuRow = int(viewMode); dirty = true;
-            return true;
-        }
+        if (event.button.button == SDL_BUTTON_LEFT &&
+            (SDL_PointInRectFloat(&point, &viewMenu) || SDL_PointInRectFloat(&point, &toolsButton)))
+        { open(SDL_PointInRectFloat(&point, &toolsButton)); return true; }
         if (menuOpen)
         {
-            if (event.button.button == SDL_BUTTON_LEFT && SDL_PointInRectFloat(&point, &viewOptions))
-            {
-                menuRow = int((point.y - viewOptions.y) / menuHeight);
-                choose();
-            }
-            // Dismissing the menu does not start an orbit or clear a material.
-            menuOpen = false; dirty = true;
-            return true;
+            if (event.button.button == SDL_BUTTON_LEFT && SDL_PointInRectFloat(&point, &options))
+            { menuRow = int((point.y - options.y) / menuHeight); choose(); }
+            menuOpen = false; dirty = true; return true;
         }
         if (point.y < menuHeight) return true;
     }
     if (menuOpen && event.type == SDL_EVENT_MOUSE_MOTION)
     {
         const SDL_FPoint point{event.motion.x, event.motion.y};
-        if (SDL_PointInRectFloat(&point, &viewOptions)) menuRow = int((point.y - viewOptions.y) / menuHeight);
+        if (SDL_PointInRectFloat(&point, &options)) menuRow = int((point.y - options.y) / menuHeight);
         dirty = true;
     }
-    return menuOpen && (event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
-                        event.type == SDL_EVENT_MOUSE_WHEEL);
+    return menuOpen && (event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_BUTTON_UP || event.type == SDL_EVENT_MOUSE_WHEEL);
 }
 
 bool MeshEditorWindow::DrawMenu()
 {
     const auto panel = Panel();
     if (!Fill(renderer, {0, 0, panel.x + panel.w, menuHeight}, EditorTheme::menuBar) ||
-        (menuOpen && !Fill(renderer, viewMenu, EditorTheme::selected)) ||
-        !Text(renderer, 12, 9, "View")) return false;
+        (menuOpen && !Fill(renderer, toolsMenu ? toolsButton : viewMenu, EditorTheme::selected)) ||
+        !Text(renderer, 12, 9, "View") || !Text(renderer, 72, 9, "Tools")) return false;
     if (!menuOpen) return true;
-    if (!Fill(renderer, viewOptions, EditorTheme::chrome)) return false;
-    for (int i = 0; i < viewCount; ++i)
+    const auto options = toolsMenu ? toolsOptions : viewOptions;
+    if (!Fill(renderer, options, EditorTheme::chrome)) return false;
+    for (int i = 0; i < (toolsMenu ? 1 : viewCount); ++i)
     {
-        const SDL_FRect row{viewOptions.x, viewOptions.y + i * menuHeight, viewOptions.w, menuHeight};
+        const SDL_FRect row{options.x, options.y + i * menuHeight, options.w, menuHeight};
         if ((menuRow == i && !Fill(renderer, row, EditorTheme::selected)) ||
-            !Text(renderer, row.x + 8, row.y + 9, int(viewMode) == i ? "*" : "") ||
-            !Text(renderer, row.x + 28, row.y + 9, viewLabels[i])) return false;
+            !Text(renderer, row.x + 8, row.y + 9, !toolsMenu && int(viewMode) == i ? "*" : "") ||
+            !Text(renderer, row.x + 28, row.y + 9, toolsMenu ? "Bake AO..." : viewLabels[i])) return false;
     }
     return true;
 }
 
 bool MeshEditorWindow::Handle(const SDL_Event& event)
 {
+    if (aoEditor && aoEditor->Handle(event)) return true;
     if (!window) return false;
     const auto* source = SDL_GetWindowFromEvent(&event);
     if (source != window && source != viewportWindow) return false;
@@ -490,6 +502,13 @@ bool MeshEditorWindow::UpdateThumbnails()
 
 bool MeshEditorWindow::Draw()
 {
+    if (aoEditor && !aoEditor->Draw()) return false;
+    if (instance.mesh && aoSnapshot != MeshAO::Current(*instance.mesh))
+    {
+        aoSnapshot = MeshAO::Current(*instance.mesh);
+        if (preview) { preview->Forget(&instance); preview->Forget(&vertexInstance); }
+        vertexInstance = {}; dirty = true;
+    }
     if (!window || (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN))) return true;
     if (Material::Revision() != materialRevision || instance.mesh->materials->revision != assignmentRevision) imagesDirty = true;
     if (!dirty && !imagesDirty) return true;

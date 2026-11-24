@@ -12,7 +12,7 @@
 
 namespace
 {
-    constexpr UINT lit = 47001, colors = 47002, alpha = 47003, frameMesh = 47004;
+    constexpr UINT lit = 47001, colors = 47002, alpha = 47003, frameMesh = 47004, bakeAO = 47005;
     constexpr WindowsMenu::MenuItem viewTitle{0, L"&View", 0, true};
     constexpr WindowsMenu::MenuItem viewItems[] = {
         {lit, L"&Lit", MF_CHECKED, false, true},
@@ -20,6 +20,8 @@ namespace
         {alpha, L"Vertex &Alpha", MF_ENABLED, false, true},
         {frameMesh, L"&Frame Mesh\tF"}
     };
+    constexpr WindowsMenu::MenuItem toolsTitle{0, L"&Tools", 0, true};
+    constexpr WindowsMenu::MenuItem toolsItems[] = {{bakeAO, L"&Bake AO..."}};
     void Caption(HWND window, const std::string& text)
     {
         const auto wide = WindowsNameDialog::Wide(text);
@@ -70,7 +72,8 @@ SDL_Window* WindowsMeshControls::Create(SDL_Window* parent)
     { SDL_SetError("Cannot create mesh editor controls"); return nullptr; }
     HMENU menu = CreateMenu();
     if (!menu) { SDL_SetError("Cannot create mesh editor menu"); return nullptr; }
-    if (!WindowsMenu::AddSubmenu(menu, viewTitle, viewItems) || !SetMenu(frame, menu))
+    if (!WindowsMenu::AddSubmenu(menu, viewTitle, viewItems) ||
+        !WindowsMenu::AddSubmenu(menu, toolsTitle, toolsItems) || !SetMenu(frame, menu))
     {
         DestroyMenu(menu);
         SDL_SetError("Cannot attach mesh editor menu");
@@ -343,6 +346,7 @@ LRESULT CALLBACK WindowsMeshControls::FrameProc(HWND window, UINT message, WPARA
             return 0;
         }
         if (LOWORD(w) == frameMesh) { self.editor.Frame(); return 0; }
+        if (LOWORD(w) == bakeAO) { self.editor.OpenAO(); return 0; }
     }
     if (message == WM_SETFOCUS) SetFocus(self.view);
     if (message == WM_NCDESTROY) { RemoveWindowSubclass(window, FrameProc, id); self.frame = nullptr; }

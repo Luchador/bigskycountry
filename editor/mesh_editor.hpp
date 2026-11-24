@@ -4,6 +4,8 @@
 #include "camera_view.hpp"
 #include <optional>
 
+class MeshAOEditor;
+
 #ifdef _WIN32
 class WindowsMeshControls;
 #endif
@@ -30,6 +32,9 @@ public:
     bool Drop(std::size_t slot, const std::string& material);
 
 private:
+    void OpenAO();
+    std::unique_ptr<MeshAOEditor> aoEditor;
+    std::shared_ptr<const MeshAOData> aoSnapshot;
 #ifdef _WIN32
     friend class WindowsMeshControls;
     std::unique_ptr<WindowsMeshControls> controls;
@@ -67,6 +72,7 @@ private:
     void SetViewMode(ViewMode mode);
     ViewMode viewMode = ViewMode::Lit;
     bool menuOpen = false;
+    bool toolsMenu = false;
     int menuRow = 0;
     int previewLOD = -1; // Auto, then each authored LOD.
     std::optional<SDL_FPoint> orbit;

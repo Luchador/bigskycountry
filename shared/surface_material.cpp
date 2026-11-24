@@ -300,7 +300,7 @@ void SurfaceMaterialCache::BindShadow(const SurfaceMaterial& material, SDL_GPURe
 }
 
 SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace) const
+                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace, float vertexAO) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
@@ -333,6 +333,7 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
     Vector3 transmission{};
     if (type == MaterialType::Foliage)
     {
+        orm[0] *= std::clamp(vertexAO, 0.f, 1.f);
         if (backFace) mapped = mapped * -1;
         const auto subsurface = hasSubsurfaceMap ? sample(MaterialSlot::Subsurface) :
                                                    std::array{color[0], color[1], color[2], 1.f};

@@ -32,7 +32,7 @@ struct SurfaceMaterial
     bool hasSubsurfaceMap = false;
     // Linear radiance: apply atmosphere before the final display conversion.
     SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                     Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace = false) const;
+                     Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace = false, float vertexAO = 1) const;
 };
 
 // One cache per renderer/device. Different materials can reference the same texture.
