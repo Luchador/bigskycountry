@@ -47,16 +47,30 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
             continue;
         }
         const auto equals = line.find('=');
-        if (!Equal(section, "Graphics") || equals == line.npos || !Equal(Trim(line.substr(0, equals)), "MSAA")) continue;
+        if (!Equal(section, "Graphics") || equals == line.npos) continue;
+        const auto key = Trim(line.substr(0, equals));
+        if (!Equal(key, "MSAA") && !Equal(key, "SSAO") && !Equal(key, "SSAOSamples")) continue;
         const auto value = Trim(line.substr(equals + 1));
-        int samples = 4;
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), samples);
-        if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && (samples == 0 || samples == 2 || samples == 4))
-            result.msaa = samples;
+        int number = 0;
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
+        const bool integer = parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
+        if (Equal(key, "MSAA"))
+        {
+            const bool valid = integer && (number == 0 || number == 2 || number == 4);
+            result.msaa = valid ? number : 4;
+            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: MSAA must be 0, 2 or 4; using 4", path.c_str(), lineNumber);
+        }
+        else if (Equal(key, "SSAO"))
+        {
+            const bool valid = integer && (number == 0 || number == 1);
+            result.ssao = valid ? number != 0 : true;
+            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: SSAO must be 0 or 1; using 1", path.c_str(), lineNumber);
+        }
         else
         {
-            result.msaa = 4;
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: MSAA must be 0, 2 or 4; using 4", path.c_str(), lineNumber);
+            const bool valid = integer && number >= 1 && number <= 64;
+            result.ssaoSamples = valid ? number : 16;
+            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: SSAOSamples must be 1..64; using 16", path.c_str(), lineNumber);
         }
     }
     return result;

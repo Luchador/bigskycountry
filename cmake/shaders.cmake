@@ -49,7 +49,7 @@ function(bigsky_shader filename profile entry stem dxil_name spirv_name)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
         COMMAND "${dxc}" -T "${profile}" -E "${entry}" ${ARGN} -WX -O3 -Qstrip_debug -Qstrip_reflect -Fh "${dxil}" -Vn "${dxil_name}" "${source}"
         COMMAND "${dxc}" -spirv -T "${profile}" -E "${entry}" ${ARGN} -WX -O3 -Fh "${spirv}" -Vn "${spirv_name}" "${source}"
-        DEPENDS "${source}" "${dxc}"
+        DEPENDS "${source}" "${dxc}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/world_vertex.hlsli"
         COMMENT "Compiling ${filename} (${entry}, DXIL and SPIR-V)"
         VERBATIM
     )
@@ -68,6 +68,11 @@ bigsky_shader(world.hlsl ps_6_0 WireframePS wireframe_frag wireframe_frag_dxil w
 bigsky_shader(world.hlsl ps_6_0 MaterialPS material_frag material_frag_dxil material_frag_spirv -D BSC_MATERIAL=1)
 bigsky_shader(world.hlsl ps_6_0 MaterialPS material_msaa2 material_msaa2_dxil material_msaa2_spirv -D BSC_MATERIAL=1 -D BSC_MSAA_SAMPLES=2)
 bigsky_shader(world.hlsl ps_6_0 MaterialPS material_msaa4 material_msaa4_dxil material_msaa4_spirv -D BSC_MATERIAL=1 -D BSC_MSAA_SAMPLES=4)
+bigsky_shader(ssao_depth.hlsl ps_6_0 DepthPS ssao_depth ssao_depth_dxil ssao_depth_spirv)
+bigsky_shader(ssao_depth.hlsl ps_6_0 CutoutPS ssao_cutout ssao_cutout_dxil ssao_cutout_spirv)
+bigsky_shader(ssao.hlsl vs_6_0 FullscreenVS ssao_vert ssao_vert_dxil ssao_vert_spirv)
+bigsky_shader(ssao.hlsl ps_6_0 OcclusionPS ssao_frag ssao_frag_dxil ssao_frag_spirv)
+bigsky_shader(ssao.hlsl ps_6_0 BlurPS ssao_blur ssao_blur_dxil ssao_blur_spirv)
 bigsky_shader(plan.hlsl vs_6_0 VSMain plan_vert plan_vert_dxil plan_vert_spirv)
 bigsky_shader(plan.hlsl ps_6_0 PSMain plan_frag plan_frag_dxil plan_frag_spirv)
 target_include_directories(BigSkyApplication PRIVATE "${output_dir}")

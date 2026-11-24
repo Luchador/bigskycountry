@@ -69,6 +69,7 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    ReleaseSSAO();
     if (multisampleColor) SDL_ReleaseGPUTexture(device, multisampleColor);
     if (spotBuffer) SDL_ReleaseGPUBuffer(device, spotBuffer);
     if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
@@ -138,7 +139,7 @@ bool WorldRenderer::CreatePipelines()
     {
         return false;
     }
-    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 1, 1, 1);
+    SDL_GPUShader* ps = CreateWorldShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "PSMain", world_frag_dxil, world_frag_spirv, 2, 1, 1);
     if (!ps)
     {
         SDL_ReleaseGPUShader(device, vs);
@@ -193,7 +194,7 @@ bool WorldRenderer::CreatePipelines()
 
     if (surfacePipeline)
     {
-        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 2, 2, 1);
     }
 
     if (texturedPipeline)
@@ -204,9 +205,9 @@ bool WorldRenderer::CreatePipelines()
                            sampleCount == SDL_GPU_SAMPLECOUNT_2 ? std::span<const Uint8>(material_msaa2_spirv) : std::span<const Uint8>(material_frag_spirv);
         // Shader alpha-to-coverage keeps alpha=1 in covered samples, necessary
         // for compositing this initially transparent target over SDL's sky.
-        cutoutPipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        cutoutPipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 2, 2, 1);
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-        if (cutoutPipeline) foliagePipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        if (cutoutPipeline) foliagePipeline = materialPipeline("MaterialPS", dxil, spirv, SurfaceMaterial::shaderMapCount + 2, 2, 1);
         pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     }
 
@@ -220,7 +221,7 @@ bool WorldRenderer::CreatePipelines()
         blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
         blend.color_blend_op = blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
         ds.enable_depth_write = false;
-        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 1, 2, 1);
+        translucentPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 2, 2, 1);
         color.blend_state = {};
         ds.enable_depth_write = true;
     }
@@ -284,7 +285,7 @@ bool WorldRenderer::CreatePipelines()
         if (cutoutPS) SDL_ReleaseGPUShader(device, cutoutPS);
     }
 
-    if (!outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1))
+    if (!outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1) || !CreateSSAOFallback())
     {
         if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
         if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
@@ -634,7 +635,7 @@ bool WorldRenderer::DrawGPU()
         SDL_EndGPUCopyPass(copy);
     }
 
-    if (!DrawShadows(commands))
+    if (!DrawShadows(commands) || !DrawSSAO(commands))
     {
         SDL_CancelGPUCommandBuffer(commands);
         return false;
@@ -657,9 +658,9 @@ bool WorldRenderer::DrawGPU()
         SDL_FColor sunDirection, sunRadiance, moonDirection, moonRadiance, ambient;
         SDL_FColor fogDensity, fogAir, fogZenith, fogOpposite, fogSunward, fogSun;
         std::array<SDL_FColor, 4> shadowX, shadowY, shadowZ, shadowParams;
-        SDL_FColor shadowControl, shadowForward, visibility, spotControl;
+        SDL_FColor shadowControl, shadowForward, visibility, ssaoControl, spotControl;
     };
-    static_assert(sizeof(LightingData) == 31*sizeof(SDL_FColor));
+    static_assert(sizeof(LightingData) == 32*sizeof(SDL_FColor));
     LightingData lighting{pack(lights.sun.direction), pack(lights.sun.radiance), pack(lights.moon.direction),
                                 pack(lights.moon.radiance), pack(lights.ambient), fogDensity,
                                 {fog ? float(fog->airDensity) : 0.f, 0, 0, 0},
@@ -678,13 +679,14 @@ bool WorldRenderer::DrawGPU()
         const double elevation = shadows.moon ? lights.moon.direction.y : lights.sun.direction.y;
         lighting.shadowControl = {4, 1.f/ShadowCascades::resolution, shadows.moon ? 1.f : 0.f,
                         float(std::clamp((elevation-.01)/.09, 0.0, 1.0))};
-        lighting.shadowForward = pack(camera->Forward());
     }
+    lighting.shadowForward = pack(camera->Forward());
+    lighting.ssaoControl = {ssaoActive ? 1.f : 0.f, 1.f / std::max(1, ssaoWidth), 1.f / std::max(1, ssaoHeight), float(worldNearDepth)};
     lighting.visibility = {float(viewDistance * viewDistance), float(1 / focal), float(viewport.w) * .5f, float(viewport.h) * .5f};
     lighting.spotControl = {float((viewport.w + lightTilePixels - 1) / lightTilePixels), float(lightTilePixels),
                             float(lights.spots.size()), float((lights.spots.size() + 127) / 128)};
-    const SDL_GPUTextureSamplerBinding shadowBinding{shadowTarget, shadowSampler};
-    SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+    const SDL_GPUTextureSamplerBinding sceneBindings[]{{shadowTarget, shadowSampler}, {ssaoActive ? ssaoResult : ssaoWhite, ssaoSampler}};
+    SDL_BindGPUFragmentSamplers(pass, 0, sceneBindings, 2);
     SDL_BindGPUFragmentStorageBuffers(pass, 0, &spotBuffer, 1);
     SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
     // Form the origin-to-eye offset in double before packing the shader uniforms.
@@ -725,7 +727,7 @@ bool WorldRenderer::DrawGPU()
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             bound = pipeline;
         }
-        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass, 1);
+        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass, 2);
         boundMaterial = material;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
@@ -787,9 +789,10 @@ bool WorldRenderer::DrawGPU()
             return false;
         }
         SDL_BindGPUGraphicsPipeline(pass, surfacePipeline);
-        SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+        SDL_BindGPUFragmentSamplers(pass, 0, sceneBindings, 2);
         SDL_BindGPUFragmentStorageBuffers(pass, 0, &spotBuffer, 1);
         lighting.spotControl = {};
+        lighting.ssaoControl = {};
         lighting.visibility = {}; // Editor foreground handles remain visible at any distance.
         SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
         source = nullptr; // Bindings are local to a render pass.
@@ -798,7 +801,7 @@ bool WorldRenderer::DrawGPU()
         SDL_EndGPURenderPass(pass);
     }
     if (!SDL_SubmitGPUCommandBuffer(commands)) return false;
-    shadowInitialized = true;
+    shadowInitialized = ssaoInitialized = true;
     for (const auto& item : uploads)
     {
         auto& mesh = *item.geometry;

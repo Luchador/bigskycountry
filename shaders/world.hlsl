@@ -1,58 +1,4 @@
-struct WorldVertex
-{
-    float4 position : TEXCOORD0;
-    float4 color : TEXCOORD1;
-    float2 uv : TEXCOORD2;
-    float4 normal : TEXCOORD3; // .w: 0 editor colors, 1 scene lighting, 2 emissive surface.
-    float4 tangent : TEXCOORD4; // .w is the sign of the bitangent.
-    float3 view : TEXCOORD5;
-};
-
-struct WorldFragment
-{
-    float4 position : SV_Position;
-    float4 color : TEXCOORD0;
-    float2 uv : TEXCOORD1;
-    float4 normal : TEXCOORD2;
-    float4 tangent : TEXCOORD3;
-    float3 view : TEXCOORD4;
-};
-
-// Mode 0 is the dynamic clip-space stream. Resident vertices are relative to
-// a nearby origin so large geographic coordinates retain local precision.
-cbuffer WorldCamera : register(b0, space1)
-{
-    float4 cameraRight, cameraUp, cameraForward;
-    float4 originMinusEye; // w = 1 for shaded geometry, 2 for wireframe
-    float4 originRemainder, wireColor;
-};
-
-WorldFragment VSMain(WorldVertex input, uint vertexID : SV_VertexID)
-{
-    WorldFragment output;
-    output.position = input.position;
-    output.color = input.color;
-    output.uv = input.uv;
-    output.normal = input.normal;
-    output.tangent = input.tangent;
-    output.view = input.view;
-    if (originMinusEye.w != 0)
-    {
-        // Preserve centimeter-sized features when a long road's origin is
-        // kilometers from the camera. Keep the two sums in this order.
-        precise float3 position = (input.position.xyz + originMinusEye.xyz) + (input.view + originRemainder.xyz);
-        output.position = float4(dot(position, cameraRight.xyz), dot(position, cameraUp.xyz),
-                                 cameraForward.w, dot(position, cameraForward.xyz));
-        output.view = -position;
-        if (originMinusEye.w == 2)
-        {
-            uint corner = vertexID % 3;
-            output.uv = float2(corner == 0, corner == 1);
-            output.color = wireColor;
-        }
-    }
-    return output;
-}
+#include "world_vertex.hlsli"
 
 cbuffer WorldLights : register(b0, space3)
 {
@@ -67,6 +13,7 @@ cbuffer WorldLights : register(b0, space3)
     float4 shadowControl;   // cascade count, inverse map size, moon flag, horizon fade
     float4 shadowForward;
     float4 visibility; // radius squared, inverse focal length, viewport half width/height
+    float4 ssaoControl; // enabled, inverse AO width/height, near depth
     float4 spotControl; // tile columns, tile size, light count, uint4 groups per tile
 };
 
@@ -77,6 +24,33 @@ cbuffer WorldLights : register(b0, space3)
 #endif
 BSC_COMBINED Texture2DArray<float> shadowMap : register(t0, space2);
 BSC_COMBINED SamplerComparisonState shadowSampler : register(s0, space2);
+
+BSC_COMBINED Texture2D<float2> ambientMap : register(t1, space2);
+BSC_COMBINED SamplerState ambientSampler : register(s1, space2);
+
+float AmbientVisibility(float2 pixel, float3 view)
+{
+    if (ssaoControl.x == 0) return 1;
+    float depth = dot(-view, shadowForward.xyz);
+    if (depth <= 0 || dot(view,view) >= 150*150) return 1;
+    float2 uv = pixel / (2 * visibility.zw);
+    float2 p = uv / ssaoControl.yz - .5;
+    float2 base = floor(p), fraction = frac(p);
+    float result = 0, total = 0;
+    // Bilateral upsampling avoids leaking a foreground object's dark silhouette
+    // onto unrelated background pixels. A missing matching surface is unoccluded.
+    [unroll] for (int y=0; y<2; ++y)
+        [unroll] for (int x=0; x<2; ++x)
+        {
+            float2 sample = ambientMap.SampleLevel(ambientSampler, (base+float2(x,y)+.5)*ssaoControl.yz, 0);
+            float delta = abs(ssaoControl.w / max(sample.y, 1e-8) - depth);
+            float weight = (x ? fraction.x : 1-fraction.x) * (y ? fraction.y : 1-fraction.y);
+            weight *= exp2(-delta / max(.08, depth*.01));
+            result += sample.x * weight;
+            total += weight;
+        }
+    return total > .001 ? saturate(result / total) : 1;
+}
 
 float CascadeShadow(int cascade, float3 p, float3 normal)
 {
@@ -164,9 +138,9 @@ float3 ToDisplay(float3 c)
 // represent floating-point denormals or NaNs.
 // Storage buffers follow sampled textures in each shader's resource set.
 #ifdef BSC_MATERIAL
-ByteAddressBuffer spotData : register(t7, space2);
+ByteAddressBuffer spotData : register(t8, space2);
 #else
-ByteAddressBuffer spotData : register(t1, space2);
+ByteAddressBuffer spotData : register(t2, space2);
 #endif
 
 void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float gloss, float metal,
@@ -209,7 +183,7 @@ void IlluminateSpots(float2 pixel, float3 view, float3 normal, float3 eye, float
 // Keep the software renderer's WorldLighting::Shade in sync.
 float3 ShadeSurface(float2 pixel, float3 normal, float3 geometricNormal, float3 view, float3 base, float3 orm, float3 emission, float3 transmission = 0)
 {
-    float3 diffuse = skyAmbient.rgb * orm.r;
+    float3 diffuse = skyAmbient.rgb * orm.r * AmbientVisibility(pixel, view);
     float3 specular = 0;
     float3 eye = UnitVector(view);
     float shadow = ShadowVisibility(geometricNormal,view);
@@ -280,19 +254,19 @@ float4 WireframePS(WorldFragment input) : SV_Target0
 }
 
 #ifdef BSC_MATERIAL
-BSC_COMBINED Texture2D<float4> baseColorMap : register(t1, space2);
-BSC_COMBINED Texture2D<float2> normalMap : register(t2, space2);
-BSC_COMBINED Texture2D<float4> ormMap : register(t3, space2);
-BSC_COMBINED Texture2D<float4> emissionOrOuterColor : register(t4, space2);
-BSC_COMBINED Texture2D<float4> alphaOrOuterNormal : register(t5, space2);
-BSC_COMBINED Texture2D<float4> outerOrmMap : register(t6, space2);
-BSC_COMBINED SamplerState outerOrmSampler : register(s6, space2);
-BSC_COMBINED SamplerState colorSampler : register(s1, space2);
-BSC_COMBINED SamplerState normalSampler : register(s2, space2);
-BSC_COMBINED SamplerState ormSampler : register(s3, space2);
+BSC_COMBINED Texture2D<float4> baseColorMap : register(t2, space2);
+BSC_COMBINED Texture2D<float2> normalMap : register(t3, space2);
+BSC_COMBINED Texture2D<float4> ormMap : register(t4, space2);
+BSC_COMBINED Texture2D<float4> emissionOrOuterColor : register(t5, space2);
+BSC_COMBINED Texture2D<float4> alphaOrOuterNormal : register(t6, space2);
+BSC_COMBINED Texture2D<float4> outerOrmMap : register(t7, space2);
+BSC_COMBINED SamplerState outerOrmSampler : register(s7, space2);
+BSC_COMBINED SamplerState colorSampler : register(s2, space2);
+BSC_COMBINED SamplerState normalSampler : register(s3, space2);
+BSC_COMBINED SamplerState ormSampler : register(s4, space2);
 
-BSC_COMBINED SamplerState emissiveSampler : register(s4, space2);
-BSC_COMBINED SamplerState opacitySampler : register(s5, space2);
+BSC_COMBINED SamplerState emissiveSampler : register(s5, space2);
+BSC_COMBINED SamplerState opacitySampler : register(s6, space2);
 cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;

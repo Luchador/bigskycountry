@@ -4,13 +4,15 @@ My project Big Sky Country
 
 The game and editor read `config.ini` beside their executables at startup. The
 build creates it from the repository's template if missing and preserves edits
-on subsequent builds. For a Ninja build, edit `build/config.ini`; for a Visual
+on subsequent builds, adding missing SSAO entries to older configs. For a Ninja build, edit `build/config.ini`; for a Visual
 Studio Release build, edit `build/Release/config.ini`. Both executables in that
 directory share the setting for 3D views, including the editor's mesh preview.
 
 ```ini
 [Graphics]
 MSAA=4
+SSAO=1
+SSAOSamples=16
 ```
 
 Use `0` to disable antialiasing, `2` for 2x MSAA, or `4` for 4x MSAA (the default).
@@ -23,6 +25,20 @@ With MSAA enabled, Foliage and Alpha Cutout materials use alpha-to-coverage.
 The shader converts opacity to a sample mask while keeping each surviving
 sample opaque, so the resolved world composites correctly over the sky. Shadow
 maps retain their existing cutout test. UI text and panels stay at native resolution.
+
+SSAO adds contact and crevice shading to ambient light in the game, editor,
+and lit mesh previews. It defaults to on (`SSAO=1`); use `SSAO=0` to skip its
+rendering passes. `SSAOSamples` accepts integers from 1 to 64, default 16.
+Higher sample counts reduce noise but cost more GPU time. Missing or invalid
+values use these defaults. The build adds missing SSAO entries under `[Graphics]`
+without replacing existing preferences. No world recook is needed.
+
+SSAO uses a cutout-aware depth prepass, half-resolution sampling, and depth-aware
+filtering. Its 2 m sampling radius fades out between 100 and 150 m. It affects
+ambient light only, including the ambient term of foliage; direct lights,
+emission, sky, UI, wireframe and vertex-color inspection remain unchanged.
+It works with MSAA off, 2x or 4x. Unsupported GPUs and the software renderer
+omit SSAO; GPU initialization failures are logged.
 
 ## Vehicle physics
 

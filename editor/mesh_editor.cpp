@@ -501,7 +501,7 @@ bool MeshEditorWindow::Draw()
     // Unit ambient and no directional light reproduce the raw linear colors,
     // with normal display encoding and the same depth-tested, cached GPU path.
     const WorldLighting colorLights{{{0, 1, 0}, {0, 0, 0}}, {{0, 1, 0}, {0, 0, 0}}, {1, 1, 1}};
-    if (!preview->Begin(renderer, camera, colors ? &colorLights : &lights)) return false;
+    if (!preview->Begin(renderer, camera, colors ? &colorLights : &lights, nullptr, 0, false, !colors)) return false;
     const auto& shown = colors ? vertexInstance : instance;
     const auto level = preview->MeshLOD(shown, previewLOD);
     preview->SubmitWorldMesh(shown, {}, WorldRenderer::MeshUVs::Authored, {1, 1, 1, 1}, previewLOD);

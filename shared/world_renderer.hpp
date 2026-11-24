@@ -48,6 +48,7 @@ public:
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
     // Fog and shadows are opt-in for world viewports; previews stay clear.
+    // Disable ambientOcclusion for raw vertex-color inspection.
     void Forget(const void* key);
     std::size_t ResidentBytes() const;
     // Per-frame work counters, also displayed by the F3 overlay.
@@ -59,7 +60,7 @@ public:
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
     int MsaaSamples() const { return sampleCount == SDL_GPU_SAMPLECOUNT_4 ? 4 : sampleCount == SDL_GPU_SAMPLECOUNT_2 ? 2 : 0; }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
-               double viewDistance = 0, bool shadows = false);
+               double viewDistance = 0, bool shadows = false, bool ambientOcclusion = true);
     // Spot positions supplied here are in world space. Rebuilt each frame, never cached with meshes.
     void SubmitSpotLight(SpotLight light);
     void SubmitEmissiveTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor linearColor);
@@ -99,6 +100,23 @@ private:
     Uint32 spotBufferBytes = 0;
     bool PrepareShadowTarget(int resolution);
     bool DrawShadows(SDL_GPUCommandBuffer* commands);
+    bool CreateSSAOFallback();
+    bool PrepareSSAO();
+    bool CreateSSAOPipelines();
+    bool DrawSSAO(SDL_GPUCommandBuffer* commands);
+    void ReleaseSSAO();
+    bool ssaoRequested = false, ssaoActive = false, ssaoFailed = false, ssaoInitialized = false;
+    int ssaoWidth = 0, ssaoHeight = 0, ssaoFullWidth = 0, ssaoFullHeight = 0;
+    SDL_GPUTexture* ssaoWhite = nullptr;
+    SDL_GPUTexture* ssaoDepth = nullptr;
+    SDL_GPUTexture* ssaoResult = nullptr;
+    SDL_GPUTexture* ssaoTemp = nullptr;
+    SDL_GPUSampler* ssaoSampler = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoDepthPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoCutoutPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoFoliagePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoBlurPipeline = nullptr;
     bool DrawSoftware();
     void BuildDrawRanges();
 

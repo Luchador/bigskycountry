@@ -41,7 +41,7 @@ std::size_t WorldRenderer::ResidentBytes() const
     return bytes;
 }
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance, bool enableShadows)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance, bool enableShadows, bool enableSSAO)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
@@ -83,6 +83,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     outline.clear();
     materialRanges.clear();
     lightGeometry = environment != nullptr;
+    ssaoRequested = lightGeometry && enableSSAO;
     lights = environment ? *environment : WorldLighting{};
     fog = atmosphere ? std::optional{*atmosphere} : std::nullopt;
     wireframeEnd = 0;
