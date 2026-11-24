@@ -39,6 +39,17 @@ bool MaterialEditor::SetType(MaterialType type)
     return Commit(std::move(next));
 }
 
+bool MaterialEditor::SetVertexAlphaAO(bool enabled)
+{
+    if (!Material::SupportsVertexAlphaAO(material.type))
+        return SDL_SetError("This material type does not support vertex alpha AO");
+    if (enabled == material.useVertexAlphaAO)
+        return true;
+    auto next = material;
+    next.useVertexAlphaAO = enabled;
+    return Commit(std::move(next));
+}
+
 bool MaterialEditor::SetTexture(MaterialSlot slot, const std::string& relative)
 {
     if (!catalog || !material.Uses(slot))

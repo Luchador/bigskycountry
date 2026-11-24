@@ -70,16 +70,19 @@ void WindowsMaterialEditor::Layout()
     GetClientRect(window, &area);
     const bool transition = editor.Current().type == MaterialType::Transition;
     const bool foliage = editor.Current().type == MaterialType::Foliage;
+    const bool vertexAO = Material::SupportsVertexAlphaAO(editor.Current().type);
     const int pad = Units(window, 6, true), side = Units(window, transition || foliage ? 180 : 144, true);
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
-    const int top = Units(window, 42, false), clear = Units(window, 28, true);
+    const int top = Units(window, vertexAO ? 60 : 42, false), clear = Units(window, 28, true);
     const int rows = transition || foliage ? 6 : 5;
     const int footer = foliage ? Units(window, 32, false) : 0;
     const int step = std::min(Units(window, 46, false), std::max(1, (int(area.bottom) - top - pad - footer) / rows));
     MoveWindow(GetDlgItem(window, IDC_MAT_PREVIEW), 0, 0, split, area.bottom, FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_LABEL), x, pad, width, Units(window, 11, false), FALSE);
     MoveWindow(GetDlgItem(window, IDC_MAT_TYPE), x, Units(window, 19, false), width, Units(window, 96, false), FALSE);
+    ShowWindow(GetDlgItem(window, IDC_MAT_VERTEX_AO), vertexAO ? SW_SHOWNA : SW_HIDE);
+    MoveWindow(GetDlgItem(window, IDC_MAT_VERTEX_AO), x, Units(window, 39, false), width, Units(window, 13, false), FALSE);
     int row = 0;
     const bool unlit = editor.Current().type == MaterialType::Unlit;
     for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
@@ -112,6 +115,7 @@ void WindowsMaterialEditor::Layout()
 void WindowsMaterialEditor::Sync()
 {
     SendDlgItemMessageW(window, IDC_MAT_TYPE, CB_SETCURSEL, int(editor.Current().type), 0);
+    CheckDlgButton(window, IDC_MAT_VERTEX_AO, editor.Current().useVertexAlphaAO ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < int(materialSlotCount); ++i)
     {
         const auto& path = editor.Current().textures[i];
@@ -302,6 +306,13 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         }
         return TRUE;
     case WM_COMMAND:
+        if (LOWORD(w) == IDC_MAT_VERTEX_AO && HIWORD(w) == BN_CLICKED)
+        {
+            if (!self->editor.SetVertexAlphaAO(IsDlgButtonChecked(hwnd, IDC_MAT_VERTEX_AO) == BST_CHECKED))
+                MessageBoxW(hwnd, WindowsNameDialog::Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+            self->Sync();
+            return TRUE;
+        }
         if (LOWORD(w) == IDC_MAT_TINT && HIWORD(w) == BN_CLICKED)
         {
             if (const auto color = WindowsTheme::PickColor(hwnd, TintColor(self->editor.Current())))

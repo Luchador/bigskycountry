@@ -11,6 +11,7 @@ public:
     const std::string& Path() const { return path; }
     void Retarget(const std::string& renamedPath) { path = renamedPath; }
     bool SetType(MaterialType type);
+    bool SetVertexAlphaAO(bool enabled);
     bool SetTexture(MaterialSlot slot, const std::string& path);
     bool SetTint(std::array<float, 3> color);
     void PreviewTint(std::array<float, 3> color);

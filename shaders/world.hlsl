@@ -271,7 +271,7 @@ cbuffer MaterialProperties : register(b1, space3)
 {
     float4 tint;
     uint alphaCutout, unlit, transition, foliage;
-    float4 subsurfaceProperties; // Strength, has subsurface map, padding.
+    float4 subsurfaceProperties; // Strength, has subsurface map, use vertex alpha AO, padding.
 };
 
 float3 DecodeNormalXY(float2 channels)
@@ -339,6 +339,9 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
         surfaceNormal = lerp(outerNormal, surfaceNormal, weight);
     }
     else glow = layerColor;
+    // Vertex alpha is ambient visibility, independent of cutout opacity and
+    // alpha-to-coverage. Apply it only when enabled by this material.
+    if (subsurfaceProperties.z != 0) orm.r *= saturate(input.color.a);
     float3 n = UnitVector(input.normal.xyz);
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
@@ -347,9 +350,6 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
     float3 shadowNormal = n;
     if (foliage)
     {
-        // Vertex alpha is baked ambient visibility, independent of cutout
-        // opacity and alpha-to-coverage. Combine it with the ORM red channel.
-        orm.r *= saturate(input.color.a);
         // Flip the complete tangent-space result on backs, not just its Z axis.
         if (!frontFace) { mapped = -mapped; n = -n; }
         float4 subsurface = subsurfaceProperties.y != 0 ? outerOrmMap.Sample(outerOrmSampler, input.uv) : float4(base.rgb, 1);

@@ -30,6 +30,7 @@ struct SurfaceMaterial
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     float subsurfaceStrength = .5f;
     bool hasSubsurfaceMap = false;
+    bool useVertexAlphaAO = false;
     // Linear radiance: apply atmosphere before the final display conversion.
     SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
                      Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace = false, float vertexAO = 1) const;

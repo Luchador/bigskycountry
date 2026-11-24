@@ -238,6 +238,7 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         }
         SurfaceMaterial material;
         material.type = definition.type;
+        material.useVertexAlphaAO = Material::SupportsVertexAlphaAO(definition.type) && definition.useVertexAlphaAO;
         material.subsurfaceStrength = definition.subsurfaceStrength;
         material.hasSubsurfaceMap = !definition.textures[static_cast<size_t>(MaterialSlot::Subsurface)].empty();
         const auto& tint = definition.emissiveTint;
@@ -284,10 +285,11 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     for (size_t i = 0; i < slots.size(); ++i)
         bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, firstSampler, bindings.data(), bindings.size());
-    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, padding[2]; };
+    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, vertexAO, padding; };
     static_assert(sizeof(Properties) == 48);
     const Properties params{material.tint, Material::IsCutout(material.type), unlit, transition, foliage,
-                            material.subsurfaceStrength, material.hasSubsurfaceMap ? 1.f : 0.f, {}};
+                            material.subsurfaceStrength, material.hasSubsurfaceMap ? 1.f : 0.f,
+                            material.useVertexAlphaAO ? 1.f : 0.f, 0};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
@@ -326,6 +328,7 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
         mappedNormal = outerNormal + (mappedNormal - outerNormal) * weight;
     }
     else glow = sample(MaterialSlot::Emissive);
+    if (useVertexAlphaAO) orm[0] *= std::clamp(vertexAO, 0.f, 1.f);
     // Re-orthogonalize the projected U axis against the interpolated shading normal.
     tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
     const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
@@ -333,7 +336,6 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
     Vector3 transmission{};
     if (type == MaterialType::Foliage)
     {
-        orm[0] *= std::clamp(vertexAO, 0.f, 1.f);
         if (backFace) mapped = mapped * -1;
         const auto subsurface = hasSubsurfaceMap ? sample(MaterialSlot::Subsurface) :
                                                    std::array{color[0], color[1], color[2], 1.f};

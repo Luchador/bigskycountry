@@ -203,11 +203,18 @@ when testing occluders, so empty space on leaf cards does not block the rays.
 Assign materials before baking. The bake includes only this mesh, not the ground
 or nearby world objects.
 
-Foliage multiplies vertex alpha by ORM ambient occlusion (red), with SSAO applied
-additionally where enabled. This affects ambient light, not cutout opacity,
-alpha-to-coverage, direct lighting, or emission. Imported vertex alpha works too;
-meshes without alpha default to 1. Standard and other material types retain their
-existing behavior. Changes update the mesh preview and placed instances.
+The Material Editor has a **Use vertex alpha AO** checkbox for **Standard**,
+**Alpha cutout**, and **Foliage**. Enable it on bark or other materials that should
+use baked AO. It multiplies vertex alpha by ORM ambient occlusion (red), with
+SSAO applied additionally where enabled. Disabling the checkbox ignores vertex
+alpha while retaining ORM occlusion and the saved mesh bake. This affects ambient
+light, not cutout opacity, alpha-to-coverage, direct lighting, or emission.
+Imported vertex alpha works too; meshes without alpha default to 1. Existing
+materials without this setting default to enabled for Foliage and disabled for
+other types. The choice is saved in the `.bmat` file and retained when changing
+material types; it has no effect on Terrain, Unlit, or Transition materials.
+Changes update the mesh preview and placed instances. Rebuild assets and recook
+the world to use updated materials in the game.
 
 AO is saved automatically in a versioned `.bao` file beside the source model
 (e.g. `oak01.fbx.bao`); keep it with the model and `.bmesh` material assignments.

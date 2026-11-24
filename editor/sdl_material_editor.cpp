@@ -8,7 +8,7 @@ namespace
     struct Layout
     {
         int windowWidth = 0, windowHeight = 0;
-        SDL_FRect view, type;
+        SDL_FRect view, type, vertexAO{};
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
         SDL_FRect tint{};
         std::array<SDL_FRect, 4> sliders{};
@@ -21,11 +21,13 @@ namespace
             const float split = float(windowWidth) - panelWidth;
             view = {0, 0, split, float(windowHeight)};
             type = {split + 10, 32, panelWidth - 20, 25};
+            const float aoHeight = Material::SupportsVertexAlphaAO(material.type) ? 28.f : 0.f;
+            if (aoHeight > 0) vertexAO = {split + 10, 65, panelWidth - 20, 20};
             const bool unlit = material.type == MaterialType::Unlit;
-            const float rowHeight = foliage ? (windowHeight - 120.f) / 6 :
-                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f) / (transition ? 6 : 5);
+            const float rowHeight = foliage ? (windowHeight - 120.f - aoHeight) / 6 :
+                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f - aoHeight) / (transition ? 6 : 5);
             const float step = std::min(80.f, rowHeight);
-            float y = 68;
+            float y = 68 + aoHeight;
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
                 if (!material.Uses(static_cast<MaterialSlot>(i))) continue;
@@ -288,6 +290,8 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
         }
         else if (SDL_PointInRectFloat(&p, &layout.type))
             typeMenu = true;
+        else if (SDL_PointInRectFloat(&p, &layout.vertexAO))
+            Report(editor.SetVertexAlphaAO(!editor.Current().useVertexAlphaAO));
         else
         {
             const bool foliage = editor.Current().type == MaterialType::Foliage;
@@ -392,6 +396,14 @@ bool SdlMaterialEditor::Draw()
               materialTypes[static_cast<std::size_t>(editor.Current().type)].label, text) ||
         !Text(renderer, layout.type.x + layout.type.w - 20, layout.type.y + 8, "v", text))
         return false;
+    if (Material::SupportsVertexAlphaAO(editor.Current().type))
+    {
+        const auto box = layout.vertexAO;
+        if (!Fill(renderer, {box.x, box.y + 2, 16, 16}, button) ||
+            (editor.Current().useVertexAlphaAO && !Text(renderer, box.x + 4, box.y + 6, "x", text)) ||
+            !Text(renderer, box.x + 22, box.y + 6, "Use vertex alpha AO", text))
+            return false;
+    }
     for (std::size_t i = 0; i < thumbs.size(); ++i)
     {
         if (!editor.Current().Uses(static_cast<MaterialSlot>(i))) continue;

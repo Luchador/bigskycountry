@@ -112,6 +112,13 @@ bool Material::Load(const std::string& requestedFile)
             return SDL_SetError("Unsupported material type: %s", value);
         material.type = static_cast<MaterialType>(match - materialTypes.begin());
     }
+    // Preserve the appearance of materials saved before this option existed.
+    material.useVertexAlphaAO = material.type == MaterialType::Foliage;
+    if (const auto* enabled = cJSON_GetObjectItemCaseSensitive(json.get(), "useVertexAlphaAO"))
+    {
+        if (!cJSON_IsBool(enabled)) return SDL_SetError("Invalid vertex alpha AO setting");
+        material.useVertexAlphaAO = cJSON_IsTrue(enabled);
+    }
     if (const auto* tint = cJSON_GetObjectItemCaseSensitive(json.get(), "emissiveTint"))
     {
         if (!cJSON_IsArray(tint) || cJSON_GetArraySize(tint) != 3) return SDL_SetError("Invalid emissive tint");
@@ -148,6 +155,9 @@ bool Material::Save(const std::string& requestedFile) const
         return false;
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "type");
     if (!cJSON_AddStringToObject(json.get(), "type", materialTypes.at(static_cast<std::size_t>(type)).key))
+        return SDL_OutOfMemory();
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "useVertexAlphaAO");
+    if (!cJSON_AddBoolToObject(json.get(), "useVertexAlphaAO", useVertexAlphaAO))
         return SDL_OutOfMemory();
     const auto unit = [](float v) { return v >= 0 && v <= 1; };
     if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
