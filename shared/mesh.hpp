@@ -67,6 +67,13 @@ struct MeshPart
 
 struct Mesh
 {
+    static constexpr std::size_t maxLODCount = 16;
+    // LOD0 is this mesh. Additional levels share its material assignments.
+    struct LOD { std::shared_ptr<Mesh> mesh; double threshold; };
+    std::vector<LOD> lods;
+    bool lodDistances = false; // Thresholds are meters; otherwise fractions of screen height.
+    std::size_t SelectLOD(double screenHeight, double localDistance, int previous = -1) const;
+    const Mesh& Level(std::size_t level) const { return level ? *lods.at(level - 1).mesh : *this; }
     Bounds3 bounds; // Local space. Filled when an imported or generated world mesh is finished.
     void UpdateBounds();
     std::string assetPath; // Relative to assets/models.

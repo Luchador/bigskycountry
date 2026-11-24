@@ -15,6 +15,28 @@ void Mesh::UpdateBounds()
 {
     bounds = {};
     for (const MeshVertex& vertex : vertices) bounds.Include(vertex.position);
+    for (const auto& lod : lods)
+        if (!lod.mesh->bounds.Empty())
+        {
+            bounds.Include(lod.mesh->bounds.min);
+            bounds.Include(lod.mesh->bounds.max);
+        }
+}
+
+std::size_t Mesh::SelectLOD(double screenHeight, double localDistance, int previous) const
+{
+    std::size_t level = 0;
+    for (const auto& lod : lods)
+    {
+        // Hysteresis prevents repeated switches while hovering around a boundary.
+        const bool wasCoarser = previous > int(level);
+        const double bias = previous < 0 ? 1.0 : (wasCoarser ? 0.9 : 1.1);
+        const bool coarser = lodDistances ? localDistance >= lod.threshold * bias :
+                                           screenHeight <= lod.threshold / bias;
+        if (!coarser) break;
+        ++level;
+    }
+    return level;
 }
 
 MeshTransform MeshTransform::AxisRotation(Vector3 unitAxis, double radians)

@@ -25,7 +25,7 @@ it does not add a global loading pause for the player.
 
 ## Loading and unloading
 
-A CPU worker reads cells and shared GLB models and builds collision BVHs. The main
+A CPU worker reads cells and shared GLB/FBX models (including authored LODs) and builds collision BVHs. The main
 thread publishes completed data and owns all GPU operations. Each streamer has
 one in-flight request/result slot: camera teleports cannot accumulate an
 unbounded queue. Completions outside the new desired set are discarded. Shutdown

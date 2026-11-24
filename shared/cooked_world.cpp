@@ -20,6 +20,13 @@ std::size_t MeshBytes(const std::shared_ptr<const Mesh> &mesh)
     if (!mesh) return 0;
     auto bytes = sizeof(Mesh) + mesh->vertices.capacity() * sizeof(MeshVertex) +
         mesh->indices.capacity() * sizeof(std::uint32_t) + mesh->parts.capacity() * sizeof(MeshPart);
+    bytes += mesh->assetPath.capacity() + mesh->lods.capacity() * sizeof(Mesh::LOD);
+    for (const auto& lod : mesh->lods)
+    {
+        const auto& level = *lod.mesh;
+        bytes += sizeof(Mesh) + level.assetPath.capacity() + level.vertices.capacity() * sizeof(MeshVertex) +
+            level.indices.capacity() * sizeof(std::uint32_t) + level.parts.capacity() * sizeof(MeshPart);
+    }
     if (mesh->materials)
     {
         bytes += sizeof(MeshMaterials) + mesh->materials->slots.capacity() * sizeof(MeshMaterialSlot) + mesh->materials->file.capacity();

@@ -48,7 +48,7 @@ public:
     // One batch per 3D viewport. All submissions share depth and stencil until End.
     // Supply the sky lighting for a world view. Omit it for a prelit editor preview.
     // Fog and shadows are opt-in for world viewports; previews stay clear.
-    void Forget(const void* key) { resident.erase(key); }
+    void Forget(const void* key);
     std::size_t ResidentBytes() const;
     // Per-frame work counters, also displayed by the F3 overlay.
     std::size_t PreparedVertices() const { return preparedVertices; }
@@ -78,7 +78,8 @@ public:
     void SubmitMaterialMesh(const MeshInstance& instance, const std::string& material, MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});
     // Long-lived world placements can reuse their GPU vertices across frames.
     void SubmitWorldMesh(const MeshInstance& instance, const std::string& material = {},
-                         MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1});
+                         MeshUVs mapping = MeshUVs::Authored, SDL_FColor tint = {1, 1, 1, 1}, int lodOverride = -1);
+    std::size_t MeshLOD(const MeshInstance& instance, int lodOverride = -1) const;
     // Mark the world triangles before submitting solid editor handles and overlays.
     void WireframeSubmittedGeometry();
     // Subsequent solid editor handles depth-test against each other in front of the world.
@@ -140,7 +141,7 @@ private:
         std::vector<WorldDepthVertex> pendingUpload;
         std::vector<MaterialRange> parts; // Contiguous, including the untextured gaps.
         std::string material;
-        std::uint64_t revision = 0, lastFrame = 0, uploadFrame = 0;
+        std::uint64_t revision = 0, lastFrame = 0, uploadFrame = 0, choiceFrame = 0;
         std::weak_ptr<const Mesh> mesh;
         MeshTransform transform;
         bool moving = false;
@@ -152,8 +153,20 @@ private:
         std::shared_ptr<ResidentGeometry> geometry;
         size_t before; // Position in the dynamic stream, preserving submission order.
         bool selected;
+        bool uploadOnly = false; // A ready LOD remains visible while this one uploads.
     };
-    std::unordered_map<const void*, std::shared_ptr<ResidentGeometry>> resident;
+    struct ResidentKey
+    {
+        const void* owner;
+        std::size_t lod;
+        ResidentKey(const void* owner, std::size_t lod = 0) : owner(owner), lod(lod) {}
+        bool operator==(const ResidentKey&) const = default;
+    };
+    struct ResidentHash
+    {
+        std::size_t operator()(ResidentKey key) const { return std::hash<const void*>{}(key.owner) ^ (key.lod * 0x9e3779b9u); }
+    };
+    std::unordered_map<ResidentKey, std::shared_ptr<ResidentGeometry>, ResidentHash> resident;
     std::vector<ResidentDraw> residentDraws;
     std::uint64_t frame = 0;
     std::size_t preparedVertices = 0, uploadedBytes = 0;

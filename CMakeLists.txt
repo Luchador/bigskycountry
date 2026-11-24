@@ -19,6 +19,16 @@ FetchContent_Declare(cgltf
 )
 FetchContent_MakeAvailable(cgltf)
 
+# ufbx 0.23.1 (MIT), static FBX geometry and authored LOD groups.
+FetchContent_Declare(ufbx
+    GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+    GIT_TAG 5955c5c0b042ac2dc6f32955ab206aaec0620cfc
+    GIT_SUBMODULES ""
+    SOURCE_SUBDIR library_only)
+FetchContent_MakeAvailable(ufbx)
+add_library(BigSkyFBX STATIC "${ufbx_SOURCE_DIR}/ufbx.c")
+target_include_directories(BigSkyFBX PUBLIC "${ufbx_SOURCE_DIR}")
+
 # Decode the same DDS blocks on devices using the software world renderer.
 FetchContent_Declare(bcdec
     URL https://codeload.github.com/iOrange/bcdec/tar.gz/80859ed3b7afb1c527a2a99d70c61457bea72d0c
@@ -81,6 +91,7 @@ add_library(BigSkyApplication STATIC
     shared/object_io.cpp
     shared/mesh.cpp
     shared/mesh_import.cpp
+    shared/mesh_fbx.cpp
     shared/mesh_materials.cpp
     shared/world_renderer.cpp
     shared/spatial_index.cpp
@@ -158,7 +169,7 @@ target_compile_features(BigSkyApplication PUBLIC cxx_std_20 PRIVATE c_std_11)
 set_source_files_properties(shared/frame_profiler.cpp PROPERTIES COMPILE_DEFINITIONS "BIGSKY_BUILD_CONFIG=\"$<CONFIG>\"")
 target_include_directories(BigSkyApplication PUBLIC shared PRIVATE "${ttf2mesh_SOURCE_DIR}" "${cdt_SOURCE_DIR}/CDT/include" "${cjson_SOURCE_DIR}" "${cgltf_SOURCE_DIR}" "${bcdec_SOURCE_DIR}")
 find_package(Threads REQUIRED)
-target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static PRIVATE meshoptimizer Threads::Threads)
+target_link_libraries(BigSkyApplication PUBLIC SDL3::SDL3-static PRIVATE meshoptimizer Threads::Threads BigSkyFBX)
 include(cmake/editor_geometry_cache.cmake)
 include(cmake/shaders.cmake)
 
@@ -271,6 +282,7 @@ add_custom_target(BigSkyAssets
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bcdec_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/bcdec.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${sdl3_image_SOURCE_DIR}/LICENSE.txt" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/SDL_image.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${cgltf_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/cgltf.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${ufbx_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:BigSkyCountry>/licenses/ufbx.txt"
     VERBATIM
 )
 add_dependencies(BigSkyAssets BigSkyTextures)

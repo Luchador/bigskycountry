@@ -418,10 +418,45 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
     }
 }
 
-void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::string& material,
-                                    MeshUVs mapping, SDL_FColor tint)
+void WorldRenderer::Forget(const void* key)
 {
-    if (!instance.mesh || !BoundsNeeded(instance.mesh->bounds, &instance.transform)) return;
+    for (std::size_t i = 0; i < Mesh::maxLODCount; ++i) resident.erase({key, i});
+}
+
+std::size_t WorldRenderer::MeshLOD(const MeshInstance& instance, int lodOverride) const
+{
+    if (!instance.mesh || instance.mesh->lods.empty()) return 0;
+    const auto& mesh = *instance.mesh;
+    if (lodOverride >= 0) return std::min(std::size_t(lodOverride), mesh.lods.size());
+    if (!camera || viewport.h <= 0 || mesh.bounds.Empty()) return 0;
+    const double scale = std::max({Math::Length(instance.transform.x), Math::Length(instance.transform.y), Math::Length(instance.transform.z)});
+    const Vector3 center = instance.transform.Point((mesh.bounds.min + mesh.bounds.max) * 0.5);
+    const double distance = Math::Length(center - camera->GetPosition());
+    const double diameter = Math::Length(mesh.bounds.max - mesh.bounds.min) * scale;
+    const double height = diameter * focal / (std::max(worldNearDepth, distance) * viewport.h);
+    int previous = -1;
+    std::uint64_t latest = 0;
+    for (std::size_t i = 0; i <= mesh.lods.size(); ++i)
+    {
+        const auto found = resident.find({&instance, i});
+        if (found == resident.end() || !found->second) continue;
+        const auto& entry = *found->second;
+        if (entry.choiceFrame >= latest && entry.choiceFrame + 1 >= frame && entry.mesh.lock().get() == &mesh.Level(i))
+        {
+            latest = entry.choiceFrame;
+            previous = int(i);
+        }
+    }
+    return mesh.SelectLOD(height, distance / std::max(scale, 1e-12), previous);
+}
+
+void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::string& material,
+                                    MeshUVs mapping, SDL_FColor tint, int lodOverride)
+{
+    if (!source.mesh || !BoundsNeeded(source.mesh->bounds, &source.transform)) return;
+    const auto level = MeshLOD(source, lodOverride);
+    MeshInstance instance = source;
+    if (level) instance.mesh = source.mesh->lods[level - 1].mesh;
     if (material.empty() && instance.mesh->HasMaterials()) mapping = MeshUVs::Authored;
     const auto emit = [&] {
         if (material.empty()) SubmitMesh(instance, tint);
@@ -436,13 +471,14 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
         return;
     }
     const auto& bounds = instance.mesh->bounds;
-    auto& entry = resident[&instance];
+    auto& entry = resident[{&source, level}];
     const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
     const auto revision = instance.mesh->materials ? instance.mesh->materials->revision : 0;
     if (sameMesh && entry->transform != instance.transform)
     {
         // Stream moving placements. Once stationary, bake the new transform once.
         entry->lastFrame = frame;
+        entry->choiceFrame = frame;
         entry->transform = instance.transform;
         entry->moving = true;
         emit();
@@ -466,7 +502,34 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& instance, const std::str
     }
     PrepareMesh(*entry, instance);
     entry->lastFrame = frame;
-    if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), false});
+    entry->choiceFrame = frame;
+    std::shared_ptr<ResidentGeometry> fallback;
+    const auto ready = [](const ResidentGeometry& geometry) {
+        return geometry.complete && geometry.buffer && geometry.uploadedBytes == geometry.bufferBytes;
+    };
+    if (!ready(*entry))
+    {
+        std::size_t best = Mesh::maxLODCount;
+        for (std::size_t i = 0; i <= source.mesh->lods.size(); ++i)
+        {
+            if (i == level) continue;
+            const auto found = resident.find({&source, i});
+            if (found == resident.end() || !found->second) continue;
+            const auto& other = *found->second;
+            const auto gap = i > level ? i - level : level - i;
+            if (gap >= best || !ready(other) || other.moving || other.mesh.lock().get() != &source.mesh->Level(i) ||
+                other.transform != instance.transform || other.revision != revision || other.material != material ||
+                other.mapping != mapping || other.tint.r != tint.r || other.tint.g != tint.g || other.tint.b != tint.b) continue;
+            best = gap;
+            fallback = found->second;
+        }
+    }
+    if (!entry->parts.empty()) residentDraws.push_back({entry, vertices.size(), false, bool(fallback)});
+    if (fallback)
+    {
+        fallback->lastFrame = frame;
+        residentDraws.push_back({fallback, vertices.size(), false});
+    }
 }
 
 void WorldRenderer::AppendSelectionVertex(SDL_FPoint point, double depth, double lift)

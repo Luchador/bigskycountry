@@ -418,6 +418,7 @@ bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
             };
             for (const auto& batch : residentDraws)
             {
+                if (batch.uploadOnly) continue;
                 const auto& mesh = *batch.geometry;
                 if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
                     !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes)) || !cascade.Intersects(mesh.bounds)) continue;
@@ -658,6 +659,7 @@ bool WorldRenderer::DrawGPU()
         boundMaterial = material;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
+        if (batch.uploadOnly) return;
         const auto& mesh = *batch.geometry;
         if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
             !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes))) return;

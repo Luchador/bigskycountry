@@ -1,5 +1,6 @@
 #include "mesh.hpp"
 #include "mesh_materials.hpp"
+#include "mesh_fbx.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
@@ -345,7 +346,8 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
     std::unique_ptr<void, decltype(&SDL_free)> bytes(SDL_LoadFile(path.c_str(), &size), SDL_free);
     auto mesh = std::make_shared<Mesh>();
 
-    if (!bytes || !ImportGLB(bytes.get(), size, *mesh))
+    const bool fbx = name.size() >= 4 && SDL_strcasecmp(name.c_str() + name.size() - 4, ".fbx") == 0;
+    if (!bytes || !(fbx ? ImportFBX(bytes.get(), size, *mesh) : ImportGLB(bytes.get(), size, *mesh)))
     {
         const std::string reason = SDL_GetError();
         SDL_SetError("Cannot load model '%s': %s", name.c_str(), reason.c_str());
@@ -356,6 +358,11 @@ std::shared_ptr<const Mesh> MeshAssets::Load(const std::string& relativePath)
     mesh->UpdateBounds();
     mesh->assetPath = name;
     if (!MeshMaterialIO::Bind(*mesh, location)) return nullptr;
+    for (auto& lod : mesh->lods)
+    {
+        lod.mesh->assetPath = name;
+        lod.mesh->materials = mesh->materials;
+    }
     loaded.emplace(name, mesh);
     return mesh;
 }

@@ -36,6 +36,7 @@ private:
     CameraView camera;
     double yaw = 0, pitch = 0, distance = 3;
     float scroll = 0;
+    int previewLOD = -1; // Auto, then each authored LOD.
     std::optional<SDL_FPoint> orbit;
     std::optional<std::size_t> hover;
     std::vector<MaterialEditor> materialPreviews;

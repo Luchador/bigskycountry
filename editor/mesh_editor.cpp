@@ -6,7 +6,7 @@
 
 namespace
 {
-    constexpr float panelWidth = 280, rowHeight = 88, header = 72;
+    constexpr float panelWidth = 280, rowHeight = 88, header = 108;
     bool Fill(SDL_Renderer* r, SDL_FRect box, SDL_Color c)
     { return EditorTheme::SetColor(r, c) && SDL_RenderFillRect(r, &box); }
     bool Text(SDL_Renderer* r, float x, float y, const std::string& s, SDL_Color c = EditorTheme::text)
@@ -89,6 +89,7 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
     const auto center = (instance.mesh->bounds.min + instance.mesh->bounds.max) * 0.5;
     const double radius = std::max(1e-6, Math::Length(instance.mesh->bounds.max - center));
     instance.transform = {center * (-1 / radius), {1 / radius, 0, 0}, {0, 1 / radius, 0}, {0, 0, 1 / radius}};
+    previewLOD = -1;
     catalog = &textures; path = relative; scroll = 0; status.clear();
     imagesDirty = true;
     Frame();
@@ -167,6 +168,12 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
         if (SDL_PointInRectFloat(&point, &view)) { orbit = point; SDL_CaptureMouse(true); }
+        else if (point.x >= view.w + 10 && point.x < view.w + panelWidth - 10 && point.y >= 72 && point.y < 100)
+        {
+            ++previewLOD;
+            if (previewLOD > int(instance.mesh->lods.size())) previewLOD = -1;
+            dirty = true;
+        }
         else if (point.y >= header && point.y < view.h - 32)
         {
             for (std::size_t i = 0; i < instance.mesh->materials->slots.size(); ++i)
@@ -229,7 +236,8 @@ bool MeshEditorWindow::Draw()
     const WorldLighting lights{{Math::Normalize(Vector3{-0.4, 0.7, -0.6}), {2.0, 1.9, 1.8}},
                                {Math::Normalize(Vector3{0.6, 0.2, 0.7}), {0.35, 0.4, 0.5}}, {0.22, 0.22, 0.24}};
     if (!preview->Begin(renderer, camera, &lights)) return false;
-    preview->SubmitWorldMesh(instance);
+    const auto level = preview->MeshLOD(instance, previewLOD);
+    preview->SubmitWorldMesh(instance, {}, WorldRenderer::MeshUVs::Authored, {1, 1, 1, 1}, previewLOD);
     if (!preview->End()) return false;
     // Large previews may need several budgeted upload frames before becoming visible.
     dirty = preview->PreparedVertices() != 0 || preview->UploadedBytes() != 0;
@@ -238,7 +246,10 @@ bool MeshEditorWindow::Draw()
     Text(renderer, view.w + 10, 14, "Material slots");
     Text(renderer, view.w + 10, 32, "Drag materials here");
     Text(renderer, view.w + 10, 50, std::to_string(instance.mesh->materials->slots.size()) + " slots | " +
-         std::to_string(instance.mesh->indices.size() / 3) + " tris");
+         std::to_string(instance.mesh->Level(level).indices.size() / 3) + " tris");
+    Fill(renderer, {view.w + 10, 72, panelWidth - 20, 28}, EditorTheme::button);
+    Text(renderer, view.w + 18, 82, (previewLOD < 0 ? "Auto: " : "Preview: ") +
+         std::string("LOD ") + std::to_string(level) + " / " + std::to_string(instance.mesh->lods.size()) + "  [click]");
     const SDL_Rect clip{int(view.w), int(header), int(panelWidth), std::max(0, int(view.h - header - 32))};
     SDL_SetRenderClipRect(renderer, &clip);
     const auto& slots = instance.mesh->materials->slots;

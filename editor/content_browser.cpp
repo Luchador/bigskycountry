@@ -233,7 +233,8 @@ void ContentBrowser::Refresh()
     for (; !error && it != end; it.increment(error))
     {
         std::error_code statError;
-        if (it->is_regular_file(statError) && SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".glb") == 0)
+        if (it->is_regular_file(statError) && (SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".glb") == 0 ||
+            SDL_strcasecmp(Utf8(it->path().extension()).c_str(), ".fbx") == 0))
         {
             const fs::path relative = it->path().lexically_relative(root);
             folders[Utf8(relative.parent_path())].push_back(Utf8(relative.filename()));
@@ -263,7 +264,7 @@ void ContentBrowser::Refresh()
     }
     if (rows.empty() && scanStatus.empty())
     {
-        scanStatus = "No GLB models found";
+        scanStatus = "No GLB or FBX models found";
     }
 }
 

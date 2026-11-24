@@ -86,7 +86,7 @@ Terrain placements use the separate `TERR` section described below. The current 
 
 ### Static mesh assets
 
-Put a self-contained glTF 2.0 binary under `assets/models/`. Model references use paths relative to that directory. The editor reads the project GLB and the game reads its staged copy in `cooked/models/`. The importer reads the active scene, applies node transforms, and converts glTF coordinates to the engine's Y-up world. It supports indexed and unindexed triangle lists, strips and fans, including interleaved vertex data. It retains normals and the first UV set. The current opaque pass draws material base color multiplied by vertex color. Texture sampling, animation, skinning, sparse accessors, and compressed primitives are outside this import path.
+Put a self-contained glTF 2.0 binary (`.glb`) or static FBX (`.fbx`) under `assets/models/`. Model references use paths relative to that directory. The editor reads the project model and the game reads its staged copy in `cooked/models/`. The importer reads the active scene, applies node transforms, and converts glTF coordinates to the engine's Y-up world. It supports indexed and unindexed triangle lists, strips and fans, including interleaved vertex data. It retains normals and the first UV set. The current opaque pass draws material base color multiplied by vertex color. Texture sampling, animation, skinning, sparse accessors, and compressed primitives are outside this import path.
 
 A `MESH` version 1 section in a world file stores one instance per record. Write the quoted model path, world position (X Y Z), then the three basis vectors (local X, Y and Z in world coordinates). The following payload places a model at (10, 2, 30) with its authored size and orientation.
 
@@ -98,7 +98,7 @@ In C++, load the asset with `world.models.Load("props/barn.glb")`. On success, a
 
 ### Placed objects
 
-`BSCObject` holds a transform, a shared mesh, health, invincibility, and a `hasCollision` flag (true by default). `Building`, `Vehicle`, `Prop`, `Character`, and `Marker` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same GLB share its geometry.
+`BSCObject` holds a transform, a shared mesh, health, invincibility, and a `hasCollision` flag (true by default). `Building`, `Vehicle`, `Prop`, `Character`, and `Marker` inherit those fields. Signs and trees can use `Prop`. NPCs and animals can use `Character`. Each object gets its own transform and gameplay state. Objects using the same model share its geometry and LODs.
 
 Place an object from C++ using a model path relative to `assets/models`. This example places a barn from `assets/models/buildings/barn.glb`.
 
@@ -115,15 +115,25 @@ if (!barn)
 
 The world owns the returned object. Use `SetTransform` to edit its placement. A successful edit updates the matrix used for rendering and picking. Use `world.Save()` to persist the placement. Positions are in meters. Scale defaults to (1, 1, 1) and applies along the model axes. Rotation defaults to zero and applies about X, then Y, then Z in radians. Signed scale supports mirroring. Each game frame calls the object's virtual `Tick` with elapsed seconds.
 
-The optional `OBJS` version 5 section stores one record per object. Each record contains the type, quoted GLB path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record adds its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–4 also load, with collision enabled by default. Older markers use their original mesh colors and white text. A vehicle record adds its acceleration in meters per second squared. Every version 5 record ends with a collision flag (0 or 1). Existing `MESH` placements keep their original transform, including any shear.
+The optional `OBJS` version 5 section stores one record per object. Each record contains the type, quoted model path, position XYZ, rotation XYZ, scale XYZ, health, and an invincibility flag (0 or 1). Type IDs are 0 for a generic object, 1 for a building, 2 for a vehicle, 3 for a prop, 4 for a character, 5 for a marker, and 6 for the editor-only spawn point. A marker record adds its quoted UTF-8 label, quoted material path, and three text color channels (RGB, 0–255). Versions 1–4 also load, with collision enabled by default. Older markers use their original mesh colors and white text. A vehicle record adds its acceleration in meters per second squared. Every version 5 record ends with a collision flag (0 or 1). Existing `MESH` placements keep their original transform, including any shear.
 
 ### Mesh editor
 
-Double-click a GLB model in the Content Browser's **Models** tab to open a floating **Mesh Editor**. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The main editor remains usable while this window is open.
+Double-click a GLB or FBX model in the Content Browser's **Models** tab to open a floating **Mesh Editor**. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The main editor remains usable while this window is open.
 
-The right panel lists the model's named glTF material slots. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
+The right panel lists the model's named material slots. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
 
-Assignments save immediately to `model.glb.bmesh` next to the GLB in `assets/models`. The original GLB is unchanged. These are shared model settings, not world edits or world undo actions; keep the sidecar in source control alongside the model. Rebuilding copies it to `build/cooked/models`. Recook the world after changing assignments so its material dependencies and asset fingerprints are current. Models without a sidecar continue to load as before.
+Assignments save immediately to `model.glb.bmesh` or `model.fbx.bmesh` next to the model in `assets/models`. The original model is unchanged. These are shared model settings, not world edits or world undo actions; keep the sidecar in source control alongside the model. Rebuilding copies it to `build/cooked/models`. Recook the world after changing assignments so its material dependencies and asset fingerprints are current. Models without a sidecar continue to load as before.
+
+### SpeedTree / FBX models and LODs
+
+Export a static FBX with its LOD group, copy it into `assets/models` (for example `vegetation/oak01.fbx`), then click **Refresh** in the Content Browser. FBX import applies node/pivot transforms, converts the declared axis system and units to the engine's Y-up meters, triangulates polygons, and retains normals, UV0, vertex colors, material slots, and explicit double-sided materials. Animation, skinning, wind, morph targets, and automatic texture/material conversion are not included. Copy source textures into `assets/textures`, create `.bmat` materials, and assign them in the Mesh Editor; leaf cards generally need an **Alpha Cutout** material with the appropriate opacity map.
+
+Native FBX LOD groups import as separate levels, up to 16 total. Ordinary meshes outside a group appear in every level. Multiple groups use matching child indices and clamp groups with fewer levels to their last child. LOD0 is the highest detail; all levels share material assignments. The Mesh Editor's **Auto / Preview LOD** button cycles through automatic selection and each level, with its triangle count displayed above it.
+
+Both the editor viewport and game select one LOD per placement, using the same level for its surface and shadows. A single group's valid ordered screen-percentage or distance thresholds are honored. When thresholds are absent/zero (as in the supplied SpeedTree oak), the defaults switch below approximately 35% and 15% projected bounding-sphere screen height; further levels continue decreasing by 3/7. A 10% hysteresis band avoids toggling at a boundary. Instance scale affects selection. A ready level remains visible while a replacement is prepared and uploaded under the normal per-frame budgets. All imported levels count toward shared model memory, and cached GPU levels remain subject to the render cache budget.
+
+Picking and collision continue using LOD0 so the collision surface does not change as the camera moves. Rebuild after adding a model to stage the FBX and its `.fbx.bmesh` sidecar, then recook the world for the game. No world file migration is needed.
 
 ### Place markers
 
@@ -340,7 +350,7 @@ For a control point, X is roll about the tangent, Y is yaw about world up, and Z
 
 The editor uses a dark charcoal theme. New panels and controls should use the UI color roles in `editor/editor_theme.hpp`. For a native Windows dialog, call `WindowsTheme::ApplyDialog` during `WM_INITDIALOG` to theme its standard controls. Viewport selection colors are defined in `shared/editor_colors.hpp`.
 
-Drag a GLB model from the **Models** tab into the 3D viewport to place a **Prop**. The lowest part of the model sits at the height of the nearest road or terrain triangle under the cursor. On empty ground it sits at Y = 0. If the ray misses the ground, its pivot lands 20 m along the cursor ray. The new prop is selected. Use **W** to move it, **E** to rotate it, or **Delete** to remove it. Placement, transforms and deletion save to the world and support **Ctrl+Z** and **Ctrl+Y**.
+Drag a GLB or FBX model from the **Models** tab into the 3D viewport to place a **Prop**. The lowest part of the model sits at the height of the nearest road or terrain triangle under the cursor. On empty ground it sits at Y = 0. If the ray misses the ground, its pivot lands 20 m along the cursor ray. The new prop is selected. Use **W** to move it, **E** to rotate it, or **Delete** to remove it. Placement, transforms and deletion save to the world and support **Ctrl+Z** and **Ctrl+Y**.
 
 Select any object, including a Marker, press **W**, then hold **Shift** and drag a translation arrow to place a copy in the same Outliner folder. The copy keeps the object’s properties and stays selected. **Esc** cancels the drag and **Ctrl+Z** undoes the duplication.
 
@@ -354,7 +364,7 @@ Double-click a material to open its floating **Material Editor**. Hold the left 
 
 Choose **Unlit** for a surface whose color stays constant as the world lighting changes. Its **Emissive** map is multiplied by the **Emissive tint**, which defaults to white. The **Translucency** map’s red channel multiplied by the slider sets opacity. A black texel is invisible, and a white texel at the default slider value of **1.00** is opaque. Both slots use white when empty, so the tint and slider also work on their own.
 
-The content browser uses a native tree of the GLB files in `assets/models`. Select a model to preview it, or click **Refresh** after changing the folder. The road inspector uses checkboxes for shoulders and drop-downs for alignment, three-lane layout, and edges. Its changes use the editor’s existing undo and save commands. The toolbar’s camera-speed slider stays in sync with the viewport mouse wheel.
+The content browser uses a native tree of the GLB and FBX files in `assets/models`. Select a model to preview it, or click **Refresh** after changing the folder. The road inspector uses checkboxes for shoulders and drop-downs for alignment, three-lane layout, and edges. Its changes use the editor’s existing undo and save commands. The toolbar’s camera-speed slider stays in sync with the viewport mouse wheel.
 
 New roads default to **Bézier** alignment. For a one-lane road, **Extra width (m)** adds to the 5 m travel lane in 0.5 m steps, evenly on both sides of the spline. Shoulders sit outside the widened lane. You can edit multiple one-lane roads together. Changing the lane count keeps the extra width setting for the next time the road has one lane.
 
