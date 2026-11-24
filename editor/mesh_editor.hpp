@@ -4,16 +4,25 @@
 #include "camera_view.hpp"
 #include <optional>
 
+#ifdef _WIN32
+class WindowsMeshControls;
+#endif
+
 // Modeless, owned utility window. Material definitions/textures stay shared assets.
 class MeshEditorWindow
 {
 public:
-    ~MeshEditorWindow() { Close(); }
+    MeshEditorWindow();
+    ~MeshEditorWindow();
     bool Open(SDL_Window* owner, TextureCatalog& catalog, const std::string& path);
     void Close();
     bool Handle(const SDL_Event& event);
     bool Draw();
-    bool Focused() const { return window && SDL_GetKeyboardFocus() == window; }
+    bool Focused() const;
+#ifdef _WIN32
+    // Called by the editor's existing Windows message hook; true means consumed.
+    bool HandleNativeMessage(void* message);
+#endif
     SDL_Window* Window() const { return window; }
     bool ContainsScreen(float x, float y) const;
     std::optional<std::size_t> SlotAtScreen(float x, float y) const;
@@ -21,6 +30,10 @@ public:
     bool Drop(std::size_t slot, const std::string& material);
 
 private:
+#ifdef _WIN32
+    friend class WindowsMeshControls;
+    std::unique_ptr<WindowsMeshControls> controls;
+#endif
     SDL_FRect View() const;
     SDL_FRect Panel() const;
     SDL_FRect Divider() const;
@@ -37,6 +50,7 @@ private:
     void DestroyThumbnails();
     bool UpdateThumbnails();
     SDL_Window* window = nullptr;
+    SDL_Window* viewportWindow = nullptr; // Native child on Windows, otherwise window.
     SDL_Renderer* renderer = nullptr;
     std::unique_ptr<WorldRenderer> preview;
     MeshInstance instance;

@@ -946,9 +946,7 @@ struct WindowsPanels::Impl
                 const auto slot = material ? std::nullopt : self.materialEditor.SlotAt(point);
                 const HWND under = WindowFromPoint(point);
                 auto& meshEditor = self.browser->MeshWindow();
-                const HWND meshWindow = meshEditor.Window() ? static_cast<HWND>(SDL_GetPointerProperty(
-                    SDL_GetWindowProperties(meshEditor.Window()), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)) : nullptr;
-                const auto meshSlot = material && meshWindow == under ? meshEditor.SlotAtScreen(float(point.x), float(point.y)) : std::nullopt;
+                const auto meshSlot = material ? meshEditor.SlotAtScreen(float(point.x), float(point.y)) : std::nullopt;
                 const bool strip = self.lastInspector && self.lastInspector->properties.HasTransitionSlot() &&
                                   under == GetDlgItem(self.road, IDC_TRANSITION_MATERIAL);
                 const bool inspector = material && self.lastInspector &&
@@ -1658,6 +1656,7 @@ struct WindowsPanels::Impl
     static bool SDLCALL Filter(void* data, MSG* msg)
     {
         auto& self = *static_cast<Impl*>(data);
+        if (self.browser->MeshWindow().HandleNativeMessage(msg)) return false;
         HWND focus = GetFocus();
         if (msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {

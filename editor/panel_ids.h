@@ -169,3 +169,13 @@
 // Keep anchor traffic controls distinct from the intersection paint controls.
 #define IDC_TRAFFIC_CONTROL_LABEL 1192
 #define IDC_TRAFFIC_CONTROL 1193
+
+#define IDD_MESH 117
+#define IDC_MESH_TITLE 1400
+#define IDC_MESH_HELP 1401
+#define IDC_MESH_STATS 1402
+#define IDC_MESH_LOD_LABEL 1403
+#define IDC_MESH_LOD 1404
+#define IDC_MESH_SLOTS 1405
+#define IDC_MESH_REMOVE 1406
+#define IDC_MESH_STATUS 1407

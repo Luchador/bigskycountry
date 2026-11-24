@@ -3,6 +3,9 @@
 #include "editor_theme.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef _WIN32
+#include "windows_mesh_controls.hpp"
+#endif
 
 namespace
 {
@@ -37,6 +40,23 @@ namespace
     }
 }
 
+MeshEditorWindow::MeshEditorWindow() = default;
+MeshEditorWindow::~MeshEditorWindow() { Close(); }
+
+bool MeshEditorWindow::Focused() const
+{
+#ifdef _WIN32
+    return controls && controls->Focused();
+#else
+    return window && SDL_GetKeyboardFocus() == window;
+#endif
+}
+
+#ifdef _WIN32
+bool MeshEditorWindow::HandleNativeMessage(void* message)
+{ return controls && controls->HandleMessage(*static_cast<MSG*>(message)); }
+#endif
+
 SDL_FRect MeshEditorWindow::Panel() const
 {
     int w = 0, h = 0;
@@ -47,8 +67,14 @@ SDL_FRect MeshEditorWindow::Panel() const
 }
 SDL_FRect MeshEditorWindow::View() const
 {
+#ifdef _WIN32
+    int w = 0, h = 0;
+    SDL_GetWindowSize(viewportWindow, &w, &h);
+    return {0, 0, float(w), float(h)};
+#else
     const auto panel = Panel();
     return {0, panel.y, std::max(1.f, panel.x - dividerWidth), panel.h};
+#endif
 }
 SDL_FRect MeshEditorWindow::Divider() const
 { const auto view = View(); return {view.w, view.y, dividerWidth, view.h}; }
@@ -79,6 +105,10 @@ void MeshEditorWindow::Close()
     DestroyThumbnails();
     preview.reset(); // Release GPU buffers before their renderer/device.
     SDL_DestroyRenderer(renderer);
+#ifdef _WIN32
+    controls.reset(); // Destroy the SDL viewport wrapper before its native parent.
+#endif
+    viewportWindow = nullptr;
     SDL_DestroyWindow(window);
     renderer = nullptr; window = nullptr;
     instance = {};
@@ -119,7 +149,17 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
         SDL_DestroyProperties(properties);
         if (!window) return false;
         SDL_SetWindowMinimumSize(window, 560, 320);
-        renderer = SDL_CreateRenderer(window, nullptr);
+#ifdef _WIN32
+        controls = std::make_unique<WindowsMeshControls>(*this);
+        viewportWindow = controls->Create(window);
+        if (!viewportWindow) { Close(); return false; }
+#else
+        viewportWindow = window;
+#endif
+        // Match the main 3D viewport: prefer SDL GPU so the shared MSAA setting
+        // applies here too, while honoring an explicitly requested renderer.
+        if (!SDL_GetHint(SDL_HINT_RENDER_DRIVER)) renderer = SDL_CreateRenderer(viewportWindow, "gpu");
+        if (!renderer) renderer = SDL_CreateRenderer(viewportWindow, nullptr);
         if (!renderer) { Close(); return false; }
         resizeCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
         preview = std::make_unique<WorldRenderer>(AssetRoot::Project);
@@ -139,6 +179,9 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
     catalog = &textures; path = relative; scroll = 0; status.clear();
     imagesDirty = true;
     Frame();
+#ifdef _WIN32
+    controls->Reload();
+#endif
     SDL_SetWindowTitle(window, ("Mesh Editor - " + relative).c_str());
     SDL_ShowWindow(window);
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(window);
@@ -148,14 +191,21 @@ bool MeshEditorWindow::Open(SDL_Window* owner, TextureCatalog& textures, const s
 
 bool MeshEditorWindow::ContainsScreen(float x, float y) const
 {
+#ifdef _WIN32
+    return controls && controls->ContainsScreen(x, y);
+#else
     if (!window || (SDL_GetWindowFlags(window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))) return false;
     int wx, wy, w, h;
     SDL_GetWindowPosition(window, &wx, &wy); SDL_GetWindowSize(window, &w, &h);
     return x >= wx && y >= wy && x < wx + w && y < wy + h;
+#endif
 }
 
 std::optional<std::size_t> MeshEditorWindow::SlotAtScreen(float x, float y) const
 {
+#ifdef _WIN32
+    return controls ? controls->SlotAtScreen(x, y) : std::nullopt;
+#else
     if (!window || menuOpen || panelGrab || !instance.mesh || !instance.mesh->materials) return {};
     int wx, wy; SDL_GetWindowPosition(window, &wx, &wy);
     const SDL_FPoint point{x - wx, y - wy};
@@ -167,11 +217,18 @@ std::optional<std::size_t> MeshEditorWindow::SlotAtScreen(float x, float y) cons
         if (SDL_PointInRectFloat(&point, &slot)) return i;
     }
     return {};
+#endif
 }
 
 void MeshEditorWindow::Hover(std::optional<std::size_t> slot)
 {
-    if (hover != slot) { hover = slot; dirty = true; }
+    if (hover != slot)
+    {
+        hover = slot; dirty = true;
+#ifdef _WIN32
+        if (controls) controls->InvalidateSlots();
+#endif
+    }
 }
 
 bool MeshEditorWindow::Drop(std::size_t slot, const std::string& material)
@@ -277,7 +334,9 @@ bool MeshEditorWindow::DrawMenu()
 
 bool MeshEditorWindow::Handle(const SDL_Event& event)
 {
-    if (!window || SDL_GetWindowFromEvent(&event) != window) return false;
+    if (!window) return false;
+    const auto* source = SDL_GetWindowFromEvent(&event);
+    if (source != window && source != viewportWindow) return false;
     if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { Close(); return true; }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST || event.type == SDL_EVENT_WINDOW_HIDDEN)
     {
@@ -290,7 +349,12 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
     {
         ClampScroll(); dirty = true;
     }
+#ifdef _WIN32
+    // Native menus and controls receive their own Windows messages.
+    if (source != viewportWindow) return true;
+#else
     if (HandleMenu(event)) return true;
+#endif
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
     {
         if (event.key.key == SDLK_ESCAPE)
@@ -300,27 +364,37 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
                 if (panelGrab) panelWidth = panelDragStart;
                 CancelPointer(); dirty = true;
             }
+#ifndef _WIN32
             else Close();
+#endif
             return true;
         }
         if (event.key.key == SDLK_F) Frame();
     }
-    const auto view = View(), panel = Panel(), divider = Divider();
+    const auto view = View();
+#ifndef _WIN32
+    const auto panel = Panel(), divider = Divider();
+#endif
     if (event.type == SDL_EVENT_MOUSE_WHEEL)
     {
         const SDL_FPoint point{event.wheel.mouse_x, event.wheel.mouse_y};
         if (SDL_PointInRectFloat(&point, &view))
             distance = std::clamp(distance * std::exp(-event.wheel.y * 0.15), 0.02, 50.0);
+#ifndef _WIN32
         else if (SDL_PointInRectFloat(&point, &panel))
         {
             scroll -= event.wheel.y * 40;
             ClampScroll();
         }
+#endif
         dirty = true;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
     {
         const SDL_FPoint point{event.button.x, event.button.y};
+#ifdef _WIN32
+        if (SDL_PointInRectFloat(&point, &view)) { orbit = point; SDL_CaptureMouse(true); }
+#else
         const auto button = LODButton(), clip = SlotClip();
         if (SDL_PointInRectFloat(&point, &divider))
         {
@@ -343,11 +417,13 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
                 if (SDL_PointInRectFloat(&point, &clear)) Drop(i, {});
             }
         }
+#endif
     }
     if (event.type == SDL_EVENT_MOUSE_MOTION)
     {
         const SDL_FPoint point{event.motion.x, event.motion.y};
         if (!(event.motion.state & SDL_BUTTON_LMASK)) CancelPointer();
+#ifndef _WIN32
         if (panelGrab)
         {
             const float available = panel.x + panel.w - dividerWidth;
@@ -355,14 +431,18 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
                                    std::min(200.f, available / 2), std::max(available - 160, available / 2));
             dirty = true;
         }
-        else if (orbit)
+        else
+#endif
+        if (orbit)
         {
             yaw -= (point.x - orbit->x) * 0.008;
             pitch = std::clamp(pitch + (point.y - orbit->y) * 0.008, -1.45, 1.45);
             orbit = point;
             dirty = true;
         }
+#ifndef _WIN32
         SetResizeCursor(panelGrab || (!orbit && SDL_PointInRectFloat(&point, &divider)));
+#endif
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) CancelPointer();
     return true; // Utility-window input must never edit or navigate the world.
@@ -377,9 +457,17 @@ bool MeshEditorWindow::UpdateThumbnails()
     thumbnails.resize(slots.size(), nullptr);
     for (std::size_t i = 0; i < slots.size(); ++i)
         if (!slots[i].material.empty() && materialPreviews[i].Open(*catalog, slots[i].material))
-            if (auto* image = materialPreviews[i].Preview(64, 64)) thumbnails[i] = SDL_CreateTextureFromSurface(renderer, image);
+        {
+            [[maybe_unused]] auto* image = materialPreviews[i].Preview(64, 64);
+#ifndef _WIN32
+            if (image) thumbnails[i] = SDL_CreateTextureFromSurface(renderer, image);
+#endif
+        }
     materialRevision = Material::Revision(); assignmentRevision = instance.mesh->materials->revision;
     imagesDirty = false;
+#ifdef _WIN32
+    controls->RefreshSlots();
+#endif
     return true;
 }
 
@@ -390,9 +478,12 @@ bool MeshEditorWindow::Draw()
     if (!dirty && !imagesDirty) return true;
     if (!UpdateThumbnails()) return false;
     ClampScroll();
-    const auto view = View(), panel = Panel(), divider = Divider();
+    const auto view = View();
+#ifndef _WIN32
+    const auto panel = Panel(), divider = Divider();
+#endif
     int ww, wh, pw, ph;
-    SDL_GetWindowSize(window, &ww, &wh);
+    SDL_GetWindowSize(viewportWindow, &ww, &wh);
     if (!SDL_GetRenderOutputSize(renderer, &pw, &ph)) return false;
     if (ww <= 0 || wh <= 0 || pw <= 0 || ph <= 0) return true;
     const float sx = float(pw) / ww, sy = float(ph) / wh;
@@ -417,6 +508,10 @@ bool MeshEditorWindow::Draw()
     if (!preview->End()) return false;
     // Large previews may need several budgeted upload frames before becoming visible.
     dirty = preview->PreparedVertices() != 0 || preview->UploadedBytes() != 0;
+#ifdef _WIN32
+    controls->Sync(level);
+    return SDL_RenderPresent(renderer);
+#else
     SDL_SetRenderViewport(renderer, nullptr); SDL_SetRenderScale(renderer, sx, sy);
     Fill(renderer, divider, EditorTheme::chrome);
     Fill(renderer, {divider.x + 2, divider.y + (divider.h - 32) / 2, 2, 32}, EditorTheme::disabled);
@@ -451,4 +546,5 @@ bool MeshEditorWindow::Draw()
     Text(renderer, 10, view.y + view.h - 22, Fit("LMB: orbit  Wheel: zoom  F: frame", Characters(view.w - 20)));
     Text(renderer, panel.x + 10, panel.y + panel.h - 22, Fit(status, Characters(panel.w - 20)));
     return DrawMenu() && SDL_RenderPresent(renderer);
+#endif
 }

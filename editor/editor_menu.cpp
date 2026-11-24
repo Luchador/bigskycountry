@@ -13,33 +13,32 @@
 #include <windows.h>
 #include <commctrl.h>
 #include "windows_theme.hpp"
+#include "windows_menu.hpp"
 #include "scene_outliner.hpp"
 #include <cwctype>
 #include "menu_ids.h"
 
+using namespace WindowsMenu;
+
 namespace
 {
-    struct MenuItem
-    {
-        UINT id;
-        const wchar_t* label;
-        UINT flags = MF_ENABLED;
-        bool bar = false;
-    };
-
     // Owner-draw data must live as long as the menu, including while Windows tracks a popup.
     constexpr MenuItem file{0, L"&File", 0, true}, edit{0, L"&Edit", 0, true}, view{0, L"&View", 0, true},
                        settings{0, L"&Settings", 0, true};
     constexpr MenuItem fileItems[] = {{BSC_FILE_SAVE, L"&Save\tCtrl+S"}, {BSC_FILE_COOK_WORLD, L"&Cook World"}};
     constexpr MenuItem editItems[] = {{BSC_EDIT_UNDO, L"&Undo\tCtrl+Z", MF_GRAYED},
                                      {BSC_EDIT_REDO, L"&Redo\tCtrl+Y", MF_GRAYED}};
-    constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe"},
-                                      {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED},
-                                      {BSC_VIEW_TRAFFIC_LANES, L"Traffic &Lanes"},
-                                      {BSC_VIEW_FOG, L"&Fog", MF_CHECKED},
-                                      {BSC_VIEW_SHADOWS, L"&Shadows", MF_CHECKED},
-                                      {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3"}};
+    constexpr MenuItem viewItems[] = {{BSC_VIEW_WIREFRAME, L"&Wireframe", MF_ENABLED, false, true},
+                                      {BSC_VIEW_ROAD_NAMES, L"Road &Names", MF_CHECKED, false, true},
+                                      {BSC_VIEW_TRAFFIC_LANES, L"Traffic &Lanes", MF_ENABLED, false, true},
+                                      {BSC_VIEW_FOG, L"&Fog", MF_CHECKED, false, true},
+                                      {BSC_VIEW_SHADOWS, L"&Shadows", MF_CHECKED, false, true},
+                                      {BSC_VIEW_VISIBILITY_STATS, L"Visibility &Statistics\tF3", MF_ENABLED, false, true}};
     constexpr MenuItem settingsItems[] = {{BSC_PROJECT_SETTINGS, L"&Project Settings"}};
+}
+
+namespace WindowsMenu
+{
     void MenuBackground(HMENU menu, SDL_Color color)
     {
         MENUINFO info{sizeof(info)};
@@ -48,7 +47,7 @@ namespace
         SetMenuInfo(menu, &info);
     }
 
-    bool Insert(HMENU menu, const MenuItem& item, HMENU submenu = nullptr)
+    bool Insert(HMENU menu, const MenuItem& item, HMENU submenu)
     {
         MENUITEMINFOW m{sizeof(m)};
         m.fMask = MIIM_ID | MIIM_FTYPE | MIIM_STATE | MIIM_DATA | MIIM_STRING;
@@ -119,7 +118,7 @@ namespace
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, WindowsTheme::Color(fg));
             if (!item.bar) { r.left += pad; r.right -= pad; }
-            if (item.id == BSC_VIEW_WIREFRAME || item.id == BSC_VIEW_ROAD_NAMES || item.id == BSC_VIEW_FOG || item.id == BSC_VIEW_SHADOWS || item.id == BSC_VIEW_VISIBILITY_STATS)
+            if (item.checkable)
             {
                 if (draw->itemState & ODS_CHECKED)
                 {
@@ -173,15 +172,8 @@ namespace
         ReleaseDC(window, dc);
     }
 
-    LRESULT CALLBACK MenuProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
-                             UINT_PTR subclass, DWORD_PTR eventType)
+    bool HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
     {
-        if (message == WM_NCPAINT || message == WM_NCACTIVATE || message == WM_EXITMENULOOP)
-        {
-            const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
-            PaintMenuBarFrame(window);
-            return result;
-        }
         if (message == WM_MEASUREITEM || message == WM_DRAWITEM)
         {
             auto* measure = message == WM_MEASUREITEM ? reinterpret_cast<MEASUREITEMSTRUCT*>(lParam) : nullptr;
@@ -192,7 +184,8 @@ namespace
                 if (item)
                 {
                     PaintMenuItem(window, *item, measure, draw);
-                    return TRUE;
+                    result = TRUE;
+                    return true;
                 }
             }
         }
@@ -208,9 +201,27 @@ namespace
                 info.cch = 128;
                 if (!GetMenuItemInfoW(menu, i, TRUE, &info) || (info.fState & MFS_DISABLED)) continue;
                 const wchar_t* key = wcschr(title, L'&');
-                if (key && key[1] && towupper(key[1]) == towupper(LOWORD(wParam))) return MAKELRESULT(i, MNC_EXECUTE);
+                if (key && key[1] && towupper(key[1]) == towupper(LOWORD(wParam))) { result = MAKELRESULT(i, MNC_EXECUTE); return true; }
             }
         }
+        return false;
+    }
+
+}
+
+namespace
+{
+    LRESULT CALLBACK MenuProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                             UINT_PTR subclass, DWORD_PTR eventType)
+    {
+        if (message == WM_NCPAINT || message == WM_NCACTIVATE || message == WM_EXITMENULOOP)
+        {
+            const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+            PaintMenuBarFrame(window);
+            return result;
+        }
+        LRESULT menuResult = 0;
+        if (HandleMessage(window, message, wParam, lParam, menuResult)) return menuResult;
         if (message == WM_COMMAND && lParam == 0)
         {
             const int id = LOWORD(wParam);
