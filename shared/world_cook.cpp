@@ -220,10 +220,10 @@ bool Cook(WorldDocument& world, const std::string& file)
             if (flat) { const auto normal = Math::Normalize(Math::Cross(t[1].position - t[0].position, t[2].position - t[0].position)); for (auto& v : t) v.normal = normal; }
             ClipTriangle(cells, id, layer, material, t, terrainProjection);
         };
-        auto roadMesh = [&](EntityId id, const RoadGeometry& road, const std::string& material) {
+        auto roadMesh = [&](EntityId id, const RoadGeometry& road, const std::string& material, bool pavement = true) {
             for (const auto& t : road.pavementTriangles)
             {
-                std::array<MeshVertex, 3> v; for (int i = 0; i < 3; ++i) v[i] = {t[i].position, {}, t[i].uv, Srgb::ToLinear(SDL_FColor{.43f,.43f,.43f,1})}; emit(id, Layer::Surface, material, v);
+                std::array<MeshVertex, 3> v; for (int i = 0; i < 3; ++i) v[i] = {t[i].position, {}, t[i].uv, Srgb::ToLinear(SDL_FColor{.43f,.43f,.43f,1})}; emit(id, pavement ? Layer::Pavement : Layer::Surface, material, v);
             }
             auto colored = [&](const auto& triangles, Layer layer) {
                 for (const auto& t : triangles) { std::array<MeshVertex, 3> v; for (int i = 0; i < 3; ++i) v[i] = {t[i].position, {}, {}, Srgb::ToLinear(t[i].color)}; emit(id, layer, {}, v); }
@@ -266,7 +266,7 @@ bool Cook(WorldDocument& world, const std::string& file)
         {
             const auto& road = world.roads[i]; const SceneKey key{SceneKind::Road, static_cast<int>(i)};
             const auto names = road.NameList();
-            entity(key, road.bounds, names, nullptr, road.style.material); roadMesh(world.StableId(key), road, road.style.material);
+            entity(key, road.bounds, names, nullptr, road.style.material); roadMesh(world.StableId(key), road, road.style.material, !road.style.railroad);
         }
         for (const auto& [id, junction] : world.intersections)
         {

@@ -1,4 +1,5 @@
 #include "cooked_world.hpp"
+#include "minimap.hpp"
 #include "mesh_ao.hpp"
 #include "world_renderer.hpp"
 #include "world_collision.hpp"
@@ -69,6 +70,7 @@ struct CookedWorld::Impl
 {
     Reader reader;
     SpatialIndex cellsIndex, objectsIndex, objectCollisionIndex;
+    std::set<std::uint64_t> legacyMinimapRoads;
     Statistics stats;
     bool ready = false, attached = false;
     std::string error;
@@ -289,6 +291,8 @@ bool CookedWorld::LoadPath(const std::string &source)
     s.objectsIndex.BeginSync();
     s.objectCollisionIndex.BeginSync();
     const auto &index = s.reader.Index();
+    if (s.reader.FormatVersion() < 10)
+        for (const auto& lane : index.traffic.lanes) s.legacyMinimapRoads.insert(lane.roadId);
     for (std::size_t i = 0; i < index.cells.size(); ++i)
         s.cellsIndex.Upsert({SceneKind::Terrain, static_cast<int>(i)}, index.cells[i].bounds);
     for (std::size_t i = 0; i < index.entities.size(); ++i)
@@ -703,6 +707,25 @@ void CookedWorld::Submit(WorldRenderer &renderer, const CameraView &camera, doub
     for (const auto &[i, instance] : s.instances)
         renderer.SubmitWorldMesh(instance.mesh, s.reader.Index().entities[i].material);
 }
+void CookedWorld::SubmitMinimap(Minimap& minimap) const
+{
+    if (!Ready()) return;
+    const auto& s = *impl;
+    // Reuse resident cells in every direction, independent of the main camera's
+    // frustum. Drawing the HUD never reads files or rebuilds road geometry.
+    for (const auto& [i, render] : s.renders)
+    {
+        if (!minimap.BoundsNeeded(s.reader.Index().cells[i].bounds)) continue;
+        for (const auto& batch : render.cell->batches)
+        {
+            const bool legacy = s.reader.FormatVersion() < 10 && batch.layer == Layer::Surface &&
+                (batch.owner.kind == SceneKind::Intersection ||
+                 (batch.owner.kind == SceneKind::Road && s.legacyMinimapRoads.contains(batch.owner.value)));
+            if (batch.layer == Layer::Pavement || legacy) minimap.Submit(batch.nearMesh);
+        }
+    }
+}
+
 void CookedWorld::SubmitLabels(WorldRenderer &renderer, const CameraView &camera)
 {
     for (const auto &[i, instance] : impl->instances)

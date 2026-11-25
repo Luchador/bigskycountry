@@ -7,6 +7,7 @@
 class WorldRenderer;
 class WorldCollision;
 class CameraView;
+class Minimap;
 
 // Main-thread residency controller. The worker owns only CPU decoding/BVH work;
 // SDL GPU objects, scene publication and collision attachment stay on the main thread.
@@ -26,6 +27,7 @@ class CookedWorld
     const std::vector<WorldPackage::Spawn> &Spawns() const;
     const TrafficNetwork& Traffic() const;
     void Submit(WorldRenderer &renderer, const CameraView &camera, double radius);
+    void SubmitMinimap(Minimap& minimap) const;
     void SubmitLabels(WorldRenderer &renderer, const CameraView &camera);
     bool DrawStatistics(SDL_Renderer *renderer, float y = -1) const;
     // Conservative metadata check, including collision not yet resident.

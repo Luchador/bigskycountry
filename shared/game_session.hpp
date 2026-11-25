@@ -2,6 +2,7 @@
 
 #include "game_world.hpp"
 #include "player.hpp"
+#include "minimap.hpp"
 #include "traffic_driver.hpp"
 #include "traffic_junctions.hpp"
 #include "traffic_population.hpp"
@@ -24,7 +25,7 @@ public:
     void Update(double seconds, const CameraView* externalView = nullptr);
     const CameraView& View() const { return started ? player.controller.camera.View() : loadingCamera; }
     void Submit(WorldRenderer& renderer, double sunElevation) const;
-    bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const;
+    bool DrawHUD(SDL_Renderer* renderer, double framesPerSecond);
     void ToggleConsole() { consoleVisible = !consoleVisible; }
     void SetProfiling(bool enabled) { world.profiling = enabled; }
     const SimulationProfile& Profile() const { return profile; }
@@ -39,6 +40,7 @@ private:
     SimulationProfile profile;
     bool debugCamera = false;
     bool consoleVisible = false;
+    Minimap minimap;
     CookedWorld* streaming = nullptr;
     CameraView loadingCamera;
     bool started = false, collisionReady = false;

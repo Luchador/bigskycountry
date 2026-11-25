@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 9; // Adds the subsurface material texture dependency.
+    inline constexpr std::uint32_t version = 10; // Separates road pavement for the minimap.
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -17,7 +17,7 @@ namespace WorldPackage
         auto operator<=>(const CellKey&) const = default;
         Vector3 Origin() const { return {x * cellMeters, 0, z * cellMeters}; }
     };
-    enum class Layer : std::uint32_t { Surface, Paint, Rail, Water, Transition };
+    enum class Layer : std::uint32_t { Surface, Paint, Rail, Water, Transition, Pavement };
     struct Batch
     {
         EntityId owner;
@@ -86,10 +86,12 @@ namespace WorldPackage
         bool ReadRender(std::size_t index, PayloadKind lod, Cell& cell) const;
         bool ReadCollision(std::size_t index, MeshInstance& mesh) const;
         const Manifest& Index() const { return manifest; }
+        std::uint32_t FormatVersion() const { return formatVersion; }
     private:
         std::string path;
         Manifest manifest;
         std::uint64_t payloadStart = 0;
+        std::uint32_t formatVersion = 0;
     };
     std::string DefaultPath(const WorldDocument& world);
     std::uint64_t FileHash(const std::string& file);

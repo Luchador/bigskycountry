@@ -1,4 +1,5 @@
 #include "speedometer.hpp"
+#include "game_hud_layout.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,7 +8,7 @@
 
 namespace
 {
-    constexpr float radius = 106;
+    constexpr float radius = GameHUD::dialRadius;
     constexpr double maximumKmh = 240;
     constexpr float startAngle = 0.75f * std::numbers::pi_v<float>;
     constexpr float sweepAngle = 1.5f * std::numbers::pi_v<float>;
@@ -37,12 +38,9 @@ namespace
 
     bool DrawDial(SDL_Renderer* renderer, const SDL_Rect& viewport, double speed)
     {
-        // Leave room for the console, and shrink gracefully in small windows.
-        constexpr float margin = 18;
-        const float scale = std::min({1.0f, (viewport.w - 2 * margin) / (2 * radius),
-                                     (viewport.h - 56 - 2 * margin) / (2 * radius)});
+        const float scale = GameHUD::Scale(viewport);
         if (scale < 0.5f) return true;
-        const SDL_FPoint center{viewport.w - margin - radius * scale, viewport.h - margin - radius * scale};
+        const SDL_FPoint center{GameHUD::margin + radius * scale, viewport.h - GameHUD::margin - radius * scale};
         constexpr int sides = 96;
         std::array<SDL_Vertex, sides + 1> vertices{};
         std::array<int, sides * 3> indices{};

@@ -141,6 +141,7 @@ add_library(BigSkyApplication STATIC
     shared/pawn_index.cpp
     shared/game_session.cpp
     shared/speedometer.cpp
+    shared/minimap.cpp
     shared/world_collision.cpp
     shared/pawn.cpp
     shared/player.cpp

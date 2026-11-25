@@ -5,6 +5,7 @@
 #include "character.hpp"
 #include "test_pawn_meshes.hpp"
 #include "speedometer.hpp"
+#include "game_hud_layout.hpp"
 #include "traffic_overlay.hpp"
 #include "world_document.hpp"
 #include "world_renderer.hpp"
@@ -155,7 +156,7 @@ void GameSession::Stream(Vector3 eye, WorldRenderer& renderer)
 {
     if (!streaming) return;
     const auto sources = PhysicsSources();
-    streaming->Update(eye, sources, world.collision, &renderer, g_ProjectSettings.ViewDistance(), g_ProjectSettings.Streaming());
+    streaming->Update(eye, sources, world.collision, &renderer, std::max(g_ProjectSettings.ViewDistance(), Minimap::radiusMeters + 64), g_ProjectSettings.Streaming());
     const auto playerSources = PhysicsSources(false);
     collisionReady = std::all_of(playerSources.begin(), playerSources.end(), [&](Vector3 p) { return streaming->CollisionReady(p); });
     for (auto& driver : trafficDrivers)
@@ -387,7 +388,8 @@ bool GameSession::DrawTrafficDebug(SDL_Renderer* renderer, const CameraView& vie
     SDL_SetRenderDrawColor(renderer, 255, 220, 140, 255);
     const float x = viewport.w * 0.5f, y = viewport.h * 0.5f;
     if (!SDL_RenderLine(renderer, x-5, y, x+5, y) || !SDL_RenderLine(renderer, x, y-5, x, y+5)) return false;
-    const SDL_FRect panel{8, float(viewport.h - 100), float(std::min(1000, viewport.w - 16)), 92};
+    const float hudTop = viewport.h - GameHUD::margin - GameHUD::mapHeight * GameHUD::Scale(viewport);
+    const SDL_FRect panel{8, std::max(64.f, hudTop - 104), float(std::min(1000, viewport.w - 16)), 92};
     SDL_SetRenderDrawColor(renderer, 22, 24, 28, 255); if (!SDL_RenderFillRect(renderer, &panel)) return false;
     SDL_SetRenderDrawColor(renderer, 225, 228, 235, 255);
     if (!SDL_RenderDebugText(renderer, 16, panel.y+8, "Traffic: F6 add | Shift+F6 add 5 | F7 clear/pause | Shift+F7 auto | F8 overlay")) return false;
@@ -491,7 +493,7 @@ void GameSession::Submit(WorldRenderer& renderer, double sunElevation) const
     }
 }
 
-bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const
+bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond)
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
@@ -532,9 +534,16 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond) const
     if (framesPerSecond > 0) SDL_snprintf(fpsText, sizeof(fpsText), "FPS: %.1f", framesPerSecond);
     const float fpsWidth = static_cast<float>(SDL_strlen(fpsText)) * 8.f + 12.f;
     const SDL_FRect fpsBackground{std::max(0.f, viewport.w - fpsWidth - 8.f), 4.f, fpsWidth, 22.f};
-    return SDL_SetRenderDrawColor(renderer, 22,24,28,255) &&
-           SDL_RenderFillRect(renderer, &fpsBackground) &&
-           SDL_SetRenderDrawColor(renderer, 255,255,255,255) &&
-           SDL_RenderDebugText(renderer, fpsBackground.x + 6.f, fpsBackground.y + 7.f, fpsText) &&
-           (!vehicle || debugCamera || !started || DrawSpeedometer(renderer, vehicle->Speed()));
+    if (!SDL_SetRenderDrawColor(renderer, 22,24,28,255) ||
+        !SDL_RenderFillRect(renderer, &fpsBackground) ||
+        !SDL_SetRenderDrawColor(renderer, 255,255,255,255) ||
+        !SDL_RenderDebugText(renderer, fpsBackground.x + 6.f, fpsBackground.y + 7.f, fpsText)) return false;
+    if (debugCamera || !started) return true;
+    if (vehicle && !DrawSpeedometer(renderer, vehicle->Speed())) return false;
+    if (const auto* pawn = player.controller.Controlled())
+    {
+        const auto pose = pawn->InterpolatedTransform(accumulator / fixedStep);
+        return minimap.Draw(renderer, document, streaming, pose.position, pose.rotation.y);
+    }
+    return true;
 }

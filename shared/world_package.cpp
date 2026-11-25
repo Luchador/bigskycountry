@@ -268,7 +268,7 @@ bool Write(const std::string& file, Manifest manifest, std::span<const Cell> cel
 }
 bool Reader::Open(const std::string& file)
 {
-    path.clear(); manifest = {};
+    path.clear(); manifest = {}; formatVersion = 0;
     try
     {
         std::ifstream in(Utf8(file), std::ios::binary | std::ios::ate);
@@ -396,7 +396,7 @@ bool Reader::Open(const std::string& file)
             if (!m.traffic.Validate()) throw std::runtime_error(SDL_GetError());
         }
         r.End(); if (28 + bytes + end != static_cast<std::uint64_t>(size)) throw std::runtime_error("Unexpected cooked world length");
-        manifest = std::move(m); payloadStart = 28 + bytes; path = file; return true;
+        manifest = std::move(m); payloadStart = 28 + bytes; path = file; formatVersion = fileVersion; return true;
     }
     catch (const std::exception& e) { return SDL_SetError("Cooked world: %s", e.what()); }
 }
@@ -421,7 +421,7 @@ bool Reader::ReadRender(std::size_t index, PayloadKind lod, Cell& cell) const
         auto owner = [&] { auto id = r.Id(); if (std::find(c.owners.begin(), c.owners.end(), id) == c.owners.end()) throw std::runtime_error("Invalid batch owner"); return id; };
         for (auto n = r.Count(28); n; --n)
         {
-            Batch b; b.owner = owner(); auto layer = r.U32(); if (layer > unsigned(Layer::Transition)) throw std::runtime_error("Invalid mesh layer");
+            Batch b; b.owner = owner(); auto layer = r.U32(); if (layer > unsigned(formatVersion >= 10 ? Layer::Pavement : Layer::Transition)) throw std::runtime_error("Invalid mesh layer");
             b.layer = static_cast<Layer>(layer); b.material = r.String(); if (!b.material.empty() && !Material::ValidAssetPath(b.material)) throw std::runtime_error("Invalid material path");
             b.nearMesh = r.MeshData(c.key.Origin()); result.batches.push_back(std::move(b));
         }
