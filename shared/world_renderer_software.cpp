@@ -19,7 +19,9 @@ namespace
                 {std::lerp(a.color.r, b.color.r, f), std::lerp(a.color.g, b.color.g, f),
                  std::lerp(a.color.b, b.color.b, f), std::lerp(a.color.a, b.color.a, f)},
                 {std::lerp(a.uv.x, b.uv.x, f), std::lerp(a.uv.y, b.uv.y, f)},
-                mix(a.normal, b.normal), a.lit, a.tangent, a.handedness, mix(a.view, b.view)};
+                mix(a.normal, b.normal), a.lit, a.tangent, a.handedness, mix(a.view, b.view),
+                {std::lerp(a.outerUV.x, b.outerUV.x, f), std::lerp(a.outerUV.y, b.outerUV.y, f)},
+                a.outerTangent, a.outerHandedness};
     }
 
     template<typename Distance>
@@ -40,7 +42,7 @@ namespace
     {
         double x, y, depth, invW;
         SDL_FColor color;
-        SDL_FPoint uv;
+        SDL_FPoint uv, outerUV;
         Vector3 normal, view;
     };
 
@@ -48,7 +50,7 @@ namespace
     {
         const double invW = 1.0 / v.w;
 
-        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color, v.uv, v.normal, v.view};
+        return {(1.0 + v.x * invW) * width * 0.5, (1.0 - v.y * invW) * height * 0.5, v.z * invW, invW, v.color, v.uv, v.outerUV, v.normal, v.view};
     }
 
     double Edge(const ScreenVertex& a, const ScreenVertex& b, double x, double y)
@@ -200,18 +202,28 @@ bool WorldRenderer::DrawSoftware()
                     {
                         const double tu = (u*a.uv.x + v*b.uv.x + w*c.uv.x) / sum;
                         const double tv = (u*a.uv.y + v*b.uv.y + w*c.uv.y) / sum;
-                        const auto gradient = [&](double da, double db, double dc)
-                        {
-                            return std::hypot(da*(a.uv.x-tu) + db*(b.uv.x-tu) + dc*(c.uv.x-tu),
-                                              da*(a.uv.y-tv) + db*(b.uv.y-tv) + dc*(c.uv.y-tv)) / sum;
+                        const auto footprintAt = [&](SDL_FPoint ta, SDL_FPoint tb, SDL_FPoint tc, double tu, double tv) {
+                            const auto gradient = [&](double da, double db, double dc) {
+                                return std::hypot(da*(ta.x-tu) + db*(tb.x-tu) + dc*(tc.x-tu),
+                                                  da*(ta.y-tv) + db*(tb.y-tv) + dc*(tc.y-tv)) / sum;
+                            };
+                            return float(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
                         };
-                        const float footprint = static_cast<float>(std::max(gradient(ax,bx,cx), gradient(ay,by,cy)));
+                        const float footprint = footprintAt(a.uv, b.uv, c.uv, tu, tv);
+                        SurfaceMaterial::Projection outer{};
+                        if (material->type == MaterialType::Transition)
+                        {
+                            const double ou = (u*a.outerUV.x + v*b.outerUV.x + w*c.outerUV.x) / sum;
+                            const double ov = (u*a.outerUV.y + v*b.outerUV.y + w*c.outerUV.y) / sum;
+                            outer = {{float(ou), float(ov)}, footprintAt(a.outerUV, b.outerUV, c.outerUV, ou, ov),
+                                     face.outerTangent, face.outerHandedness};
+                        }
                         const Vector3 normal = Math::Normalize(a.normal*u + b.normal*v + c.normal*w);
                         const Vector3 view = (a.view*u + b.view*v + c.view*w) * (1.0 / sum);
                         const float red = material->type == MaterialType::Transition ?
                             float((u*a.color.r + v*b.color.r + w*c.color.r) / sum) : 1.f;
                         auto color = material->ShadeLinear(float(tu), float(tv), footprint, lights, normal,
-                            face.tangent, face.handedness, view, red, backFace,
+                            face.tangent, face.handedness, view, red, outer, backFace,
                             float((u*a.color.a + v*b.color.a + w*c.color.a) / sum));
                         if (color.a == 0) continue;
                         if (fog && lit) color = fog->Apply(color, view, camera->GetPosition().y);

@@ -99,5 +99,5 @@ namespace WorldPackage
     // Shared geometry helpers for cooking.
     std::shared_ptr<Mesh> Simplify(const Mesh& mesh);
     void ClipTriangle(std::map<CellKey, Cell>& cells, EntityId owner, Layer layer,
-                      const std::string& material, const std::array<MeshVertex, 3>& triangle);
+                      const std::string& material, const std::array<MeshVertex, 3>& triangle, bool terrainProjection = false);
 }

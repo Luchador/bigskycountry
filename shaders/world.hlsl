@@ -329,25 +329,30 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
 #endif
     }
     float3 orm = ormMap.Sample(ormSampler, input.uv).rgb;
-    float3 layerColor = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb;
     float3 surfaceNormal = DecodeNormalXY(normalMap.Sample(normalSampler, input.uv));
-    float3 glow = 0;
-    if (transition)
-    {
-        float weight = saturate(input.color.r);
-        base.rgb = lerp(layerColor, base.rgb, weight);
-        orm = lerp(outerOrmMap.Sample(outerOrmSampler, input.uv).rgb, orm, weight);
-        float3 outerNormal = DecodeNormalXY(alphaOrOuterNormal.Sample(opacitySampler, input.uv).rg);
-        surfaceNormal = lerp(outerNormal, surfaceNormal, weight);
-    }
-    else glow = layerColor;
-    // Vertex alpha is ambient visibility, independent of cutout opacity and
-    // alpha-to-coverage. Apply it only when enabled by this material.
-    if (subsurfaceProperties.z != 0) orm.r *= saturate(input.color.a);
     float3 n = UnitVector(input.normal.xyz);
     float3 t = UnitVector(input.tangent.xyz - n * dot(n, input.tangent.xyz));
     float3 b = cross(n, t) * input.tangent.w;
     float3 mapped = UnitVector(t * surfaceNormal.x + b * surfaceNormal.y + n * surfaceNormal.z);
+    float3 glow = 0;
+    if (transition)
+    {
+        float weight = saturate(input.color.r);
+        float3 outerColor = emissionOrOuterColor.Sample(emissiveSampler, input.outerUV).rgb;
+        base.rgb = lerp(outerColor, base.rgb, weight);
+        orm = lerp(outerOrmMap.Sample(outerOrmSampler, input.outerUV).rgb, orm, weight);
+        float3 outerNormal = DecodeNormalXY(alphaOrOuterNormal.Sample(opacitySampler, input.outerUV).rg);
+        // The inner layer follows the road; the outer layer follows terrain.
+        // Interpret each normal in its own frame before blending in world space.
+        float3 outerT = UnitVector(input.outerTangent.xyz - n * dot(n, input.outerTangent.xyz));
+        float3 outerB = cross(n, outerT) * input.outerTangent.w;
+        float3 outerMapped = UnitVector(outerT * outerNormal.x + outerB * outerNormal.y + n * outerNormal.z);
+        mapped = UnitVector(lerp(outerMapped, mapped, weight));
+    }
+    else glow = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb;
+    // Vertex alpha is ambient visibility, independent of cutout opacity and
+    // alpha-to-coverage. Apply it only when enabled by this material.
+    if (subsurfaceProperties.z != 0) orm.r *= saturate(input.color.a);
     float3 transmission = 0;
     float3 shadowNormal = n;
     if (foliage)

@@ -1,4 +1,5 @@
 #include "world_renderer.hpp"
+#include "surface_projection.hpp"
 #include "mesh_ao.hpp"
 #include "camera_view.hpp"
 #include "terrain_chunk.hpp"
@@ -229,26 +230,6 @@ void WorldRenderer::SubmitMesh(const MeshInstance& instance, SDL_FColor tint)
     }
 }
 
-namespace
-{
-    // Terrain uses a four-meter tile projected onto the dominant local plane.
-    std::array<SDL_FPoint, 3> TerrainUVs(const std::array<Vector3, 3>& points, const MeshTransform& frame)
-    {
-        const Vector3 local = frame.Unrotate(Math::Cross(points[1] - points[0], points[2] - points[0]));
-        Vector3 u = frame.x, v = frame.z;
-        if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = frame.y;
-        else if (std::abs(local.z) > std::abs(local.y)) v = frame.y;
-        std::array<SDL_FPoint, 3> uv;
-        for (size_t i = 0; i < points.size(); ++i)
-        {
-            const Vector3 offset = points[i] - frame.origin;
-            uv[i] = {float(Math::Dot(offset, u) / SurfaceMaterial::tileMeters),
-                     float(Math::Dot(offset, v) / SurfaceMaterial::tileMeters)};
-        }
-        return uv;
-    }
-}
-
 void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
                                            const std::array<SDL_FColor, 3>& colors, const std::array<SDL_FPoint, 3>& uv,
                                            const std::array<Vector3, 3>* smoothNormals)
@@ -256,11 +237,9 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
     // Derive the normal-map axes from the same UVs all material maps sample.
     const Vector3 e1 = points[1] - points[0], e2 = points[2] - points[0];
     const Vector3 normal = Math::Normalize(Math::Cross(e1, e2));
-    const double du1 = double(uv[1].x) - uv[0].x, dv1 = double(uv[1].y) - uv[0].y;
-    const double du2 = double(uv[2].x) - uv[0].x, dv2 = double(uv[2].y) - uv[0].y;
-    const double determinant = du1 * dv2 - du2 * dv1;
-    const float handedness = determinant < 0.0 ? -1.0f : 1.0f;
-    const Vector3 tangent = Math::Normalize(determinant == 0.0 ? e1 : (e1 * dv2 - e2 * dv1) * handedness);
+    const auto frame = SurfaceProjection::TangentFrame(points, uv);
+    const auto outerUV = SurfaceProjection::UVs(points);
+    const auto outerFrame = SurfaceProjection::TangentFrame(points, outerUV);
     for (size_t i = 0; i < points.size(); ++i)
     {
         const Vector3 p = points[i];
@@ -268,8 +247,11 @@ void WorldRenderer::SubmitMaterialTriangle(const std::array<Vector3, 3>& points,
         vertex.uv = uv[i];
         vertex.normal = smoothNormals ? (*smoothNormals)[i] : normal;
         vertex.lit = lightGeometry;
-        vertex.tangent = tangent;
-        vertex.handedness = handedness;
+        vertex.tangent = frame.tangent;
+        vertex.handedness = frame.handedness;
+        vertex.outerUV = outerUV[i];
+        vertex.outerTangent = outerFrame.tangent;
+        vertex.outerHandedness = outerFrame.handedness;
         vertices.push_back(vertex);
     }
 }
@@ -300,7 +282,7 @@ void WorldRenderer::SubmitMaterialMesh(const MeshInstance& instance, const std::
         const std::array normals{worldNormal(a.normal), worldNormal(b.normal), worldNormal(c.normal)};
         const std::array positions{instance.transform.Point(a.position), instance.transform.Point(b.position),
                                    instance.transform.Point(c.position)};
-        const auto uv = mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) : std::array{a.uv, b.uv, c.uv};
+        const auto uv = mapping == MeshUVs::TerrainProjection ? SurfaceProjection::UVs(positions) : std::array{a.uv, b.uv, c.uv};
         const auto start = vertices.size();
         const auto& path = material.empty() ? mesh.MaterialAt(i) : material;
         const auto color = [&](const MeshVertex& vertex) {
@@ -384,7 +366,7 @@ void WorldRenderer::PrepareMesh(ResidentGeometry& geometry, const MeshInstance& 
             const std::array normals{worldNormal(a.normal), worldNormal(b.normal), worldNormal(c.normal)};
             if (textured)
             {
-                const auto uv = geometry.mapping == MeshUVs::TerrainProjection ? TerrainUVs(positions, instance.transform) :
+                const auto uv = geometry.mapping == MeshUVs::TerrainProjection ? SurfaceProjection::UVs(positions) :
                     std::array{a.uv, b.uv, c.uv};
                 const auto& path = geometry.material.empty() ? mesh.MaterialAt(i) : geometry.material;
                 const auto color = [&](const MeshVertex& vertex) {

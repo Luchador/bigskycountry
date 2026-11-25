@@ -303,7 +303,7 @@ void SurfaceMaterialCache::BindShadow(const SurfaceMaterial& material, SDL_GPURe
 }
 
 SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace, float vertexAO) const
+                                  Vector3 tangent, float handedness, Vector3 view, float vertexRed, const Projection& outer, bool backFace, float vertexAO) const
 {
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
@@ -319,21 +319,27 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
         return {};
     auto orm = sample(MaterialSlot::ORM);
     auto mappedNormal = DecodeNormalXY(sample(MaterialSlot::Normal));
+    // Re-orthogonalize each projected U axis against the shading normal.
+    const auto mapNormal = [&](Vector3 sample, Vector3 axis, float sign) {
+        const Vector3 t = Math::Normalize(axis - normal * Math::Dot(normal, axis));
+        const Vector3 b = Math::Cross(normal, t) * sign;
+        return Math::Normalize(t * sample.x + b * sample.y + normal * sample.z);
+    };
+    Vector3 mapped = mapNormal(mappedNormal, tangent, handedness);
     std::array<float, 4> glow{};
     if (type == MaterialType::Transition)
     {
+        const auto outerSample = [&](MaterialSlot slot) {
+            return maps[static_cast<size_t>(slot)]->cpu.Sample(outer.uv.x, outer.uv.y, outer.footprint);
+        };
         const float weight = std::clamp(vertexRed, 0.f, 1.f);
-        color = BlendMaterialSamples(sample(MaterialSlot::OuterBaseColor), color, weight);
-        orm = BlendMaterialSamples(sample(MaterialSlot::OuterORM), orm, weight);
-        const auto outerNormal = DecodeNormalXY(sample(MaterialSlot::OuterNormal));
-        mappedNormal = outerNormal + (mappedNormal - outerNormal) * weight;
+        color = BlendMaterialSamples(outerSample(MaterialSlot::OuterBaseColor), color, weight);
+        orm = BlendMaterialSamples(outerSample(MaterialSlot::OuterORM), orm, weight);
+        const auto outerNormal = mapNormal(DecodeNormalXY(outerSample(MaterialSlot::OuterNormal)), outer.tangent, outer.handedness);
+        mapped = Math::Normalize(outerNormal + (mapped - outerNormal) * weight);
     }
     else glow = sample(MaterialSlot::Emissive);
     if (useVertexAlphaAO) orm[0] *= std::clamp(vertexAO, 0.f, 1.f);
-    // Re-orthogonalize the projected U axis against the interpolated shading normal.
-    tangent = Math::Normalize(tangent - normal * Math::Dot(normal, tangent));
-    const Vector3 bitangent = Math::Cross(normal, tangent) * handedness;
-    Vector3 mapped = Math::Normalize(tangent * mappedNormal.x + bitangent * mappedNormal.y + normal * mappedNormal.z);
     Vector3 transmission{};
     if (type == MaterialType::Foliage)
     {

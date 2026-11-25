@@ -35,6 +35,10 @@ struct WorldDepthVertex
     WorldFloat3 tangent{};
     float handedness = 1;
     WorldFloat3 view{};
+    // Transition outer-layer coordinates/frame, independent of authored road UVs.
+    SDL_FPoint outerUV{};
+    WorldFloat3 outerTangent{};
+    float outerHandedness = 1;
 };
 
 class WorldRenderer

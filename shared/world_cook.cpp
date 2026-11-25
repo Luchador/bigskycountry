@@ -1,4 +1,5 @@
 #include "world_package.hpp"
+#include "surface_projection.hpp"
 #include "mesh_collision.hpp"
 #include "world_lighting.hpp"
 #include "spatial_index.hpp"
@@ -109,7 +110,7 @@ namespace
     }
 }
 void ClipTriangle(std::map<CellKey, Cell>& cells, EntityId owner, Layer layer, const std::string& material,
-                  const std::array<MeshVertex, 3>& triangle)
+                  const std::array<MeshVertex, 3>& triangle, bool terrainProjection)
 {
     Bounds3 bounds; for (const auto& v : triangle) bounds.Include(v.position);
     const auto lo = Key(bounds.min), hi = Key(bounds.max);
@@ -135,9 +136,15 @@ void ClipTriangle(std::map<CellKey, Cell>& cells, EntityId owner, Layer layer, c
                 it = std::prev(cell.batches.end());
             }
             auto mesh = std::const_pointer_cast<Mesh>(it->nearMesh.mesh);
-            for (auto j : {std::size_t(0), i - 1, i})
+            const std::array indices{std::size_t(0), i - 1, i};
+            // Share one whole-tile origin across the cell, preserving welded
+            // vertices/LOD simplification without storing huge float UVs.
+            const auto uv = terrainProjection ? SurfaceProjection::UVs(
+                {polygon[0].position, polygon[i - 1].position, polygon[i].position}, origin) : std::array<SDL_FPoint, 3>{};
+            for (size_t k = 0; k < indices.size(); ++k)
             {
-                auto v = polygon[j]; v.position = v.position - origin;
+                auto v = polygon[indices[k]]; v.position = v.position - origin;
+                if (terrainProjection) v.uv = uv[k];
                 mesh->indices.push_back(static_cast<std::uint32_t>(mesh->vertices.size())); mesh->vertices.push_back(v);
             }
         }
@@ -209,9 +216,9 @@ bool Cook(WorldDocument& world, const std::string& file)
                 for (const auto& slot : instance->mesh->materials->slots) asset(AssetKind::Material, slot.material);
             entities[e.id] = manifest.entities.size(); manifest.entities.push_back(std::move(e));
         };
-        auto emit = [&](EntityId id, Layer layer, const std::string& material, std::array<MeshVertex, 3> t, bool flat = true) {
+        auto emit = [&](EntityId id, Layer layer, const std::string& material, std::array<MeshVertex, 3> t, bool flat = true, bool terrainProjection = false) {
             if (flat) { const auto normal = Math::Normalize(Math::Cross(t[1].position - t[0].position, t[2].position - t[0].position)); for (auto& v : t) v.normal = normal; }
-            ClipTriangle(cells, id, layer, material, t);
+            ClipTriangle(cells, id, layer, material, t, terrainProjection);
         };
         auto roadMesh = [&](EntityId id, const RoadGeometry& road, const std::string& material) {
             for (const auto& t : road.pavementTriangles)
@@ -302,15 +309,8 @@ bool Cook(WorldDocument& world, const std::string& file)
                         if (terrain && chunk.boundary && material.empty())
                         { v[k].color.r *= TerrainChunk::groundColor.r; v[k].color.g *= TerrainChunk::groundColor.g; v[k].color.b *= TerrainChunk::groundColor.b; }
                     }
-                    if (terrain && (!material.empty() || !mesh.HasMaterials()))
-                    {
-                        const auto local = instance.transform.Unrotate(Math::Cross(v[1].position - v[0].position, v[2].position - v[0].position));
-                        auto u = instance.transform.x, w = instance.transform.z;
-                        if (std::abs(local.x) > std::abs(local.y) && std::abs(local.x) >= std::abs(local.z)) u = instance.transform.y;
-                        else if (std::abs(local.z) > std::abs(local.y)) w = instance.transform.y;
-                        for (auto& vertex : v) { auto p = vertex.position - instance.transform.origin; vertex.uv = {float(Math::Dot(p, u) / 4), float(Math::Dot(p, w) / 4)}; }
-                    }
-                    emit(world.StableId(key), terrain ? Layer::Surface : Layer::Water, surface, v, false);
+                    emit(world.StableId(key), terrain ? Layer::Surface : Layer::Water, surface, v, false,
+                         terrain);
                 }
             };
             bake(chunk.Instance(), true, chunk.material);

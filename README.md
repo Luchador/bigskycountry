@@ -349,7 +349,7 @@ Open the single-chunk example from the repository root with `.\build\BigSkyCount
 
 The test grid at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Each placement has its own position and rotation in the Transform panel.
 
-Drag a material from the Content Browser’s **Textures** tab onto a chunk in the 3D viewport. The assignment belongs to that placement, saves with the world, and supports **Ctrl+Z** and **Ctrl+Y**. The texture repeats every 4 m in the chunk’s local coordinates.
+Drag a material from the Content Browser’s **Textures** tab onto a chunk in the 3D viewport. The assignment belongs to that placement, saves with the world, and supports **Ctrl+Z** and **Ctrl+Y**. The texture repeats every 4 m using a shared world-space projection. Transition strips use that same projection for their outer Base Color, Normal, and ORM maps; their inner layer retains road-aligned UVs. Assign matching outer/terrain maps to keep the texture and lighting continuous across their boundary. The projection stays fixed when a chunk is moved or rotated and uses the dominant world plane on steep surfaces. Rebuild the game and editor and recook existing worlds to update stored terrain UVs.
 
 Selected terrain chunks have an orange boundary outline, including when multiple chunks are selected in the Outliner. The outline follows the mesh perimeter rather than the interior triangle edges and updates when the terrain is regenerated.
 

@@ -6,6 +6,8 @@ struct WorldVertex
     float4 normal : TEXCOORD3; // .w: 0 editor colors, 1 scene lighting, 2 emissive surface.
     float4 tangent : TEXCOORD4; // .w is the sign of the bitangent.
     float3 view : TEXCOORD5;
+    float2 outerUV : TEXCOORD6;
+    float4 outerTangent : TEXCOORD7;
 };
 
 struct WorldFragment
@@ -16,6 +18,8 @@ struct WorldFragment
     float4 normal : TEXCOORD2;
     float4 tangent : TEXCOORD3;
     float3 view : TEXCOORD4;
+    float2 outerUV : TEXCOORD5;
+    float4 outerTangent : TEXCOORD6;
 };
 
 // Mode 0 is the dynamic clip-space stream. Resident vertices are relative to
@@ -36,6 +40,8 @@ WorldFragment VSMain(WorldVertex input, uint vertexID : SV_VertexID)
     output.normal = input.normal;
     output.tangent = input.tangent;
     output.view = input.view;
+    output.outerUV = input.outerUV;
+    output.outerTangent = input.outerTangent;
     if (originMinusEye.w != 0)
     {
         // Preserve centimeter-sized features when a long road's origin is

@@ -22,7 +22,6 @@ struct SurfaceMaterialTexture
 
 struct SurfaceMaterial
 {
-    static constexpr double tileMeters = 4.0;
     static constexpr unsigned shaderMapCount = 6;
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
@@ -32,9 +31,17 @@ struct SurfaceMaterial
     float alphaCutoff = .5f;
     bool hasSubsurfaceMap = false;
     bool useVertexAlphaAO = false;
+    struct Projection
+    {
+        SDL_FPoint uv;
+        float footprint;
+        Vector3 tangent;
+        float handedness;
+    };
     // Linear radiance: apply atmosphere before the final display conversion.
     SDL_FColor ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
-                     Vector3 tangent, float handedness, Vector3 view, float vertexRed, bool backFace = false, float vertexAO = 1) const;
+                     Vector3 tangent, float handedness, Vector3 view, float vertexRed, const Projection& outer,
+                     bool backFace = false, float vertexAO = 1) const;
 };
 
 // One cache per renderer/device. Different materials can reference the same texture.
