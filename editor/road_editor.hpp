@@ -128,6 +128,7 @@ private:
     void ConnectEndpoint(WorldDocument& world);
     void SubdivideSelection(WorldDocument& world);
     void PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers);
+    bool OpenMeshAtPointer(WorldDocument& world, const FreeCamera& camera);
     bool PickWaterControl(WorldDocument& world, const FreeCamera& camera, bool doubleClick, SDL_Keymod modifiers);
     void MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer);
     void BeginWaterEditing(WorldDocument& world);

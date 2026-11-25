@@ -152,6 +152,15 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
         return false;
     }
     browser.Refresh();
+    browser.MeshWindow().SetMaterialOpener([this](const std::string& path)
+    {
+#ifdef _WIN32
+        panels.OpenMaterial(path);
+#else
+        if (!browser.MaterialWindow().Open(frame, browser.Textures(), path))
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Material Editor", SDL_GetError(), frame);
+#endif
+    });
     gizmo.Load(models);
 #ifndef _WIN32
     resizeCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
@@ -3285,6 +3294,34 @@ void RoadEditor::MoveWaterPoint(WorldDocument& world, const FreeCamera& camera, 
     dragChanged = *chunk.WaterSource() != dragStart->water->definition;
 }
 
+bool RoadEditor::OpenMeshAtPointer(WorldDocument& world, const FreeCamera& camera)
+{
+    if (waterEdit || state.drawing || drag != Drag::None) return false;
+    ViewportPicker picker(camera, scene, mouse);
+    const auto hit = planView ? PlanElementAt(world, ToWorld(mouse.x, mouse.y)) : picker.TestPlacementSurfaces(world, true);
+    if (!hit) return false;
+    const MeshInstance* instance = nullptr;
+    switch (hit->kind)
+    {
+    case SceneKind::Object: instance = &world.Objects()[hit->index]->Instance(); break;
+    case SceneKind::Mesh: instance = &world.meshes[hit->index]; break;
+    case SceneKind::Terrain: instance = &world.Terrain()[hit->index]->Instance(); break;
+    default: return false;
+    }
+    // Generated roads and terrain have no model asset to edit.
+    if (!instance->mesh || instance->mesh->assetPath.empty()) return false;
+    const std::string path = instance->mesh->assetPath;
+    state.SelectRows({*hit});
+#ifdef _WIN32
+    panels.RevealModel(path);
+#else
+    browser.RevealModel(path);
+#endif
+    if (!browser.MeshWindow().Open(frame, browser.Textures(), path))
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mesh Editor", SDL_GetError(), frame);
+    return true;
+}
+
 void RoadEditor::PickWorldRoad(WorldDocument& world, const FreeCamera& camera, SDL_Keymod modifiers)
 {
     const bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
@@ -4603,9 +4640,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
 #else
             const SDL_Keymod modifiers = SDL_GetModState();
 #endif
+            const bool openMesh = e.button.clicks == 2 && !(modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI));
             if (planView)
             {
-                PressCanvas(world, mouse.x, mouse.y, modifiers);
+                if (!openMesh || !OpenMeshAtPointer(world, camera))
+                    PressCanvas(world, mouse.x, mouse.y, modifiers);
             }
             else
             {
@@ -4615,7 +4654,11 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                     drag = Drag::BoxSelect;
                     SDL_CaptureMouse(true);
                 }
-                else if (!PickWaterControl(world, camera, e.button.clicks >= 2, modifiers)) PickWorldRoad(world, camera, modifiers);
+                else if (!PickWaterControl(world, camera, e.button.clicks >= 2, modifiers))
+                {
+                    if (!openMesh || !OpenMeshAtPointer(world, camera))
+                        PickWorldRoad(world, camera, modifiers);
+                }
             }
         }
         else if (!planView)

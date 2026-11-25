@@ -373,6 +373,12 @@ INT_PTR CALLBACK WindowsMeshControls::PanelProc(HWND window, UINT message, WPARA
     if (message == WM_COMMAND)
     {
         if (LOWORD(w) == IDC_MESH_REMOVE && HIWORD(w) == BN_CLICKED) self->RemoveMaterial();
+        else if (LOWORD(w) == IDC_MESH_SLOTS && HIWORD(w) == LBN_DBLCLK)
+        {
+            POINT point{};
+            if (GetCursorPos(&point))
+                if (const auto slot = self->SlotAtScreen(float(point.x), float(point.y))) self->editor.OpenMaterial(*slot);
+        }
         else if (LOWORD(w) == IDC_MESH_SLOTS && HIWORD(w) == LBN_SELCHANGE)
         {
             if (self->editor.showCollision)

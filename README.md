@@ -185,9 +185,13 @@ The optional `OBJS` version 5 section stores one record per object. Each record 
 
 ### Mesh editor
 
+Double-click a placed mesh in the editor's 3D or 2D viewport to open its source model in the Mesh Editor and reveal it in the Content Browser's **Models** tab. The browser selects the model, expands its parent folders, and scrolls it into view. This works for objects, static meshes, and imported terrain meshes; generated roads and terrain keep their usual editing behavior. Modifier clicks and lake/river edit mode retain their existing controls.
+
 Double-click a GLB or FBX model in the Content Browser's **Models** tab to open a floating **Mesh Editor** above the main editor. Hold **LMB** in its viewport to orbit, use the mouse wheel to zoom, and press **F** to frame the model. The preview resizes with the window. The mesh window stays above its owner, and the main editor remains usable for browsing and dragging materials while it is open. Opening another model also restores the mesh window if it was minimized.
 
 The Mesh Editor opens at **1800 × 1200**. Both it and the Material Editor start at twice their previous width and height; controls retain their normal size, leaving more room for the previews. Both windows remain resizable.
+
+Double-click an assigned material in the Mesh Editor's material-slot list to open that `.bmat` in the Material Editor. This reuses the same Material Editor window as the Content Browser. Empty slots do not open an editor; material changes continue to update all meshes using that material.
 
 The right panel lists the model's named material slots. Drag its left divider to adjust the panel width; names and drop targets resize with it. Drag a `.bmat` from the Content Browser's **Textures** tab onto a slot; use **X** to clear its assignment. Scroll the panel for meshes with many slots. The preview and existing world instances update together, using the same material renderer as the game, including alpha cutout and translucent unlit materials. Unassigned slots retain their imported mesh colors. A Marker or terrain placement's explicit material override takes precedence over these model defaults.
 

@@ -380,6 +380,13 @@ bool MeshEditorWindow::DrawMenu()
     return true;
 }
 
+void MeshEditorWindow::OpenMaterial(std::size_t slot)
+{
+    if (showCollision || !instance.mesh || !instance.mesh->materials || !openMaterial) return;
+    const auto& slots = instance.mesh->materials->slots;
+    if (slot < slots.size() && !slots[slot].material.empty()) openMaterial(slots[slot].material);
+}
+
 bool MeshEditorWindow::Handle(const SDL_Event& event)
 {
     if (aoEditor && aoEditor->Handle(event)) return true;
@@ -468,7 +475,12 @@ bool MeshEditorWindow::Handle(const SDL_Event& event)
                 const auto clear = Clear(i), row = Slot(i);
                 if (showCollision && SDL_PointInRectFloat(&point, &row))
                 { SelectShape(i); if (SDL_PointInRectFloat(&point, &clear)) CollisionCommand(7); break; }
-                if (!showCollision && SDL_PointInRectFloat(&point, &clear)) Drop(i, {});
+                if (!showCollision && SDL_PointInRectFloat(&point, &row))
+                {
+                    if (SDL_PointInRectFloat(&point, &clear)) Drop(i, {});
+                    else if (event.button.clicks == 2) OpenMaterial(i);
+                    break;
+                }
             }
         }
 #endif

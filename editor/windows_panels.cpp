@@ -812,6 +812,8 @@ struct WindowsPanels::Impl
         }
     }
 
+    std::map<std::string, HTREEITEM> modelItems;
+
     void Populate()
     {
         populated = true;
@@ -819,6 +821,7 @@ struct WindowsPanels::Impl
         HWND tree = GetDlgItem(models, IDC_MODELS);
         SendMessageW(tree, WM_SETREDRAW, FALSE, 0);
         TreeView_DeleteAllItems(tree);
+        modelItems.clear();
         std::map<std::string, HTREEITEM> folders;
         HTREEITEM selected = nullptr;
         const auto& rows = browser->Rows();
@@ -842,6 +845,7 @@ struct WindowsPanels::Impl
                 start = slash + 1;
             }
             const HTREEITEM item = AddTreeItem(tree, parent, row.label, static_cast<LPARAM>(i + 1));
+            modelItems.emplace(row.modelPath, item);
             if (row.modelPath == browser->Selected())
             {
                 selected = item;
@@ -861,13 +865,18 @@ struct WindowsPanels::Impl
         populating = false;
     }
 
+    void OpenMaterial(const std::string& path)
+    {
+        if (!path.empty() && !materialEditor.Open(frame, browser->Textures(), path))
+            MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+    }
+
     void OpenSelectedMaterial()
     {
         HWND list = GetDlgItem(models, IDC_TEXTURES);
         const auto row = SendMessageW(list, LB_GETCURSEL, 0, 0);
         const auto path = MaterialAtRow(list, row);
-        if (!path.empty() && !materialEditor.Open(frame, browser->Textures(), path))
-            MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Material Editor", MB_OK | MB_ICONWARNING);
+        OpenMaterial(path);
     }
 
     void DrawRoadMaterial(const DRAWITEMSTRUCT& draw)
@@ -1815,6 +1824,27 @@ struct WindowsPanels::Impl
 
 WindowsPanels::WindowsPanels() : impl(std::make_unique<Impl>()) {}
 WindowsPanels::~WindowsPanels() = default;
+
+void WindowsPanels::OpenMaterial(const std::string& path)
+{
+    impl->OpenMaterial(path);
+}
+
+void WindowsPanels::RevealModel(const std::string& path)
+{
+    auto& p = *impl;
+    p.browser->RevealModel(path);
+    TabCtrl_SetCurSel(GetDlgItem(p.models, IDC_BROWSER_TABS), 0);
+    p.ShowBrowserTab();
+    if (!p.populated || !p.modelItems.contains(path)) p.Populate();
+    if (const auto item = p.modelItems.find(path); item != p.modelItems.end())
+    {
+        const HWND tree = GetDlgItem(p.models, IDC_MODELS);
+        // EnsureVisible expands the ancestors without changing unrelated folders.
+        TreeView_EnsureVisible(tree, item->second);
+        TreeView_SelectItem(tree, item->second);
+    }
+}
 
 SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
 {

@@ -277,6 +277,20 @@ void ContentBrowser::Select(const std::string& path)
     }
 }
 
+void ContentBrowser::RevealModel(const std::string& path)
+{
+    SetTab(Tab::Models);
+    const auto find = [&] { return std::find_if(rows.begin(), rows.end(), [&](const Row& row) { return row.modelPath == path; }); };
+    auto row = find();
+    if (row == rows.end())
+    {
+        Refresh();
+        row = find();
+    }
+    Select(path);
+    if (row != rows.end()) scroll = static_cast<float>(row - rows.begin()) * rowHeight;
+}
+
 bool ContentBrowser::UpdatePreview()
 {
     if (!previewDirty)

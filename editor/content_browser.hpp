@@ -51,6 +51,7 @@ public:
     const std::string& PreviewStatus() const { return previewStatus; }
     SDL_Surface* Preview() const { return surface.get(); }
     void Select(const std::string& path);
+    void RevealModel(const std::string& path);
     bool UpdatePreview(); // Returns true when the selected model or its preview changed.
 
 private:

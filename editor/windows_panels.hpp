@@ -21,6 +21,8 @@ public:
     ~WindowsPanels();
     SDL_Window* Create(SDL_Window* frame, ContentBrowser& browser);
     bool OpenProjectSettings();
+    void RevealModel(const std::string& path);
+    void OpenMaterial(const std::string& path);
     bool ViewportFocused() const;
     std::optional<SDL_FPoint> ViewportPointer(const SDL_Rect& scene) const;
     bool HasPendingEdit() const;

@@ -4,7 +4,9 @@
 #include "free_camera.hpp"
 #include "transform_gizmo.hpp"
 #include "mesh_collision.hpp"
+#include <functional>
 #include <optional>
+#include <utility>
 
 class MeshAOEditor;
 
@@ -32,8 +34,11 @@ public:
     std::optional<std::size_t> SlotAtScreen(float x, float y) const;
     void Hover(std::optional<std::size_t> slot);
     bool Drop(std::size_t slot, const std::string& material);
+    void SetMaterialOpener(std::function<void(const std::string&)> opener) { openMaterial = std::move(opener); }
 
 private:
+    void OpenMaterial(std::size_t slot);
+    std::function<void(const std::string&)> openMaterial;
     void OpenAO();
     void UpdateCamera();
     void CollisionCommand(int command);
