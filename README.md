@@ -219,9 +219,12 @@ model; selected shapes are orange. Empty-space dragging still orbits the camera.
 Each completed edit saves to `<model>.bcollision` alongside the source GLB/FBX;
 no world save is required. Placed objects, static mesh instances, and all their
 visual LODs share these settings. Terrain surfaces retain triangle collision,
-and an object's **Has Collision = false** still disables its collision. Rebuild
-to copy the sidecar into cooked assets, then **Cook World** to refresh dependency
-hashes and streaming bounds. Collision shapes use analytic capsule/sphere queries,
+and an object's **Has Collision = false** still disables its collision. After
+editing collision, use **Cook World** and restart the game. Cooking copies the
+referenced models' collision settings into cooked assets and refreshes dependency
+hashes and streaming bounds; collision-only edits do not require a rebuild.
+New or re-exported models, material assignments, and textures still need an asset
+build. Collision shapes use analytic capsule/sphere queries,
 with a BVH and the existing streamed collision budgets. Instance translation,
 rotation, scale and mirroring are supported; nonuniform instance scaling
 conservatively widens the radius to prevent gaps. Prefer uniform placement scale

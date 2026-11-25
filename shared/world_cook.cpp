@@ -15,6 +15,45 @@ namespace WorldPackage
 {
 namespace
 {
+    bool StageCollisionSettings(const std::string& model, AssetRoot root)
+    {
+        if (root == AssetRoot::Cooked) return true;
+        const auto relative = "models/" + model + ".bcollision";
+        const auto source = AssetPaths::Root(root) + relative;
+        const auto destination = AssetPaths::Root(AssetRoot::Cooked) + relative;
+        const auto utf8 = [](const std::string& path) {
+            return std::filesystem::path(std::u8string(path.begin(), path.end()));
+        };
+        if (std::filesystem::weakly_canonical(utf8(source)) ==
+            std::filesystem::weakly_canonical(utf8(destination))) return true;
+
+        // Mesh-editor edits are saved after the asset build. Publish the same
+        // sidecar the manifest fingerprints, or the game rejects the new world
+        // and falls back to collision from the previous staged model settings.
+        if (!std::filesystem::exists(utf8(source)))
+        {
+            // Removing a sidecar restores Detailed collision; discard any old
+            // cooked override as well, just as the asset build's pruning does.
+            std::filesystem::remove(utf8(destination));
+            return true;
+        }
+        const auto hash = FileHash(source);
+        if (!hash) return SDL_SetError("Cannot read mesh collision settings: %s", source.c_str());
+        if (hash == FileHash(destination)) return true;
+        const auto directory = destination.substr(0, destination.find_last_of('/'));
+        if (!SDL_CreateDirectory(directory.c_str())) return false;
+        SDL_Time time;
+        if (!SDL_GetCurrentTime(&time)) return false;
+        const auto temporary = destination + "." + std::to_string(time) + ".tmp";
+        if (!SDL_CopyFile(source.c_str(), temporary.c_str()) || !SDL_RenamePath(temporary.c_str(), destination.c_str()))
+        {
+            const std::string error = SDL_GetError();
+            SDL_RemovePath(temporary.c_str());
+            return SDL_SetError("Cannot update cooked collision for '%s': %s", model.c_str(), error.c_str());
+        }
+        return true;
+    }
+
     CellKey Key(Vector3 p)
     {
         const double x = std::floor(p.x / cellMeters), z = std::floor(p.z / cellMeters);
@@ -336,6 +375,8 @@ bool Cook(WorldDocument& world, const std::string& file)
             }
             packed.push_back(std::move(cell));
         }
+        for (const auto& asset : manifest.assets)
+            if (asset.kind == AssetKind::Model && !StageCollisionSettings(asset.path, root)) return false;
         return Write(file, std::move(manifest), packed);
     }
     catch (const std::exception& e) { return SDL_SetError("World cook failed: %s", e.what()); }
