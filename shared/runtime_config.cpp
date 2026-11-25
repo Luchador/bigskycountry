@@ -27,7 +27,7 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
     std::unique_ptr<char, decltype(&SDL_free)> bytes(static_cast<char*>(SDL_LoadFile(path.c_str(), &size)), SDL_free);
     if (!bytes)
     {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Cannot read %s: %s; using default graphics settings", path.c_str(), SDL_GetError());
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Cannot read %s: %s; using default runtime settings", path.c_str(), SDL_GetError());
         return result;
     }
     std::string_view contents(bytes.get(), size), section;
@@ -47,14 +47,31 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
             continue;
         }
         const auto equals = line.find('=');
-        if (!Equal(section, "Graphics") || equals == line.npos) continue;
+        if (equals == line.npos) continue;
         const auto key = Trim(line.substr(0, equals));
-        if (!Equal(key, "MSAA") && !Equal(key, "SSAO") && !Equal(key, "SSAOSamples")) continue;
+        int* budget = nullptr;
+        if (Equal(section, "Streaming"))
+        {
+            if (Equal(key, "GeometryMiB")) budget = &result.streamGeometryMiB;
+            else if (Equal(key, "AssetsMiB")) budget = &result.streamAssetsMiB;
+            else if (Equal(key, "CollisionMiB")) budget = &result.streamCollisionMiB;
+            else continue;
+        }
+        else if (!Equal(section, "Graphics") ||
+                 (!Equal(key, "MSAA") && !Equal(key, "SSAO") && !Equal(key, "SSAOSamples"))) continue;
         const auto value = Trim(line.substr(equals + 1));
         int number = 0;
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
         const bool integer = parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
-        if (Equal(key, "MSAA"))
+        if (budget)
+        {
+            const bool valid = integer && (number == 0 || (number >= 64 && number <= 16384));
+            *budget = valid ? number : 0;
+            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "%s:%u: %.*s must be 0 or 64..16384 MiB; using the project budget",
+                path.c_str(), lineNumber, int(key.size()), key.data());
+        }
+        else if (Equal(key, "MSAA"))
         {
             const bool valid = integer && (number == 0 || number == 2 || number == 4);
             result.msaa = valid ? number : 4;
@@ -74,6 +91,14 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
         }
     }
     return result;
+}
+
+StreamingSettings RuntimeConfig::ApplyStreamingOverrides(StreamingSettings settings) const
+{
+    if (streamGeometryMiB) settings.geometryBytes = std::size_t(streamGeometryMiB) * StreamingSettings::MiB;
+    if (streamAssetsMiB) settings.assetBytes = std::size_t(streamAssetsMiB) * StreamingSettings::MiB;
+    if (streamCollisionMiB) settings.collisionBytes = std::size_t(streamCollisionMiB) * StreamingSettings::MiB;
+    return settings;
 }
 
 const RuntimeConfig& RuntimeConfig::Get()

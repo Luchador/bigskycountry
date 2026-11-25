@@ -13,7 +13,8 @@ public:
     static constexpr double minViewDistance = 100, maxViewDistance = 128000;
     bool Load(AssetRoot location);
     bool SaveDistances(double railroadMeters, double viewMeters);
-    const StreamingSettings& Streaming() const { return streaming; }
+    StreamingSettings Streaming() const; // Effective budgets, including local config.ini overrides.
+    const StreamingSettings& StreamingDefaults() const { return streaming; }
     bool SaveOptions(double railroadMeters, double viewMeters, const StreamingSettings& budgets)
         { return SaveOptions(railroadMeters, viewMeters, budgets, shadowDistance); }
     bool SaveOptions(double railroadMeters, double viewMeters, const StreamingSettings& budgets, double shadowMeters);

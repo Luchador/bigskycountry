@@ -10,7 +10,7 @@ namespace ProjectDistanceFields
     inline std::string Text(int field = 0)
     {
         char text[64];
-        const auto& budgets = g_ProjectSettings.Streaming();
+        const auto& budgets = g_ProjectSettings.StreamingDefaults();
         const double values[]{g_ProjectSettings.RailroadDetailDistance(), g_ProjectSettings.ViewDistance() / 1000,
             double(budgets.geometryBytes) / StreamingSettings::MiB, double(budgets.assetBytes) / StreamingSettings::MiB,
             double(budgets.collisionBytes) / StreamingSettings::MiB, g_ProjectSettings.ShadowDistance() / 1000};
@@ -28,7 +28,7 @@ namespace ProjectDistanceFields
         if (!view) return SDL_SetError("Enter a view distance between 0.1 and 128 kilometers.");
         const auto shadow = ParseTransformValue(shadowText);
         if (!shadow) return SDL_SetError("Enter a shadow distance between 0 and 10 kilometers (0 disables shadows).");
-        auto budgets = g_ProjectSettings.Streaming();
+        auto budgets = g_ProjectSettings.StreamingDefaults();
         const auto parseBudget = [](std::string_view text, std::size_t& bytes) {
             const auto parsed = ParseTransformValue(text);
             if (!parsed || *parsed < 64 || *parsed > 16384) return false;

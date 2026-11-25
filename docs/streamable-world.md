@@ -69,13 +69,29 @@ simulation-state eviction for dynamic actors in this milestone.
 
 ## Budgets and editor protection
 
-**Settings → Project Settings** exposes three budgets (64–16,384 MiB):
+**Settings → Project Settings** exposes three project budgets (64–16,384 MiB):
 
 | Control | Default | Accounting |
 | --- | ---: | --- |
 | Geometry per CPU/GPU cache | 512 MiB | Separate limits for decoded cell geometry and retained renderer buffers/staging |
 | Shared models + textures | 512 MiB | Half for unique decoded model meshes, half for shared material maps per renderer |
 | Streamed collision | 256 MiB | Chunk/instance triangle and BVH allocations |
+
+`config.ini` beside the game/editor executable can override these on this machine:
+
+```ini
+[Streaming]
+GeometryMiB=0
+AssetsMiB=0
+CollisionMiB=0
+```
+
+Each key accepts `0` to inherit its project budget, or an integer from 64 to
+16,384 MiB. Missing/invalid entries also inherit; invalid entries log a warning.
+The build adds missing keys with `0` so existing project budgets keep working.
+Project Settings continues to display and save the project defaults; local
+overrides are applied to streaming and renderer/texture caches, including editor
+previews. Restart to apply INI changes; no world recook is necessary.
 
 These are working-set targets, not a cap on total process memory. The manifest,
 indexes, allocator overhead, dynamic geometry, render targets, sky textures,

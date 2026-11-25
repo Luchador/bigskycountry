@@ -226,6 +226,7 @@ BEGIN
     EDITTEXT IDC_SHADOW_DISTANCE, 174, 191, 65, 15, ES_AUTOHSCROLL | WS_TABSTOP
     LTEXT "Nearby collision and active GPU assets stay protected.", -1, 10, 218, 370, 12
     LTEXT "Editor source data and undo are always kept resident.", -1, 10, 233, 370, 12
+    LTEXT "Budgets are project defaults; config.ini can override them locally.", -1, 10, 246, 370, 12
     DEFPUSHBUTTON "Apply", IDOK, 174, 258, 65, 16
 END
 

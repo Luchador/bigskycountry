@@ -1,4 +1,5 @@
 #include "project_settings.hpp"
+#include "runtime_config.hpp"
 #include <SDL3/SDL.h>
 #include <cJSON.h>
 #include <cmath>
@@ -50,6 +51,11 @@ namespace
         SDL_RemovePath(temp.c_str());
         return SDL_SetError("Cannot save %s: %s", path.c_str(), error.c_str());
     }
+}
+
+StreamingSettings ProjectSettings::Streaming() const
+{
+    return RuntimeConfig::Get().ApplyStreamingOverrides(streaming);
 }
 
 bool ProjectSettings::Load(AssetRoot location)

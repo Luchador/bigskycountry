@@ -70,7 +70,8 @@ bool SdlProjectSettings::Paint() const
         !SDL_RenderDebugText(renderer, 20, 326, "Streamed collision budget (MiB)") ||
         !SDL_RenderDebugText(renderer, 20, 390, "Shadow distance (km, 0 - 10; 0 disables shadows)") ||
         !SDL_RenderDebugText(renderer, 20, 460, "Nearby collision and active GPU assets stay protected.") ||
-        !SDL_RenderDebugText(renderer, 20, 480, "Editor source data and undo are always kept resident.")) return false;
+        !SDL_RenderDebugText(renderer, 20, 480, "Editor source data and undo are always kept resident.") ||
+        !SDL_RenderDebugText(renderer, 20, 498, "Project budgets; config.ini can override them locally.")) return false;
     for (int i = 0; i < 6; ++i)
         if (!distanceField.DrawField(renderer, distanceBoxes[i], {}, i, values[i], true)) return false;
     for (int i = 0; i < 3; ++i)

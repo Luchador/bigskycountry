@@ -1,18 +1,23 @@
 My project Big Sky Country
 
-## Graphics configuration
+## Runtime configuration
 
 The game and editor read `config.ini` beside their executables at startup. The
 build creates it from the repository's template if missing and preserves edits
-on subsequent builds, adding missing SSAO entries to older configs. For a Ninja build, edit `build/config.ini`; for a Visual
+on subsequent builds, adding missing SSAO and streaming entries to older configs. For a Ninja build, edit `build/config.ini`; for a Visual
 Studio Release build, edit `build/Release/config.ini`. Both executables in that
-directory share the setting for 3D views, including the editor's mesh preview.
+directory share the settings, including the editor's mesh preview.
 
 ```ini
 [Graphics]
 MSAA=4
 SSAO=1
 SSAOSamples=16
+
+[Streaming]
+GeometryMiB=0
+AssetsMiB=0
+CollisionMiB=0
 ```
 
 Use `0` to disable antialiasing, `2` for 2x MSAA, or `4` for 4x MSAA (the default).
@@ -39,6 +44,24 @@ ambient light only, including the ambient term of foliage; direct lights,
 emission, sky, UI, wireframe and vertex-color inspection remain unchanged.
 It works with MSAA off, 2x or 4x. Unsupported GPUs and the software renderer
 omit SSAO; GPU initialization failures are logged.
+
+The `[Streaming]` entries override memory budgets locally for the game and editor.
+Use `0` (the default), omit a key, or leave it invalid to keep that budget from
+**Settings → Project Settings**. Explicit overrides accept whole numbers from
+64 to 16,384 MiB; invalid values log a warning. Restart after editing; no world
+recook is needed. For example, `GeometryMiB=1024` allows 1 GiB in each geometry
+cache. Changes in the Project Settings dialog still edit the project defaults
+and do not overwrite the local overrides. F3 displays the effective render and
+texture limits.
+
+| Config key | Project default | Controls |
+| --- | ---: | --- |
+| `GeometryMiB` | 512 MiB | Separate limits for decoded cell geometry and renderer buffers/staging |
+| `AssetsMiB` | 512 MiB | Shared models and textures; each receives half of this budget |
+| `CollisionMiB` | 256 MiB | Streamed collision meshes and BVHs |
+
+These are cache targets, not a total RAM/VRAM limit. Active rendering and required
+nearby collision can exceed them; editor source data and undo history stay resident.
 
 ## Vehicle physics
 
