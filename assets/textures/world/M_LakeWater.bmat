@@ -1,7 +1,16 @@
 {
     "version": 1,
-    "type": "unlit",
-    "emissiveTint": [0.12, 0.37, 0.45],
-    "translucencyMultiplier": 0.68,
+    "type": "water",
+    "water": {
+        "color": [0.08, 0.26, 0.22],
+        "roughness": 0.16,
+        "waveStrength": 0.18,
+        "waveScale": 3.0,
+        "waveSpeed": 0.6,
+        "clarity": 4.0,
+        "refraction": 0.15,
+        "shoreWidth": 0.35,
+        "foam": 0.2
+    },
     "textures": {}
 }

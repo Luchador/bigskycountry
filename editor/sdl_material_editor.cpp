@@ -11,13 +11,14 @@ namespace
         SDL_FRect view, type, vertexAO{};
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
         SDL_FRect tint{};
-        std::array<SDL_FRect, 5> sliders{};
+        std::array<SDL_FRect, 5 + waterProperties.size()> sliders{};
         Layout(SDL_Window* window, const Material& material)
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+            const bool water = material.type == MaterialType::Water;
             const bool transition = material.type == MaterialType::Transition;
             const bool foliage = material.type == MaterialType::Foliage;
-            const float panelWidth = foliage ? 280.f : transition ? 256.f : 224.f;
+            const float panelWidth = foliage || water ? 280.f : transition ? 256.f : 224.f;
             const float split = float(windowWidth) - panelWidth;
             view = {0, 0, split, float(windowHeight)};
             type = {split + 10, 32, panelWidth - 20, 25};
@@ -45,6 +46,15 @@ namespace
                 }
             }
             sliders[3] = {split + 10, y + 18, panelWidth - 20, 18};
+            if (water)
+            {
+                tint = {split+panelWidth-65,y,55,16};
+                y += 20;
+                for (int c=0; c<3; ++c,y+=17) sliders[c] = {split+32,y,panelWidth-42,15};
+                const float step = std::max(30.f,std::min(44.f,(windowHeight-y-8)/waterProperties.size()));
+                for (size_t i=0; i<waterProperties.size(); ++i,y+=step)
+                    sliders[5+i] = {split+10,y+18,panelWidth-20,16};
+            }
         }
         std::optional<MaterialSlot> Slot(SDL_FPoint p) const
         {
@@ -90,7 +100,6 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
         SDL_DestroyProperties(props);
         if (!window)
             return false;
-        SDL_SetWindowMinimumSize(window, 440, 350);
         renderer = SDL_CreateRenderer(window, nullptr);
         if (!renderer)
         {
@@ -98,6 +107,7 @@ bool SdlMaterialEditor::Open(SDL_Window* owner, TextureCatalog& catalog, const s
             return false;
         }
     }
+    SDL_SetWindowMinimumSize(window,540,editor.Current().type == MaterialType::Water ? 680 : 400);
     SDL_SetWindowTitle(window, ("Material Editor - " + path).c_str());
     SDL_RaiseWindow(window);
     imagesDirty = dirty = true;
@@ -124,10 +134,12 @@ void SdlMaterialEditor::FinishDrag()
     orbitPoint.reset();
     if (activeSlider)
     {
-        editor.PreviewTint(editor.Current().emissiveTint);
+        editor.PreviewTint(editor.Current().type == MaterialType::Water ? editor.Current().water.color : editor.Current().emissiveTint);
         editor.PreviewTranslucency(editor.Current().translucency);
         editor.PreviewSubsurface(editor.Current().subsurfaceStrength);
         editor.PreviewAlphaCutoff(editor.Current().alphaCutoff);
+        for (size_t i=0; i<waterProperties.size(); ++i)
+            editor.PreviewWater(i,editor.Current().water.*waterProperties[i].member);
         sphereDirty = true;
         activeSlider.reset();
     }
@@ -158,6 +170,7 @@ void SdlMaterialEditor::StartDrag(const std::string& path)
 
 void SdlMaterialEditor::Report(bool success)
 {
+    SDL_SetWindowMinimumSize(window,540,editor.Current().type == MaterialType::Water ? 680 : 400);
     if (!success)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Material Editor", SDL_GetError(), window);
     else
@@ -301,8 +314,9 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
             const bool foliage = editor.Current().type == MaterialType::Foliage;
             for (int i = 0; i < int(layout.sliders.size()); ++i)
             {
-                const bool visible = i == 4 ? Material::IsCutout(editor.Current().type) :
-                    editor.Current().type == MaterialType::Unlit || (foliage && i == 3);
+                const bool water = editor.Current().type == MaterialType::Water;
+                const bool visible = i >= 5 ? water : i == 4 ? Material::IsCutout(editor.Current().type) :
+                    (water && i < 3) || editor.Current().type == MaterialType::Unlit || (foliage && i == 3);
                 if (visible && SDL_PointInRectFloat(&p, &layout.sliders[i]))
                 {
                     activeSlider = i;
@@ -324,7 +338,14 @@ void SdlMaterialEditor::AdjustSlider(float x, bool commit)
     const int index = *activeSlider;
     const auto bar = Layout(window, editor.Current()).sliders[index];
     const float fraction = std::clamp((x - bar.x) / (bar.w - 1), 0.f, 1.f);
-    if (index == 4)
+    if (index >= 5)
+    {
+        const auto& p = waterProperties[index-5];
+        const float value = std::lerp(p.minimum,p.maximum,fraction);
+        if (commit) Report(editor.SetWater(index-5,value));
+        else editor.PreviewWater(index-5,value);
+    }
+    else if (index == 4)
     {
         const float value = std::round(fraction * 100) / 100;
         if (commit) Report(editor.SetAlphaCutoff(value));
@@ -439,16 +460,17 @@ bool SdlMaterialEditor::Draw()
             return false;
     }
     const bool foliage = editor.Current().type == MaterialType::Foliage;
-    if (editor.Current().type == MaterialType::Unlit || foliage)
+    const bool water = editor.Current().type == MaterialType::Water;
+    if (editor.Current().type == MaterialType::Unlit || foliage || water)
     {
         const auto& color = editor.Tint();
         const auto byte = [](float c) { return static_cast<Uint8>(std::lround(c * 255)); };
-        if (!foliage && (!Text(renderer, layout.type.x, layout.tint.y + 4, "Emissive tint", text) ||
+        if (!foliage && (!Text(renderer, layout.type.x, layout.tint.y + 4, water ? "Water color" : "Emissive tint", text) ||
             !Fill(renderer, layout.tint, {byte(color[0]), byte(color[1]), byte(color[2]), 255}))) return false;
         char label[40];
         const float strength = foliage ? editor.Subsurface() : editor.Translucency();
         SDL_snprintf(label, sizeof(label), foliage ? "Subsurface strength %.2f" : "Translucency %.2f", strength);
-        for (int i = foliage ? 3 : 0; i < 4; ++i)
+        for (int i = foliage ? 3 : 0; i < (water ? 3 : 4); ++i)
         {
             const auto bar = layout.sliders[i];
             const bool factor = i == 3;
@@ -468,6 +490,18 @@ bool SdlMaterialEditor::Draw()
             !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
             !Fill(renderer, {bar.x + editor.AlphaCutoff() * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
     }
+    if (water)
+        for (size_t i=0; i<waterProperties.size(); ++i)
+        {
+            const auto& p = waterProperties[i];
+            const float value = editor.Water().*p.member;
+            const auto bar = layout.sliders[5+i];
+            char label[80];
+            SDL_snprintf(label,sizeof(label),"%s %.2f",p.label,value);
+            if (!Text(renderer,bar.x,bar.y-16,label,text) ||
+                !Fill(renderer,{bar.x,bar.y+bar.h/2-2,bar.w,4},button) ||
+                !Fill(renderer,{bar.x+(value-p.minimum)/(p.maximum-p.minimum)*(bar.w-6),bar.y+1,6,bar.h-2},accent)) return false;
+        }
     if (typeMenu)
         for (int i = 0; i < int(materialTypes.size()); ++i)
         {

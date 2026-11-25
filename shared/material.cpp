@@ -132,6 +132,23 @@ bool Material::Load(const std::string& requestedFile)
     if (const auto* cutoff = cJSON_GetObjectItemCaseSensitive(json.get(), "alphaCutoff"))
         if (!ReadUnit(cutoff, material.alphaCutoff)) return SDL_SetError("Invalid alpha cutoff");
     const auto* maps = cJSON_GetObjectItemCaseSensitive(json.get(), "textures");
+    if (const auto* water = cJSON_GetObjectItemCaseSensitive(json.get(), "water"))
+    {
+        if (!cJSON_IsObject(water)) return SDL_SetError("Invalid water properties");
+        if (const auto* color = cJSON_GetObjectItemCaseSensitive(water, "color"))
+        {
+            if (!cJSON_IsArray(color) || cJSON_GetArraySize(color) != 3) return SDL_SetError("Invalid water color");
+            for (int i = 0; i < 3; ++i)
+                if (!ReadUnit(cJSON_GetArrayItem(color, i), material.water.color[i])) return SDL_SetError("Invalid water color");
+        }
+        for (const auto& property : waterProperties)
+            if (const auto* value = cJSON_GetObjectItemCaseSensitive(water, property.key))
+            {
+                if (!cJSON_IsNumber(value) || !(value->valuedouble >= property.minimum && value->valuedouble <= property.maximum))
+                    return SDL_SetError("Invalid water %s", property.key);
+                material.water.*property.member = static_cast<float>(value->valuedouble);
+            }
+    }
     if (maps && !cJSON_IsObject(maps))
         return SDL_SetError("Invalid material texture list");
     for (std::size_t i = 0; i < keys.size(); ++i)
@@ -162,6 +179,25 @@ bool Material::Save(const std::string& requestedFile) const
     if (!cJSON_AddBoolToObject(json.get(), "useVertexAlphaAO", useVertexAlphaAO))
         return SDL_OutOfMemory();
     const auto unit = [](float v) { return v >= 0 && v <= 1; };
+    if (!std::ranges::all_of(water.color, unit)) return SDL_SetError("Invalid water color");
+    for (const auto& property : waterProperties)
+        if (!(water.*property.member >= property.minimum && water.*property.member <= property.maximum))
+            return SDL_SetError("Invalid water %s", property.key);
+    if (type == MaterialType::Water || water != WaterMaterial{})
+    {
+        auto* values = cJSON_GetObjectItemCaseSensitive(json.get(), "water");
+        if (!values) values = cJSON_AddObjectToObject(json.get(), "water");
+        if (!cJSON_IsObject(values)) return SDL_SetError("Invalid water properties");
+        cJSON_DeleteItemFromObjectCaseSensitive(values, "color");
+        Json color(cJSON_CreateFloatArray(water.color.data(), 3), cJSON_Delete);
+        if (!color || !cJSON_AddItemToObject(values, "color", color.get())) return SDL_OutOfMemory();
+        color.release();
+        for (const auto& property : waterProperties)
+        {
+            cJSON_DeleteItemFromObjectCaseSensitive(values, property.key);
+            if (!cJSON_AddNumberToObject(values, property.key, water.*property.member)) return SDL_OutOfMemory();
+        }
+    }
     if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
     if (!unit(subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
     if (!unit(alphaCutoff)) return SDL_SetError("Invalid alpha cutoff");

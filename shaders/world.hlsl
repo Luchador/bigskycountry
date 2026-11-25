@@ -137,7 +137,9 @@ float3 ToDisplay(float3 c)
 // record offsets. Tile masks stay integer bits, including patterns that
 // represent floating-point denormals or NaNs.
 // Storage buffers follow sampled textures in each shader's resource set.
-#ifdef BSC_MATERIAL
+#ifdef BSC_WATER
+ByteAddressBuffer spotData : register(t5, space2);
+#elif defined(BSC_MATERIAL)
 ByteAddressBuffer spotData : register(t8, space2);
 #else
 ByteAddressBuffer spotData : register(t2, space2);

@@ -7,6 +7,8 @@
 #include <cstring>
 #include <limits>
 #include <span>
+#include <cmath>
+#include <numbers>
 
 #ifdef BIGSKY_WORLD_GPU
 #include "world_vert_dxil.hpp"
@@ -17,6 +19,8 @@
 #include "wireframe_frag_spirv.hpp"
 #include "material_frag_dxil.hpp"
 #include "material_frag_spirv.hpp"
+#include "water_frag_dxil.hpp"
+#include "water_frag_spirv.hpp"
 #include "material_msaa2_dxil.hpp"
 #include "material_msaa2_spirv.hpp"
 #include "material_msaa4_dxil.hpp"
@@ -69,6 +73,9 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    if (waterPipeline) SDL_ReleaseGPUGraphicsPipeline(device, waterPipeline);
+    if (waterScene) SDL_ReleaseGPUTexture(device, waterScene);
+    if (waterSampler) SDL_ReleaseGPUSampler(device, waterSampler);
     ReleaseSSAO();
     if (multisampleColor) SDL_ReleaseGPUTexture(device, multisampleColor);
     if (spotBuffer) SDL_ReleaseGPUBuffer(device, spotBuffer);
@@ -197,6 +204,7 @@ bool WorldRenderer::CreatePipelines()
     if (surfacePipeline)
     {
         texturedPipeline = materialPipeline("MaterialPS", material_frag_dxil, material_frag_spirv, SurfaceMaterial::shaderMapCount + 2, 2, 1);
+        waterPipeline = materialPipeline("WaterPS", water_frag_dxil, water_frag_spirv, 5, 2, 1);
     }
 
     if (texturedPipeline)
@@ -287,8 +295,10 @@ bool WorldRenderer::CreatePipelines()
         if (cutoutPS) SDL_ReleaseGPUShader(device, cutoutPS);
     }
 
-    if (!outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1) || !CreateSSAOFallback())
+    if (!waterPipeline || !outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1) || !CreateSSAOFallback())
     {
+        if (waterPipeline) SDL_ReleaseGPUGraphicsPipeline(device, waterPipeline);
+        waterPipeline = nullptr;
         if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
         if (shadowSampler) SDL_ReleaseGPUSampler(device, shadowSampler);
         if (shadowPipeline) SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
@@ -476,7 +486,7 @@ bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
             };
             SDL_GPUGraphicsPipeline* bound = nullptr;
             const auto draw = [&](size_t first, size_t end, const SurfaceMaterial* material) {
-                if (first >= end || (material && material->type == MaterialType::Unlit)) return;
+                if (first >= end || (material && (material->type == MaterialType::Unlit || material->type == MaterialType::Water))) return;
                 const bool cutout = material && Material::IsCutout(material->type);
                 auto* pipeline = cutout ? shadowCutoutPipeline : shadowPipeline;
                 if (bound != pipeline) SDL_BindGPUGraphicsPipeline(pass, bound = pipeline);
@@ -509,8 +519,71 @@ bool WorldRenderer::DrawShadows(SDL_GPUCommandBuffer* commands)
     return true;
 }
 
+bool WorldRenderer::PrepareWater()
+{
+    if (!waterSampler)
+    {
+        SDL_GPUSamplerCreateInfo info{};
+        info.min_filter = info.mag_filter = SDL_GPU_FILTER_LINEAR;
+        info.address_mode_u = info.address_mode_v = info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        waterSampler = SDL_CreateGPUSampler(device, &info);
+        if (!waterSampler) return false;
+    }
+    if (waterScene && waterWidth == viewport.w && waterHeight == viewport.h) return true;
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    info.width = viewport.w;
+    info.height = viewport.h;
+    info.layer_count_or_depth = info.num_levels = 1;
+    auto* replacement = SDL_CreateGPUTexture(device, &info);
+    if (!replacement) return false;
+    if (waterScene) SDL_ReleaseGPUTexture(device, waterScene);
+    waterScene = replacement;
+    waterWidth = viewport.w;
+    waterHeight = viewport.h;
+    return true;
+}
+
+void WorldRenderer::BindWater(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, const SurfaceMaterial& material)
+{
+    const auto axis = [](Vector3 v, float w) { return SDL_FColor{float(v.x),float(v.y),float(v.z),w}; };
+    const auto& water = material.water;
+    const auto tint = Srgb::ToLinear({water.color[0],water.color[1],water.color[2],water.roughness});
+    // Reduce phases in double before sending them to the GPU. A floating origin,
+    // geographic coordinates and long sessions must not make ripples jump.
+    constexpr std::array directions{SDL_FPoint{1,0}, SDL_FPoint{.6f,.8f}, SDL_FPoint{-.8f,.6f}, SDL_FPoint{.28f,-.96f}};
+    constexpr std::array lengths{1.,.57,.23,.11}, speeds{1.,.9,1.1,.8};
+    const auto eye = camera->GetPosition();
+    const double time = double(SDL_GetTicksNS())/1e9;
+    std::array<float,4> phase{};
+    for (size_t i=0; i<4; ++i)
+    {
+        const double k = 2*std::numbers::pi/(water.waveScale*lengths[i]);
+        phase[i] = float(std::remainder((eye.x*directions[i].x+eye.z*directions[i].y-time*water.waveSpeed*speeds[i])*k, 2*std::numbers::pi));
+    }
+    const SDL_FColor properties[]{tint,
+        {water.waveStrength,water.waveScale,water.waveSpeed,water.clarity},
+        {water.refraction,water.shoreWidth,water.foam,waterDepthReady ? 1.f : 0.f},
+        axis(camera->Right(),float(scaleX)), axis(camera->Up(),float(scaleY)), axis(camera->Forward(),float(worldNearDepth)),
+        {phase[0],phase[1],phase[2],phase[3]},
+        {float(std::fmod(time*water.waveSpeed*.017,1)),float(std::fmod(time*water.waveSpeed*.013,1)),0,0}};
+    SDL_PushGPUFragmentUniformData(commands,1,properties,sizeof(properties));
+    const SDL_GPUTextureSamplerBinding inputs[]{{waterScene,waterSampler},{waterDepthReady ? ssaoDepth : ssaoWhite,ssaoSampler}};
+    SDL_BindGPUFragmentSamplers(pass,3,inputs,2);
+}
+
 bool WorldRenderer::DrawGPU()
 {
+    const auto isWater = [](const SurfaceMaterial* m) { return m && m->type == MaterialType::Water; };
+    waterRequested = !residentWire && !wireframeEnd &&
+        (std::ranges::any_of(draws,[&](const auto& d) { return isWater(d.material); }) ||
+         std::ranges::any_of(residentDraws,[&](const auto& d) {
+             return !d.uploadOnly && BoundsVisible(d.geometry->bounds) &&
+                 std::ranges::any_of(d.geometry->parts,[&](const auto& p) { return isWater(p.material); });
+         }));
+    if (waterRequested && !PrepareWater()) return false;
     if (shadows.active && !PrepareShadowTarget(ShadowCascades::resolution))
     {
         SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Shadows disabled for this frame: %s", SDL_GetError());
@@ -601,14 +674,15 @@ bool WorldRenderer::DrawGPU()
     const bool foreground = foregroundStart < vertices.size();
     color.texture = multisampleColor ? multisampleColor : resolved;
     color.load_op = SDL_GPU_LOADOP_CLEAR; // Transparent pixels reveal the sky.
-    color.store_op = multisampleColor && !foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
-    color.resolve_texture = resolved;
+    color.store_op = multisampleColor ? (waterRequested ? SDL_GPU_STOREOP_RESOLVE_AND_STORE :
+        (!foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE)) : SDL_GPU_STOREOP_STORE;
+    color.resolve_texture = multisampleColor && (waterRequested || !foreground) ? resolved : nullptr;
     color.cycle_resolve_texture = true;
     color.cycle = true;
     SDL_GPUDepthStencilTargetInfo depth{};
     depth.texture = depthTarget;
     depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_CLEAR; // Reversed depth clears to zero.
-    depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depth.store_op = depth.stencil_store_op = waterRequested ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
     depth.cycle = true;
 
     if (!resolved)
@@ -726,7 +800,8 @@ bool WorldRenderer::DrawGPU()
     const auto bindPipeline = [&](const SurfaceMaterial* material, bool wire) {
         auto* pipeline = surfacePipeline;
         if (wire) pipeline = wireframePipeline;
-        else if (material) pipeline = material->type == MaterialType::Unlit ? translucentPipeline :
+        else if (material) pipeline = material->type == MaterialType::Water ? waterPipeline :
+                                      material->type == MaterialType::Unlit ? translucentPipeline :
                                       material->type == MaterialType::Foliage ? foliagePipeline :
                                       material->type == MaterialType::AlphaCutout ? cutoutPipeline : texturedPipeline;
         if (pipeline != bound)
@@ -734,45 +809,88 @@ bool WorldRenderer::DrawGPU()
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             bound = pipeline;
         }
-        if (material && material != boundMaterial) materialCache.Bind(*material, commands, pass, 2);
+        if (material && material != boundMaterial)
+        {
+            materialCache.Bind(*material, commands, pass, 2);
+            if (isWater(material)) BindWater(commands, pass, *material);
+        }
         boundMaterial = material;
     };
+    int phase = 0; // Opaque scene, then water, then ordinary translucency/overlays.
+    const auto accepted = [&](const SurfaceMaterial* material) {
+        if (!waterRequested) return true;
+        const int kind = isWater(material) ? 1 : (material && material->type == MaterialType::Unlit ? 2 : 0);
+        return kind == phase;
+    };
     const auto drawResident = [&](const ResidentDraw& batch) {
-        if (batch.uploadOnly) return;
+        // Shadow-only submissions must not bind a water pass that was skipped
+        // because no water is visible in the main camera.
+        if (batch.uploadOnly || !BoundsVisible(batch.geometry->bounds)) return;
         const auto& mesh = *batch.geometry;
         if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
             !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes))) return;
         bindSource(batch.geometry->buffer, batch.geometry.get());
         for (const auto& part : batch.geometry->parts)
         {
+            if (!accepted(part.material)) continue;
             bindPipeline(residentWire ? nullptr : part.material, residentWire);
             draw(part.first, part.end, batch.selected);
         }
     };
-    auto batch = residentDraws.begin();
-    for (const auto& range : draws)
-    {
-        size_t first = range.first;
-        // Draw opaque geometry in its original order, including coplanar paint
-        // and the editor overlays. Globally sorted translucent draws come last.
-        const bool translucent = range.material && range.material->type == MaterialType::Unlit;
-        while (batch != residentDraws.end() && (translucent || batch->before < range.end))
+    const auto drawScene = [&] {
+        auto batch = residentDraws.begin();
+        for (const auto& range : draws)
         {
-            const size_t split = translucent ? first : std::clamp(batch->before, first, range.end);
-            if (first < split)
+            size_t first = range.first;
+            // Draw opaque geometry in its original order, including coplanar paint
+            // and the editor overlays. Globally sorted translucent draws come last.
+            const bool translucent = range.material && range.material->type == MaterialType::Unlit;
+            while (batch != residentDraws.end() && (translucent || batch->before < range.end))
+            {
+                const size_t split = translucent ? first : std::clamp(batch->before, first, range.end);
+                if (first < split && accepted(range.material))
+                {
+                    bindSource(vertexBuffer, nullptr);
+                    bindPipeline(range.material, first < wireframeEnd);
+                    draw(first, split, range.selected);
+                    first = split;
+                }
+                drawResident(*batch++);
+            }
+            if (accepted(range.material))
             {
                 bindSource(vertexBuffer, nullptr);
                 bindPipeline(range.material, first < wireframeEnd);
-                draw(first, split, range.selected);
-                first = split;
+                draw(first, range.end, range.selected);
             }
-            drawResident(*batch++);
         }
-        bindSource(vertexBuffer, nullptr);
-        bindPipeline(range.material, first < wireframeEnd);
-        draw(first, range.end, range.selected);
+        while (batch != residentDraws.end()) drawResident(*batch++);
+    };
+    drawScene();
+    if (waterRequested)
+    {
+        SDL_EndGPURenderPass(pass);
+        auto* copy = SDL_BeginGPUCopyPass(commands);
+        if (!copy) { SDL_CancelGPUCommandBuffer(commands); return false; }
+        const SDL_GPUTextureLocation src{resolved,0,0,0,0,0}, dst{waterScene,0,0,0,0,0};
+        SDL_CopyGPUTextureToTexture(copy,&src,&dst,viewport.w,viewport.h,1,true);
+        SDL_EndGPUCopyPass(copy);
+        color.load_op = SDL_GPU_LOADOP_LOAD;
+        color.cycle = color.cycle_resolve_texture = false;
+        color.store_op = multisampleColor && !foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+        color.resolve_texture = multisampleColor && !foreground ? resolved : nullptr;
+        depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_LOAD;
+        depth.cycle = false;
+        depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        pass = SDL_BeginGPURenderPass(commands,&color,1,&depth);
+        if (!pass) { SDL_CancelGPUCommandBuffer(commands); return false; }
+        SDL_BindGPUFragmentSamplers(pass,0,sceneBindings,2);
+        SDL_BindGPUFragmentStorageBuffers(pass,0,&spotBuffer,1);
+        SDL_PushGPUFragmentUniformData(commands,0,&lighting,sizeof(lighting));
+        source = nullptr; bound = nullptr; boundMaterial = nullptr;
+        phase = 1; drawScene();
+        phase = 2; drawScene();
     }
-    while (batch != residentDraws.end()) drawResident(*batch++);
 
     if (outlineStart < foregroundStart)
     {
@@ -787,8 +905,13 @@ bool WorldRenderer::DrawGPU()
         // Keep the scene color and start a fresh depth buffer for the gizmo.
         color.load_op = SDL_GPU_LOADOP_LOAD;
         color.cycle = false;
+        depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
         // Retain the multisample scene through the gizmo pass and resolve once.
-        if (multisampleColor) color.store_op = SDL_GPU_STOREOP_RESOLVE;
+        if (multisampleColor)
+        {
+            color.store_op = SDL_GPU_STOREOP_RESOLVE;
+            color.resolve_texture = resolved;
+        }
         pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
         if (!pass)
         {

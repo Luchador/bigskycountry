@@ -2,8 +2,9 @@
 
 #include <array>
 #include <string>
+#include "water_material.hpp"
 
-enum class MaterialType { Standard, AlphaCutout, Terrain, Unlit, Transition, Foliage, Count };
+enum class MaterialType { Standard, AlphaCutout, Terrain, Unlit, Transition, Foliage, Water, Count };
 struct MaterialTypeInfo
 {
     const char* key;
@@ -15,7 +16,8 @@ inline constexpr std::array<MaterialTypeInfo, static_cast<std::size_t>(MaterialT
     {"terrain", "Terrain"},
     {"unlit", "Unlit"},
     {"transition", "Transition"},
-    {"foliage", "Foliage"}
+    {"foliage", "Foliage"},
+    {"water", "Water"}
 }};
 
 enum class MaterialSlot { BaseColor, Normal, ORM, Emissive, Opacity, Translucency, OuterBaseColor, OuterNormal, OuterORM, Subsurface, Count };
@@ -28,6 +30,7 @@ inline constexpr std::array<const char*, materialSlotCount> materialSlotLabels{
 struct Material
 {
     MaterialType type = MaterialType::Standard;
+    WaterMaterial water;
     std::array<float, 3> emissiveTint{1, 1, 1}; // Display (sRGB) picker values.
     float translucency = 1;
     float subsurfaceStrength = .5f; // Thin-leaf transmission from directional lights, 0..1.
@@ -40,6 +43,7 @@ struct Material
     }
     bool Uses(MaterialSlot slot) const
     {
+        if (type == MaterialType::Water) return slot == MaterialSlot::Normal;
         if (type == MaterialType::Transition)
             return slot <= MaterialSlot::ORM || (slot >= MaterialSlot::OuterBaseColor && slot <= MaterialSlot::OuterORM);
         if (type == MaterialType::Foliage)

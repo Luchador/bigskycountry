@@ -25,6 +25,7 @@ struct SurfaceMaterial
     static constexpr unsigned shaderMapCount = 6;
     std::array<const SurfaceMaterialTexture*, materialSlotCount> maps{};
     MaterialType type{};
+    WaterMaterial water;
     std::uint64_t lastUsed = 0;
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     float subsurfaceStrength = .5f;

@@ -238,6 +238,7 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         }
         SurfaceMaterial material;
         material.type = definition.type;
+        material.water = definition.water;
         material.useVertexAlphaAO = Material::SupportsVertexAlphaAO(definition.type) && definition.useVertexAlphaAO;
         material.subsurfaceStrength = definition.subsurfaceStrength;
         material.alphaCutoff = definition.alphaCutoff;
@@ -271,6 +272,12 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
 
 void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, Uint32 firstSampler) const
 {
+    if (material.type == MaterialType::Water)
+    {
+        const SDL_GPUTextureSamplerBinding binding{material.maps[static_cast<size_t>(MaterialSlot::Normal)]->gpu, sampler};
+        SDL_BindGPUFragmentSamplers(pass, firstSampler, &binding, 1);
+        return; // The water pass supplies its own uniforms and scene buffers.
+    }
     std::array<SDL_GPUTextureSamplerBinding, SurfaceMaterial::shaderMapCount> bindings{};
     const bool unlit = material.type == MaterialType::Unlit;
     const bool transition = material.type == MaterialType::Transition;
@@ -305,6 +312,11 @@ void SurfaceMaterialCache::BindShadow(const SurfaceMaterial& material, SDL_GPURe
 SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const WorldLighting& lights, Vector3 normal,
                                   Vector3 tangent, float handedness, Vector3 view, float vertexRed, const Projection& outer, bool backFace, float vertexAO) const
 {
+    if (type == MaterialType::Water)
+    {
+        const auto c = Srgb::ToLinear({water.color[0], water.color[1], water.color[2], 1});
+        return lights.ShadeLinear(normal, view, c, {1, water.roughness, 0});
+    }
     const auto sample = [&](MaterialSlot slot) {
         return maps[static_cast<size_t>(slot)]->cpu.Sample(u, v, footprint);
     };

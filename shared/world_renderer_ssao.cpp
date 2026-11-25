@@ -179,6 +179,7 @@ bool WorldRenderer::PrepareSSAO()
 bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
 {
     ssaoActive = false;
+    waterDepthReady = false;
     if (!ssaoInitialized)
     {
         SDL_GPUColorTargetInfo white{};
@@ -191,10 +192,11 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
         SDL_EndGPURenderPass(pass);
         // Set initialized only after successful command-buffer submission.
     }
-    if (!RuntimeConfig::Get().ssao || !ssaoRequested || ssaoFailed || residentWire || wireframeEnd) return true;
+    const bool ambient = RuntimeConfig::Get().ssao && ssaoRequested;
+    if ((!ambient && !waterRequested) || ssaoFailed || residentWire || wireframeEnd) return true;
     if (!PrepareSSAO())
     {
-        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "SSAO disabled: %s", SDL_GetError());
+        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "Scene depth/SSAO unavailable: %s", SDL_GetError());
         ssaoFailed = true;
         return true;
     }
@@ -208,7 +210,8 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
     auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
     if (!pass) return false;
     constexpr double farDistance = 152; // Fade ends at 150 m, plus 2 m sampling radius.
-    const double distance = viewDistance > 0 ? std::min(viewDistance, farDistance) : farDistance;
+    const double distance = waterRequested ? (viewDistance > 0 ? viewDistance : 128000) :
+        (viewDistance > 0 ? std::min(viewDistance, farDistance) : farDistance);
     const auto axis = [](Vector3 v, float w = 0) { return SDL_FColor{float(v.x),float(v.y),float(v.z),w}; };
     SDL_FColor cameraData[]{axis(camera->Right()*scaleX), axis(camera->Up()*scaleY),
                             axis(camera->Forward(),float(worldNearDepth)), {}, {}, {}};
@@ -221,7 +224,7 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
         SDL_PushGPUVertexUniformData(commands,0,cameraData,sizeof(cameraData));
     };
     const auto draw = [&](size_t first, size_t end, const SurfaceMaterial* material) {
-        if (first >= end || (material && material->type == MaterialType::Unlit)) return;
+        if (first >= end || (material && (material->type == MaterialType::Unlit || material->type == MaterialType::Water))) return;
         const bool cutout = material && Material::IsCutout(material->type);
         auto* pipeline = !cutout ? ssaoDepthPipeline : material->type == MaterialType::Foliage ? ssaoFoliagePipeline : ssaoCutoutPipeline;
         SDL_BindGPUGraphicsPipeline(pass,pipeline);
@@ -255,6 +258,8 @@ bool WorldRenderer::DrawSSAO(SDL_GPUCommandBuffer* commands)
     }
     SDL_EndGPURenderPass(pass);
 
+    waterDepthReady = waterRequested;
+    if (!ambient) return true;
     struct Settings { SDL_FColor projection, textureSize, settings, blurStep; };
     Settings settings{{float(1/scaleX),float(1/scaleY),float(worldNearDepth),2},
                       {1.f/viewport.w,1.f/viewport.h,float(ssaoWidth),float(ssaoHeight)},

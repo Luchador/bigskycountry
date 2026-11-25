@@ -18,7 +18,7 @@ namespace
 
     COLORREF TintColor(const Material& material)
     {
-        const auto& c = material.emissiveTint;
+        const auto& c = material.type == MaterialType::Water ? material.water.color : material.emissiveTint;
         return RGB(std::lround(c[0] * 255), std::lround(c[1] * 255), std::lround(c[2] * 255));
     }
 }
@@ -68,11 +68,12 @@ void WindowsMaterialEditor::Layout()
 {
     RECT area{};
     GetClientRect(window, &area);
+    const bool water = editor.Current().type == MaterialType::Water;
     const bool transition = editor.Current().type == MaterialType::Transition;
     const bool foliage = editor.Current().type == MaterialType::Foliage;
     const bool vertexAO = Material::SupportsVertexAlphaAO(editor.Current().type);
     const bool cutout = Material::IsCutout(editor.Current().type);
-    const int pad = Units(window, 6, true), side = Units(window, transition || foliage ? 180 : 144, true);
+    const int pad = Units(window, 6, true), side = Units(window, transition || foliage || water ? 180 : 144, true);
     const int split = std::max<int>(1, area.right - side);
     const int x = split + pad, width = side - 2 * pad;
     const int propertiesTop = Units(window, vertexAO ? 60 : 42, false);
@@ -92,7 +93,7 @@ void WindowsMaterialEditor::Layout()
     int row = 0;
     const bool unlit = editor.Current().type == MaterialType::Unlit;
     for (int id : {IDC_MAT_TINT, IDC_MAT_FACTOR_LABEL, IDC_MAT_FACTOR})
-        ShowWindow(GetDlgItem(window, id), (unlit || (foliage && id != IDC_MAT_TINT)) ? SW_SHOWNA : SW_HIDE);
+        ShowWindow(GetDlgItem(window, id), (unlit || (water && id == IDC_MAT_TINT) || (foliage && id != IDC_MAT_TINT)) ? SW_SHOWNA : SW_HIDE);
     for (int i = 0; i < int(materialSlotCount); ++i)
     {
         const bool visible = editor.Current().Uses(static_cast<MaterialSlot>(i));
@@ -114,6 +115,18 @@ void WindowsMaterialEditor::Layout()
         MoveWindow(GetDlgItem(window, IDC_MAT_FACTOR_LABEL), x, y, width, Units(window, 12, false), FALSE);
         MoveWindow(GetDlgItem(window, IDC_MAT_FACTOR), x, y + Units(window, 14, false), width, Units(window, 18, false), FALSE);
     }
+    if (water)
+        MoveWindow(GetDlgItem(window, IDC_MAT_TINT), x, top + step, width, Units(window,20,false), FALSE);
+    const int waterTop = top + step + Units(window,26,false);
+    const int waterStep = std::min(Units(window,34,false), std::max(Units(window,30,false), (int(area.bottom)-waterTop-pad)/int(waterProperties.size())));
+    for (int i=0; i<int(waterProperties.size()); ++i)
+    {
+        const int y = waterTop+i*waterStep;
+        for (int id : {IDC_MAT_WATER_LABEL_FIRST+i, IDC_MAT_WATER_SLIDER_FIRST+i})
+            ShowWindow(GetDlgItem(window,id), water ? SW_SHOWNA : SW_HIDE);
+        MoveWindow(GetDlgItem(window,IDC_MAT_WATER_LABEL_FIRST+i),x,y,width,Units(window,12,false),FALSE);
+        MoveWindow(GetDlgItem(window,IDC_MAT_WATER_SLIDER_FIRST+i),x,y+Units(window,12,false),width,Units(window,18,false),FALSE);
+    }
     // Erase the old control positions and paint the whole layout during the native resize loop.
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
@@ -132,7 +145,32 @@ void WindowsMaterialEditor::Sync()
     }
     SyncFactor();
     SyncCutoff();
+    SyncWater();
+    if (editor.Current().type == MaterialType::Water)
+    {
+        RECT client{}, frame{};
+        GetClientRect(window, &client);
+        GetWindowRect(window, &frame);
+        const int height = Units(window, 365, false);
+        if (client.bottom < height)
+            SetWindowPos(window, nullptr, 0, 0, frame.right-frame.left,
+                frame.bottom-frame.top+height-client.bottom, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     Layout();
+}
+
+void WindowsMaterialEditor::SyncWater()
+{
+    for (int i=0; i<int(waterProperties.size()); ++i)
+    {
+        const auto& p = waterProperties[i];
+        const float value = editor.Water().*p.member;
+        char label[80];
+        SDL_snprintf(label,sizeof(label),"%s %.2f",p.label,value);
+        SetDlgItemTextW(window,IDC_MAT_WATER_LABEL_FIRST+i,WindowsNameDialog::Wide(label).c_str());
+        SendDlgItemMessageW(window,IDC_MAT_WATER_SLIDER_FIRST+i,TBM_SETPOS,TRUE,
+            std::lround((value-p.minimum)/(p.maximum-p.minimum)*1000));
+    }
 }
 
 void WindowsMaterialEditor::SyncCutoff()
@@ -239,7 +277,7 @@ void WindowsMaterialEditor::Paint(const DRAWITEMSTRUCT& draw)
 {
     if (draw.CtlID == IDC_MAT_TINT)
     {
-        WindowsTheme::DrawColorButton(draw, L"Emissive tint", TintColor(editor.Current()));
+        WindowsTheme::DrawColorButton(draw, editor.Current().type == MaterialType::Water ? L"Water color" : L"Emissive tint", TintColor(editor.Current()));
         return;
     }
     if (draw.CtlID == IDC_MAT_PREVIEW)
@@ -286,6 +324,8 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
             const auto label = WindowsNameDialog::Wide(type.label);
             SendDlgItemMessageW(hwnd, IDC_MAT_TYPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         }
+        for (int i=0; i<int(waterProperties.size()); ++i)
+            SendDlgItemMessageW(hwnd,IDC_MAT_WATER_SLIDER_FIRST+i,TBM_SETRANGE,FALSE,MAKELPARAM(0,1000));
         self.Layout();
         return TRUE;
     }
@@ -299,13 +339,25 @@ INT_PTR CALLBACK WindowsMaterialEditor::Dialog(HWND hwnd, UINT message, WPARAM w
         return TRUE;
     case WM_GETMINMAXINFO: {
         auto* limits = reinterpret_cast<MINMAXINFO*>(l);
-        limits->ptMinTrackSize = {Units(hwnd, 270, true), Units(hwnd, 225, false)};
+        limits->ptMinTrackSize = {Units(hwnd, 330, true), Units(hwnd, self->editor.Current().type == MaterialType::Water ? 380 : 225, false)};
         return TRUE;
     }
     case WM_DRAWITEM:
         self->Paint(*reinterpret_cast<DRAWITEMSTRUCT*>(l));
         return TRUE;
     case WM_HSCROLL:
+        if (const int i = GetDlgCtrlID(reinterpret_cast<HWND>(l))-IDC_MAT_WATER_SLIDER_FIRST;
+            i >= 0 && i < int(waterProperties.size()))
+        {
+            const auto& p = waterProperties[i];
+            const float value = std::lerp(p.minimum,p.maximum,SendDlgItemMessageW(hwnd,IDC_MAT_WATER_SLIDER_FIRST+i,TBM_GETPOS,0,0)/1000.f);
+            if (LOWORD(w) == TB_THUMBTRACK) self->editor.PreviewWater(i,value);
+            else if (!self->editor.SetWater(i,value))
+                MessageBoxW(hwnd,WindowsNameDialog::Wide(SDL_GetError()).c_str(),L"Material Editor",MB_OK|MB_ICONWARNING);
+            self->SyncWater();
+            InvalidateRect(GetDlgItem(hwnd,IDC_MAT_PREVIEW),nullptr,FALSE);
+            return TRUE;
+        }
         if (reinterpret_cast<HWND>(l) == GetDlgItem(hwnd, IDC_MAT_CUTOFF))
         {
             const float value = SendDlgItemMessageW(hwnd, IDC_MAT_CUTOFF, TBM_GETPOS, 0, 0) / 100.f;

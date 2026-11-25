@@ -80,7 +80,7 @@ namespace
                 throw std::runtime_error("Cannot read AO material '" + slots[i].material + "': " + SDL_GetError());
             auto& surface = result[i];
             surface.foliage = material.type == MaterialType::Foliage;
-            surface.invisible = material.type == MaterialType::Unlit;
+            surface.invisible = material.type == MaterialType::Unlit || material.type == MaterialType::Water;
             if (Material::IsCutout(material.type))
             {
                 surface.alphaCutoff = material.alphaCutoff;

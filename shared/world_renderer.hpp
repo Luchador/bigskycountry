@@ -96,6 +96,13 @@ private:
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();
+    bool PrepareWater();
+    void BindWater(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, const SurfaceMaterial& material);
+    bool waterRequested = false, waterDepthReady = false;
+    SDL_GPUGraphicsPipeline* waterPipeline = nullptr;
+    SDL_GPUTexture* waterScene = nullptr;
+    SDL_GPUSampler* waterSampler = nullptr;
+    int waterWidth = 0, waterHeight = 0;
     // Three float4s per light followed by per-tile light bitsets, packed as uint4s.
     std::vector<SDL_FColor> BuildSpotLightData() const;
     static constexpr int lightTilePixels = 64;

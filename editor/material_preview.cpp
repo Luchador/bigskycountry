@@ -323,3 +323,67 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
     RasterJob::Run(&job);
     for (int i = 0; i < started; ++i) SDL_WaitThread(threads[i], nullptr);
 }
+
+void MaterialEditor::RenderWater(SDL_Surface& target) const
+{
+    // A shallow basin makes clarity, shoreline fade and refraction legible;
+    // the ordinary sphere cannot demonstrate those water properties.
+    const auto& w = Water();
+    const double angle = std::clamp(.65+pitch,.2,1.4);
+    const Vector3 eye{std::sin(yaw)*10*std::cos(angle),10*std::sin(angle),std::cos(yaw)*10*std::cos(angle)};
+    const Vector3 forward = Math::Normalize(eye*-1), right{std::cos(yaw),0,-std::sin(yaw)};
+    const Vector3 up = Math::Cross(right,forward);
+    const Vector3 light = Math::Normalize({-.4,.8,.5});
+    const auto tint = Srgb::ToLinear({w.color[0],w.color[1],w.color[2],1});
+    const auto* map = catalog->Image(material.textures[static_cast<size_t>(MaterialSlot::Normal)]);
+    const double focal = std::min(target.w,target.h)*.95;
+    constexpr std::array directions{SDL_FPoint{1,0},SDL_FPoint{.6f,.8f},SDL_FPoint{-.8f,.6f},SDL_FPoint{.28f,-.96f}};
+    constexpr std::array lengths{1.,.57,.23,.11}, weights{.52,.28,.14,.06};
+    for (int y=0; y<target.h; ++y)
+    {
+        auto* row = static_cast<Uint8*>(target.pixels)+y*target.pitch;
+        for (int x=0; x<target.w; ++x)
+        {
+            const Vector3 ray = Math::Normalize(forward + right*((x+.5-target.w*.5)/focal) + up*((target.h*.5-y-.5)/focal));
+            Vector3 color{.12,.20,.29};
+            if (ray.y < -.001)
+            {
+                const Vector3 p = eye+ray*(-eye.y/ray.y);
+                if (std::abs(p.x) <= 5 && std::abs(p.z) <= 5)
+                {
+                    double sx=0,sz=0;
+                    for (int i=0;i<4;++i)
+                    {
+                        const double phase=(p.x*directions[i].x+p.z*directions[i].y-w.waveSpeed)*2*pi/(w.waveScale*lengths[i]);
+                        const double slope=std::cos(phase)*weights[i]*w.waveStrength;
+                        sx+=slope*directions[i].x; sz+=slope*directions[i].y;
+                    }
+                    const auto frac=[](double v) { return v-std::floor(v); };
+                    const auto detail=Sample<2>(map,frac(p.x/w.waveScale),frac(p.z/w.waveScale),{.5f,.5f,1,1});
+                    Vector3 n=Math::Normalize({-sx+(detail[0]*2-1)*w.waveStrength,1,-sz+(detail[1]*2-1)*w.waveStrength});
+                    const Vector3 view=ray*-1;
+                    const double depth=std::max(0.,2.5*(1-std::max(std::abs(p.x),std::abs(p.z))/5));
+                    const double shore=std::clamp(depth/w.shoreWidth,0.,1.);
+                    const double check=std::fmod(std::abs(std::floor(p.x+n.x*w.refraction*3)+std::floor(p.z+n.z*w.refraction*3)),2);
+                    const Vector3 bed=check ? Vector3{.25,.22,.14} : Vector3{.34,.3,.2};
+                    const double transmission=std::exp2(-depth/(w.clarity*std::max(.1,-ray.y)));
+                    const Vector3 body=bed*transmission+Vector3{tint.r,tint.g,tint.b}*(1-transmission);
+                    const double nv=std::clamp(Math::Dot(n,view),0.,1.);
+                    const Vector3 reflection=n*(2*nv)-view;
+                    const double sky=std::sqrt(std::clamp(reflection.y,0.,1.));
+                    const Vector3 reflected=Vector3{.38,.48,.57}*(1-sky)+Vector3{.07,.21,.42}*sky;
+                    const double fresnel=.02037+.97963*std::pow(1-nv,5);
+                    const double highlight=std::pow(std::max(0.,Math::Dot(n,Math::Normalize(light+view))),4+400*(1-w.roughness)*(1-w.roughness));
+                    const double foam=w.foam*(1-shore)*(.5+.5*std::sin(p.x*5+p.z*7));
+                    color=(body*(1-fresnel)+reflected*fresnel+Vector3{1,1,.9}*(highlight*.5))*(1-foam)+Vector3{.7,.7,.7}*foam;
+                    color=bed*(1-shore)+color*shore;
+                }
+            }
+            auto* pixel=row+x*4;
+            pixel[2]=display.EncodeLinear(std::clamp(color.x,0.,1.));
+            pixel[1]=display.EncodeLinear(std::clamp(color.y,0.,1.));
+            pixel[0]=display.EncodeLinear(std::clamp(color.z,0.,1.));
+            pixel[3]=255;
+        }
+    }
+}

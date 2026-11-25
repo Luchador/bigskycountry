@@ -17,7 +17,8 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     previewFactor = material.translucency;
     previewSubsurface = material.subsurfaceStrength;
     previewAlphaCutoff = material.alphaCutoff;
-    previewTint = material.emissiveTint;
+    previewWater = material.water;
+    previewTint = material.type == MaterialType::Water ? material.water.color : material.emissiveTint;
     previewDirty = true;
     return true;
 }
@@ -37,7 +38,9 @@ bool MaterialEditor::SetType(MaterialType type)
         return true;
     auto next = material;
     next.type = type;
-    return Commit(std::move(next));
+    const bool saved = Commit(std::move(next));
+    previewTint = material.type == MaterialType::Water ? material.water.color : material.emissiveTint;
+    return saved;
 }
 
 bool MaterialEditor::SetVertexAlphaAO(bool enabled)
@@ -68,9 +71,11 @@ bool MaterialEditor::SetTexture(MaterialSlot slot, const std::string& relative)
 bool MaterialEditor::SetTint(std::array<float, 3> color)
 {
     auto next = material;
-    next.emissiveTint = color;
-    const bool saved = color == material.emissiveTint || Commit(std::move(next));
-    PreviewTint(material.emissiveTint);
+    if (material.type == MaterialType::Water) next.water.color = color;
+    else next.emissiveTint = color;
+    const bool saved = Commit(std::move(next));
+    PreviewTint(material.type == MaterialType::Water ? material.water.color : material.emissiveTint);
+    previewWater.color = material.water.color;
     return saved;
 }
 
@@ -78,6 +83,7 @@ void MaterialEditor::PreviewTint(std::array<float, 3> color)
 {
     if (color == previewTint) return;
     previewTint = color;
+    if (material.type == MaterialType::Water) previewWater.color = color;
     previewDirty = true;
 }
 
@@ -129,6 +135,23 @@ bool MaterialEditor::SetAlphaCutoff(float value)
     return saved;
 }
 
+void MaterialEditor::PreviewWater(size_t property, float value)
+{
+    const auto& p = waterProperties.at(property);
+    previewWater.*p.member = std::clamp(value, p.minimum, p.maximum);
+    previewDirty = true;
+}
+
+bool MaterialEditor::SetWater(size_t property, float value)
+{
+    auto next = material;
+    next.water.*waterProperties.at(property).member = value;
+    const bool saved = Commit(std::move(next));
+    previewWater = material.water;
+    previewDirty = true;
+    return saved;
+}
+
 bool MaterialEditor::Orbit(double deltaX, double deltaY, double viewportSpan)
 {
     if (viewportSpan <= 0.0) return false;
@@ -155,7 +178,8 @@ SDL_Surface* MaterialEditor::Preview(int pixelWidth, int pixelHeight)
     }
     if (previewDirty || ImagesChanged())
     {
-        RenderSphere(*preview);
+        if (material.type == MaterialType::Water) RenderWater(*preview);
+        else RenderSphere(*preview);
         previewDirty = false;
         imageRevision = catalog->ImageRevision();
     }

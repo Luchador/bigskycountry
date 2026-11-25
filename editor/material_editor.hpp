@@ -25,6 +25,9 @@ public:
     void PreviewAlphaCutoff(float value);
     bool SetAlphaCutoff(float value);
     float AlphaCutoff() const { return previewAlphaCutoff; }
+    void PreviewWater(size_t property, float value);
+    bool SetWater(size_t property, float value);
+    const WaterMaterial& Water() const { return previewWater; }
     const Material& Current() const { return material; }
     bool Orbit(double deltaX, double deltaY, double viewportSpan);
     SDL_Surface* Preview(int pixelWidth, int pixelHeight);
@@ -34,9 +37,11 @@ public:
 private:
     bool Commit(Material next);
     void RenderSphere(SDL_Surface& target) const;
+    void RenderWater(SDL_Surface& target) const;
     TextureCatalog* catalog = nullptr;
     std::string path;
     Material material;
+    WaterMaterial previewWater;
     float previewFactor = 1;
     float previewSubsurface = .5f;
     float previewAlphaCutoff = .5f;

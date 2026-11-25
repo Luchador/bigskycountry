@@ -21,6 +21,7 @@ private:
     void Sync();
     void SyncFactor();
     void SyncCutoff();
+    void SyncWater();
     void Paint(const DRAWITEMSTRUCT& draw);
     MaterialEditor editor;
     HWND window = nullptr;
