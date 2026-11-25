@@ -421,7 +421,9 @@ bool Reader::ReadRender(std::size_t index, PayloadKind lod, Cell& cell) const
         auto owner = [&] { auto id = r.Id(); if (std::find(c.owners.begin(), c.owners.end(), id) == c.owners.end()) throw std::runtime_error("Invalid batch owner"); return id; };
         for (auto n = r.Count(28); n; --n)
         {
-            Batch b; b.owner = owner(); auto layer = r.U32(); if (layer > unsigned(formatVersion >= 10 ? Layer::Pavement : Layer::Transition)) throw std::runtime_error("Invalid mesh layer");
+            Batch b; b.owner = owner(); auto layer = r.U32();
+            const auto lastLayer = formatVersion >= 11 ? Layer::Embankment : formatVersion >= 10 ? Layer::Pavement : Layer::Transition;
+            if (layer > unsigned(lastLayer)) throw std::runtime_error("Invalid mesh layer");
             b.layer = static_cast<Layer>(layer); b.material = r.String(); if (!b.material.empty() && !Material::ValidAssetPath(b.material)) throw std::runtime_error("Invalid material path");
             b.nearMesh = r.MeshData(c.key.Origin()); result.batches.push_back(std::move(b));
         }

@@ -721,7 +721,9 @@ void CookedWorld::SubmitMinimap(Minimap& minimap) const
             const bool legacy = s.reader.FormatVersion() < 10 && batch.layer == Layer::Surface &&
                 (batch.owner.kind == SceneKind::Intersection ||
                  (batch.owner.kind == SceneKind::Road && s.legacyMinimapRoads.contains(batch.owner.value)));
-            if (batch.layer == Layer::Pavement || legacy) minimap.Submit(batch.nearMesh);
+            if (batch.layer == Layer::Water) minimap.Submit(batch.nearMesh, Minimap::Layer::Water);
+            else if (batch.layer == Layer::Embankment) minimap.Submit(batch.nearMesh, Minimap::Layer::Railroad);
+            else if (batch.layer == Layer::Pavement || legacy) minimap.Submit(batch.nearMesh, Minimap::Layer::Road);
         }
     }
 }

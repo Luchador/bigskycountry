@@ -8,7 +8,7 @@
 // Disk format is explicit little-endian; never serialize these C++ structs directly.
 namespace WorldPackage
 {
-    inline constexpr std::uint32_t version = 10; // Separates road pavement for the minimap.
+    inline constexpr std::uint32_t version = 11; // Separates railroad embankments for the minimap.
     inline constexpr double cellMeters = 512.0;
     inline constexpr double distantMeters = 2000.0;
     struct CellKey
@@ -17,7 +17,7 @@ namespace WorldPackage
         auto operator<=>(const CellKey&) const = default;
         Vector3 Origin() const { return {x * cellMeters, 0, z * cellMeters}; }
     };
-    enum class Layer : std::uint32_t { Surface, Paint, Rail, Water, Transition, Pavement };
+    enum class Layer : std::uint32_t { Surface, Paint, Rail, Water, Transition, Pavement, Embankment };
     struct Batch
     {
         EntityId owner;

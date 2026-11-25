@@ -11,13 +11,30 @@ namespace
     constexpr double pitch = 55 * std::numbers::pi / 180;
     constexpr double cameraDistance = 260;
     constexpr float markerHeight = .70f;
-    constexpr SDL_FColor pavement{.48f, .50f, .53f, 1};
+    constexpr std::array<SDL_FColor, size_t(Minimap::Layer::Count)> colors{{
+        {.16f, .40f, .65f, 1}, // Water.
+        {.72f, .58f, .40f, 1}, // Railroad embankments.
+        {.48f, .50f, .53f, 1}  // Road pavement.
+    }};
 
     Bounds3 Flatten(Bounds3 bounds)
     {
         bounds.min.y = bounds.max.y = 0;
         return bounds;
     }
+}
+
+std::array<Vector3, 3> Minimap::Source::Triangle(size_t i) const
+{
+    if (geometry)
+    {
+        const auto& t = geometry->pavementTriangles[i];
+        return {t[0].position, t[1].position, t[2].position};
+    }
+    const auto& data = *mesh->mesh;
+    return {mesh->transform.Point(data.vertices[data.indices[i*3]].position),
+            mesh->transform.Point(data.vertices[data.indices[i*3+1]].position),
+            mesh->transform.Point(data.vertices[data.indices[i*3+2]].position)};
 }
 
 bool Minimap::BoundsNeeded(const Bounds3& bounds) const
@@ -28,31 +45,38 @@ bool Minimap::BoundsNeeded(const Bounds3& bounds) const
 void Minimap::Synchronize(const WorldDocument& document)
 {
     if (sourceDocument == &document && sourceRevision == RoadGeometry::latestRevision &&
+        waterRevision == TerrainChunk::LatestWaterRevision() && terrainCount == document.Terrain().size() &&
         roadCount == document.roads.size() && junctionCount == document.IntersectionSurfaces().size()) return;
     sourceDocument = &document;
     sourceRevision = RoadGeometry::latestRevision;
+    waterRevision = TerrainChunk::LatestWaterRevision(); terrainCount = document.Terrain().size();
     roadCount = document.roads.size(); junctionCount = document.IntersectionSurfaces().size();
     sources.clear(); index.BeginSync();
-    const auto add = [&](const RoadGeometry& geometry) {
-        // Split long roads into spatially searchable spans instead of walking
-        // every triangle of a cross-country road on every HUD frame.
+    const auto add = [&](Source source, size_t count) {
+        // Split long roads, railroads and large water bodies into searchable
+        // spans instead of walking every triangle on every HUD frame.
         constexpr size_t trianglesPerSpan = 128;
-        for (size_t first = 0; first < geometry.pavementTriangles.size(); first += trianglesPerSpan)
+        for (size_t first = 0; first < count; first += trianglesPerSpan)
         {
-            const size_t end = std::min(first + trianglesPerSpan, geometry.pavementTriangles.size());
+            source.first = first; source.end = std::min(first + trianglesPerSpan, count);
             Bounds3 bounds;
-            for (size_t i = first; i < end; ++i)
-                for (const auto& vertex : geometry.pavementTriangles[i]) bounds.Include(vertex.position);
+            for (size_t i = first; i < source.end; ++i)
+                for (const auto& vertex : source.Triangle(i)) bounds.Include(vertex);
             index.Upsert({SceneKind::Road, int(sources.size())}, Flatten(bounds));
-            sources.push_back({&geometry, first, end});
+            sources.push_back(source);
         }
     };
-    for (const auto& road : document.roads) if (!road.style.railroad) add(road);
-    for (const auto& [id, surface] : document.IntersectionSurfaces()) add(surface.geometry);
+    for (const auto& road : document.roads)
+        add({&road, nullptr, road.style.railroad ? Layer::Railroad : Layer::Road}, road.pavementTriangles.size());
+    for (const auto& [id, surface] : document.IntersectionSurfaces())
+        add({&surface.geometry}, surface.geometry.pavementTriangles.size());
+    for (const auto& chunk : document.Terrain())
+        if (chunk->HasWater() && chunk->Water().mesh)
+            add({nullptr, &chunk->Water(), Layer::Water}, chunk->Water().mesh->indices.size() / 3);
     index.EndSync();
 }
 
-void Minimap::SubmitTriangle(const std::array<Vector3, 3>& triangle)
+void Minimap::SubmitTriangle(const std::array<Vector3, 3>& triangle, Layer layer)
 {
     Bounds3 bounds; for (auto p : triangle) bounds.Include(p);
     if (!BoundsNeeded(bounds)) return;
@@ -73,24 +97,25 @@ void Minimap::SubmitTriangle(const std::array<Vector3, 3>& triangle)
     if (polygon.count < 3) return;
     const auto vertex = [&](Vector3 p) {
         return SDL_Vertex{{float(rectangle.x + halfWidth + p.x*focal/p.z),
-                           float(rectangle.y + centerY - p.y*focal/p.z)}, pavement, {}};
+                           float(rectangle.y + centerY - p.y*focal/p.z)}, colors[size_t(layer)], {}};
     };
+    auto& batch = vertices[size_t(layer)];
     for (int i = 2; i < polygon.count; ++i)
     {
-        vertices.push_back(vertex(polygon.points[0]));
-        vertices.push_back(vertex(polygon.points[i-1]));
-        vertices.push_back(vertex(polygon.points[i]));
+        batch.push_back(vertex(polygon.points[0]));
+        batch.push_back(vertex(polygon.points[i-1]));
+        batch.push_back(vertex(polygon.points[i]));
     }
 }
 
-void Minimap::Submit(const MeshInstance& instance)
+void Minimap::Submit(const MeshInstance& instance, Layer layer)
 {
     if (!instance.mesh || !BoundsNeeded(WorldBounds(instance.mesh->bounds, instance.transform))) return;
     const auto& mesh = *instance.mesh;
     for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
         SubmitTriangle({instance.transform.Point(mesh.vertices[mesh.indices[i]].position),
                         instance.transform.Point(mesh.vertices[mesh.indices[i+1]].position),
-                        instance.transform.Point(mesh.vertices[mesh.indices[i+2]].position)});
+                        instance.transform.Point(mesh.vertices[mesh.indices[i+2]].position)}, layer);
 }
 
 bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const CookedWorld* streaming,
@@ -110,7 +135,7 @@ bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const 
         forward = Math::Normalize({facing.x, 0, facing.z});
     right = {forward.z, 0, -forward.x};
     focal = rectangle.h * 1.1;
-    vertices.clear();
+    for (auto& batch : vertices) batch.clear();
     if (streaming && streaming->Ready()) streaming->SubmitMinimap(*this);
     else
     {
@@ -119,10 +144,7 @@ bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const 
         {
             const auto& source = sources[key.index];
             for (size_t i = source.first; i < source.end; ++i)
-            {
-                const auto& t = source.geometry->pavementTriangles[i];
-                SubmitTriangle({t[0].position, t[1].position, t[2].position});
-            }
+                SubmitTriangle(source.Triangle(i), source.layer);
         }
     }
     SDL_BlendMode oldBlend;
@@ -138,7 +160,9 @@ bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const 
         // 20% transparent = 80% opaque (204/255).
         if (!SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) || !SDL_SetRenderClipRect(renderer, &clip) ||
             !SDL_SetRenderDrawColor(renderer, 12,15,20,204) || !SDL_RenderFillRect(renderer, &rectangle)) return false;
-        if (!vertices.empty() && !SDL_RenderGeometry(renderer, nullptr, vertices.data(), int(vertices.size()), nullptr, 0)) return false;
+        // Water goes below tracks and pavement even when its cell arrives last.
+        for (const auto& batch : vertices)
+            if (!batch.empty() && !SDL_RenderGeometry(renderer, nullptr, batch.data(), int(batch.size()), nullptr, 0)) return false;
         const float x = rectangle.x + rectangle.w*.5f, y = rectangle.y + rectangle.h*markerHeight;
         const auto arrow = [&](float size, SDL_FColor color) {
             const SDL_Vertex points[]{{{x,y-13*size},color,{}}, {{x-9*size,y+9*size},color,{}},
