@@ -94,7 +94,7 @@ void Minimap::Submit(const MeshInstance& instance)
 }
 
 bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const CookedWorld* streaming,
-                   Vector3 center, double heading)
+                   Vector3 center, Vector3 facing)
 {
     SDL_Rect viewport{};
     if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
@@ -102,7 +102,12 @@ bool Minimap::Draw(SDL_Renderer* renderer, const WorldDocument& document, const 
     if (scale < .5f) return true;
     rectangle = GameHUD::MapRect(viewport);
     position = center;
-    forward = {std::sin(heading), 0, std::cos(heading)};
+    // Use the rendered pawn's actual forward axis, not its Euler Y angle:
+    // equivalent X/Y/Z rotations can otherwise reverse the map's heading.
+    // Retain the last useful heading while the vehicle points nearly vertically.
+    facing = Math::Normalize(facing);
+    if (std::hypot(facing.x, facing.z) > .2)
+        forward = Math::Normalize({facing.x, 0, facing.z});
     right = {forward.z, 0, -forward.x};
     focal = rectangle.h * 1.1;
     vertices.clear();

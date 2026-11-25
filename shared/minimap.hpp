@@ -15,7 +15,7 @@ class Minimap
 public:
     static constexpr double radiusMeters = 600;
     bool Draw(SDL_Renderer* renderer, const WorldDocument& document, const CookedWorld* streaming,
-              Vector3 position, double heading);
+              Vector3 position, Vector3 facing);
     bool BoundsNeeded(const Bounds3& bounds) const;
     void Submit(const MeshInstance& mesh);
 
@@ -28,7 +28,7 @@ private:
     size_t roadCount = 0, junctionCount = 0;
     std::vector<SDL_Vertex> vertices;
     SDL_FRect rectangle{};
-    Vector3 position{}, right{}, forward{};
+    Vector3 position{}, right{}, forward{0, 0, 1};
     double focal = 0;
     void Synchronize(const WorldDocument& document);
     void SubmitTriangle(const std::array<Vector3, 3>& triangle);

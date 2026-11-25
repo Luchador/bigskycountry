@@ -543,7 +543,7 @@ bool GameSession::DrawHUD(SDL_Renderer* renderer, double framesPerSecond)
     if (const auto* pawn = player.controller.Controlled())
     {
         const auto pose = pawn->InterpolatedTransform(accumulator / fixedStep);
-        return minimap.Draw(renderer, document, streaming, pose.position, pose.rotation.y);
+        return minimap.Draw(renderer, document, streaming, pose.position, pose.ToMeshTransform().z);
     }
     return true;
 }
