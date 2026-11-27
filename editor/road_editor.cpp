@@ -2829,9 +2829,14 @@ void RoadEditor::FinishAnchorRoad(WorldDocument& world)
         AnchorOccupied(world, anchor)) return;
     if (!(road.id = world.AllocateRoadId())) { status = SDL_GetError(); return; }
     EditSnapshot before(state);
+    const int folder = world.hierarchy.Parent({SceneKind::Intersection, anchor.intersectionId});
     world.roads.push_back(std::move(road));
     state.SelectPoint(static_cast<int>(world.roads.size()) - 1, 1);
-    Commit(world, state.selected, std::move(before), &world.roads.back());
+    if (folder) world.hierarchy.Move({{SceneKind::Road, state.selected}}, folder);
+    EditSnapshot after(state, &world.roads.back());
+    after.roadFolder = folder;
+    outliner.Invalidate();
+    if (history.Record(state.selected, std::move(before), std::move(after))) Save(world);
 }
 
 void RoadEditor::FillSelection(WorldDocument& world)
