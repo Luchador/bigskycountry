@@ -408,6 +408,15 @@ still stop safely at the lane end. See [traffic implementation](docs/traffic.md)
 
 ### Terrain chunks
 
+On Windows, click the terrain icon at the far left of the top toolbar or press
+**Ctrl+T** to open the **Terrain Editor**. It is a resizable, modeless native window;
+the main editor remains usable while it is open. Clicking again or pressing
+**Ctrl+T** again focuses the existing window. **Close**, **Esc**, or the title-bar
+**X** closes only the Terrain Editor. Its toolbar icon switches between
+`assets/textures/editor/btn_terrain_off.png` and `btn_terrain_on.png` to reflect
+whether the window is open. This first pass provides the window; terrain raise,
+lower, and flatten tools will follow separately.
+
 Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.
 
 The test grid at `assets/models/terrain/test_grid.glb` has 10 × 10 shared vertices on the XZ plane at 5 m spacing. Each placement has its own position and rotation in the Transform panel.

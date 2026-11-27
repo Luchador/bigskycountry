@@ -5,6 +5,8 @@
 #include "marker.hpp"
 #include "properties_inspector.hpp"
 #include "windows_material_editor.hpp"
+#include "windows_terrain_editor.hpp"
+#include "asset_paths.hpp"
 #include "windows_theme.hpp"
 #include "windows_outliner.hpp"
 #include "content_browser.hpp"
@@ -64,10 +66,10 @@ namespace
         }
     }
 
-    HBITMAP ToolbarBitmap(TransformIcon which, int size)
+    HBITMAP ToolbarBitmap(SDL_Surface* source, int size)
     {
         using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
-        Surface icon(LoadTransformIcon(which), SDL_DestroySurface);
+        Surface icon(source, SDL_DestroySurface);
         if (!icon)
         {
             return nullptr;
@@ -138,6 +140,7 @@ struct WindowsPanels::Impl
     std::optional<SDL_Keymod> pressModifiers;
     ContentBrowser* browser = nullptr;
     WindowsMaterialEditor materialEditor;
+    WindowsTerrainEditor terrainEditor;
     HWND projectSettings = nullptr;
     std::string pressedTexture;
     POINT texturePress{};
@@ -148,26 +151,47 @@ struct WindowsPanels::Impl
     int scroll = 0;
     double lastSpeed = -1;
     std::array<HBITMAP, transformIcons.size()> icons{};
+    std::array<HBITMAP, 2> terrainIcons{};
     int iconSize = 0;
     TransformSettings displayedSettings;
 
     ~Impl()
     {
+        terrainEditor.Close();
         for (HBITMAP icon : icons)
         {
             DeleteObject(icon);
         }
+        for (HBITMAP icon : terrainIcons) DeleteObject(icon);
     }
 
-    void ShowButton(int id, TransformIcon which, const wchar_t* caption, const wchar_t* fallback)
+    void ShowButton(int id, HBITMAP icon, const wchar_t* caption, const wchar_t* fallback)
     {
         HWND button = GetDlgItem(toolbar, id);
-        HBITMAP icon = icons[static_cast<int>(which)];
         LONG_PTR style = GetWindowLongPtrW(button, GWL_STYLE);
         SetWindowLongPtrW(button, GWL_STYLE, icon ? style | BS_BITMAP : style & ~BS_BITMAP);
         SetWindowTextW(button, icon ? caption : fallback);
         SendMessageW(button, BM_SETIMAGE, IMAGE_BITMAP, reinterpret_cast<LPARAM>(icon));
         InvalidateRect(button, nullptr, TRUE);
+    }
+
+    void ShowButton(int id, TransformIcon which, const wchar_t* caption, const wchar_t* fallback)
+    {
+        ShowButton(id, icons[static_cast<int>(which)], caption, fallback);
+    }
+
+    void ShowTerrainButton()
+    {
+        if (!IsWindow(toolbar)) return;
+        const bool open = terrainEditor.Window() != nullptr;
+        ShowButton(IDC_TERRAIN_EDITOR, terrainIcons[open ? 1 : 0],
+                   open ? L"Terrain Editor open (Ctrl+T)" : L"Terrain Editor (Ctrl+T)", open ? L"T*" : L"T");
+    }
+
+    void OpenTerrainEditor()
+    {
+        if (!terrainEditor.Open(frame, [this] { ShowTerrainButton(); }))
+            MessageBoxW(frame, Wide(SDL_GetError()).c_str(), L"Terrain Editor", MB_OK | MB_ICONERROR);
     }
 
     void ShowSettings(const TransformSettings& settings)
@@ -183,6 +207,7 @@ struct WindowsPanels::Impl
     void SizeTransformButtons(int side, int spaceX, int y)
     {
         const int gap = DialogSize(toolbar, 3, 0).cx;
+        MoveWindow(GetDlgItem(toolbar, IDC_TERRAIN_EDITOR), gap, y, side, side, FALSE);
         const int snapX = spaceX - side - gap;
         MoveWindow(GetDlgItem(toolbar, IDC_TRANSFORM_SPACE), spaceX, y, side, side, FALSE);
         MoveWindow(GetDlgItem(toolbar, IDC_SNAP_TO_GRID), snapX, y, side, side, FALSE);
@@ -195,7 +220,7 @@ struct WindowsPanels::Impl
             return;
         }
         iconSize = size;
-        for (int id : {IDC_TRANSFORM_SPACE, IDC_SNAP_TO_GRID})
+        for (int id : {IDC_TRANSFORM_SPACE, IDC_SNAP_TO_GRID, IDC_TERRAIN_EDITOR})
         {
             SendDlgItemMessageW(toolbar, id, BM_SETIMAGE, IMAGE_BITMAP, 0);
         }
@@ -203,9 +228,18 @@ struct WindowsPanels::Impl
         {
             HBITMAP& icon = icons[static_cast<int>(which)];
             DeleteObject(icon);
-            icon = ToolbarBitmap(which, size);
+            icon = ToolbarBitmap(LoadTransformIcon(which), size);
+        }
+        constexpr std::array names{"btn_terrain_off.png", "btn_terrain_on.png"};
+        for (std::size_t i = 0; i < terrainIcons.size(); ++i)
+        {
+            DeleteObject(terrainIcons[i]);
+            const auto path = AssetPaths::Root(AssetRoot::Project) + "textures/editor/" + names[i];
+            terrainIcons[i] = ToolbarBitmap(SDL_LoadPNG(path.c_str()), size);
+            if (!terrainIcons[i]) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Terrain toolbar icon %s could not be loaded", path.c_str());
         }
         ShowSettings(displayedSettings);
+        ShowTerrainButton();
     }
 
     struct Inspector
@@ -461,7 +495,7 @@ struct WindowsPanels::Impl
         moveTool(IDC_SPEED_VALUE, 54, 7, 50, 12);
         SizeTransformButtons(side, rect.right - DialogSize(toolbar, 204, 0).cx - side, insetY);
         // The controls have moved without repainting. Erase their old footprints and
-        // paint all six children at their final positions, even when the icon size is unchanged.
+        // paint all children at their final positions, even when the icon size is unchanged.
         RedrawWindow(toolbar, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 
         LayoutBrowserLists();
@@ -1013,6 +1047,7 @@ struct WindowsPanels::Impl
         {
             switch (id)
             {
+            case IDC_TERRAIN_EDITOR: OpenTerrainEditor(); return;
             case IDC_MARKER_CLEAR_MATERIAL:
                 if (inspected && lastInspector && lastInspector->properties.page == PropertiesPage::Marker)
                 {
@@ -1667,11 +1702,21 @@ struct WindowsPanels::Impl
     static bool SDLCALL Filter(void* data, MSG* msg)
     {
         auto& self = *static_cast<Impl*>(data);
+        const HWND terrain = self.terrainEditor.Window();
+        const bool mainInput = msg->hwnd == self.frame || IsChild(self.frame, msg->hwnd);
+        const bool terrainInput = terrain && (msg->hwnd == terrain || IsChild(terrain, msg->hwnd));
+        if ((mainInput || terrainInput) && (msg->message == WM_KEYDOWN || msg->message == WM_KEYUP) &&
+            msg->wParam == 'T' && (GetKeyState(VK_CONTROL) & 0x8000) &&
+            !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
+        {
+            if (msg->message == WM_KEYDOWN && !(msg->lParam & (1L << 30))) self.OpenTerrainEditor();
+            return false;
+        }
         if (self.browser->MeshWindow().HandleNativeMessage(msg)) return false;
         HWND focus = GetFocus();
         if (msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {
-            for (HWND dialog : {self.materialEditor.Window(), self.projectSettings})
+            for (HWND dialog : {self.materialEditor.Window(), self.projectSettings, terrain})
             {
                 if (dialog && (msg->hwnd == dialog || IsChild(dialog, msg->hwnd)))
                     return !IsDialogMessageW(dialog, msg);
@@ -1898,6 +1943,18 @@ SDL_Window* WindowsPanels::Create(SDL_Window* frame, ContentBrowser& browser)
     };
 
     p.toolbar = panel(IDD_TOOLBAR);
+    if (const HWND tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP,
+                                        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                        p.frame, nullptr, module, nullptr))
+    {
+        TOOLINFOW tool{sizeof(tool)};
+        tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        tool.hwnd = p.toolbar;
+        tool.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(p.toolbar, IDC_TERRAIN_EDITOR));
+        static wchar_t caption[] = L"Terrain Editor (Ctrl+T)";
+        tool.lpszText = caption;
+        SendMessageW(tip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+    }
     p.models = panel(IDD_BROWSER);
     p.road = panel(IDD_ROAD);
     p.splitter = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"Resize Scene Outliner",
