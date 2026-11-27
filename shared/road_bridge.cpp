@@ -282,7 +282,7 @@ std::optional<BridgeSettings> PlanOverpass(const Road& upper, const std::set<int
         std::size_t(*segments.rbegin() + 1) >= upper.points.size() ||
         int(segments.size()) != *segments.rbegin() - *segments.begin() + 1)
         return fail("Select adjoining road or railroad segments for the overpass");
-    if (!upper.rampLanes.empty() || !upper.crossings.empty() || upper.HasDeadEnd())
+    if (!upper.rampLanes.empty() || !upper.crossings.empty() || upper.HasDeadEnd() || upper.HasCulDeSac())
         return fail("Split the overpass section from ramps, grade crossings, or dead ends first");
     if (upper.style.railroad)
         for (const auto& road : roads)

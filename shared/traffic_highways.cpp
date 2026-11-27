@@ -61,6 +61,55 @@ void TrafficNetwork::BuildHighways(const WorldDocument& world)
     links.clear();
     std::map<int,std::vector<const TrafficLane*>> roadLanes;
     for (const auto& lane : lanes) roadLanes[lane.roadId].push_back(&lane);
+    // One circulation lane per bulb. Wider approaches prepare for the innermost
+    // lane using the existing mandatory-route lane-change behavior.
+    for (const auto& road : world.roads)
+    {
+        for (int end = 0; end < 2; ++end)
+        {
+            if (!road.culDeSacs[end]) continue;
+            const auto& bulb = *road.culDeSacs[end];
+            const TrafficLane* from = nullptr;
+            const TrafficLane* to = nullptr;
+            const int direction = end ? 1 : -1;
+            for (const auto* lane : roadLanes[road.id])
+            {
+                if (lane->ordinal != 0) continue;
+                const auto endpoint = lane->direction == direction ? lane->points.back() : lane->points.front();
+                if (std::abs(Math::Dot(endpoint-bulb.mouth,bulb.forward)) > .1) continue;
+                if (lane->direction == direction) from = lane;
+                else to = lane;
+            }
+            if (!from || !to) continue;
+            TrafficLink link;
+            link.from = from->id; link.to = to->id;
+            link.fromDistance = from->Length(); link.toDistance = 0;
+            link.path.width = std::min(from->width,to->width);
+            link.path.speedLimit = 4.0; // About 9 mph; slow down before entering the bulb.
+            const double r = bulb.radius - 2.5;
+            const double along = Math::Dot(bulb.center-bulb.mouth,bulb.forward);
+            const auto right = bulb.center-bulb.left*r, left = bulb.center+bulb.left*r;
+            const auto curve = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 d) {
+                const int count = std::max(16,static_cast<int>(std::ceil((Math::Length(b-a)+Math::Length(c-b)+Math::Length(d-c))/.5)));
+                for (int i = 0; i <= count; ++i)
+                {
+                    const double t = double(i)/count, u = 1-t;
+                    Append(link.path.points,a*(u*u*u)+b*(3*u*u*t)+c*(3*u*t*t)+d*(t*t*t));
+                }
+            };
+            const auto a = from->points.back(), d = to->points.front();
+            curve(a,a+bulb.forward*(along*.55),right-bulb.forward*(along*.45),right);
+            const int count = std::max(32,static_cast<int>(std::ceil(std::numbers::pi*r/.5)));
+            for (int i = 1; i <= count; ++i)
+            {
+                const double angle = -std::numbers::pi*.5+std::numbers::pi*i/count;
+                Append(link.path.points,bulb.center+bulb.forward*(r*std::cos(angle))+bulb.left*(r*std::sin(angle)));
+            }
+            curve(left,left-bulb.forward*(along*.45),d+bulb.forward*(along*.55),d);
+            link.path.Measure();
+            links.push_back(std::move(link));
+        }
+    }
     const auto connectEnds = [&](const TrafficLane& from, const TrafficLane& to) {
         if (from.id == to.id || Math::Length(from.points.back()-to.points.front()) > 0.08 ||
             Math::Dot(from.Tangent(from.Length()),to.Tangent(0)) < 0.94 ||
@@ -92,7 +141,7 @@ void TrafficNetwork::BuildHighways(const WorldDocument& world)
         for (auto* lane : roadLanes[road.id])
         {
             const auto& point = lane->direction > 0 ? road.points.front() : road.points.back();
-            if (!point.anchor && !point.ramp && !point.curveJoin) starts[key(lane->points.front())].push_back(lane);
+            if (!point.anchor && !point.ramp && !point.curveJoin && point.culDeSacRadius == 0) starts[key(lane->points.front())].push_back(lane);
         }
     }
     for (const auto& road : world.roads)
@@ -101,7 +150,7 @@ void TrafficNetwork::BuildHighways(const WorldDocument& world)
         for (auto* lane : roadLanes[road.id])
         {
             const auto& point = lane->direction > 0 ? road.points.back() : road.points.front();
-            if (point.anchor || point.ramp || point.curveJoin) continue;
+            if (point.anchor || point.ramp || point.curveJoin || point.culDeSacRadius > 0) continue;
             const auto [x,y,z] = key(lane->points.back());
             for (int dx=-1; dx<=1; ++dx) for (int dy=-1; dy<=1; ++dy) for (int dz=-1; dz<=1; ++dz)
                 if (const auto i=starts.find({x+dx,y+dy,z+dz}); i!=starts.end())

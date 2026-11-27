@@ -188,6 +188,8 @@ namespace RoadIO
                 p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||
                 (road.style.railroad && p.segmentLanes > RailroadSettings::maxTracks) ||
                 !ValidDivision(p.segmentDivision, p.segmentLanes ? p.segmentLanes : road.style.GetLaneCount(), road.style) ||
+                !std::isfinite(p.culDeSacRadius) || p.culDeSacRadius < 0 || p.culDeSacRadius > Road::maxCulDeSacRadius ||
+                (p.culDeSacRadius > 0 && (!road.CanCulDeSac(static_cast<int>(&p - road.points.data())) || p.deadEndLength > 0)) ||
                 !std::isfinite(p.deadEndLength) || p.deadEndLength < 0 ||
                 (p.deadEndLength > 0 && !road.CanDeadEnd(static_cast<int>(&p - road.points.data()))))
             {
@@ -229,7 +231,7 @@ namespace RoadIO
             { out.setstate(std::ios::failbit); return; }
             out << ' ' << p.curveJoin.has_value();
             if (p.curveJoin) out << ' ' << p.curveJoin->station << ' ' << p.curveJoin->side << ' ' << p.curveJoin->direction << ' ' << p.curveJoin->offset;
-            out << '\n';
+            out << ' ' << p.culDeSacRadius << '\n';
         }
     }
 
@@ -414,6 +416,10 @@ namespace RoadIO
                         p.connectorTarget || (i != 0 && i + 1 != count)) in.setstate(std::ios::failbit);
                 }
             }
+            if (version >= 31) in >> p.culDeSacRadius;
+            if (!std::isfinite(p.culDeSacRadius) || p.culDeSacRadius < 0 || p.culDeSacRadius > Road::maxCulDeSacRadius ||
+                (p.culDeSacRadius > 0 && (count < 2 || (i != 0 && i + 1 != count) || road.style.railroad ||
+                 road.style.oneWay || p.Joined() || p.rampStation || p.deadEndLength > 0))) in.setstate(std::ios::failbit);
             if (!ValidDivision(p.segmentDivision, p.segmentLanes ? p.segmentLanes : road.style.GetLaneCount(), road.style)) in.setstate(std::ios::failbit);
             if (!ValidShoulders(p.segmentShoulders, road.style.railroad.has_value())) in.setstate(std::ios::failbit);
             if (p.segmentLanes < 0 || p.segmentLanes > RoadStyle::maxLanes ||

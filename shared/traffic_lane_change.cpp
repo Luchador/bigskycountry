@@ -206,6 +206,8 @@ void TrafficDriver::HighwayUpdate(double seconds)
     {
         const auto& link=network->links[*highwayLink];
         highwayReason=link.kind==TrafficLinkKind::Exit ? "Taking exit" : link.kind==TrafficLinkKind::Merge ? "Ramp merge" : "Continuing road";
+        if (source->roadId == destination->roadId && source->direction != destination->direction)
+            highwayReason="Turning around";
         if (link.kind==TrafficLinkKind::Merge && (!mergeGranted || progress<entry-2.2) && entry-progress<100 && mergeDelay<=0)
         {
             mergeGranted=GapAvailable(maneuver,*destination,destinationStation);

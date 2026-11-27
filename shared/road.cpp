@@ -885,12 +885,38 @@ bool Road::HasDeadEnd() const
         (CanDeadEnd(static_cast<int>(points.size()) - 1) && points.back().deadEndLength > 0);
 }
 
+bool Road::CanCulDeSac(int point) const
+{
+    return CanDeadEnd(point) && !style.oneWay && MinimumCulDeSacRadius(point) <= maxCulDeSacRadius;
+}
+
+bool Road::HasCulDeSac() const
+{
+    return points.size() >= 2 && (points.front().culDeSacRadius > 0 || points.back().culDeSacRadius > 0);
+}
+
+double Road::MinimumCulDeSacRadius(int point) const
+{
+    const auto endpoint = EndpointStyle(point == 0);
+    return std::max(15.0, (endpoint.LeftWidth() + endpoint.RightWidth()) * 0.5 + 8.0);
+}
+
 void Road::Rebuild()
 {
     // Topology edits can turn a capped endpoint into an interior point or a
     // connected end. The new connection owns that boundary instead of the cap.
     for (int i = 0; i < static_cast<int>(points.size()); ++i)
+    {
         if (!CanDeadEnd(i)) points[i].deadEndLength = 0;
+        auto& radius = points[i].culDeSacRadius;
+        if (!CanCulDeSac(i) || !std::isfinite(radius) || radius < 0) radius = 0;
+        if (radius > 0)
+        {
+            radius = std::clamp(radius, MinimumCulDeSacRadius(i), maxCulDeSacRadius);
+            points[i].deadEndLength = 0;
+        }
+    }
+    culDeSacs = {};
     MarkRebuilt();
     rampSeams.clear();
     laneCenterlines.clear();
@@ -1167,6 +1193,14 @@ void Road::Rebuild()
             auto& cap = seam.frame;
             cap = {frame.Direction(cap.left), frame.Direction(cap.up),
                    frame.Direction(cap.leftPerMeter), frame.Direction(cap.upPerMeter)};
+        }
+        for (auto& bulb : culDeSacs) if (bulb)
+        {
+            bulb->mouth = frame.Point(bulb->mouth);
+            bulb->center = frame.Point(bulb->center);
+            bulb->forward = frame.Direction(bulb->forward);
+            bulb->left = frame.Direction(bulb->left);
+            bulb->up = frame.Direction(bulb->up);
         }
         for (auto& rim : bridgeRims) for (auto& p : rim) p.position = frame.Point(p.position);
         moveSurface(pavementTriangles);

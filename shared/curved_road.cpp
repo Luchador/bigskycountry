@@ -77,6 +77,7 @@ namespace
         point.heading = std::atan2(forward.z,forward.x);
         point.pitch = std::atan2(forward.y,std::hypot(forward.x,forward.z));
         point.deadEndLength = 0;
+        point.culDeSacRadius = 0;
     }
     bool ClearsMouths(const Road& host, Vector3 p)
     {

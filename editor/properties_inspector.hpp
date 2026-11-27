@@ -22,12 +22,13 @@ struct PropertiesInspector
     std::optional<std::string> roadNames; // Also present for an unnamed road or draft.
     bool paintMarkings = true;
     bool hasDeadEnd = false;
+    std::optional<double> culDeSacRadius;
     std::optional<double> deadEndLength; // Editable only for the selected free endpoint.
     std::optional<double> bridgeDepth; // All selected segments must belong to a bridge.
     bool mixedBridgeDepth = false;
-    bool HasRoadDetail() const { return deadEndLength.has_value() || bridgeDepth.has_value(); }
-    const char* RoadDetailLabel() const { return bridgeDepth ? "Deck thickness (m)" : "End transition (m)"; }
-    const char* RoadDetailHint() const { return bridgeDepth ? "Overpass" : "0 = no dead end"; }
+    bool HasRoadDetail() const { return deadEndLength.has_value() || bridgeDepth.has_value() || culDeSacRadius.has_value(); }
+    const char* RoadDetailLabel() const { return bridgeDepth ? "Deck thickness (m)" : culDeSacRadius ? "Cul-de-sac radius (m)" : "End transition (m)"; }
+    const char* RoadDetailHint() const { return bridgeDepth ? "Overpass" : culDeSacRadius ? "0 = remove cul-de-sac" : "0 = no dead end"; }
     std::string RoadDetailText() const;
     RoadStyle style;
     std::bitset<static_cast<size_t>(RoadProperty::Count)> mixed;

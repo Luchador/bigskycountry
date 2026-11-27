@@ -8,7 +8,7 @@ std::string PropertiesInspector::RoadDetailText() const
 {
     if (mixedBridgeDepth) return "Mixed";
     char text[48];
-    SDL_snprintf(text, sizeof(text), "%.2f", bridgeDepth.value_or(deadEndLength.value_or(0.0)));
+    SDL_snprintf(text, sizeof(text), "%.2f", bridgeDepth.value_or(culDeSacRadius.value_or(deadEndLength.value_or(0.0))));
     return text;
 }
 
@@ -213,7 +213,10 @@ PropertiesInspector InspectProperties(const WorldDocument& world, const RoadEdit
             result.paintMarkings = road->paintMarkings;
             result.hasDeadEnd = road->HasDeadEnd();
             if (!editingDraft && !group && target.kind == SelectionKind::Point && road->CanDeadEnd(target.point))
-                result.deadEndLength = road->points[target.point].deadEndLength;
+            {
+                if (road->points[target.point].culDeSacRadius > 0) result.culDeSacRadius = road->points[target.point].culDeSacRadius;
+                else result.deadEndLength = road->points[target.point].deadEndLength;
+            }
         }
 
         double meters = road ? road->SplineLengthMeters() : 0;

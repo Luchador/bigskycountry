@@ -316,7 +316,7 @@ struct WindowsPanels::Impl
     {
         const bool marker = field == InspectorEdit::markerText && lastInspector && lastInspector->properties.page == PropertiesPage::Marker;
         const bool roadNames = field == InspectorEdit::roadNames && lastInspector && lastInspector->properties.roadNames;
-        const bool deadEnd = lastInspector && (field == InspectorEdit::deadEndLength || field == InspectorEdit::bridgeDepth) && lastInspector->properties.HasRoadDetail();
+        const bool deadEnd = lastInspector && (field == InspectorEdit::deadEndLength || field == InspectorEdit::bridgeDepth || field == InspectorEdit::culDeSacRadius) && lastInspector->properties.HasRoadDetail();
         const bool intersectionSize = lastInspector &&
             ((field == InspectorEdit::intersectionSize && (lastInspector->properties.yIntersection || lastInspector->properties.townSquare)) ||
              (field == InspectorEdit::townIslandSize && lastInspector->properties.townSquare && lastInspector->properties.townIsland != TownIsland::None));
@@ -1129,6 +1129,7 @@ struct WindowsPanels::Impl
                                   lastInspector->properties.Mixed(RoadProperty::Names) != properties.Mixed(RoadProperty::Names);
         const bool refreshDeadEnd = pageChanged || lastInspector->selected != data.selected || lastInspector->point != data.point ||
                                    lastInspector->properties.deadEndLength != properties.deadEndLength ||
+                                   lastInspector->properties.culDeSacRadius != properties.culDeSacRadius ||
                                    lastInspector->properties.bridgeDepth != properties.bridgeDepth || lastInspector->properties.mixedBridgeDepth != properties.mixedBridgeDepth;
         const bool stripChanged = !lastInspector || lastInspector->properties.HasTransitionSlot() != properties.HasTransitionSlot();
         lastInspector = data;
@@ -1776,7 +1777,7 @@ struct WindowsPanels::Impl
                           id == IDC_ROAD_NAMES ? InspectorEdit::roadNames :
                           id == IDC_INTERSECTION_SIZE ? InspectorEdit::intersectionSize :
                           id == IDC_TOWN_ISLAND_SIZE ? InspectorEdit::townIslandSize :
-                          id == IDC_DEAD_END_LENGTH ? (self.lastInspector && self.lastInspector->properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength) : id - IDC_LOC_X;
+                          id == IDC_DEAD_END_LENGTH ? (self.lastInspector && self.lastInspector->properties.bridgeDepth ? InspectorEdit::bridgeDepth : self.lastInspector && self.lastInspector->properties.culDeSacRadius ? InspectorEdit::culDeSacRadius : InspectorEdit::deadEndLength) : id - IDC_LOC_X;
         if (IsChild(self.road, focus) && (id == IDC_MARKER_TEXT || id == IDC_ROAD_NAMES || id == IDC_INTERSECTION_SIZE || id == IDC_TOWN_ISLAND_SIZE || id == IDC_DEAD_END_LENGTH || (id >= IDC_LOC_X && id <= IDC_GEO_LOCATION)) &&
             msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
         {

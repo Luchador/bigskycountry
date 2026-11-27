@@ -161,6 +161,7 @@ struct RoadPoint
     int connectorTarget = 0; // Connected endpoint follows the matching source socket.
     Vector3 surfaceUp{0, 1, 0}; // Cross-section up in the road's local frame.
     double deadEndLength = 0.0; // Meters beyond a free endpoint; zero disables the end transition.
+    double culDeSacRadius = 0.0; // Circular pavement beyond a free two-way endpoint; zero disables it.
     int segmentLanes = 0; // Outgoing lane/railroad track count. Zero inherits and tapers to edited neighbors.
     std::array<int, 2> segmentShoulders{}; // Left/right outgoing overrides: 0 inherits, 1 off, 2 on.
     std::optional<RoadDivision> segmentDivision; // Outgoing segment; empty inherits the road default.
@@ -288,6 +289,19 @@ struct Road : RoadGeometry
     static constexpr double defaultDeadEndLength = 5.0;
     bool CanDeadEnd(int point) const;
     bool HasDeadEnd() const;
+    static constexpr double defaultCulDeSacRadius = 15.0;
+    static constexpr double maxCulDeSacRadius = 1000.0;
+    bool CanCulDeSac(int point) const;
+    bool HasCulDeSac() const;
+    double MinimumCulDeSacRadius(int point) const;
+    struct CulDeSac
+    {
+        Vector3 mouth, center, forward, left, up;
+        double radius = 0, halfMouth = 0;
+    };
+    // Derived with the pavement, in world space after Rebuild; shared by traffic.
+    std::array<std::optional<CulDeSac>, 2> culDeSacs;
+
     int id = 0; // Persistent terrain neighbor ID. Drafts have no ID.
     bool paintMarkings = true;
     RoadStyle style;

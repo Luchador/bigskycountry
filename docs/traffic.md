@@ -227,7 +227,10 @@ cars. Nearby preload requests from a queue are coalesced; exact readiness checks
 remain per car. Drivers brake before unavailable collision. If support becomes
 unavailable underneath one, that AI car is suspended independently of the player
 and treated as stopped by other traffic. Cars pushed off their lane brake; there
-is no autonomous rerouting at a dead end. Cars that fall more than 100 m below
+is no autonomous rerouting at an ordinary dead end. Cul-de-sacs provide a cooked
+continuation link back to the opposite lane of the same road, with a 4 m/s speed
+limit around the bulb. Wider approaches merge into the innermost lane before the
+turnaround. Cars that fall more than 100 m below
 their last support, with no landing surface below them in either loaded collision
 or unloaded-world metadata, are removed along with their intersection requests.
 This prevents lost cars from accumulating fall speed and increasing physics work

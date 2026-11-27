@@ -798,17 +798,21 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         Commit(world, target.index, std::move(before), &road);
         return;
     }
-    if (command == EditorCommand::CreateDeadEnd)
+    if (command == EditorCommand::CreateDeadEnd || command == EditorCommand::CreateCulDeSac)
     {
         if (!roadMenuTarget) return;
         const auto target = *roadMenuTarget;
         roadMenuTarget.reset();
         if (target.index < 0 || target.index >= static_cast<int>(world.roads.size())) return;
         auto& road = world.roads[target.index];
-        if (road.revision != target.revision || !road.CanDeadEnd(target.point) || road.points[target.point].deadEndLength > 0) return;
+        const bool bulb = command == EditorCommand::CreateCulDeSac;
+        if (road.revision != target.revision || !(bulb ? road.CanCulDeSac(target.point) : road.CanDeadEnd(target.point))) return;
+        auto& point = road.points[target.point];
+        if (bulb ? point.culDeSacRadius > 0 : point.deadEndLength > 0) return;
         EditSnapshot before(state, &road);
         state.SelectPoint(target.index, target.point);
-        road.points[target.point].deadEndLength = Road::defaultDeadEndLength;
+        point.deadEndLength = bulb ? 0 : Road::defaultDeadEndLength;
+        point.culDeSacRadius = bulb ? std::max(Road::defaultCulDeSacRadius, road.MinimumCulDeSacRadius(target.point)) : 0;
         road.Rebuild();
         Commit(world, target.index, std::move(before), &road);
         return;
@@ -1082,7 +1086,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     std::optional<std::array<bool,4>> switches;
     std::optional<bool> flattenEnabled;
     std::optional<SplitMenuOptions> split;
-    std::optional<bool> deadEnd, overpass;
+    std::optional<bool> deadEnd, overpass, culDeSac;
     bool canCreate = !(hit.kind == RoadPickKind::Intersection && hit.side >= 0 && AnchorOccupied(world, {hit.index, hit.side}));
     if (lane && !crossingMenuTarget && hit.kind != RoadPickKind::Point)
     {
@@ -1111,7 +1115,10 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
         {
             roadMenuTarget->point = hit.index;
             if (!road.style.railroad && (hit.index == 0 || hit.index + 1 == static_cast<int>(road.points.size())))
+            {
                 deadEnd = road.CanDeadEnd(hit.index) && road.points[hit.index].deadEndLength == 0;
+                culDeSac = road.CanCulDeSac(hit.index) && road.points[hit.index].culDeSacRadius == 0;
+            }
             split = SplitMenuOptions{hit.index > 0 && hit.index + 1 < static_cast<int>(road.points.size()), road.style.railroad.has_value()};
         }
         if (const auto at = LocateRoadHit(road, hit, position))
@@ -1146,7 +1153,7 @@ void RoadEditor::OpenViewportMenu(WorldDocument& world, FreeCamera& camera)
     const bool curveSite = roadMenuTarget && roadMenuTarget->curveSite.has_value();
     const CurveMenuOptions curves{curveSite, curveSite && curvedConnectorStart &&
         world.roads[roadMenuTarget->index].id != curvedConnectorStart->roadId, curvedConnectorStart.has_value()};
-    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches, curves, riverOptions))
+    if (const auto command = menu.OpenViewport(rightClick->windowPoint, picker.mouse, scene, canCreate, ramps, flattenEnabled, crossingMenuTarget.has_value(), crossingMenuTarget && crossingMenuTarget->existing >= 0, split, deadEnd, overpass, switches, curves, riverOptions, culDeSac))
     {
         RunCommand(*command, world, camera);
     }
@@ -1844,6 +1851,7 @@ void RoadEditor::MovePoint(WorldDocument& world, Vector3 position)
         state.point = *extensionSource == 0 ? 0 : static_cast<int>(road.points.size());
         RoadPoint end{position, {}};
         end.deadEndLength = originalPoints[*extensionSource].deadEndLength;
+        end.culDeSacRadius = originalPoints[*extensionSource].culDeSacRadius;
         if (state.point == 0)
         {
             end.segmentLanes = road.points.front().segmentLanes;
@@ -2425,7 +2433,7 @@ bool RoadEditor::RenderPropertiesPanel(SDL_Renderer* renderer, const WorldDocume
     {
         const auto box = DeadEndBox(properties);
         if (!Text(renderer, 12, box.y - 16, properties.RoadDetailLabel(), muted) ||
-            !transformPanel.DrawField(renderer, box, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength, properties.RoadDetailText(), true) ||
+            !transformPanel.DrawField(renderer, box, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : properties.culDeSacRadius ? InspectorEdit::culDeSacRadius : InspectorEdit::deadEndLength, properties.RoadDetailText(), true) ||
             !Text(renderer, 12, box.y + 29, properties.RoadDetailHint(), muted)) return false;
     }
     if (!Text(renderer, 14, 18, properties.title.c_str(), ink)) return false;
@@ -3024,8 +3032,8 @@ void RoadEditor::ConnectRamps(WorldDocument& world)
     exit.points.back().connectorSocket = ++lastJoin;
     entrance.points.front().connectorSocket = ++lastJoin;
     // The new connector replaces any terminal blend on either source ramp.
-    if (exit.points.back().deadEndLength > 0) exit.Rebuild();
-    if (entrance.points.front().deadEndLength > 0) entrance.Rebuild();
+    if (exit.points.back().deadEndLength > 0 || exit.points.back().culDeSacRadius > 0) exit.Rebuild();
+    if (entrance.points.front().deadEndLength > 0 || entrance.points.front().culDeSacRadius > 0) entrance.Rebuild();
     road.points.resize(2);
     road.points.front().position = exit.points.back().position;
     road.points.front().connectorTarget = exit.points.back().connectorSocket;
@@ -3704,6 +3712,27 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
         Commit(world, state.selected, std::move(before), &road);
         return;
     }
+    if (edit.field == InspectorEdit::culDeSacRadius)
+    {
+        if (EditingDraft() || edit.target.kind != SelectionKind::Point) return;
+        auto& road = world.roads.at(edit.target.index);
+        if (!road.CanCulDeSac(edit.target.point)) return;
+        const auto value = ParseTransformValue(edit.text);
+        const double minimum = road.MinimumCulDeSacRadius(edit.target.point);
+        if (!value || *value < 0 || *value > Road::maxCulDeSacRadius || (*value > 0 && *value < minimum))
+        {
+            status = "Cul-de-sac radius must be 0 (remove) or at least " + std::to_string(minimum) + " m, up to 1000 m";
+            return;
+        }
+        auto& point = road.points[edit.target.point];
+        if (point.culDeSacRadius == *value) return;
+        EditSnapshot before(state, &road);
+        point.culDeSacRadius = *value;
+        if (*value > 0) point.deadEndLength = 0;
+        road.Rebuild();
+        Commit(world, edit.target.index, std::move(before), &road);
+        return;
+    }
     if (edit.field == InspectorEdit::deadEndLength)
     {
         if (edit.target.kind != SelectionKind::Point || EditingDraft()) return;
@@ -3714,6 +3743,7 @@ void RoadEditor::ApplyInspectorEdit(WorldDocument& world, const InspectorEdit& e
         if (road.points[edit.target.point].deadEndLength == *value) return;
         EditSnapshot before(state, &road);
         road.points[edit.target.point].deadEndLength = *value;
+        if (*value > 0) road.points[edit.target.point].culDeSacRadius = 0;
         road.Rebuild();
         Commit(world, edit.target.index, std::move(before), &road);
         return;
@@ -4581,7 +4611,7 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
                 const auto deadEndBox = DeadEndBox(properties);
                 if (properties.HasRoadDetail() && SDL_PointInRectFloat(&local, &deadEndBox))
                 {
-                    transformPanel.StartEdit(window, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : InspectorEdit::deadEndLength, properties.RoadDetailText());
+                    transformPanel.StartEdit(window, state.Target(), properties.bridgeDepth ? InspectorEdit::bridgeDepth : properties.culDeSacRadius ? InspectorEdit::culDeSacRadius : InspectorEdit::deadEndLength, properties.RoadDetailText());
                     return EditorEvent::Handled;
                 }
                 if (properties.roadNames && SDL_PointInRectFloat(&local, &roadNamesBox))

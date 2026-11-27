@@ -480,7 +480,7 @@ std::optional<MaterialAction> EditorMenu::OpenMaterialMenu(SDL_Window* window, i
 #endif
 
 std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection,
-                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass, std::optional<std::array<bool,4>> switches, CurveMenuOptions curves, RiverMenuOptions rivers)
+                                                       std::optional<RampMenuOptions> ramps, std::optional<bool> canFlatten, bool crossingAvailable, bool crossingExists, std::optional<SplitMenuOptions> split, std::optional<bool> deadEnd, std::optional<bool> overpass, std::optional<std::array<bool,4>> switches, CurveMenuOptions curves, RiverMenuOptions rivers, std::optional<bool> culDeSac)
 {
     // Both menu backends use the same categories and context-sensitive actions.
     auto& infrastructure = viewportItems[0];
@@ -505,6 +505,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     }
     if (overpass) infrastructure.push_back({*overpass ? "Remove Overpass" : "Overpass", EditorCommand::ToggleOverpass});
     if (deadEnd) infrastructure.push_back({"Dead End", EditorCommand::CreateDeadEnd, *deadEnd});
+    if (culDeSac) infrastructure.push_back({"Cul-de-sac", EditorCommand::CreateCulDeSac, *culDeSac});
     if (canFlatten) infrastructure.push_back({"Flatten Segment", EditorCommand::FlattenSegment, *canFlatten});
     if (split) infrastructure.push_back({split->railroad ? "Split Railroad" : "Split Road", EditorCommand::SplitRoad, split->enabled});
     if (curves.start) infrastructure.push_back({"Start Curved Connector", EditorCommand::StartCurvedConnector});
@@ -550,7 +551,7 @@ std::optional<EditorCommand> EditorMenu::OpenViewport(SDL_FPoint windowPoint, SD
     if (ready && ClientToScreen(hwnd, &at))
         choice = TrackPopupMenuEx(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, at.x, at.y, hwnd, nullptr);
     DestroyMenu(root);
-    if (choice >= commandBase && choice <= commandBase + static_cast<UINT>(EditorCommand::CreateTownSquare))
+    if (choice >= commandBase && choice <= commandBase + static_cast<UINT>(EditorCommand::CreateCulDeSac))
         return static_cast<EditorCommand>(choice - commandBase);
 #else
     openMenu = -1;

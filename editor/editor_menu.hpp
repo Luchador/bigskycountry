@@ -7,7 +7,7 @@
 #include "material_action.hpp"
 
 enum class EditorCommand { Save, CookWorld, Undo, Redo, ToggleWireframe, ToggleRoadNames, ToggleTrafficLanes, ToggleFog, ToggleShadows, ToggleVisibilityStatistics, ProjectSettings, CreateRoad, CreateRailroad, CreateMarker, CreateIntersection, CreateYIntersection, CreateLake, CreateRiver,
-                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint, CreateTownSquare };
+                           CreateExitRamp, CreateEntranceRamp, CreateRailSwitchLeft, CreateRailSwitchRight, CreateRailSwitchLeftReverse, CreateRailSwitchRightReverse, ToggleRailroadCrossing, FlattenSegment, SplitRoad, CreateDeadEnd, ToggleOverpass, StartCurvedConnector, FinishCurvedConnector, CancelCurvedConnector, StartRiverConnection, FinishRiverConnection, DisconnectRiver, CancelRiverConnection, CreateSpawnPoint, CreateTownSquare, CreateCulDeSac };
 struct RampMenuOptions { bool exit, entrance; };
 struct CurveMenuOptions { bool start = false, finish = false, cancel = false; };
 struct RiverMenuOptions { bool start = false, finish = false, disconnect = false, cancel = false; };
@@ -23,7 +23,7 @@ public:
 #endif
     bool Attach(SDL_Window* window);
     std::optional<EditorCommand> OpenViewport(SDL_FPoint windowPoint, SDL_FPoint viewportPoint, SDL_Rect scene, bool canCreateIntersection, std::optional<RampMenuOptions> ramps,
-                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<SplitMenuOptions> split = {}, std::optional<bool> deadEnd = {}, std::optional<bool> overpass = {}, std::optional<std::array<bool, 4>> switches = {}, CurveMenuOptions curves = {}, RiverMenuOptions rivers = {});
+                                              std::optional<bool> flattenEnabled, bool crossingAvailable = false, bool crossingExists = false, std::optional<SplitMenuOptions> split = {}, std::optional<bool> deadEnd = {}, std::optional<bool> overpass = {}, std::optional<std::array<bool, 4>> switches = {}, CurveMenuOptions curves = {}, RiverMenuOptions rivers = {}, std::optional<bool> culDeSac = {});
 #ifndef _WIN32
     static constexpr int barHeight = 24;
     bool HandleBar(SDL_Renderer* renderer, const SDL_Event& event, std::optional<EditorCommand>& command);

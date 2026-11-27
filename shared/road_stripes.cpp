@@ -628,6 +628,107 @@ namespace
         if (line.empty() || line.back() != point) line.push_back(point);
     }
 
+    // A disk cut at the road mouth. Concentric edge bands share the road's exact
+    // mouth vertices, including asymmetric shoulders, instead of overlapping it.
+    std::vector<Vector3> BuildCulDeSac(Road& road, const RoadPath& path, int end, Vector3 tangent)
+    {
+        auto& point = end ? road.points.back() : road.points.front();
+        if (point.culDeSacRadius <= 0) return {};
+        CrossSection section{};
+        bool first = true;
+        VisitOffsetStations(path, 0, [&](const CrossSection& station)
+        {
+            if (end || first) section = station;
+            first = false;
+        });
+        const auto style = road.EndpointStyle(end == 0);
+        const double sign = end ? 1.0 : -1.0;
+        const auto left = section.lateral * sign;
+        const auto forward = Math::Normalize(tangent - left * Math::Dot(tangent, left)) * sign;
+        if (forward == Vector3{}) return {};
+        const auto width = [&](bool leftSide) {
+            return path.profile ? path.profile->PavementWidth(section.distance, leftSide) :
+                                  (leftSide ? style.LeftWidth() : style.RightWidth());
+        };
+        const double lw = width(end != 0), rw = width(end == 0), h = (lw + rw) * 0.5;
+        // Split-profile context may make the actual mouth wider than its endpoint style.
+        const double radius = point.culDeSacRadius = std::max(point.culDeSacRadius, h + 8.0);
+        const auto mouth = section.center + left * ((lw - rw) * 0.5);
+        const double along = std::sqrt(radius * radius - h * h);
+        const auto center = mouth + forward * along;
+        road.culDeSacs[end] = Road::CulDeSac{mouth, center, forward, left, section.up, radius, h};
+        const int count = std::clamp(static_cast<int>(std::ceil(2 * std::numbers::pi * radius)), 64, 2048);
+        const auto ring = [&](int i, double rightOffset, double leftOffset, double height = 0.0) {
+            const double offset = (rightOffset + leftOffset) * 0.5;
+            const double r = radius + offset, chord = h + offset;
+            const double d = std::sqrt(r * r - chord * chord);
+            const double angle = std::acos(-d / r);
+            const double theta = -angle + 2 * angle * i / count;
+            return mouth + left * ((leftOffset - rightOffset) * 0.5) +
+                   forward * (d + r * std::cos(theta)) + left * (r * std::sin(theta)) + section.up * height;
+        };
+        const auto uv = [&](Vector3 p) {
+            const auto delta = p - section.center;
+            const double lateral = Math::Dot(delta, section.lateral);
+            const double gap = style.HalfSeparation();
+            const double tile = std::abs(lateral) < gap ? 2 * RoadStyle::innerShoulderWidth : style.TravelLaneWidth();
+            const double u = style.GetLaneCount() * .5 + (style.IsDivided() && lateral < 0 ? 1 : 0) -
+                (lateral >= 0 ? 1 : -1) * (std::abs(lateral) - gap) / tile;
+            return SDL_FPoint{static_cast<float>(u), static_cast<float>((section.distance + sign * Math::Dot(delta, forward)) / RoadStyle::laneWidth)};
+        };
+        const auto pavement = [&](Vector3 p) { return Road::PavementVertex{p, uv(p)}; };
+        const auto rimBand = [&](double a, double ah, double b, double bh, SDL_FColor color) {
+            for (int i = 1; i <= count; ++i)
+            {
+                const auto p = ring(i-1,a,a,ah), q = ring(i-1,b,b,bh);
+                const auto r = ring(i,b,b,bh), s = ring(i,a,a,ah);
+                if (style.edge == RoadEdge::Transition)
+                {
+                    const Road::TransitionVertex va{p,{1,0,0,1},uv(p)}, vb{q,{0,0,0,1},uv(q)};
+                    const Road::TransitionVertex vc{r,{0,0,0,1},uv(r)}, vd{s,{1,0,0,1},uv(s)};
+                    auto& strip = road.transitionStrips[style.transitionMaterial];
+                    strip.push_back({va,vc,vb}); strip.push_back({va,vd,vc});
+                }
+                else
+                {
+                    const Road::EdgeVertex va{p,color}, vb{q,color}, vc{r,color}, vd{s,color};
+                    road.edgeTriangles.push_back({va,vc,vb}); road.edgeTriangles.push_back({va,vd,vc});
+                }
+            }
+        };
+        for (int i = 1; i <= count; ++i)
+            road.pavementTriangles.push_back({pavement(center), pavement(ring(i,0,0)), pavement(ring(i-1,0,0))});
+        road.pavementTriangles.push_back({pavement(center), pavement(ring(0,0,0)), pavement(ring(count,0,0))});
+        if (style.edge == RoadEdge::Transition) rimBand(0,0,RoadStyle::stripWidth,0,{});
+        if (style.edge == RoadEdge::Curb)
+        {
+            const double apron = RoadStyle::curbApronWidth, height = RoadStyle::curbHeight;
+            rimBand(0,0,apron,0,RoadEdgeColor::apron);
+            rimBand(apron,0,apron,height,RoadEdgeColor::riser);
+            rimBand(apron,height,style.EdgeWidth(),height,RoadEdgeColor::top);
+        }
+        if (road.paintMarkings)
+        {
+            const auto shoulder = [&](bool leftSide) {
+                return path.profile ? path.profile->Shoulder(section.distance, leftSide) :
+                    ((leftSide ? style.leftShoulder : style.rightShoulder) ? RoadStyle::shoulderWidth : 0.0);
+            };
+            const double rightInset = -shoulder(end == 0), leftInset = -shoulder(end != 0);
+            for (int i = 1; i <= count; ++i)
+            {
+                const auto a = ring(i-1,rightInset-stripeWidth,leftInset-stripeWidth,RoadStyle::stripeHeight);
+                const auto b = ring(i-1,rightInset,leftInset,RoadStyle::stripeHeight);
+                const auto c = ring(i,rightInset,leftInset,RoadStyle::stripeHeight);
+                const auto d = ring(i,rightInset-stripeWidth,leftInset-stripeWidth,RoadStyle::stripeHeight);
+                road.whiteStripes.push_back({a,c,b}); road.whiteStripes.push_back({a,d,c});
+            }
+        }
+        std::vector<Vector3> boundary;
+        const double edge = style.EdgeWidth(), height = style.edge == RoadEdge::Curb ? RoadStyle::curbHeight : 0;
+        for (int i = 1; i < count; ++i) boundary.push_back(ring(i,edge,edge,height));
+        return boundary;
+    }
+
     // Continue the terminal cross section, sharing its exact edge vertices.
     // The red channel fades along the cap and, for side strips, across its corners.
     std::optional<std::array<Vector3, 2>> BuildDeadEnd(Road& road, const RoadPath& path, int end, Vector3 tangent)
@@ -917,7 +1018,7 @@ namespace
                 if (rim.empty() || rim.back().position != ra[faces]) rim.push_back({a.distance, ra[faces]});
                 rim.push_back({b.distance, rb[faces]});
             }
-            if (boundary.empty() && road.points.front().deadEndLength == 0)
+            if (boundary.empty() && road.points.front().deadEndLength == 0 && road.points.front().culDeSacRadius == 0)
                 boundary.insert(boundary.end(), ra.begin(), ra.begin() + faces);
             if (boundary.empty() || boundary.back() != ra[faces]) boundary.push_back(ra[faces]);
             boundary.push_back(rb[faces]);
@@ -1039,7 +1140,7 @@ namespace
                 AddEdgeFace(road, side, ra, rb, 2, RoadEdgeColor::top, RoadEdgeColor::top);
             }
         });
-        if (road.points.back().deadEndLength == 0)
+        if (road.points.back().deadEndLength == 0 && road.points.back().culDeSacRadius == 0)
             for (int i = faces - 1; i >= 0; --i) boundary.push_back(lastRim[i]);
 
         if (bridge && !stations.empty())
@@ -1373,6 +1474,10 @@ void Road::BuildSurface(const std::vector<Vector3>& samples, std::span<const Vec
     }
     const Vector3 firstTangent = tangents.empty() ? spans.front().end - spans.front().start : tangents.front();
     const Vector3 lastTangent = tangents.empty() ? spans.back().end - spans.back().start : tangents.back();
+    const auto lastBulb = BuildCulDeSac(*this, path, 1, lastTangent);
+    outline.insert(outline.begin() + rightBoundaryCount, lastBulb.begin(), lastBulb.end());
+    const auto firstBulb = BuildCulDeSac(*this, path, 0, firstTangent);
+    outline.insert(outline.end(), firstBulb.begin(), firstBulb.end());
     if (const auto cap = BuildDeadEnd(*this, path, 1, lastTangent))
         outline.insert(outline.begin() + rightBoundaryCount, cap->begin(), cap->end());
     if (const auto cap = BuildDeadEnd(*this, path, 0, firstTangent))

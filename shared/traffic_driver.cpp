@@ -233,6 +233,12 @@ void TrafficDriver::Update(double seconds)
         if (!granted && progress < entry) { stopAt = std::min(stopAt, entry-bumperMargin); reason = junctionReason; }
         else if (progress >= entry && progress < exit) reason = "Crossing intersection";
     }
+    if (highwayLink && progress < exit + 3)
+    {
+        const double limit = network->links[*highwayLink].path.speedLimit;
+        const double distance = std::max(0.0, entry-progress-4);
+        targetSpeed = std::min(targetSpeed, std::sqrt(limit*limit + 2*braking*distance));
+    }
     if (highwayLink && network->links[*highwayLink].kind == TrafficLinkKind::Merge && !mergeGranted && progress < entry)
     {
         stopAt = std::min(stopAt, entry-bumperMargin);
