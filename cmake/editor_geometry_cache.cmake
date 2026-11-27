@@ -5,6 +5,7 @@ set(geometry_cache_sources
     shared/editor_geometry_cache.cpp shared/editor_geometry_cache.hpp
     shared/terrain_fill.cpp shared/terrain_fill.hpp
     shared/lake.cpp shared/lake.hpp shared/river.cpp shared/river.hpp
+    shared/river_bed.cpp shared/river_bed.hpp shared/river_junction.cpp shared/river_junction.hpp
     shared/math.cpp shared/math.hpp shared/mesh.hpp shared/terrain_chunk.hpp shared/road.hpp)
 file(GLOB_RECURSE geometry_cache_cdt CONFIGURE_DEPENDS "${cdt_SOURCE_DIR}/CDT/include/*")
 list(APPEND geometry_cache_sources ${geometry_cache_cdt})

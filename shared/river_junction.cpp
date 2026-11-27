@@ -1,4 +1,5 @@
 #include "river_junction.hpp"
+#include "river_bed.hpp"
 #include <CDT.h>
 #include <algorithm>
 #include <cmath>
@@ -23,6 +24,16 @@ namespace
             if ((a.z>p.z)!=(b.z>p.z) && p.x<(b.x-a.x)*(p.z-a.z)/(b.z-a.z)+a.x) inside=!inside;
         }
         return inside;
+    }
+    double ShoreDistance(Vector3 p, const std::vector<LakeSample>& rim)
+    {
+        double distance = std::numeric_limits<double>::max();
+        for (std::size_t i=1; i<rim.size(); ++i)
+        {
+            const auto a=rim[i-1].position,b=rim[i].position;
+            distance=std::min(distance,Distance(p,a+(b-a)*Along(p,a,b)));
+        }
+        return distance;
     }
     std::vector<Vector3> Bank(const RiverJunction::Source& source, int bank)
     {
@@ -72,6 +83,7 @@ namespace
     {
         std::vector<LakeSample> rim;
         CDT::Triangulation<double> cdt;
+        std::optional<RiverBedProfile> river;
         double depth;
         std::optional<double> Height(Vector3 p) const
         {
@@ -228,6 +240,7 @@ std::optional<std::vector<LakeGeometry>> RiverJunction::Build(std::span<const So
             std::vector<CDT::V2d<double>> points; std::vector<Edge> boundary;
             Bounds3 bounds;
             for (auto& p:surface.rim) { p.position=source.transform.Point(p.position)-origin; bounds.Include(p.position); }
+            if (std::holds_alternative<RiverDefinition>(source.definition)) surface.river.emplace(surface.rim);
             const auto count=static_cast<Index>(surface.rim.size()-1);
             for (Index i=0;i<count;++i)
             {
@@ -236,10 +249,18 @@ std::optional<std::vector<LakeGeometry>> RiverJunction::Build(std::span<const So
                 const auto first=add(a),second=add(b); if (first!=second) edges.emplace_back(first,second);
             }
             surface.cdt.insertVertices(points); surface.cdt.insertEdges(boundary); surface.cdt.eraseOuterTrianglesAndHoles();
-            const double spacing=std::max(5.0,std::max(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)/96);
-            for (double z=bounds.min.z+spacing*.5;z<bounds.max.z;z+=spacing)
-                for (double x=bounds.min.x+spacing*.5;x<bounds.max.x;x+=spacing)
-                    if (Inside({x,0,z},surface.rim)) add({x,0,z});
+            if (surface.river)
+            {
+                for (const auto p:surface.river->InteriorSamples())
+                    if (Inside(p,surface.rim) && ShoreDistance(p,surface.rim)>1e-6) add(p);
+            }
+            else
+            {
+                const double spacing=std::max(5.0,std::max(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)/96);
+                for (double z=bounds.min.z+spacing*.5;z<bounds.max.z;z+=spacing)
+                    for (double x=bounds.min.x+spacing*.5;x<bounds.max.x;x+=spacing)
+                        if (Inside({x,0,z},surface.rim)) add({x,0,z});
+            }
         }
         CDT::Triangulation<double> cdt(CDT::VertexInsertionOrder::Auto,CDT::IntersectingConstraintEdges::TryResolve,1e-8);
         cdt.insertVertices(vertices); cdt.insertEdges(edges); cdt.eraseSuperTriangle();
@@ -283,11 +304,23 @@ std::optional<std::vector<LakeGeometry>> RiverJunction::Build(std::span<const So
         std::vector<Vector3> bottom(positions.size()),waterNormals(positions.size()),bedNormals(positions.size());
         for (std::size_t i=0;i<positions.size();++i)
         {
-            auto& p=positions[i]; double depth=0;
-            for (const auto& surface:surfaces) if (auto height=surface.Height(p)) { p.y=*height; depth=surface.depth; break; }
+            auto& p=positions[i];
             double shore=std::numeric_limits<double>::max();
             for (const auto& edge:rim) shore=std::min(shore,Distance(p,edge[0]+(edge[1]-edge[0])*Along(p,edge[0],edge[1])));
-            bottom[i]=p; bottom[i].y-=std::min(depth,shore*.25);
+            double weightedDepth=0,weights=0,fallback=0;
+            bool found=false;
+            for (const auto& surface:surfaces) if (auto height=surface.Height(p))
+            {
+                const double depth=surface.river ? surface.river->Depth(p,surface.depth,shore) : std::min(surface.depth,shore*.25);
+                if (!found) { p.y=*height; fallback=depth; found=true; }
+                // Blend only within overlapping sources. A source's influence
+                // vanishes at its original rim, so different depths meet without
+                // a step. The profile uses the exposed union banks, never the
+                // internal bank or end cap across an open tributary mouth.
+                const double weight=ShoreDistance(p,surface.rim);
+                weightedDepth+=depth*weight; weights+=weight;
+            }
+            bottom[i]=p; bottom[i].y-=weights>1e-8 ? weightedDepth/weights : fallback;
         }
         for (auto& [owner,t]:triangles)
         {

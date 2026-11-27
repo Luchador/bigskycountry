@@ -1,4 +1,5 @@
 #include "lake.hpp"
+#include "river_bed.hpp"
 #include <CDT.h>
 #include <algorithm>
 #include <array>
@@ -53,12 +54,16 @@ namespace
     }
     using Triangle = std::array<Uint32, 3>;
     std::shared_ptr<Mesh> MakeMesh(std::span<const Vector3> positions, std::span<const Triangle> triangles, bool bed,
-                                   double depth, const std::vector<LakeSample>& rim)
+                                   double depth, const std::vector<LakeSample>& rim, const RiverBedProfile* river)
     {
         auto mesh = std::make_shared<Mesh>();
         for (auto position : positions)
         {
-            if (bed) position.y -= std::min(depth, ShoreDistance(position, rim) * 0.25);
+            if (bed)
+            {
+                const double shore = ShoreDistance(position, rim);
+                position.y -= river ? river->Depth(position, depth, shore) : std::min(depth, shore*0.25);
+            }
             mesh->vertices.push_back({position, {}, {float(position.x / 4), float(position.z / 4)},
                                       bed ? SDL_FColor{0.24f, 0.20f, 0.12f, 1} : SDL_FColor{1, 1, 1, 1}});
         }
@@ -93,7 +98,7 @@ namespace
     }
 
     void MakeSurfaces(LakeGeometry& result, const CDT::Triangulation<double>& surface,
-                      const CDT::Triangulation<double>& refined, double depth)
+                      const CDT::Triangulation<double>& refined, double depth, const RiverBedProfile* river)
     {
         const auto& rim = result.shoreline;
         const auto rimCount = static_cast<Uint32>(rim.size()-1);
@@ -139,8 +144,8 @@ namespace
         }
         // Matching triangulation guarantees the bed stays below the surface
         // over entire triangles, including bends and changes in grade.
-        result.water = MakeMesh(positions, triangles, false, depth, rim);
-        result.bed = MakeMesh(positions, triangles, true, depth, rim);
+        result.water = MakeMesh(positions, triangles, false, depth, rim, river);
+        result.bed = MakeMesh(positions, triangles, true, depth, rim, river);
     }
 }
 
@@ -294,6 +299,9 @@ std::optional<LakeGeometry> LakeGeometry::BuildShoreline(std::vector<LakeSample>
     LakeGeometry result;
     result.shoreline = std::move(samples);
     const auto& rim = result.shoreline;
+    std::optional<RiverBedProfile> river;
+    if (std::ranges::any_of(rim, [](const auto& sample) { return sample.bank == 0; }) &&
+        std::ranges::any_of(rim, [](const auto& sample) { return sample.bank == 1; })) river.emplace(rim);
     Bounds3 bounds;
     for (const auto& sample : rim) bounds.Include(sample.position);
     double area = 0;
@@ -324,17 +332,25 @@ std::optional<LakeGeometry> LakeGeometry::BuildShoreline(std::vector<LakeSample>
         water.insertVertices(vertices);
         water.insertEdges(edges);
         water.eraseOuterTrianglesAndHoles();
-        // Interior samples make a subdivided basin, including narrow areas where
-        // a regular grid would miss the polygon altogether.
-        const double spacing = std::max(5.0, std::max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) / 96);
-        for (double z = bounds.min.z + spacing * 0.5; z < bounds.max.z; z += spacing)
-            for (double x = bounds.min.x + spacing * 0.5; x < bounds.max.x; x += spacing)
-                if (Inside({x, 0, z}, rim) && ShoreDistance({x, 0, z}, rim) > 0.1) vertices.push_back({x, z});
+        if (river)
+        {
+            // A bounding-box grid can miss a long, narrow river completely.
+            // Follow both sampled banks and place a full profile at each station.
+            for (const auto p : river->InteriorSamples())
+                if (Inside(p, rim) && ShoreDistance(p, rim) > 1e-6) vertices.push_back({p.x, p.z});
+        }
+        else
+        {
+            const double spacing = std::max(5.0, std::max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) / 96);
+            for (double z = bounds.min.z + spacing * 0.5; z < bounds.max.z; z += spacing)
+                for (double x = bounds.min.x + spacing * 0.5; x < bounds.max.x; x += spacing)
+                    if (Inside({x, 0, z}, rim) && ShoreDistance({x, 0, z}, rim) > 0.1) vertices.push_back({x, z});
+        }
         CDT::Triangulation<double> bed;
         bed.insertVertices(vertices);
         bed.insertEdges(edges);
         bed.eraseOuterTrianglesAndHoles();
-        MakeSurfaces(result, water, bed, depth);
+        MakeSurfaces(result, water, bed, depth, river ? &*river : nullptr);
     }
     catch (const std::exception&)
     {
