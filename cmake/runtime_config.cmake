@@ -88,5 +88,5 @@ function(ensure_config_entries target_section)
     endif()
 endfunction()
 
-ensure_config_entries(Graphics "SSAO=1" "SSAOSamples=16")
+ensure_config_entries(Graphics "SSAO=1" "SSAOSamples=16" "Bloom=1" "BloomIntensity=0.08" "BloomRadius=1.0" "BloomThreshold=1.0")
 ensure_config_entries(Streaming "GeometryMiB=0" "AssetsMiB=0" "CollisionMiB=0")

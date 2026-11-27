@@ -1,6 +1,7 @@
 #include "runtime_config.hpp"
 #include <SDL3/SDL.h>
 #include <charconv>
+#include <cmath>
 #include <memory>
 #include <string_view>
 
@@ -49,6 +50,26 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
         const auto equals = line.find('=');
         if (equals == line.npos) continue;
         const auto key = Trim(line.substr(0, equals));
+        const auto value = Trim(line.substr(equals + 1));
+        if (Equal(section, "Graphics"))
+        {
+            float* setting = nullptr;
+            float low = 0, high = 0, fallback = 0;
+            if (Equal(key, "BloomIntensity")) { setting = &result.bloomIntensity; high = 2; fallback = .08f; }
+            else if (Equal(key, "BloomRadius")) { setting = &result.bloomRadius; low = .5f; high = 2; fallback = 1; }
+            else if (Equal(key, "BloomThreshold")) { setting = &result.bloomThreshold; high = 16; fallback = 1; }
+            if (setting)
+            {
+                float number = 0;
+                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
+                const bool valid = parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() &&
+                    std::isfinite(number) && number >= low && number <= high;
+                *setting = valid ? number : fallback;
+                if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: %.*s must be %.2f..%.2f; using %.2f",
+                    path.c_str(), lineNumber, int(key.size()), key.data(), low, high, fallback);
+                continue;
+            }
+        }
         int* budget = nullptr;
         if (Equal(section, "Streaming"))
         {
@@ -58,8 +79,7 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
             else continue;
         }
         else if (!Equal(section, "Graphics") ||
-                 (!Equal(key, "MSAA") && !Equal(key, "SSAO") && !Equal(key, "SSAOSamples"))) continue;
-        const auto value = Trim(line.substr(equals + 1));
+                 (!Equal(key, "MSAA") && !Equal(key, "SSAO") && !Equal(key, "SSAOSamples") && !Equal(key, "Bloom"))) continue;
         int number = 0;
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
         const bool integer = parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
@@ -77,11 +97,12 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
             result.msaa = valid ? number : 4;
             if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: MSAA must be 0, 2 or 4; using 4", path.c_str(), lineNumber);
         }
-        else if (Equal(key, "SSAO"))
+        else if (Equal(key, "SSAO") || Equal(key, "Bloom"))
         {
             const bool valid = integer && (number == 0 || number == 1);
-            result.ssao = valid ? number != 0 : true;
-            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: SSAO must be 0 or 1; using 1", path.c_str(), lineNumber);
+            (Equal(key, "Bloom") ? result.bloom : result.ssao) = valid ? number != 0 : true;
+            if (!valid) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: %.*s must be 0 or 1; using 1",
+                path.c_str(), lineNumber, int(key.size()), key.data());
         }
         else
         {

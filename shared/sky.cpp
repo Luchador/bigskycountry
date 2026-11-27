@@ -157,6 +157,45 @@ void Sky::UpdateGrid()
     }
 }
 
+Sky::~Sky()
+{
+    SDL_DestroyTexture(background);
+}
+
+bool Sky::DrawBackground(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes)
+{
+#ifdef BIGSKY_WORLD_GPU
+    if (SDL_strcmp(SDL_GetRendererName(renderer), "gpu") == 0)
+    {
+        SDL_Rect viewport{};
+        if (!SDL_GetRenderViewport(renderer, &viewport)) return false;
+        if (viewport.w <= 0 || viewport.h <= 0) return true;
+        if (!background || background->w != viewport.w || background->h != viewport.h)
+        {
+            const auto props = SDL_CreateProperties();
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGBA64_FLOAT);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER, SDL_COLORSPACE_SRGB_LINEAR);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_TARGET);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, viewport.w);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, viewport.h);
+            SDL_SetFloatProperty(props, SDL_PROP_TEXTURE_CREATE_HDR_HEADROOM_FLOAT, 16);
+            auto* texture = SDL_CreateTextureWithProperties(renderer, props);
+            SDL_DestroyProperties(props);
+            if (!texture) return false;
+            SDL_DestroyTexture(background);
+            background = texture;
+        }
+        auto* previous = SDL_GetRenderTarget(renderer);
+        if (!SDL_SetRenderTarget(renderer, background)) return false;
+        // Each texture retains its own viewport. Reset explicitly after resizes.
+        const bool drawn = SDL_SetRenderViewport(renderer, nullptr) && Draw(renderer, camera, timeOfDayMinutes);
+        const bool restored = SDL_SetRenderTarget(renderer, previous);
+        return drawn && restored;
+    }
+#endif
+    return Draw(renderer, camera, timeOfDayMinutes);
+}
+
 bool Sky::Draw(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes)
 {
     SDL_Rect content;

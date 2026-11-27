@@ -94,9 +94,18 @@ bool Sun::Draw(SDL_Renderer* renderer, const CameraView& camera, Vector3 directi
 
     // Budget disc emission against the unbrightened SDR sky. The aureole is already
     // in the framebuffer and is intentionally excluded from this calculation.
-    const SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g), std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
+    SDL_FColor emission{std::max(0.0f, tint.r - baseSkyAtSun.r), std::max(0.0f, tint.g - baseSkyAtSun.g), std::max(0.0f, tint.b - baseSkyAtSun.b), 1.0f};
+    const auto* target = SDL_GetRenderTarget(renderer);
+    const bool hdr = target && target->format == SDL_PIXELFORMAT_RGBA64_FLOAT;
+    if (hdr) emission = tint;
 
     const SkyDisc::DiscMesh mesh = SkyDisc::Project(camera, direction, viewport, *texture, discBounds, angularDiameter, emission);
 
-    return mesh.count == 0 || discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count, mesh.fan, 3 * (mesh.count - 2));
+    if (mesh.count == 0) return true;
+    float scale = 1;
+    if (!SDL_GetRenderColorScale(renderer, &scale)) return false;
+    if (hdr && !SDL_SetRenderColorScale(renderer, scale * 8.f)) return false;
+    const bool drawn = discShader.Draw(renderer, texture.get(), mesh.vertices.data(), mesh.count, mesh.fan, 3 * (mesh.count - 2));
+    const bool restored = !hdr || SDL_SetRenderColorScale(renderer, scale);
+    return drawn && restored;
 }

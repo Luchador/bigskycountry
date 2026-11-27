@@ -236,10 +236,10 @@ float3 ApplyFog(float3 linearColor, float3 view)
 float4 PSMain(WorldFragment input) : SV_Target0
 {
     ClipVisibility(input);
-    if (input.normal.w == 0) return input.color;
-    if (input.normal.w == 2) return float4(ToDisplay(ApplyFog(input.color.rgb,input.view)),input.color.a);
+    if (input.normal.w == 0) return float4(ToLinear(input.color.rgb), input.color.a);
+    if (input.normal.w == 2) return float4(ApplyFog(input.color.rgb,input.view),input.color.a);
     float3 c = ShadeSurface(input.position.xy, UnitVector(input.normal.xyz), UnitVector(input.normal.xyz), input.view, input.color.rgb, float3(1, 1, 0), 0);
-    return float4(ToDisplay(ApplyFog(c, input.view)), input.color.a);
+    return float4(ApplyFog(c, input.view), input.color.a);
 }
 
 // Multiplying by reciprocal clip W makes each component a linear screen-space
@@ -252,7 +252,7 @@ float4 WireframePS(WorldFragment input) : SV_Target0
     const float halfWidth = 1.0;
     bool onEdge = any(edge * edge <= halfWidth * halfWidth * (dx * dx + dy * dy));
     // Clear interiors to sky while writing depth and selection stencil as usual.
-    return onEdge ? float4(input.color.rgb, 1.0) : 0;
+    return onEdge ? float4(ToLinear(input.color.rgb), 1.0) : 0;
 }
 
 #ifdef BSC_MATERIAL
@@ -317,7 +317,7 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
         if (alpha <= 0) discard;
         float3 c = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb * tint.rgb;
         if (input.normal.w != 0) c = ApplyFog(c, input.view);
-        return float4(ToDisplay(c), alpha);
+        return float4(c, alpha);
     }
     float4 base = baseColorMap.Sample(colorSampler, input.uv);
     if (alphaCutout)
@@ -370,8 +370,8 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
     }
     float3 c = ShadeSurface(input.position.xy, mapped, shadowNormal, input.view, base.rgb, orm, glow, transmission);
     if (input.normal.w != 0) c = ApplyFog(c, input.view);
-    // SDL composites the world into a display-encoded color target.
-    return float4(ToDisplay(c), 1);
+    // Keep linear HDR radiance until the shared scene post-processing pass.
+    return float4(c, 1);
 }
 
 #endif // BSC_MATERIAL

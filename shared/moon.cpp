@@ -20,7 +20,8 @@ Vector3 Moon::Direction(Vector3 sunDirection)
 
 bool Moon::Load(SDL_Renderer* renderer)
 {
-    texture.reset(TextureLoader::Load(renderer, "world/moon.tga", discBounds));
+    texture.reset(TextureLoader::Load(renderer, "world/moon.tga", discBounds,
+                  SDL_strcmp(SDL_GetRendererName(renderer), "gpu") == 0));
 
     if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR) || !SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND))
     {

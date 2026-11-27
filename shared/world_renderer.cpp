@@ -43,13 +43,18 @@ std::size_t WorldRenderer::ResidentBytes() const
     return bytes;
 }
 
-bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance, bool enableShadows, bool enableSSAO)
+bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const WorldLighting* environment, const WorldFog* atmosphere, double distance, bool enableShadows, bool enableSSAO,
+                          SDL_Texture* background, bool enablePostProcessing)
 {
     if (!SDL_GetRenderViewport(target, &viewport))
     {
         return false;
     }
     renderer = target;
+    skyBackground = background;
+    postProcessing = enablePostProcessing && environment != nullptr;
+    SDL_GetRenderDrawColorFloat(target, &backgroundColor.r, &backgroundColor.g, &backgroundColor.b, &backgroundColor.a);
+    backgroundColor = Srgb::ToLinear(backgroundColor);
     camera = &view;
     viewDistance = std::isfinite(distance) && distance > 0 ? distance : 0;
     viewport.x = viewport.y = 0;
@@ -59,6 +64,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     ++frame;
     preparedVertices = uploadedBytes = preparationNanos = 0;
     residentDraws.clear();
+    overlayResidentStart = std::numeric_limits<std::size_t>::max();
     residentWire = false;
     // Looking away does not unload a warm buffer. Streamed cells explicitly call
     // Forget on unload; authored mesh owners can expire here. Other disposable
@@ -93,6 +99,8 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     selectedRanges.clear();
     outlineStart = 0;
     if (viewport.w > 0 && viewport.h > 0 && !PrepareTarget(target, viewport.w, viewport.h)) return false;
+    // If GPU initialization fell back, the captured sky still needs presenting.
+    if (!device && skyBackground && !SDL_RenderTexture(target, skyBackground, nullptr, nullptr)) return false;
     shadowEnd = std::numeric_limits<std::size_t>::max();
     shadows.active = false;
     if (device && environment && enableShadows)
@@ -604,6 +612,7 @@ void WorldRenderer::BuildDrawRanges()
     {
         size_t end = outlineStart;
         if (first < wireframeEnd) end = std::min(end, wireframeEnd);
+        if (first < shadowEnd) end = std::min(end, shadowEnd);
         while (material != materialRanges.end() && material->end <= first) ++material;
         while (selection != selectedRanges.end() && selection->end <= first) ++selection;
         const SurfaceMaterial* surface = nullptr;
@@ -629,7 +638,10 @@ void WorldRenderer::BuildDrawRanges()
     }
     if (transparent.empty()) return;
     // Clip W is camera-space depth. Blend far to near after every opaque surface.
-    std::stable_sort(transparent.begin(), transparent.end(), [](const auto& a, const auto& b) { return a.depth > b.depth; });
+    std::stable_sort(transparent.begin(), transparent.end(), [&](const auto& a, const auto& b) {
+        const bool ao = a.draw.first >= shadowEnd, bo = b.draw.first >= shadowEnd;
+        return ao != bo ? !ao : a.depth > b.depth;
+    });
 
     // Pack sorted triangles into the original transparent spans so a large translucent
     // road or terrain mesh can still be drawn in batches. Opaque and overlay vertices stay in place.
@@ -657,7 +669,7 @@ void WorldRenderer::BuildDrawRanges()
 
 bool WorldRenderer::End()
 {
-    if ((vertices.empty() && residentDraws.empty()) || viewport.w <= 0 || viewport.h <= 0)
+    if (viewport.w <= 0 || viewport.h <= 0 || (!device && vertices.empty() && residentDraws.empty()))
     {
         return true;
     }

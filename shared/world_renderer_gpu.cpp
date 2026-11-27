@@ -73,6 +73,7 @@ WorldRenderer::ResidentGeometry::~ResidentGeometry()
 
 WorldRenderer::~WorldRenderer()
 {
+    ReleasePostProcessing();
     if (waterPipeline) SDL_ReleaseGPUGraphicsPipeline(device, waterPipeline);
     if (waterScene) SDL_ReleaseGPUTexture(device, waterScene);
     if (waterSampler) SDL_ReleaseGPUSampler(device, waterSampler);
@@ -115,7 +116,10 @@ WorldRenderer::~WorldRenderer()
 bool WorldRenderer::CreatePipelines()
 {
     const int requested = RuntimeConfig::Get().msaa;
-    const auto colorFormat = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    const auto colorFormat = sceneFormat;
+    if (!SDL_GPUTextureSupportsFormat(device, sceneFormat, SDL_GPU_TEXTURETYPE_2D,
+        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        return SDL_SetError("RGBA16F HDR render targets are not supported");
     // Color and depth/stencil must agree. Prefer the requested quality, then
     // fall back to lower counts rather than dropping to the software renderer.
     for (const auto count : {SDL_GPU_SAMPLECOUNT_4, SDL_GPU_SAMPLECOUNT_2, SDL_GPU_SAMPLECOUNT_1})
@@ -164,7 +168,7 @@ bool WorldRenderer::CreatePipelines()
         {7, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(WorldDepthVertex, outerTangent)}
     };
     SDL_GPUColorTargetDescription color{};
-    color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    color.format = sceneFormat;
     SDL_GPUGraphicsPipelineCreateInfo pipeline{};
     pipeline.vertex_shader = vs;
     pipeline.fragment_shader = ps;
@@ -295,8 +299,10 @@ bool WorldRenderer::CreatePipelines()
         if (cutoutPS) SDL_ReleaseGPUShader(device, cutoutPS);
     }
 
-    if (!waterPipeline || !outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1) || !CreateSSAOFallback())
+    if (!waterPipeline || !outlinePipeline || !shadowPipeline || !shadowCutoutPipeline || !shadowSampler || !PrepareShadowTarget(1) || !CreateSSAOFallback() || !CreatePostPipelines())
     {
+        ReleasePostProcessing();
+        ReleaseSSAO();
         if (waterPipeline) SDL_ReleaseGPUGraphicsPipeline(device, waterPipeline);
         waterPipeline = nullptr;
         if (shadowTarget) SDL_ReleaseGPUTexture(device, shadowTarget);
@@ -397,7 +403,7 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
         SDL_GPUTexture* multisampled = nullptr;
         if (sampleCount != SDL_GPU_SAMPLECOUNT_1)
         {
-            info.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+            info.format = sceneFormat;
             info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
             multisampled = SDL_CreateGPUTexture(device, &info);
             if (!multisampled)
@@ -413,6 +419,14 @@ bool WorldRenderer::PrepareTarget(SDL_Renderer* renderer, int width, int height)
             SDL_ReleaseGPUTexture(device, depthTarget);
         }
 
+        if (!PreparePostTargets(width, height))
+        {
+            SDL_ReleaseGPUTexture(device, depth);
+            if (multisampled) SDL_ReleaseGPUTexture(device, multisampled);
+            SDL_DestroyTexture(color);
+            depthTarget = nullptr;
+            return false;
+        }
         depthTarget = depth;
         if (multisampleColor) SDL_ReleaseGPUTexture(device, multisampleColor);
         multisampleColor = multisampled;
@@ -532,7 +546,7 @@ bool WorldRenderer::PrepareWater()
     if (waterScene && waterWidth == viewport.w && waterHeight == viewport.h) return true;
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
-    info.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    info.format = sceneFormat;
     info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     info.width = viewport.w;
     info.height = viewport.h;
@@ -576,6 +590,8 @@ void WorldRenderer::BindWater(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass*
 
 bool WorldRenderer::DrawGPU()
 {
+    // Submit SDL sky/previous viewport uses before sampling or cycling textures.
+    if (!SDL_FlushRenderer(renderer)) return false;
     const auto isWater = [](const SurfaceMaterial* m) { return m && m->type == MaterialType::Water; };
     waterRequested = !residentWire && !wireframeEnd &&
         (std::ranges::any_of(draws,[&](const auto& d) { return isWater(d.material); }) ||
@@ -670,19 +686,18 @@ bool WorldRenderer::DrawGPU()
     }
 
     SDL_GPUColorTargetInfo color{};
-    auto* resolved = static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(SDL_GetTextureProperties(colorTarget), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    auto* resolved = sceneColor;
     const bool foreground = foregroundStart < vertices.size();
     color.texture = multisampleColor ? multisampleColor : resolved;
     color.load_op = SDL_GPU_LOADOP_CLEAR; // Transparent pixels reveal the sky.
-    color.store_op = multisampleColor ? (waterRequested ? SDL_GPU_STOREOP_RESOLVE_AND_STORE :
-        (!foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE)) : SDL_GPU_STOREOP_STORE;
-    color.resolve_texture = multisampleColor && (waterRequested || !foreground) ? resolved : nullptr;
+    color.store_op = multisampleColor ? (waterRequested ? SDL_GPU_STOREOP_RESOLVE_AND_STORE : SDL_GPU_STOREOP_RESOLVE) : SDL_GPU_STOREOP_STORE;
+    color.resolve_texture = multisampleColor ? resolved : nullptr;
     color.cycle_resolve_texture = true;
     color.cycle = true;
     SDL_GPUDepthStencilTargetInfo depth{};
     depth.texture = depthTarget;
     depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_CLEAR; // Reversed depth clears to zero.
-    depth.store_op = depth.stencil_store_op = waterRequested ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
+    depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_STORE; // Retain selection/depth for overlays after bloom.
     depth.cycle = true;
 
     if (!resolved)
@@ -816,16 +831,18 @@ bool WorldRenderer::DrawGPU()
         }
         boundMaterial = material;
     };
-    int phase = 0; // Opaque scene, then water, then ordinary translucency/overlays.
+    bool overlays = false;
+    int phase = 0; // Opaque scene, then water, then ordinary translucency.
     const auto accepted = [&](const SurfaceMaterial* material) {
-        if (!waterRequested) return true;
+        if (overlays || !waterRequested) return true;
         const int kind = isWater(material) ? 1 : (material && material->type == MaterialType::Unlit ? 2 : 0);
         return kind == phase;
     };
     const auto drawResident = [&](const ResidentDraw& batch) {
         // Shadow-only submissions must not bind a water pass that was skipped
         // because no water is visible in the main camera.
-        if (batch.uploadOnly || !BoundsVisible(batch.geometry->bounds)) return;
+        if (batch.uploadOnly || !BoundsVisible(batch.geometry->bounds) ||
+            (std::size_t(&batch - residentDraws.data()) >= overlayResidentStart) != overlays) return;
         const auto& mesh = *batch.geometry;
         if (!mesh.buffer || (mesh.uploadedBytes < mesh.bufferBytes &&
             !(mesh.uploadFrame == frame && mesh.uploadEnd == mesh.bufferBytes))) return;
@@ -836,6 +853,11 @@ bool WorldRenderer::DrawGPU()
             bindPipeline(residentWire ? nullptr : part.material, residentWire);
             draw(part.first, part.end, batch.selected);
         }
+    };
+    const auto drawRange = [&](std::size_t first, std::size_t end, Uint8 marker) {
+        if (overlays) first = std::max(first, std::min(shadowEnd, outlineStart));
+        else end = std::min(end, shadowEnd);
+        draw(first, end, marker);
     };
     const auto drawScene = [&] {
         auto batch = residentDraws.begin();
@@ -852,7 +874,7 @@ bool WorldRenderer::DrawGPU()
                 {
                     bindSource(vertexBuffer, nullptr);
                     bindPipeline(range.material, first < wireframeEnd);
-                    draw(first, split, range.selected);
+                    drawRange(first, split, range.selected);
                     first = split;
                 }
                 drawResident(*batch++);
@@ -861,7 +883,7 @@ bool WorldRenderer::DrawGPU()
             {
                 bindSource(vertexBuffer, nullptr);
                 bindPipeline(range.material, first < wireframeEnd);
-                draw(first, range.end, range.selected);
+                drawRange(first, range.end, range.selected);
             }
         }
         while (batch != residentDraws.end()) drawResident(*batch++);
@@ -877,11 +899,11 @@ bool WorldRenderer::DrawGPU()
         SDL_EndGPUCopyPass(copy);
         color.load_op = SDL_GPU_LOADOP_LOAD;
         color.cycle = color.cycle_resolve_texture = false;
-        color.store_op = multisampleColor && !foreground ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
-        color.resolve_texture = multisampleColor && !foreground ? resolved : nullptr;
+        color.store_op = multisampleColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+        color.resolve_texture = multisampleColor ? resolved : nullptr;
         depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_LOAD;
         depth.cycle = false;
-        depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_STORE;
         pass = SDL_BeginGPURenderPass(commands,&color,1,&depth);
         if (!pass) { SDL_CancelGPUCommandBuffer(commands); return false; }
         SDL_BindGPUFragmentSamplers(pass,0,sceneBindings,2);
@@ -891,6 +913,28 @@ bool WorldRenderer::DrawGPU()
         phase = 1; drawScene();
         phase = 2; drawScene();
     }
+
+    SDL_EndGPURenderPass(pass);
+    if (!DrawPostProcessing(commands)) { SDL_CancelGPUCommandBuffer(commands); return false; }
+
+    // The tone-mapped image is still linear. Draw overlays using the original
+    // depth/stencil and sample count, then perform display encoding exactly once.
+    overlays = true;
+    color.load_op = SDL_GPU_LOADOP_LOAD;
+    color.cycle = color.cycle_resolve_texture = false;
+    color.store_op = multisampleColor ? (foreground ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_RESOLVE) : SDL_GPU_STOREOP_STORE;
+    color.resolve_texture = multisampleColor && !foreground ? resolved : nullptr;
+    depth.load_op = depth.stencil_load_op = SDL_GPU_LOADOP_LOAD;
+    depth.store_op = depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depth.cycle = false;
+    pass = SDL_BeginGPURenderPass(commands, &color, 1, &depth);
+    if (!pass) { SDL_CancelGPUCommandBuffer(commands); return false; }
+    SDL_BindGPUFragmentSamplers(pass, 0, sceneBindings, 2);
+    SDL_BindGPUFragmentStorageBuffers(pass, 0, &spotBuffer, 1);
+    lighting.spotControl = {}; lighting.ssaoControl = {}; lighting.visibility = {};
+    SDL_PushGPUFragmentUniformData(commands, 0, &lighting, sizeof(lighting));
+    source = nullptr; bound = nullptr; boundMaterial = nullptr;
+    drawScene();
 
     if (outlineStart < foregroundStart)
     {
@@ -930,6 +974,7 @@ bool WorldRenderer::DrawGPU()
         draw(foregroundStart, vertices.size(), 0);
         SDL_EndGPURenderPass(pass);
     }
+    if (!EncodeDisplay(commands)) { SDL_CancelGPUCommandBuffer(commands); return false; }
     if (!SDL_SubmitGPUCommandBuffer(commands)) return false;
     shadowInitialized = ssaoInitialized = true;
     for (const auto& item : uploads)

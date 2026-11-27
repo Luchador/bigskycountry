@@ -4,7 +4,7 @@ My project Big Sky Country
 
 The game and editor read `config.ini` beside their executables at startup. The
 build creates it from the repository's template if missing and preserves edits
-on subsequent builds, adding missing SSAO and streaming entries to older configs. For a Ninja build, edit `build/config.ini`; for a Visual
+on subsequent builds, adding missing graphics and streaming entries to older configs. For a Ninja build, edit `build/config.ini`; for a Visual
 Studio Release build, edit `build/Release/config.ini`. Both executables in that
 directory share the settings, including the editor's mesh preview.
 
@@ -13,6 +13,10 @@ directory share the settings, including the editor's mesh preview.
 MSAA=4
 SSAO=1
 SSAOSamples=16
+Bloom=1
+BloomIntensity=0.08
+BloomRadius=1.0
+BloomThreshold=1.0
 
 [Streaming]
 GeometryMiB=0
@@ -44,6 +48,22 @@ ambient light only, including the ambient term of foliage; direct lights,
 emission, sky, UI, wireframe and vertex-color inspection remain unchanged.
 It works with MSAA off, 2x or 4x. Unsupported GPUs and the software renderer
 omit SSAO; GPU initialization failures are logged.
+
+The GPU renderer uses linear RGBA16F HDR for world lighting, water, and sky,
+resolves MSAA, and applies multi-resolution bloom before tone mapping. Midtones
+retain their existing linear values; highlights roll smoothly toward display white.
+`Bloom=0` skips bloom but keeps HDR tone mapping. `BloomIntensity` accepts 0..2
+(default 0.08), `BloomRadius` 0.5..2 (default 1), and `BloomThreshold` 0..16
+(default 1, in linear brightness units). Threshold 0 includes the entire scene;
+positive thresholds have a soft transition. Invalid/missing entries use defaults.
+Restart after edits; rebuilding adds missing keys without changing existing values.
+No world recook is needed. See [HDR and bloom](docs/hdr-bloom.md) for the render order.
+
+Bloom applies to the game, 3D editor, and lit mesh previews. HUD, minimap, text,
+editor labels, selection outlines, and transform handles are drawn afterward.
+Plan view and software rendering omit bloom. Mesh vertex RGB/alpha inspection
+bypasses both bloom and tone mapping; wireframe omits bloom. Vehicle lenses have
+separate HDR radiance values in `shared/car.cpp`, independent of spotlight power.
 
 The `[Streaming]` entries override memory budgets locally for the game and editor.
 Use `0` (the default), omit a key, or leave it invalid to keep that budget from

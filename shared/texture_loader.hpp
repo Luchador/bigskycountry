@@ -20,7 +20,8 @@ public:
     static SDL_Surface* LoadTgaSurfaceFromFile(const char* path);
 
     // Preserve the image colors and return the bounds of texels with at least half opacity.
-    static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds);
+    // linear creates a floating-point texture for composition into the HDR sky.
+    static SDL_Texture* Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds, bool linear = false);
 
     // Turn brightness into opacity on a white texture, multiplying by any source alpha.
     // discBounds encloses texels with at least half opacity, excluding the sprite's padding.

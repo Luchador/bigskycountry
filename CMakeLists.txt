@@ -127,6 +127,7 @@ add_library(BigSkyApplication STATIC
     shared/road_render.cpp
     shared/plan_renderer.cpp
     shared/world_renderer_gpu.cpp
+    shared/world_renderer_post.cpp
     shared/world_renderer_ssao.cpp
     shared/world_renderer_software.cpp
     shared/sky_disc.cpp

@@ -53,5 +53,8 @@ float4 PSMain(StarPixel input) : SV_Target0
 {
     float4 texel = starTexture.Sample(starSampler, input.uv);
     // Additive RGB: black is invisible; an optional alpha channel is respected.
-    return float4(input.color * texel.rgb * texel.a, 1);
+    float3 color = input.color * texel.rgb * texel.a;
+    // Preserve the catalog's display brightness when compositing into the HDR sky.
+    color = lerp(color / 12.92, pow((color + .055) / 1.055, 2.4), step(.04045, color));
+    return float4(color, 1);
 }

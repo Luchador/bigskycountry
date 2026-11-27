@@ -27,12 +27,18 @@ struct SkyEnvironment
 class Sky
 {
 public:
+    ~Sky();
     // Use one Sky per renderer and destroy it before the renderer.
     bool Draw(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes);
+    // GPU world views capture the sky in linear HDR for composition before bloom.
+    // Non-GPU renderers retain the original direct drawing path.
+    bool DrawBackground(SDL_Renderer* renderer, const CameraView& camera, double timeOfDayMinutes);
+    SDL_Texture* Background() const { return background; }
     const WorldLighting& Lighting() const { return environment.lights; }
     const WorldFog& Fog() const { return environment.fog; }
 
 private:
+    SDL_Texture* background = nullptr;
     Sun sun;
     Moon moon;
     Stars stars;

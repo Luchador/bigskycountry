@@ -89,7 +89,7 @@ namespace
 
     enum class DiscOpacity { SourceAlpha, BrightnessTimesAlpha };
 
-    SDL_Texture* CreateDiscTexture(SDL_Renderer* renderer, SDL_Surface* source, SDL_Rect& bounds, DiscOpacity opacity)
+    SDL_Texture* CreateDiscTexture(SDL_Renderer* renderer, SDL_Surface* source, SDL_Rect& bounds, DiscOpacity opacity, bool linear)
     {
         Surface rgba(SDL_ConvertSurface(source, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
         if (!rgba)
@@ -124,6 +124,14 @@ namespace
             return nullptr;
         }
         bounds = {left, top, right - left + 1, bottom - top + 1};
+        if (linear)
+        {
+            // SDL's SDR renderer creates 8-bit textures without sRGB sampling,
+            // even while drawing into a linear floating-point render target.
+            Surface converted(SDL_ConvertSurfaceAndColorspace(rgba.get(), SDL_PIXELFORMAT_RGBA64_FLOAT,
+                              nullptr, SDL_COLORSPACE_SRGB_LINEAR, 0), SDL_DestroySurface);
+            return converted ? SDL_CreateTextureFromSurface(renderer, converted.get()) : nullptr;
+        }
         return SDL_CreateTextureFromSurface(renderer, rgba.get());
     }
 
@@ -195,7 +203,7 @@ namespace
         return surface;
     }
 
-    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity)
+    SDL_Texture* LoadTexture(SDL_Renderer* renderer, const char* relativePath, SDL_Rect* discBounds, DiscOpacity opacity, bool linear = false)
     {
         if (!renderer)
         {
@@ -214,7 +222,7 @@ namespace
         {
             return nullptr;
         }
-        return discBounds ? CreateDiscTexture(renderer, surface.get(), *discBounds, opacity)
+        return discBounds ? CreateDiscTexture(renderer, surface.get(), *discBounds, opacity, linear)
                           : SDL_CreateTextureFromSurface(renderer, surface.get());
     }
 }
@@ -229,9 +237,9 @@ SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePat
     return LoadTexture(renderer, relativePath, nullptr, DiscOpacity::SourceAlpha);
 }
 
-SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds)
+SDL_Texture* TextureLoader::Load(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& alphaBounds, bool linear)
 {
-    return LoadTexture(renderer, relativePath, &alphaBounds, DiscOpacity::SourceAlpha);
+    return LoadTexture(renderer, relativePath, &alphaBounds, DiscOpacity::SourceAlpha, linear);
 }
 
 SDL_Texture* TextureLoader::LoadMask(SDL_Renderer* renderer, const char* relativePath, SDL_Rect& discBounds)

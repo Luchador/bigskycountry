@@ -6,6 +6,7 @@
 #include "world_fog.hpp"
 #include "shadow_cascades.hpp"
 #include <array>
+#include <limits>
 #include <SDL3/SDL.h>
 
 class CameraView;
@@ -64,11 +65,12 @@ public:
     std::size_t TextureCount() const { return materialCache.TextureCount(); }
     int MsaaSamples() const { return sampleCount == SDL_GPU_SAMPLECOUNT_4 ? 4 : sampleCount == SDL_GPU_SAMPLECOUNT_2 ? 2 : 0; }
     bool Begin(SDL_Renderer* renderer, const CameraView& camera, const WorldLighting* lights = nullptr, const WorldFog* fog = nullptr,
-               double viewDistance = 0, bool shadows = false, bool ambientOcclusion = true);
+               double viewDistance = 0, bool shadows = false, bool ambientOcclusion = true,
+               SDL_Texture* skyBackground = nullptr, bool postProcessing = true);
     // Spot positions supplied here are in world space. Rebuilt each frame, never cached with meshes.
     void SubmitSpotLight(SpotLight light);
     void SubmitEmissiveTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor linearColor);
-    void BeginUnlit() { shadowEnd = vertices.size(); lightGeometry = false; }
+    void BeginUnlit() { shadowEnd = vertices.size(); overlayResidentStart = residentDraws.size(); lightGeometry = false; }
     // World colors are linear albedo. Editor overlay colors are display-encoded.
     void SubmitTriangle(Vector3 a, Vector3 b, Vector3 c, SDL_FColor color);
     void SubmitTriangle(const std::array<Vector3, 3>& positions, const std::array<SDL_FColor, 3>& colors);
@@ -96,6 +98,26 @@ private:
     bool PrepareTarget(SDL_Renderer* renderer, int width, int height);
     bool CreatePipelines();
     bool DrawGPU();
+    bool CreatePostPipelines();
+    bool PreparePostTargets(int width, int height);
+    bool DrawPostProcessing(SDL_GPUCommandBuffer* commands);
+    bool EncodeDisplay(SDL_GPUCommandBuffer* commands);
+    void ReleasePostTargets();
+    void ReleasePostProcessing();
+    static constexpr SDL_GPUTextureFormat sceneFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    SDL_GPUTexture* sceneColor = nullptr;
+    SDL_GPUTexture* postScene = nullptr;
+    SDL_Texture* skyBackground = nullptr; // Borrowed until End; linear HDR.
+    SDL_FColor backgroundColor{};
+    bool postProcessing = true;
+    struct BloomLevel { SDL_GPUTexture* down = nullptr; SDL_GPUTexture* up = nullptr; int width = 0, height = 0; };
+    std::vector<BloomLevel> bloomLevels;
+    SDL_GPUSampler* postSampler = nullptr;
+    SDL_GPUGraphicsPipeline* composePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* downsamplePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* upsamplePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* tonePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* encodePipeline = nullptr;
     bool PrepareWater();
     void BindWater(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, const SurfaceMaterial& material);
     bool waterRequested = false, waterDepthReady = false;
@@ -199,6 +221,7 @@ private:
     };
     std::unordered_map<ResidentKey, std::shared_ptr<ResidentGeometry>, ResidentHash> resident;
     std::vector<ResidentDraw> residentDraws;
+    std::size_t overlayResidentStart = std::numeric_limits<std::size_t>::max();
     std::uint64_t frame = 0;
     std::size_t preparedVertices = 0, uploadedBytes = 0;
     std::uint64_t preparationNanos = 0;

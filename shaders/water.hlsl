@@ -86,7 +86,7 @@ float3 WaterReflection(float3 p, float3 ray, float roughness, float3 sky)
                 float edge = saturate(min(min(uv.x,uv.y),min(1-uv.x,1-uv.y))*12);
                 float4 scene = opaqueScene.SampleLevel(sceneSampler,uv,0);
                 float confidence = edge * scene.a * (1-smoothstep(.35,.8,roughness));
-                return lerp(sky,ToLinear(scene.rgb/max(scene.a,.001)),confidence);
+                return lerp(sky,scene.rgb/max(scene.a,.001),confidence);
             }
             break;
         }
@@ -155,7 +155,7 @@ float4 WaterPS(WorldFragment input) : SV_Target0
     float3 moon = moonRadiance.rgb*(shadowControl.z != 0 ? shadow : 1);
     float3 irradiance = skyAmbient.rgb + .5*(sun*saturate(sunDirection.y)+moon*saturate(moonDirection.y));
     float3 scattering = waterColor.rgb*irradiance;
-    float3 body = ToLinear(background.rgb/max(background.a,.001))*transmission + scattering*(1-transmission);
+    float3 body = (background.rgb/max(background.a,.001))*transmission + scattering*(1-transmission);
     float3 reflectionRay = reflect(-eye,n);
     float3 reflection = WaterReflection(p+geometric*.03,reflectionRay,roughness,WaterSky(reflectionRay));
     float fresnel = .02037 + .97963*pow(1-saturate(dot(n,eye)),5);
@@ -171,6 +171,6 @@ float4 WaterPS(WorldFragment input) : SV_Target0
     color = ApplyFog(color,input.view);
     // Blend in shader, retaining opaque alpha for MSAA and SDL sky composition.
     float4 shoreScene = optics.w != 0 ? opaqueScene.SampleLevel(sceneSampler,uv,0) : 0;
-    color = lerp(ToLinear(shoreScene.rgb/max(shoreScene.a,.001)),color,lerp(1,shore,shoreScene.a));
-    return float4(ToDisplay(color),1);
+    color = lerp(shoreScene.rgb/max(shoreScene.a,.001),color,lerp(1,shore,shoreScene.a));
+    return float4(color,1);
 }

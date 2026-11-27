@@ -121,7 +121,7 @@ bool Stars::Impl::PrepareSprite()
         const std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
             DdsTexture::LoadColorSurface("world/star.tga"), SDL_DestroySurface);
         DdsTexture image;
-        // Preserve the sprite's display RGB, matching SDL's additive SDR path.
+        // The shader converts the authored display brightness to linear light.
         if (!surface || !image.FromImage(surface.get(), DdsTexture::Format::Packed)) return false;
         gpuSprite = image.Upload(device);
         return gpuSprite != nullptr;
@@ -185,7 +185,7 @@ bool Stars::Impl::PrepareGPU()
     const SDL_GPUVertexAttribute attributes[] = {{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
                                                 {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(StarSky::Star, r)}};
     SDL_GPUColorTargetDescription color{};
-    color.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32);
+    color.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
     color.blend_state.enable_blend = true;
     color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -249,7 +249,7 @@ bool Stars::Impl::DrawGPU(const CameraView& camera, const StarSky::Frame& frame,
     if (!SDL_FlushRenderer(renderer)) return false;
     if (!target || target->w != viewport.w || target->h != viewport.h)
     {
-        auto* next = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, viewport.w, viewport.h);
+        auto* next = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA64_FLOAT, SDL_TEXTUREACCESS_TARGET, viewport.w, viewport.h);
         if (!next) return false;
         if (!SDL_SetTextureBlendMode(next, SDL_BLENDMODE_ADD) || !SDL_SetTextureScaleMode(next, SDL_SCALEMODE_NEAREST))
         {

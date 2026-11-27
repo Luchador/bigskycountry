@@ -15,6 +15,8 @@ namespace
                                         {-0.85,0.75,1.35}, {0.85,0.75,1.35}};
     // Rounded chassis, bumpers and cabin. They also catch roof/side landings.
     constexpr double hullRadius = 0.43;
+    // Lens radiance is separate from spotlight power; HDR bloom sees these faces.
+    constexpr float headlightLensRadiance = 6.f, brakeLightLensRadiance = 3.f;
     constexpr Vector3 hull[] = {{-0.55,0.60,-1.70}, {0.55,0.60,-1.70},
                                 {-0.55,0.60,0}, {0.55,0.60,0},
                                 {-0.55,0.60,1.70}, {0.55,0.60,1.70},
@@ -86,7 +88,9 @@ void Car::SubmitLights(WorldRenderer& renderer, double interpolation, bool headl
         const auto lamp = [&](bool front)
         {
             const double x = side * .61, z = front ? 2.175 : -2.175;
-            const SDL_FColor color = front ? SDL_FColor{1,.95f,.8f,1} : SDL_FColor{1,.012f,.004f,1};
+            SDL_FColor color = front ? SDL_FColor{1,.95f,.8f,1} : SDL_FColor{1,.012f,.004f,1};
+            const float radiance = front ? headlightLensRadiance : brakeLightLensRadiance;
+            color.r *= radiance; color.g *= radiance; color.b *= radiance;
             const Vector3 a = pose.Point({x-.16,.65,z}), b = pose.Point({x+.16,.65,z});
             const Vector3 c = pose.Point({x+.16,.85,z}), d = pose.Point({x-.16,.85,z});
 
