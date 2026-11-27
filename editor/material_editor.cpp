@@ -17,6 +17,7 @@ bool MaterialEditor::Open(TextureCatalog& assets, const std::string& relative)
     previewFactor = material.translucency;
     previewSubsurface = material.subsurfaceStrength;
     previewAlphaCutoff = material.alphaCutoff;
+    previewEmissiveIntensity = material.emissiveIntensity;
     previewWater = material.water;
     previewTint = material.type == MaterialType::Water ? material.water.color : material.emissiveTint;
     previewDirty = true;
@@ -132,6 +133,26 @@ bool MaterialEditor::SetAlphaCutoff(float value)
     next.alphaCutoff = value;
     const bool saved = value == material.alphaCutoff || Commit(std::move(next));
     PreviewAlphaCutoff(material.alphaCutoff);
+    return saved;
+}
+
+void MaterialEditor::PreviewEmissiveIntensity(float value)
+{
+    if (!std::isfinite(value)) return;
+    value = std::clamp(value, 0.f, 100.f);
+    if (value == previewEmissiveIntensity) return;
+    previewEmissiveIntensity = value;
+    previewDirty = true;
+}
+
+bool MaterialEditor::SetEmissiveIntensity(float value)
+{
+    if (material.type != MaterialType::Standard)
+        return SDL_SetError("Emissive intensity is only available for Standard materials");
+    auto next = material;
+    next.emissiveIntensity = value;
+    const bool saved = value == material.emissiveIntensity || Commit(std::move(next));
+    PreviewEmissiveIntensity(material.emissiveIntensity);
     return saved;
 }
 

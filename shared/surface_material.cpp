@@ -242,6 +242,7 @@ const SurfaceMaterial* SurfaceMaterialCache::Get(const std::string& path, SDL_GP
         material.useVertexAlphaAO = Material::SupportsVertexAlphaAO(definition.type) && definition.useVertexAlphaAO;
         material.subsurfaceStrength = definition.subsurfaceStrength;
         material.alphaCutoff = definition.alphaCutoff;
+        material.emissiveIntensity = definition.type == MaterialType::Standard ? definition.emissiveIntensity : 1.f;
         material.hasSubsurfaceMap = !definition.textures[static_cast<size_t>(MaterialSlot::Subsurface)].empty();
         const auto& tint = definition.emissiveTint;
         material.tint = Srgb::ToLinear({tint[0], tint[1], tint[2], definition.translucency});
@@ -293,11 +294,18 @@ void SurfaceMaterialCache::Bind(const SurfaceMaterial& material, SDL_GPUCommandB
     for (size_t i = 0; i < slots.size(); ++i)
         bindings[i] = {material.maps[static_cast<size_t>(slots[i])]->gpu, sampler};
     SDL_BindGPUFragmentSamplers(pass, firstSampler, bindings.data(), bindings.size());
-    struct Properties { SDL_FColor tint; Uint32 cutout, unlit, transition, foliage; float strength, hasMap, vertexAO, alphaCutoff; };
-    static_assert(sizeof(Properties) == 48);
+    struct Properties
+    {
+        SDL_FColor tint;
+        Uint32 cutout, unlit, transition, foliage;
+        float strength, hasMap, vertexAO, alphaCutoff;
+        float emissiveIntensity, padding[3];
+    };
+    static_assert(sizeof(Properties) == 64);
     const Properties params{material.tint, Material::IsCutout(material.type), unlit, transition, foliage,
                             material.subsurfaceStrength, material.hasSubsurfaceMap ? 1.f : 0.f,
-                            material.useVertexAlphaAO ? 1.f : 0.f, material.alphaCutoff};
+                            material.useVertexAlphaAO ? 1.f : 0.f, material.alphaCutoff,
+                            material.emissiveIntensity, {}};
     SDL_PushGPUFragmentUniformData(commands, 1, &params, sizeof(params));
 }
 
@@ -350,7 +358,11 @@ SDL_FColor SurfaceMaterial::ShadeLinear(float u, float v, float footprint, const
         const auto outerNormal = mapNormal(DecodeNormalXY(outerSample(MaterialSlot::OuterNormal)), outer.tangent, outer.handedness);
         mapped = Math::Normalize(outerNormal + (mapped - outerNormal) * weight);
     }
-    else glow = sample(MaterialSlot::Emissive);
+    else
+    {
+        glow = sample(MaterialSlot::Emissive);
+        for (int channel = 0; channel < 3; ++channel) glow[channel] *= emissiveIntensity;
+    }
     if (useVertexAlphaAO) orm[0] *= std::clamp(vertexAO, 0.f, 1.f);
     Vector3 transmission{};
     if (type == MaterialType::Foliage)

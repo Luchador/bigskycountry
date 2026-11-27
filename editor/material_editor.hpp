@@ -25,6 +25,9 @@ public:
     void PreviewAlphaCutoff(float value);
     bool SetAlphaCutoff(float value);
     float AlphaCutoff() const { return previewAlphaCutoff; }
+    void PreviewEmissiveIntensity(float value);
+    bool SetEmissiveIntensity(float value);
+    float EmissiveIntensity() const { return previewEmissiveIntensity; }
     void PreviewWater(size_t property, float value);
     bool SetWater(size_t property, float value);
     const WaterMaterial& Water() const { return previewWater; }
@@ -45,6 +48,7 @@ private:
     float previewFactor = 1;
     float previewSubsurface = .5f;
     float previewAlphaCutoff = .5f;
+    float previewEmissiveIntensity = 1;
     std::array<float, 3> previewTint{1, 1, 1};
     double yaw = 0.0, pitch = 0.0;
     bool previewDirty = true;

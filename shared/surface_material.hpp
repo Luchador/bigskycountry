@@ -30,6 +30,7 @@ struct SurfaceMaterial
     SDL_FColor tint{1, 1, 1, 1}; // Linear RGB with the translucency multiplier in alpha.
     float subsurfaceStrength = .5f;
     float alphaCutoff = .5f;
+    float emissiveIntensity = 1;
     bool hasSubsurfaceMap = false;
     bool useVertexAlphaAO = false;
     struct Projection

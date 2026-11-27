@@ -55,8 +55,8 @@ RuntimeConfig RuntimeConfig::Load(const std::string& path)
         {
             float* setting = nullptr;
             float low = 0, high = 0, fallback = 0;
-            if (Equal(key, "BloomIntensity")) { setting = &result.bloomIntensity; high = 2; fallback = .08f; }
-            else if (Equal(key, "BloomRadius")) { setting = &result.bloomRadius; low = .5f; high = 2; fallback = 1; }
+            if (Equal(key, "BloomIntensity")) { setting = &result.bloomIntensity; high = 100; fallback = .08f; }
+            else if (Equal(key, "BloomRadius")) { setting = &result.bloomRadius; low = .5f; high = 32; fallback = 1; }
             else if (Equal(key, "BloomThreshold")) { setting = &result.bloomThreshold; high = 16; fallback = 1; }
             if (setting)
             {

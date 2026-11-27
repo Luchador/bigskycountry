@@ -125,6 +125,12 @@ bool Material::Load(const std::string& requestedFile)
         for (int i = 0; i < 3; ++i)
             if (!ReadUnit(cJSON_GetArrayItem(tint, i), material.emissiveTint[i])) return SDL_SetError("Invalid emissive tint");
     }
+    if (const auto* intensity = cJSON_GetObjectItemCaseSensitive(json.get(), "emissiveIntensity"))
+    {
+        if (!cJSON_IsNumber(intensity) || !(intensity->valuedouble >= 0 && intensity->valuedouble <= 100))
+            return SDL_SetError("Invalid emissive intensity (expected 0..100)");
+        material.emissiveIntensity = static_cast<float>(intensity->valuedouble);
+    }
     if (const auto* factor = cJSON_GetObjectItemCaseSensitive(json.get(), "translucencyMultiplier"))
         if (!ReadUnit(factor, material.translucency)) return SDL_SetError("Invalid translucency multiplier");
     if (const auto* strength = cJSON_GetObjectItemCaseSensitive(json.get(), "subsurfaceStrength"))
@@ -201,6 +207,11 @@ bool Material::Save(const std::string& requestedFile) const
     if (!std::ranges::all_of(emissiveTint, unit) || !unit(translucency)) return SDL_SetError("Invalid unlit material values");
     if (!unit(subsurfaceStrength)) return SDL_SetError("Invalid subsurface strength");
     if (!unit(alphaCutoff)) return SDL_SetError("Invalid alpha cutoff");
+    if (!(emissiveIntensity >= 0 && emissiveIntensity <= 100))
+        return SDL_SetError("Invalid emissive intensity (expected 0..100)");
+    cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "emissiveIntensity");
+    if (type == MaterialType::Standard || emissiveIntensity != 1)
+        if (!cJSON_AddNumberToObject(json.get(), "emissiveIntensity", emissiveIntensity)) return SDL_OutOfMemory();
     cJSON_DeleteItemFromObjectCaseSensitive(json.get(), "alphaCutoff");
     if (IsCutout(type) || alphaCutoff != .5f)
         if (!cJSON_AddNumberToObject(json.get(), "alphaCutoff", alphaCutoff)) return SDL_OutOfMemory();

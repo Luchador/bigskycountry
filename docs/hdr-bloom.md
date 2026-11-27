@@ -8,14 +8,26 @@ existing worlds and cooked geometry do not need recooking.
 | Key | Default | Accepted values |
 | --- | --- | --- |
 | `Bloom` | `1` | `0` off, `1` on |
-| `BloomIntensity` | `0.08` | `0..2`; zero skips bloom work |
-| `BloomRadius` | `1.0` | `0.5..2`; larger values spread the halo farther |
+| `BloomIntensity` | `0.08` | `0..100`; zero skips bloom work |
+| `BloomRadius` | `1.0` | `0.5..32`; larger values spread the halo farther and cost more GPU time |
 | `BloomThreshold` | `1.0` | `0..16` linear brightness; zero includes all scene colors |
 
 A positive threshold has a soft knee of half its value. Begin with the defaults;
 raise the threshold to restrict glow to brighter highlights, or reduce intensity
 for a more restrained effect. No automatic exposure adaptation is applied.
 Disabling bloom retains HDR and highlight tone mapping.
+Radii above 2 use a denser horizontal/vertical tent filter so small bright sources
+produce a continuous halo rather than a grid of separated samples. These settings
+cost an extra filter pass and an intermediate image per upsample level; the
+default radius retains the original filter and allocation sizes.
+
+Bright stars receive an additional HDR exposure in `shaders/stars.hlsl`:
+`zeroMagnitudeRadiance` is 256, scaled by `10^(-0.4 * magnitude)`. The boost
+has full weight through magnitude 1 and fades smoothly to zero at magnitude 3.
+The original faint-star baseline remains. Both contributions follow the existing
+sunrise/sunset and horizon fades, and the boost retains the catalog color and
+sprite opacity. The GPU's floating-point star target preserves this light until
+scene bloom and tone mapping; sprite sizes are unchanged.
 
 ## Frame order
 
@@ -29,7 +41,8 @@ Disabling bloom retains HDR and highlight tone mapping.
 4. Resolve the world and composite it over the HDR sky, before extracting bloom.
 5. Downsample through up to six levels, starting at half dimensions. The first
    reduction uses a 13-tap filter and normalized brightness weighting to suppress
-   isolated bright samples. Upsample with a 3x3 tent filter, combining levels with
+   isolated bright samples. Upsample with a 3x3 tent (dense separable tent above
+   radius 2), combining levels with
    normalized weights so intensity does not grow with the number of levels.
 6. Combine scene and bloom. Preserve linear midtones up to 0.6, then apply a smooth
    exponential shoulder to the brightest channel and scale RGB together. This
@@ -80,3 +93,9 @@ checks confirmed bloom outside bright geometry, unchanged HUD/gizmo colors, reta
 overlay depth, and unmodified raw vertex-color values. Config parsing and migration
 checks covered defaults, ranges, invalid values, CRLF/BOM and preserved preferences.
 These checks do not measure Direct3D 12 performance on the target Windows GPU.
+
+The extended settings and bright-star update were also checked in Release with
+DXIL/SPIR-V compilation, config boundary/invalid-value checks, and Vulkan renders
+at radii 1, 4 and 8. Bloom-on/off image comparisons confirmed an extended bright-star
+halo while HUD pixels stayed unchanged; larger radii were inspected for repeated
+images of the star. Both MSAA and non-MSAA paths were exercised across resizes.

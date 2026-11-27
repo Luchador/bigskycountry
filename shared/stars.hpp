@@ -10,8 +10,8 @@ class CameraView;
 namespace StarSky
 {
     // Equatorial unit direction, visual magnitude, display RGB, SDR brightness.
-    // The catalog is prepared offline; neither CSV parsing nor color conversion
-    // is performed during gameplay. See tools/cook_stars.py and licenses/HYG.txt.
+    // Positions and B-V colors are prepared offline. The GPU adds HDR emission
+    // from apparent magnitude. See tools/cook_stars.py and licenses/HYG.txt.
     struct Star { float x, y, z, magnitude, r, g, b, brightness; };
     std::span<const Star> Catalog();
     struct Frame

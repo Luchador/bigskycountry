@@ -32,6 +32,7 @@ struct Material
     MaterialType type = MaterialType::Standard;
     WaterMaterial water;
     std::array<float, 3> emissiveTint{1, 1, 1}; // Display (sRGB) picker values.
+    float emissiveIntensity = 1; // Standard materials: linear emissive texture multiplier, 0..100.
     float translucency = 1;
     float subsurfaceStrength = .5f; // Thin-leaf transmission from directional lights, 0..1.
     float alphaCutoff = .5f; // Cutout/foliage keeps base alpha * opacity at or above this value, 0..1.

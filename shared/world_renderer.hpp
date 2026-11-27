@@ -110,12 +110,20 @@ private:
     SDL_Texture* skyBackground = nullptr; // Borrowed until End; linear HDR.
     SDL_FColor backgroundColor{};
     bool postProcessing = true;
-    struct BloomLevel { SDL_GPUTexture* down = nullptr; SDL_GPUTexture* up = nullptr; int width = 0, height = 0; };
+    struct BloomLevel
+    {
+        SDL_GPUTexture* down = nullptr;
+        SDL_GPUTexture* up = nullptr;
+        int width = 0, height = 0;
+        SDL_GPUTexture* horizontal = nullptr; // Only needed for radii above 2.
+    };
     std::vector<BloomLevel> bloomLevels;
     SDL_GPUSampler* postSampler = nullptr;
     SDL_GPUGraphicsPipeline* composePipeline = nullptr;
     SDL_GPUGraphicsPipeline* downsamplePipeline = nullptr;
     SDL_GPUGraphicsPipeline* upsamplePipeline = nullptr;
+    SDL_GPUGraphicsPipeline* horizontalBloomPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* wideBloomPipeline = nullptr;
     SDL_GPUGraphicsPipeline* tonePipeline = nullptr;
     SDL_GPUGraphicsPipeline* encodePipeline = nullptr;
     bool PrepareWater();

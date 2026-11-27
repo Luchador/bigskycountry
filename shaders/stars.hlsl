@@ -17,7 +17,13 @@ struct StarPixel
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
     float3 color : TEXCOORD1;
+    float3 radiance : TEXCOORD2;
 };
+
+float3 ToLinear(float3 color)
+{
+    return lerp(color / 12.92, pow((color + .055) / 1.055, 2.4), step(.04045, color));
+}
 
 StarPixel VSMain(StarInput star, uint vertex : SV_VertexID)
 {
@@ -33,12 +39,22 @@ StarPixel VSMain(StarInput star, uint vertex : SV_VertexID)
     float altitude = dot(horizonUp.xyz, direction);
     float fade = viewForward.w * smoothstep(0.0, 0.0871557427, altitude);
     output.color = star.colorBrightness.rgb * (star.colorBrightness.a * fade);
+    output.radiance = 0;
     if (depth <= 0.001 || altitude <= 0)
     {
         output.position = float4(2, 2, 0, 1);
         output.color = 0;
         return output;
     }
+    // Keep faint stars' existing visibility, but give bright stars real HDR
+    // headroom. This is an artistic exposure, with relative flux from HYG's
+    // apparent magnitude: one magnitude brighter supplies 2.512x more light.
+    // Taper the extra emission smoothly away between magnitudes 1 and 3.
+    const float zeroMagnitudeRadiance = 256.0;
+    float magnitude = star.directionMagnitude.w;
+    float brightWeight = 1 - smoothstep(1.0, 3.0, magnitude);
+    output.radiance = ToLinear(star.colorBrightness.rgb) *
+        (zeroMagnitudeRadiance * pow(10.0, -0.4 * magnitude) * brightWeight * fade);
     float radius = (1.5 + 2.0 * sqrt(star.colorBrightness.a)) * horizonUp.w;
     float2 center = float2(dot(viewRight.xyz, direction) * viewRight.w,
                            dot(viewUp.xyz, direction) * viewUp.w);
@@ -54,7 +70,8 @@ float4 PSMain(StarPixel input) : SV_Target0
     float4 texel = starTexture.Sample(starSampler, input.uv);
     // Additive RGB: black is invisible; an optional alpha channel is respected.
     float3 color = input.color * texel.rgb * texel.a;
-    // Preserve the catalog's display brightness when compositing into the HDR sky.
-    color = lerp(color / 12.92, pow((color + .055) / 1.055, 2.4), step(.04045, color));
+    // Preserve the faint-star baseline; apply the bright-star exposure in linear
+    // light so its color and texture alpha survive without premature clipping.
+    color = ToLinear(color) + input.radiance * ToLinear(texel.rgb) * texel.a;
     return float4(color, 1);
 }

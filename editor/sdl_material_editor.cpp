@@ -5,13 +5,14 @@
 
 namespace
 {
+    constexpr int emissiveSlider = 5 + waterProperties.size();
     struct Layout
     {
         int windowWidth = 0, windowHeight = 0;
         SDL_FRect view, type, vertexAO{};
         std::array<SDL_FRect, materialSlotCount> slots{}, clear{};
         SDL_FRect tint{};
-        std::array<SDL_FRect, 5 + waterProperties.size()> sliders{};
+        std::array<SDL_FRect, emissiveSlider + 1> sliders{};
         Layout(SDL_Window* window, const Material& material)
         {
             SDL_GetWindowSize(window, &windowWidth, &windowHeight);
@@ -26,11 +27,13 @@ namespace
             if (aoHeight > 0) vertexAO = {split + 10, 65, panelWidth - 20, 20};
             const float cutoffHeight = Material::IsCutout(material.type) ? 44.f : 0.f;
             if (cutoffHeight > 0) sliders[4] = {split + 10, 86 + aoHeight, panelWidth - 20, 18};
+            const float emissiveHeight = material.type == MaterialType::Standard ? 44.f : 0.f;
+            if (emissiveHeight > 0) sliders[emissiveSlider] = {split + 10, 86 + aoHeight, panelWidth - 20, 18};
             const bool unlit = material.type == MaterialType::Unlit;
             const float rowHeight = foliage ? (windowHeight - 120.f - aoHeight - cutoffHeight) / 6 :
-                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f - aoHeight - cutoffHeight) / (transition ? 6 : 5);
+                unlit ? (windowHeight - 210.f) / 2 : (windowHeight - 70.f - aoHeight - cutoffHeight - emissiveHeight) / (transition ? 6 : 5);
             const float step = std::min(80.f, rowHeight);
-            float y = 68 + aoHeight + cutoffHeight;
+            float y = 68 + aoHeight + cutoffHeight + emissiveHeight;
             for (std::size_t i = 0; i < slots.size(); ++i)
             {
                 if (!material.Uses(static_cast<MaterialSlot>(i))) continue;
@@ -138,6 +141,7 @@ void SdlMaterialEditor::FinishDrag()
         editor.PreviewTranslucency(editor.Current().translucency);
         editor.PreviewSubsurface(editor.Current().subsurfaceStrength);
         editor.PreviewAlphaCutoff(editor.Current().alphaCutoff);
+        editor.PreviewEmissiveIntensity(editor.Current().emissiveIntensity);
         for (size_t i=0; i<waterProperties.size(); ++i)
             editor.PreviewWater(i,editor.Current().water.*waterProperties[i].member);
         sphereDirty = true;
@@ -315,7 +319,8 @@ bool SdlMaterialEditor::Handle(const SDL_Event& e)
             for (int i = 0; i < int(layout.sliders.size()); ++i)
             {
                 const bool water = editor.Current().type == MaterialType::Water;
-                const bool visible = i >= 5 ? water : i == 4 ? Material::IsCutout(editor.Current().type) :
+                const bool visible = i == emissiveSlider ? editor.Current().type == MaterialType::Standard :
+                    i >= 5 ? water : i == 4 ? Material::IsCutout(editor.Current().type) :
                     (water && i < 3) || editor.Current().type == MaterialType::Unlit || (foliage && i == 3);
                 if (visible && SDL_PointInRectFloat(&p, &layout.sliders[i]))
                 {
@@ -338,7 +343,13 @@ void SdlMaterialEditor::AdjustSlider(float x, bool commit)
     const int index = *activeSlider;
     const auto bar = Layout(window, editor.Current()).sliders[index];
     const float fraction = std::clamp((x - bar.x) / (bar.w - 1), 0.f, 1.f);
-    if (index >= 5)
+    if (index == emissiveSlider)
+    {
+        const float value = std::round(fraction * 1000) / 10;
+        if (commit) Report(editor.SetEmissiveIntensity(value));
+        else editor.PreviewEmissiveIntensity(value);
+    }
+    else if (index >= 5)
     {
         const auto& p = waterProperties[index-5];
         const float value = std::lerp(p.minimum,p.maximum,fraction);
@@ -480,6 +491,15 @@ bool SdlMaterialEditor::Draw()
                 !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
                 !Fill(renderer, {bar.x + value * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
         }
+    }
+    if (editor.Current().type == MaterialType::Standard)
+    {
+        const auto bar = layout.sliders[emissiveSlider];
+        char label[40];
+        SDL_snprintf(label, sizeof(label), "Emissive intensity %.1f", editor.EmissiveIntensity());
+        if (!Text(renderer, bar.x, bar.y - 16, label, text) ||
+            !Fill(renderer, {bar.x, bar.y + bar.h / 2 - 2, bar.w, 4}, button) ||
+            !Fill(renderer, {bar.x + editor.EmissiveIntensity() / 100 * (bar.w - 6), bar.y + 1, 6, bar.h - 2}, accent)) return false;
     }
     if (Material::IsCutout(editor.Current().type))
     {

@@ -78,6 +78,8 @@ bigsky_shader(bloom.hlsl vs_6_0 FullscreenVS post_vert post_vert_dxil post_vert_
 bigsky_shader(bloom.hlsl ps_6_0 ComposePS post_compose post_compose_dxil post_compose_spirv)
 bigsky_shader(bloom.hlsl ps_6_0 DownsamplePS bloom_down bloom_down_dxil bloom_down_spirv)
 bigsky_shader(bloom.hlsl ps_6_0 UpsamplePS bloom_up bloom_up_dxil bloom_up_spirv)
+bigsky_shader(bloom.hlsl ps_6_0 UpsampleHorizontalPS bloom_horizontal bloom_horizontal_dxil bloom_horizontal_spirv)
+bigsky_shader(bloom.hlsl ps_6_0 UpsampleWidePS bloom_wide bloom_wide_dxil bloom_wide_spirv)
 bigsky_shader(bloom.hlsl ps_6_0 TonePS post_tone post_tone_dxil post_tone_spirv)
 bigsky_shader(bloom.hlsl ps_6_0 EncodePS post_encode post_encode_dxil post_encode_spirv)
 bigsky_shader(plan.hlsl vs_6_0 VSMain plan_vert plan_vert_dxil plan_vert_spirv)

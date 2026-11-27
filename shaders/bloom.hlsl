@@ -72,6 +72,37 @@ float4 UpsamplePS(Fragment input) : SV_Target0
     // Normalized accumulation keeps intensity independent of pyramid depth.
     return float4(lerp(fine, sum/16, .7), 1);
 }
+float3 WideTent(float2 uv, float2 stepUV)
+{
+    // Dense separable taps avoid the disconnected 3x3 images produced by
+    // spreading the small-radius kernel across bright, tiny sources like stars.
+    // Match the small kernel's spread as radius crosses 2, rather than making
+    // the halo narrower when switching to dense sampling. Radius 32 reaches
+    // 56 texels either side. Keep every tap: combining adjacent taps is not
+    // equivalent at the fractional texel phases used during upsampling, and
+    // produces cross-shaped dips around very bright points.
+    float width = sqrt(3 * filter.z * filter.z + 1);
+    int extent = min(56, (int)ceil(width));
+    float3 color = 0;
+    float weightSum = 0;
+    [loop] for (int offset = -extent; offset <= extent; ++offset)
+    {
+        float weight = max(0, width - abs(offset));
+        color += Read(uv + stepUV * offset) * weight;
+        weightSum += weight;
+    }
+    return color / weightSum;
+}
+float4 UpsampleHorizontalPS(Fragment input) : SV_Target0
+{
+    return float4(WideTent(input.uv, float2(filter.x, 0)), 1);
+}
+float4 UpsampleWidePS(Fragment input) : SV_Target0
+{
+    float3 wide = WideTent(input.uv, float2(0, filter.y));
+    float3 fine = secondImage.SampleLevel(secondSampler, input.uv, 0).rgb;
+    return float4(lerp(fine, wide, .7), 1);
+}
 float4 TonePS(Fragment input) : SV_Target0
 {
     float3 color = Read(input.uv);

@@ -128,7 +128,7 @@ namespace
         SDL_Surface *base, *normal, *orm, *emissive, *opacity, *outerBase, *outerNormal, *outerOrm, *subsurface;
         MaterialType type;
         SDL_FColor tint;
-        float factor, subsurfaceStrength, alphaCutoff;
+        float factor, subsurfaceStrength, alphaCutoff, emissiveIntensity;
         Vector3 toEye;
         const Vector3 light = Math::Normalize({-.48, .68, .72});
         const Vector3 half = Math::Normalize(light + toEye);
@@ -199,7 +199,7 @@ namespace
                 const double f0 = .04 * (1 - metal) + albedo[c] * metal;
                 const double f = f0 + (1 - f0) * fresnelWeight;
                 const double diffuse = albedo[c] * (1 - metal) * (1 - f);
-                pixel[2 - c] = display.Encode(glow[c] + scatter[c] * backlight + ao * (ambient * diffuse + studio * f0) +
+                pixel[2 - c] = display.Encode(glow[c] * emissiveIntensity + scatter[c] * backlight + ao * (ambient * diffuse + studio * f0) +
                                        2.6 * nl * (diffuse / pi + distribution * visibility * f));
             }
         }
@@ -284,7 +284,8 @@ void MaterialEditor::RenderSphere(SDL_Surface& target) const
                         image(material.type == MaterialType::Unlit ? MaterialSlot::Translucency : MaterialSlot::Opacity),
                         image(MaterialSlot::OuterBaseColor), image(MaterialSlot::OuterNormal), image(MaterialSlot::OuterORM),
                         image(MaterialSlot::Subsurface), material.type,
-                        Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), Subsurface(), AlphaCutoff(), toEye};
+                        Srgb::ToLinear({tint[0], tint[1], tint[2], 1}), Translucency(), Subsurface(), AlphaCutoff(),
+                        material.type == MaterialType::Standard ? EmissiveIntensity() : 1.f, toEye};
     constexpr auto background = EditorTheme::field;
     SDL_FillSurfaceRect(&target, nullptr, SDL_MapSurfaceRGB(&target, background.r, background.g, background.b));
     static const Mesh sphere = BuildSphere();

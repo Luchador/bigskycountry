@@ -274,6 +274,7 @@ cbuffer MaterialProperties : register(b1, space3)
     float4 tint;
     uint alphaCutout, unlit, transition, foliage;
     float4 subsurfaceProperties; // Strength, has subsurface map, use vertex alpha AO, alpha cutoff.
+    float4 emissionProperties; // Linear emissive intensity, padding (non-Standard materials use 1).
 };
 
 float3 DecodeNormalXY(float2 channels)
@@ -351,7 +352,7 @@ float4 MaterialPS(WorldFragment input, bool frontFace : SV_IsFrontFace
         float3 outerMapped = UnitVector(outerT * outerNormal.x + outerB * outerNormal.y + n * outerNormal.z);
         mapped = UnitVector(lerp(outerMapped, mapped, weight));
     }
-    else glow = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb;
+    else glow = emissionOrOuterColor.Sample(emissiveSampler, input.uv).rgb * emissionProperties.x;
     // Vertex alpha is ambient visibility, independent of cutout opacity and
     // alpha-to-coverage. Apply it only when enabled by this material.
     if (subsurfaceProperties.z != 0) orm.r *= saturate(input.color.a);

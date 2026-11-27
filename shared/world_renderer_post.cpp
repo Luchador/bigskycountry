@@ -12,6 +12,10 @@
 #include "bloom_down_spirv.hpp"
 #include "bloom_up_dxil.hpp"
 #include "bloom_up_spirv.hpp"
+#include "bloom_horizontal_dxil.hpp"
+#include "bloom_horizontal_spirv.hpp"
+#include "bloom_wide_dxil.hpp"
+#include "bloom_wide_spirv.hpp"
 #include "post_tone_dxil.hpp"
 #include "post_tone_spirv.hpp"
 #include "post_encode_dxil.hpp"
@@ -76,6 +80,8 @@ bool WorldRenderer::CreatePostPipelines()
     composePipeline = create("ComposePS", post_compose_dxil, post_compose_spirv, 2, sceneFormat, SDL_GPU_SAMPLECOUNT_1);
     downsamplePipeline = create("DownsamplePS", bloom_down_dxil, bloom_down_spirv, 1, sceneFormat, SDL_GPU_SAMPLECOUNT_1);
     upsamplePipeline = create("UpsamplePS", bloom_up_dxil, bloom_up_spirv, 2, sceneFormat, SDL_GPU_SAMPLECOUNT_1);
+    horizontalBloomPipeline = create("UpsampleHorizontalPS", bloom_horizontal_dxil, bloom_horizontal_spirv, 1, sceneFormat, SDL_GPU_SAMPLECOUNT_1);
+    wideBloomPipeline = create("UpsampleWidePS", bloom_wide_dxil, bloom_wide_spirv, 2, sceneFormat, SDL_GPU_SAMPLECOUNT_1);
     tonePipeline = create("TonePS", post_tone_dxil, post_tone_spirv, 2, sceneFormat, sampleCount);
     encodePipeline = create("EncodePS", post_encode_dxil, post_encode_spirv, 1,
                             SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_RGBA32), SDL_GPU_SAMPLECOUNT_1);
@@ -84,7 +90,8 @@ bool WorldRenderer::CreatePostPipelines()
     sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
     sampler.address_mode_u = sampler.address_mode_v = sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     postSampler = SDL_CreateGPUSampler(device, &sampler);
-    return composePipeline && downsamplePipeline && upsamplePipeline && tonePipeline && encodePipeline && postSampler;
+    return composePipeline && downsamplePipeline && upsamplePipeline && horizontalBloomPipeline && wideBloomPipeline &&
+        tonePipeline && encodePipeline && postSampler;
 }
 
 bool WorldRenderer::PreparePostTargets(int width, int height)
@@ -107,8 +114,9 @@ bool WorldRenderer::PreparePostTargets(int width, int height)
             width = std::max(1, (width + 1) / 2); height = std::max(1, (height + 1) / 2);
             info.width = width; info.height = height;
             BloomLevel level{SDL_CreateGPUTexture(device, &info), SDL_CreateGPUTexture(device, &info), width, height};
+            if (config.bloomRadius > 2) level.horizontal = SDL_CreateGPUTexture(device, &info);
             bloomLevels.push_back(level);
-            if (!level.down || !level.up) { valid = false; break; }
+            if (!level.down || !level.up || (config.bloomRadius > 2 && !level.horizontal)) { valid = false; break; }
         }
     }
     if (!valid) ReleasePostTargets();
@@ -140,7 +148,12 @@ bool WorldRenderer::DrawPostProcessing(SDL_GPUCommandBuffer* commands)
             const auto& coarse = bloomLevels[i];
             const auto& fine = bloomLevels[i-1];
             uniforms.filter = {1.f/coarse.width, 1.f/coarse.height, config.bloomRadius, 0};
-            if (!Pass(commands, upsamplePipeline, fine.up, postSampler, source, fine.down, uniforms)) return false;
+            if (fine.horizontal)
+            {
+                if (!Pass(commands, horizontalBloomPipeline, fine.horizontal, postSampler, source, nullptr, uniforms) ||
+                    !Pass(commands, wideBloomPipeline, fine.up, postSampler, fine.horizontal, fine.down, uniforms)) return false;
+            }
+            else if (!Pass(commands, upsamplePipeline, fine.up, postSampler, source, fine.down, uniforms)) return false;
             source = fine.up;
         }
         glow = source;
@@ -170,6 +183,7 @@ void WorldRenderer::ReleasePostTargets()
     {
         if (level.down) SDL_ReleaseGPUTexture(device, level.down);
         if (level.up) SDL_ReleaseGPUTexture(device, level.up);
+        if (level.horizontal) SDL_ReleaseGPUTexture(device, level.horizontal);
     }
     bloomLevels.clear();
     if (sceneColor) SDL_ReleaseGPUTexture(device, sceneColor);
@@ -180,9 +194,11 @@ void WorldRenderer::ReleasePostTargets()
 void WorldRenderer::ReleasePostProcessing()
 {
     ReleasePostTargets();
-    for (auto* pipeline : {composePipeline, downsamplePipeline, upsamplePipeline, tonePipeline, encodePipeline})
+    for (auto* pipeline : {composePipeline, downsamplePipeline, upsamplePipeline, horizontalBloomPipeline,
+                          wideBloomPipeline, tonePipeline, encodePipeline})
         if (pipeline) SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     composePipeline = downsamplePipeline = upsamplePipeline = tonePipeline = encodePipeline = nullptr;
+    horizontalBloomPipeline = wideBloomPipeline = nullptr;
     if (postSampler) SDL_ReleaseGPUSampler(device, postSampler);
     postSampler = nullptr;
 }

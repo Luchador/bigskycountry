@@ -52,8 +52,8 @@ omit SSAO; GPU initialization failures are logged.
 The GPU renderer uses linear RGBA16F HDR for world lighting, water, and sky,
 resolves MSAA, and applies multi-resolution bloom before tone mapping. Midtones
 retain their existing linear values; highlights roll smoothly toward display white.
-`Bloom=0` skips bloom but keeps HDR tone mapping. `BloomIntensity` accepts 0..2
-(default 0.08), `BloomRadius` 0.5..2 (default 1), and `BloomThreshold` 0..16
+`Bloom=0` skips bloom but keeps HDR tone mapping. `BloomIntensity` accepts 0..100
+(default 0.08), `BloomRadius` 0.5..32 (default 1), and `BloomThreshold` 0..16
 (default 1, in linear brightness units). Threshold 0 includes the entire scene;
 positive thresholds have a soft transition. Invalid/missing entries use defaults.
 Restart after edits; rebuilding adds missing keys without changing existing values.
@@ -125,6 +125,17 @@ Rebuild the game and editor and recook the world for the railroad embankment min
 ## Material textures
 
 Materials in the Content Browser's **Textures** tab show shaded preview thumbnails using the Material Editor's renderer. Most use a sphere; Water uses a shallow basin. Previews are generated on demand, cached while browsing folders, and updated after material saves. Click **Refresh** after changing texture images outside the editor. Unreadable material files retain the **M** placeholder.
+
+**Standard** materials have an **Emissive intensity** slider, 0.0–100.0 in
+0.1 steps. It multiplies the emissive texture in linear space before HDR bloom
+and tone mapping. The default is 1.0, including for older materials; 0 removes
+emission. The sphere previews changes during dragging, and releasing the slider
+saves `emissiveIntensity` in the `.bmat`. The value is retained when switching
+material types but only applied to Standard materials. An unassigned emissive
+texture contributes no light. Rebuild assets after material edits to copy the
+definition into the game's cooked assets; a world recook is not needed. This
+controls the material's visible emission and bloom, not illumination of nearby
+objects.
 
 For leaves, select **Foliage** in the Material Editor and assign that material to
 the leaf slots in the Mesh Editor. Foliage renders both sides, uses the same
@@ -702,7 +713,7 @@ Use **,** to move sky time 30 minutes earlier and **.** to move it 30 minutes la
 
 The game and 3D editor render 8,920 stars from **HYG v4.1**, limited to apparent
 visual magnitude **6.5 or brighter**, excluding the Sun. Positions use the catalog's
-J2000 coordinates; brightness follows apparent magnitude with SDR compression,
+J2000 coordinates; faint-star brightness follows apparent magnitude with SDR compression,
 and colors are approximated from B-V (40 missing color indices use neutral white).
 Stars share the sun's repeating August 1 sky at 38° N, 95° W (CDT); this is the
 existing fixed sky location, not yet a position-dependent observer or calendar.
@@ -710,6 +721,14 @@ They fade smoothly from full visibility with the sun 6° below the horizon to
 invisible at 5° above it, beginning to appear before sunset and disappearing
 shortly after sunrise. Stars below the horizon are hidden, and those close to it
 fade into the haze. Sky rotation stays continuous across midnight.
+
+The GPU adds HDR emission to stars brighter than magnitude 3, with the strongest
+boost below magnitude 1. A magnitude-zero star adds 256 units of linear radiance
+at full visibility, following the magnitude/flux relationship and tapering the
+boost smoothly to zero by magnitude 3. This lets bright stars produce bloom
+without brightening the entire star field. Colors, sprite sizes and sky fading
+are preserved; software rendering retains the original SDR appearance. The
+artistic exposure is `zeroMagnitudeRadiance` in `shaders/stars.hlsl`.
 
 The star sprite is **`assets/textures/world/star.tga`**, shared by all stars.
 Use a white shape on black: additive blending makes black invisible without
