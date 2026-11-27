@@ -104,6 +104,8 @@ Rebuild the game and editor and recook the world for the railroad embankment min
 
 ## Material textures
 
+Materials in the Content Browser's **Textures** tab show shaded preview thumbnails using the Material Editor's renderer. Most use a sphere; Water uses a shallow basin. Previews are generated on demand, cached while browsing folders, and updated after material saves. Click **Refresh** after changing texture images outside the editor. Unreadable material files retain the **M** placeholder.
+
 For leaves, select **Foliage** in the Material Editor and assign that material to
 the leaf slots in the Mesh Editor. Foliage renders both sides, uses the same
 alpha cutout as **Alpha cutout**, and casts masked shadows. A combined color/opacity

@@ -143,6 +143,7 @@ struct WindowsPanels::Impl
     POINT texturePress{};
     bool draggingTexture = false;
     bool populating = false, populated = false, texturesPopulated = false;
+    unsigned textureMaterialRevision = 0;
     std::set<std::string> collapsedTextureFolders;
     int scroll = 0;
     double lastSpeed = -1;
@@ -782,7 +783,7 @@ struct WindowsPanels::Impl
             RECT icon = draw.rcItem;
             InflateRect(&icon, -pad, -pad);
             icon.right = icon.left + icon.bottom - icon.top;
-            SDL_Surface* surface = item.material ? nullptr : catalog.Thumbnail(draw.itemData);
+            SDL_Surface* surface = catalog.Thumbnail(draw.itemData);
             WindowsTheme::DrawPreview(draw.hDC, icon, surface);
             SetBkMode(draw.hDC, TRANSPARENT);
             if (!surface)
@@ -2148,6 +2149,12 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
     if (!p.populated)
     {
         p.Populate();
+    }
+
+    if (p.textureMaterialRevision != Material::Revision())
+    {
+        p.textureMaterialRevision = Material::Revision();
+        InvalidateRect(GetDlgItem(p.models, IDC_TEXTURES), nullptr, FALSE);
     }
 
     if (p.browser->ActiveTab() == ContentBrowser::Tab::Models && p.browser->UpdatePreview())

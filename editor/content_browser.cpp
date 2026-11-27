@@ -789,7 +789,7 @@ bool ContentBrowser::Draw(SDL_Renderer* renderer, int width, int height)
                 return false;
             }
             const SDL_FRect icon{10, y + 5, 54, 54};
-            SDL_Texture* thumb = item.material ? nullptr : textures.ThumbnailTexture(i, renderer);
+            SDL_Texture* thumb = textures.ThumbnailTexture(i, renderer);
             if (thumb)
             {
                 if (!SDL_RenderTexture(renderer, thumb, nullptr, &icon))

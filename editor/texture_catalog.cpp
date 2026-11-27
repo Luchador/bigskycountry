@@ -432,6 +432,20 @@ SDL_Surface* TextureCatalog::Image(const std::string& path)
 
 SDL_Surface* TextureCatalog::Thumbnail(const std::string& path)
 {
+    if (Material::ValidAssetPath(path))
+    {
+        SyncMaterialThumbnails();
+        auto [it, inserted] = materialThumbnails.try_emplace(path, nullptr, SDL_DestroySurface);
+        if (inserted)
+        {
+            // Render only requested (visible) materials. Keep the small result
+            // across folder navigation and share source images with the editors.
+            MaterialEditor preview;
+            if (preview.Open(*this, path))
+                it->second = MakeThumbnail(preview.Preview(thumbnailSize * 2, thumbnailSize * 2));
+        }
+        return it->second.get(); // Failed previews are retried after a save/Refresh.
+    }
     auto* image = Image(path);
     if (!image) return nullptr;
     auto& thumb = images.at(path).thumbnail;
@@ -441,12 +455,30 @@ SDL_Surface* TextureCatalog::Thumbnail(const std::string& path)
 
 SDL_Surface* TextureCatalog::Thumbnail(std::size_t index)
 {
-    return items.at(index).material ? nullptr : Thumbnail(items[index].path);
+    return Thumbnail(items.at(index).path);
+}
+
+void TextureCatalog::SyncMaterialThumbnails()
+{
+    if (materialThumbnailRevision == Material::Revision()) return;
+    materialThumbnailRevision = Material::Revision();
+    materialThumbnails.clear();
+#ifndef _WIN32
+    for (std::size_t i = 0; i < items.size(); ++i)
+        if (items[i].material)
+        {
+            SDL_DestroyTexture(thumbnailTextures[i]);
+            thumbnailTextures[i] = nullptr;
+        }
+#endif
 }
 
 #ifndef _WIN32
 SDL_Texture* TextureCatalog::ThumbnailTexture(std::size_t index, SDL_Renderer* renderer)
 {
+    // Check before returning an existing upload: saved material edits must also
+    // replace the renderer's texture, not just its cached CPU image.
+    SyncMaterialThumbnails();
     auto*& texture = thumbnailTextures.at(index);
     if (!texture)
         if (auto* thumb = Thumbnail(index)) texture = SDL_CreateTextureFromSurface(renderer, thumb);

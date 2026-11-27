@@ -35,6 +35,8 @@ public:
     Uint64 ImageRevision() const { return imageRevision; }
     // Borrowed until a refresh detects a changed source. All materials share these pixels.
     SDL_Surface* Image(const std::string& path);
+    // Textures use flat images; materials use the Material Editor's shaded preview.
+    // Borrowed until Refresh or a material save invalidates the thumbnail cache.
     SDL_Surface* Thumbnail(const std::string& path);
     SDL_Surface* Thumbnail(std::size_t index);
 #ifndef _WIN32
@@ -60,6 +62,9 @@ private:
         }
     };
     std::map<std::string, ImageEntry, PathLess> images;
+    std::map<std::string, Surface, PathLess> materialThumbnails;
+    unsigned materialThumbnailRevision = 0;
+    void SyncMaterialThumbnails();
     Uint64 imageRevision = 0;
 #ifndef _WIN32
     std::vector<SDL_Texture*> thumbnailTextures;
