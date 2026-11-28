@@ -33,7 +33,7 @@ namespace
     constexpr Tag meshTag = {'M', 'E', 'S', 'H'};
     constexpr Uint32 meshVersion = 1;
     constexpr Tag terrainTag = {'T', 'E', 'R', 'R'};
-    constexpr Uint32 terrainVersion = 10;
+    constexpr Uint32 terrainVersion = 11;
     constexpr Tag outlinerTag = {'O', 'U', 'T', 'L'};
     constexpr Tag identityTag = {'E', 'I', 'D', 'S'};
     constexpr Tag objectTag = {'O', 'B', 'J', 'S'};
@@ -136,6 +136,11 @@ namespace
                 auto* chunk = world.PlaceTerrainFill(std::move(boundary), true);
                 if (!chunk) return false;
                 chunk->material = std::move(material);
+                if (version >= 11)
+                {
+                    TerrainSculptEdits edits;
+                    if (!ReadTerrainSculpt(in, edits) || !chunk->SetSculptEdits(std::move(edits))) return false;
+                }
                 in >> std::ws;
                 continue;
             }
@@ -880,7 +885,9 @@ bool WorldDocument::Save()
             }
             terrainData << ' ' << chunk->boundary->waterBodies.size();
             for (auto id : chunk->boundary->waterBodies) terrainData << ' ' << id;
-            terrainData << ' ' << chunk->boundary->filterIncidentalPockets << '\n';
+            terrainData << ' ' << chunk->boundary->filterIncidentalPockets;
+            WriteTerrainSculpt(terrainData, chunk->SculptEdits());
+            terrainData << '\n';
             continue;
         }
         const auto& mesh = chunk->Instance().mesh;

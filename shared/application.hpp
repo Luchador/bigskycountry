@@ -36,6 +36,7 @@ public:
     virtual bool IsPlanView() const = 0;
     virtual bool SetContentViewport(SDL_Renderer* renderer) = 0;
     virtual EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) = 0;
+    virtual void Update(WorldDocument&, const FreeCamera&, double) {}
     virtual bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) = 0;
     // Editor-owned GPU buffers must be released before SDL destroys the renderer/device.
     virtual void ReleaseRenderResources() {}

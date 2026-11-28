@@ -414,8 +414,39 @@ the main editor remains usable while it is open. Clicking again or pressing
 **Ctrl+T** again focuses the existing window. **Close**, **Esc**, or the title-bar
 **X** closes only the Terrain Editor. Its toolbar icon switches between
 `assets/textures/editor/btn_terrain_off.png` and `btn_terrain_on.png` to reflect
-whether the window is open. This first pass provides the window; terrain raise,
-lower, and flatten tools will follow separately.
+whether the window is open.
+
+Choose **Raise**, **Lower**, or **Flatten** in the Terrain Editor; only one brush
+is active at a time. Hold **LMB** over generated terrain to sculpt. Flatten samples
+its target height at the start of each stroke. **Strength** controls meters per
+second for raise/lower and the convergence rate for flatten. The brush outline
+follows the terrain surface in both perspective and plan views, with gaps where
+there is no editable land. Hold **Ctrl** and scroll to change the radius, or type
+it into **Radius (m)**; the range is **0.1 to 1000 m**.
+
+**Seam transition (m)** defaults to **10 m** and can be set from **0.1 to 1000 m**.
+All perimeter vertices remain fixed, including road transition/curb edges,
+railroad embankments, and river/lake banks. Inside that band, displacement scales
+linearly from zero at the seam to full strength at the band's inner edge. Brush
+strength also falls linearly toward the circular brush edge. Small brushes add
+local mesh detail with shared edges to avoid cracks; terrain normals update after
+each edit. Brushes affect visible generated land fills; imported terrain models,
+roads, railroads, water surfaces, and water beds retain their own editing tools.
+
+One drag is one **Ctrl+Z / Ctrl+Y** action. **Esc** in the viewport cancels the
+current stroke; when idle it disables the brush. Clearing **Enable brush** or
+closing the Terrain Editor restores ordinary viewport selection. Completed
+strokes save with the world. `TERR` version **11** adds a counted list of sculpt
+stamps to each `fill` record (tool, XYZ center/flatten target, radius, amount,
+seam-transition width). Older worlds load without sculpt edits. Edits are replayed
+against rebuilt terrain when boundaries change, so the current seams remain pinned.
+Very dense edits are bounded at 500,000 vertices and 100,000 stamps per fill;
+a rejected stamp leaves its mesh unchanged. Rebuild the editor/game and **recook
+the world** to update the game's streamed terrain and collision.
+
+Tool icons use `btn_terrain_off/on.png` for Raise,
+`btn_terrain_lower_off/on.png` for Lower, and
+`btn_terrain_flatten_off/on.png` for Flatten in `assets/textures/editor/`.
 
 Open the single-chunk example from the repository root with `.\build\BigSkyCountryEditor.exe examples\test-terrain.wld`.
 

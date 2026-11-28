@@ -59,10 +59,28 @@ public:
     bool IsPlanView() const override { return planView; }
     bool SetContentViewport(SDL_Renderer* renderer) override;
     EditorEvent HandleEvent(SDL_Window* window, SDL_Renderer* renderer, const SDL_Event& event, WorldDocument& world, FreeCamera& camera) override;
+    void Update(WorldDocument& world, const FreeCamera& camera, double elapsed) override;
     bool Render(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) override;
     void ReleaseRenderResources() override { browser.MeshWindow().Close(); planRenderer.Clear(); planDraft.reset(); }
 
 private:
+    const TerrainBrushSettings& TerrainBrush() const;
+    std::optional<Vector3> PickTerrainBrush(const WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer) const;
+    bool TerrainBrushInput(const SDL_Event& event, SDL_FPoint pointer, WorldDocument& world, const FreeCamera& camera);
+    void StampTerrain(WorldDocument& world, Vector3 center, double elapsed);
+    void FinishTerrainStroke(WorldDocument& world, bool cancel = false);
+    std::vector<std::optional<Vector3>> TerrainBrushContour(const WorldDocument& world) const;
+    void SubmitTerrainBrush(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera) const;
+    bool DrawTerrainBrush(SDL_Renderer* renderer, const WorldDocument& world, const FreeCamera& camera) const;
+    struct TerrainStroke
+    {
+        EditSnapshot before;
+        TerrainBrushSettings settings;
+        double height = 0, elapsed = 0;
+        std::optional<Vector3> previous;
+    };
+    std::optional<TerrainStroke> terrainStroke;
+    std::optional<Vector3> terrainHover;
     enum class Drag
     {
         None,

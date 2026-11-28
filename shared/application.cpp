@@ -234,6 +234,8 @@ namespace
                 return false;
             }
 
+            if (roadTool) roadTool->Update(world, freeCamera, elapsedNanoseconds / 1.0e9);
+
             const bool profiling = game && gameVisibilityStats;
             const Uint64 sceneStart = profiling ? SDL_GetTicksNS() : 0;
             if (!roadTool || !roadTool->IsPlanView())

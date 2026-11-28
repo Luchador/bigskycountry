@@ -118,6 +118,7 @@ add_library(BigSkyApplication STATIC
     shared/terrain_fill.cpp
     shared/editor_geometry_cache.cpp
     shared/terrain_chunk.cpp
+    shared/terrain_sculpt.cpp
     shared/lake.cpp
     shared/river.cpp
     shared/river_bed.cpp
@@ -223,6 +224,7 @@ add_executable(BigSkyCountryEditor WIN32
     editor/texture_catalog.cpp
     editor/scene_outliner.cpp
     editor/road_editor.cpp
+    editor/terrain_brush.cpp
     editor/selection_bounds.cpp
     editor/plan_selection.cpp
     editor/viewport_selection.cpp

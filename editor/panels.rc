@@ -27,8 +27,21 @@ CAPTION "Terrain Editor"
 FONT 9, "Segoe UI"
 BEGIN
     GROUPBOX "Terrain tools", IDC_TERRAIN_TOOLS, 8, 8, 244, 200
-    LTEXT "No terrain tools available yet.", IDC_TERRAIN_EMPTY, 16, 24, 228, 24
-    DEFPUSHBUTTON "Close", IDCANCEL, 198, 216, 54, 16
+    CONTROL "Raise", IDC_TERRAIN_RAISE, "Button", BS_PUSHBUTTON | BS_BITMAP | WS_TABSTOP, 16, 24, 32, 32
+    CONTROL "Lower", IDC_TERRAIN_LOWER, "Button", BS_PUSHBUTTON | BS_BITMAP | WS_TABSTOP, 72, 24, 32, 32
+    CONTROL "Flatten", IDC_TERRAIN_FLATTEN, "Button", BS_PUSHBUTTON | BS_BITMAP | WS_TABSTOP, 128, 24, 32, 32
+    CTEXT "Raise", -1, 12, 58, 40, 12
+    CTEXT "Lower", -1, 68, 58, 40, 12
+    CTEXT "Flatten", -1, 124, 58, 40, 12
+    AUTOCHECKBOX "Enable brush", IDC_TERRAIN_ENABLED, 16, 76, 100, 12, WS_TABSTOP
+    LTEXT "Radius (m)", -1, 16, 97, 104, 12
+    EDITTEXT IDC_TERRAIN_RADIUS, 140, 94, 90, 14, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Strength", -1, 16, 117, 104, 12
+    EDITTEXT IDC_TERRAIN_STRENGTH, 140, 114, 90, 14, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Seam transition (m)", -1, 16, 137, 120, 12
+    EDITTEXT IDC_TERRAIN_SEAM, 140, 134, 90, 14, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Hold LMB to sculpt. Ctrl+wheel: radius (0.1-1000 m).\nFlatten samples height at the start of each stroke.\nEsc: cancel stroke / disable brush. Ctrl+Z: undo.", -1, 16, 157, 224, 40
+    PUSHBUTTON "Close", IDCANCEL, 198, 216, 54, 16
 END
 
 IDD_BROWSER DIALOGEX 0, 0, BROWSER_WIDTH, 240

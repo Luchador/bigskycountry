@@ -12,6 +12,8 @@ namespace WindowsTheme
     std::optional<COLORREF> PickColor(HWND owner, COLORREF current);
     void DrawPreview(HDC dc, const RECT& area, SDL_Surface* surface, SDL_Color background = EditorTheme::preview);
     void TitleBar(HWND window);
+    // Takes ownership of the SDL surface.
+    HBITMAP ButtonBitmap(SDL_Surface* source, int size);
     // Call during WM_INITDIALOG. Control input, focus, notifications and accessibility stay native.
     void ApplyDialog(HWND dialog, SDL_Color background = EditorTheme::panel);
 }

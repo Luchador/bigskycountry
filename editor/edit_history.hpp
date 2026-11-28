@@ -146,6 +146,7 @@ struct EditSnapshot
         int folder = 0;
         std::optional<WaterDefinition> water;
         std::uint64_t persistentId = 0;
+        TerrainSculptEdits sculpt;
         bool operator==(const TerrainPlacement&) const = default;
     };
     std::optional<TerrainPlacement> addedTerrain;
@@ -156,6 +157,7 @@ struct EditSnapshot
         bool operator==(const WaterEdit&) const = default;
     };
     std::optional<WaterEdit> water;
+    std::map<std::uint64_t, TerrainSculptEdits> terrainSculpt; // Stable placement IDs.
     struct PlacedMaterial
     {
         SceneKey target;

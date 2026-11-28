@@ -215,7 +215,7 @@ bool EditHistory::Action::ChangesWorld() const
 {
     return roadIndex >= 0 || !after.roadProperties.empty() || object || after.meshTransform || after.roadGroup || after.junction ||
            after.objectInvincible || after.objectHasCollision || after.markerText || after.markerTextColor || after.hierarchy || after.placedMaterial ||
-           before.addedTerrain || after.addedTerrain || after.water;
+           before.addedTerrain || after.addedTerrain || after.water || !after.terrainSculpt.empty();
 }
 
 bool EditHistory::Record(int roadIndex, EditSnapshot before, EditSnapshot after, std::optional<ObjectEdit> object)
@@ -532,6 +532,7 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
                                            world.PlaceTerrain(placement.modelPath, placement.transform);
         if (!chunk) return Result::Failed;
         chunk->material = placement.material;
+        if (!chunk->SetSculptEdits(placement.sculpt)) return Result::Failed;
         if (placement.persistentId) chunk->persistentId = placement.persistentId;
         world.MoveLastTerrainTo(to.meshSelection.index);
         if (placement.folder) world.hierarchy.Move({{SceneKind::Terrain, to.meshSelection.index}}, placement.folder);
@@ -600,6 +601,11 @@ EditHistory::Result EditHistory::Restore(WorldDocument& world, RoadEditorState& 
         auto* path = FindPlacedMaterial(world, to.placedMaterial->target);
         if (!path) return Result::Failed;
         *path = to.placedMaterial->path;
+    }
+    for (const auto& [id, edits] : to.terrainSculpt)
+    {
+        const auto it = std::ranges::find_if(world.Terrain(), [id](const auto& chunk) { return chunk->persistentId == id; });
+        if (it == world.Terrain().end() || !(*it)->SetSculptEdits(edits)) return Result::Failed;
     }
     if (to.water && !world.Terrain().at(to.water->index)->SetWater(to.water->definition)) return Result::Failed;
     if (to.meshTransform && !to.water && !SetPlacementTransform(world, to.meshSelection, *to.meshTransform))

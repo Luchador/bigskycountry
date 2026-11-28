@@ -289,6 +289,11 @@ void RoadEditor::UpdateGizmoHover(const WorldDocument& world, const FreeCamera& 
 
 void RoadEditor::SubmitGizmos(WorldRenderer& renderer, const WorldDocument& world, const FreeCamera& camera)
 {
+    if (TerrainBrush().enabled && !waterEdit && !state.drawing && drag == Drag::None && !rampDrag)
+    {
+        SubmitTerrainBrush(renderer, world, camera);
+        return;
+    }
     const auto waterTarget = state.meshSelection;
     if ((waterTarget.kind == SelectionKind::Terrain || waterTarget.kind == SelectionKind::WaterPoint) &&
         !state.HasHiddenSelection(world.hierarchy) && world.Terrain().at(waterTarget.index)->EditingWater())
@@ -1951,6 +1956,7 @@ void RoadEditor::RotatePlanPoint(Road& road)
 
 void RoadEditor::Release(WorldDocument& world)
 {
+    FinishTerrainStroke(world);
     if (drag == Drag::WaterPoint || drag == Drag::BoxSelect) SDL_CaptureMouse(false);
     selectionBox.reset();
     if (rampDrag) FinishRampControl(world, false);
@@ -2590,6 +2596,7 @@ bool RoadEditor::Render(SDL_Renderer* renderer, const WorldDocument& world, cons
     if (menu.TrafficLanesEnabled() && !trafficOverlay.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
     if (menu.RoadNamesEnabled() && !roadNames.Draw(renderer, world, camera, scene, planView, center, scale)) return false;
     if (!planView && !DrawSelectionBox(renderer)) return false;
+    if (!DrawTerrainBrush(renderer, world, camera)) return false;
 
     const char* message = StatusText();
     if (*message && !Text(renderer, 12, 28, message, ink)) return false;
@@ -3517,7 +3524,7 @@ void RoadEditor::DeleteSelection(WorldDocument& world)
         EditSnapshot before(state);
         before.addedTerrain = EditSnapshot::TerrainPlacement{
             chunk.boundary ? "" : chunk.Instance().mesh->assetPath, chunk.GetTransform(), chunk.boundary,
-            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index}), chunk.WaterSource(), chunk.persistentId};
+            chunk.material, world.hierarchy.Parent({SceneKind::Terrain, index}), chunk.WaterSource(), chunk.persistentId, chunk.SculptEdits()};
         world.RemoveTerrain(index);
         state.SelectRows({});
         EditSnapshot after(state);
@@ -4027,6 +4034,25 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     // Input can change the selection, tool, projection or scene under a stationary cursor.
     // Recheck once after the event queue is drained, even if several events arrived.
     lastHoverPoint = {-1, -1};
+    if (terrainStroke && event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
+    {
+        FinishTerrainStroke(world);
+        return EditorEvent::Handled;
+    }
+    if (SDL_GetWindowFromEvent(&event) == window && event.type == SDL_EVENT_KEY_DOWN &&
+        (terrainStroke || (TerrainBrush().enabled && ViewportFocused())) &&
+        (event.key.key == SDLK_ESCAPE || (terrainStroke && event.key.key == SDLK_Z && (event.key.mod & SDL_KMOD_CTRL))))
+    {
+        if (!event.key.repeat)
+        {
+            if (terrainStroke) FinishTerrainStroke(world, true);
+#ifdef _WIN32
+            else panels.DisableTerrainBrush();
+#endif
+            terrainHover.reset();
+        }
+        return EditorEvent::Handled;
+    }
     if (drag == Drag::BoxSelect && SDL_GetWindowFromEvent(&event) == window)
     {
         if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP)
@@ -4484,6 +4510,8 @@ EditorEvent RoadEditor::HandleEvent(SDL_Window* window, SDL_Renderer* renderer, 
     case SDL_EVENT_MOUSE_MOTION: pointer = {e.motion.x, e.motion.y}; break;
     default: pointer = {e.button.x, e.button.y}; break;
     }
+
+    if (TerrainBrushInput(e, {pointer.x - scene.x, pointer.y}, world, camera)) return EditorEvent::Handled;
 
     if (rampDrag)
     {

@@ -6,6 +6,7 @@
 #include <uxtheme.h>
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <string>
 
 namespace WindowsTheme
@@ -546,3 +547,35 @@ void ApplyDialog(HWND dialog, SDL_Color background)
     if (!(GetWindowLongPtrW(dialog, GWL_STYLE) & WS_CHILD)) TitleBar(dialog);
 }
 }
+
+    HBITMAP WindowsTheme::ButtonBitmap(SDL_Surface* source, int size)
+    {
+        using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
+        Surface icon(source, SDL_DestroySurface);
+        if (!icon)
+        {
+            return nullptr;
+        }
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = size;
+        info.bmiHeader.biHeight = -size;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* pixels = nullptr;
+        HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        if (!bitmap)
+        {
+            return nullptr;
+        }
+        Surface target(SDL_CreateSurfaceFrom(size, size, SDL_PIXELFORMAT_BGRA32, pixels, 4 * size), SDL_DestroySurface);
+        const auto face = EditorTheme::button;
+        if (!target || !SDL_FillSurfaceRect(target.get(), nullptr, SDL_MapSurfaceRGB(target.get(), face.r, face.g, face.b)) ||
+            !SDL_BlitSurfaceScaled(icon.get(), nullptr, target.get(), nullptr, SDL_SCALEMODE_LINEAR))
+        {
+            DeleteObject(bitmap);
+            return nullptr;
+        }
+        return bitmap;
+    }

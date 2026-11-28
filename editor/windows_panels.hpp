@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <memory>
 #include "scene_outliner.hpp"
+#include "terrain_sculpt.hpp"
 
 struct PropertiesInspector;
 class ContentBrowser;
@@ -21,6 +22,9 @@ public:
     ~WindowsPanels();
     SDL_Window* Create(SDL_Window* frame, ContentBrowser& browser);
     bool OpenProjectSettings();
+    const TerrainBrushSettings& TerrainBrush() const;
+    void SetTerrainRadius(double radius);
+    void DisableTerrainBrush();
     void RevealModel(const std::string& path);
     void OpenMaterial(const std::string& path);
     bool ViewportFocused() const;

@@ -66,38 +66,6 @@ namespace
         }
     }
 
-    HBITMAP ToolbarBitmap(SDL_Surface* source, int size)
-    {
-        using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
-        Surface icon(source, SDL_DestroySurface);
-        if (!icon)
-        {
-            return nullptr;
-        }
-        BITMAPINFO info{};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = size;
-        info.bmiHeader.biHeight = -size;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        void* pixels = nullptr;
-        HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-        if (!bitmap)
-        {
-            return nullptr;
-        }
-        Surface target(SDL_CreateSurfaceFrom(size, size, SDL_PIXELFORMAT_BGRA32, pixels, 4 * size), SDL_DestroySurface);
-        const auto face = EditorTheme::button;
-        if (!target || !SDL_FillSurfaceRect(target.get(), nullptr, SDL_MapSurfaceRGB(target.get(), face.r, face.g, face.b)) ||
-            !SDL_BlitSurfaceScaled(icon.get(), nullptr, target.get(), nullptr, SDL_SCALEMODE_LINEAR))
-        {
-            DeleteObject(bitmap);
-            return nullptr;
-        }
-        return bitmap;
-    }
-
     // Keep the main HWND as the SDL input window, even over the swapchain.
     LRESULT CALLBACK ViewProc(HWND window, UINT message, WPARAM w, LPARAM l)
     {
@@ -228,14 +196,14 @@ struct WindowsPanels::Impl
         {
             HBITMAP& icon = icons[static_cast<int>(which)];
             DeleteObject(icon);
-            icon = ToolbarBitmap(LoadTransformIcon(which), size);
+            icon = WindowsTheme::ButtonBitmap(LoadTransformIcon(which), size);
         }
         constexpr std::array names{"btn_terrain_off.png", "btn_terrain_on.png"};
         for (std::size_t i = 0; i < terrainIcons.size(); ++i)
         {
             DeleteObject(terrainIcons[i]);
             const auto path = AssetPaths::Root(AssetRoot::Project) + "textures/editor/" + names[i];
-            terrainIcons[i] = ToolbarBitmap(SDL_LoadPNG(path.c_str()), size);
+            terrainIcons[i] = WindowsTheme::ButtonBitmap(SDL_LoadPNG(path.c_str()), size);
             if (!terrainIcons[i]) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Terrain toolbar icon %s could not be loaded", path.c_str());
         }
         ShowSettings(displayedSettings);
@@ -1712,6 +1680,12 @@ struct WindowsPanels::Impl
             if (msg->message == WM_KEYDOWN && !(msg->lParam & (1L << 30))) self.OpenTerrainEditor();
             return false;
         }
+        if (terrainInput && msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN &&
+            GetDlgCtrlID(msg->hwnd) >= IDC_TERRAIN_RADIUS && GetDlgCtrlID(msg->hwnd) <= IDC_TERRAIN_SEAM)
+        {
+            SendMessageW(terrain, WM_COMMAND, IDOK, 0);
+            return false;
+        }
         if (self.browser->MeshWindow().HandleNativeMessage(msg)) return false;
         HWND focus = GetFocus();
         if (msg->message >= WM_KEYFIRST && msg->message <= WM_KEYLAST)
@@ -2249,3 +2223,7 @@ void WindowsPanels::Sync(const RoadEditorState& state, const Road* current, bool
         SetDlgItemTextW(p.toolbar, IDC_SPEED_VALUE, text);
     }
 }
+
+const TerrainBrushSettings& WindowsPanels::TerrainBrush() const { return impl->terrainEditor.Settings(); }
+void WindowsPanels::SetTerrainRadius(double radius) { impl->terrainEditor.SetRadius(radius); }
+void WindowsPanels::DisableTerrainBrush() { impl->terrainEditor.Disable(); }

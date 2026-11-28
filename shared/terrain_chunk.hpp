@@ -2,6 +2,7 @@
 
 #include "mesh.hpp"
 #include "river.hpp"
+#include "terrain_sculpt.hpp"
 
 #include <array>
 #include <cstdint>
@@ -29,7 +30,13 @@ public:
     using MeshPlacement::persistentId;
     using MeshPlacement::GetTransform;
     using MeshPlacement::Instance;
-    using MeshPlacement::SetMesh;
+    void SetMesh(std::shared_ptr<const Mesh> mesh);
+    // Sculpt generated dry land only; road/rail geometry and water beds remain authored by their tools.
+    bool CanSculpt() const { return boundary.has_value() && !HasWater() && Instance().mesh != nullptr; }
+    const TerrainSculptEdits& SculptEdits() const { return sculptEdits; }
+    bool SetSculptEdits(TerrainSculptEdits edits);
+    bool Sculpt(const TerrainStamp& stamp);
+    std::optional<double> SculptHeight(double x, double z) const;
 
     const std::optional<LakeDefinition>& Lake() const { return lakeDraft ? lakeDraft : lake; }
     const std::optional<RiverDefinition>& River() const { return riverDraft ? riverDraft : river; }
@@ -96,6 +103,9 @@ public:
 
 private:
     std::shared_ptr<EditorGeometryCache> geometryCache;
+    std::shared_ptr<const Mesh> sculptSource;
+    TerrainSculptEdits sculptEdits;
+    mutable std::unique_ptr<TerrainSculptSurface> sculptSurface;
     void WaterChanged() { waterRevision = ++latestWaterRevision; }
     inline static std::uint64_t latestWaterRevision = 0;
     std::uint64_t waterRevision = 0;

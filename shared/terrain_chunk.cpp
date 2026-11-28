@@ -181,3 +181,59 @@ void TerrainChunk::ApplyWaterGeometry(const WaterDefinition& definition, LakeGeo
     joinedWater = joined;
     WaterChanged();
 }
+
+void TerrainChunk::SetMesh(std::shared_ptr<const Mesh> mesh)
+{
+    sculptSource = mesh;
+    sculptSurface.reset();
+    MeshPlacement::SetMesh(std::move(mesh));
+    if (sculptEdits && sculptSource && !SetSculptEdits(sculptEdits))
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot reapply terrain sculpt: %s", SDL_GetError());
+}
+
+bool TerrainChunk::SetSculptEdits(TerrainSculptEdits edits)
+{
+    if (!sculptSource || !edits)
+    {
+        sculptEdits = std::move(edits);
+        sculptSurface.reset();
+        MeshPlacement::SetMesh(sculptSource);
+        return true;
+    }
+    auto surface = std::make_unique<TerrainSculptSurface>(sculptSource);
+    std::vector<const TerrainStamp*> stamps;
+    for (auto p = edits; p; p = p->previous) stamps.push_back(&p->stamp);
+    for (auto i = stamps.rbegin(); i != stamps.rend(); ++i)
+    {
+        SDL_ClearError();
+        if (!surface->Apply(**i) && *SDL_GetError()) return false;
+    }
+    sculptSurface = std::move(surface);
+    sculptEdits = std::move(edits);
+    MeshPlacement::SetMesh(sculptSurface->MeshData());
+    return true;
+}
+
+bool TerrainChunk::Sculpt(const TerrainStamp& stamp)
+{
+    if (!CanSculpt()) return false;
+    const auto& bounds = Instance().mesh->bounds;
+    const double dx = std::max({bounds.min.x - stamp.center.x, 0.0, stamp.center.x - bounds.max.x});
+    const double dz = std::max({bounds.min.z - stamp.center.z, 0.0, stamp.center.z - bounds.max.z});
+    if (dx * dx + dz * dz >= stamp.radius * stamp.radius) return false;
+    if (sculptEdits && sculptEdits->count >= 100000) return SDL_SetError("Terrain stroke limit reached");
+    if (!sculptSurface) sculptSurface = std::make_unique<TerrainSculptSurface>(Instance().mesh);
+    if (!sculptSurface->Apply(stamp)) return false;
+    sculptEdits = std::make_shared<TerrainSculptLayer>(TerrainSculptLayer{stamp, sculptEdits, sculptEdits ? sculptEdits->count + 1 : 1});
+    MeshPlacement::SetMesh(sculptSurface->MeshData());
+    return true;
+}
+
+std::optional<double> TerrainChunk::SculptHeight(double x, double z) const
+{
+    if (!CanSculpt()) return {};
+    const auto& bounds = Instance().mesh->bounds;
+    if (x < bounds.min.x || x > bounds.max.x || z < bounds.min.z || z > bounds.max.z) return {};
+    if (!sculptSurface) sculptSurface = std::make_unique<TerrainSculptSurface>(Instance().mesh);
+    return sculptSurface->Height(x, z);
+}
