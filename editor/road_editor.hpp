@@ -64,6 +64,7 @@ public:
     void ReleaseRenderResources() override { browser.MeshWindow().Close(); planRenderer.Clear(); planDraft.reset(); }
 
 private:
+    void UpdateTerrainBrush(WorldDocument& world, const FreeCamera& camera, double elapsed);
     const TerrainBrushSettings& TerrainBrush() const;
     std::optional<Vector3> PickTerrainBrush(const WorldDocument& world, const FreeCamera& camera, SDL_FPoint pointer) const;
     bool TerrainBrushInput(const SDL_Event& event, SDL_FPoint pointer, WorldDocument& world, const FreeCamera& camera);

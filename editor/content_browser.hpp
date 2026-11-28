@@ -9,6 +9,7 @@
 #include "sdl_material_editor.hpp"
 #endif
 #include <string>
+#include <utility>
 #include <vector>
 
 // Model previews and texture thumbnails are loaded on demand.
@@ -21,7 +22,8 @@ public:
     MeshEditorWindow& MeshWindow() { return meshWindow; }
     const MeshEditorWindow& MeshWindow() const { return meshWindow; }
     TextureCatalog& Textures() { return textures; }
-    void Refresh();
+    void Refresh(bool reloadModels = true);
+    bool TakeModelRefresh() { return std::exchange(modelRefreshPending, false); }
     static bool ConfirmMaterialDelete(SDL_Window* window, const std::string& path);
     std::string MaterialLabel(const std::string& path);
     SDL_Surface* RoadMaterialThumbnail(const std::string& path, bool strip = false);
@@ -102,5 +104,6 @@ private:
     std::size_t triangleCount = 0;
     float scroll = 0;
     bool previewDirty = true;
+    bool modelRefreshPending = false;
     SDL_Texture* preview = nullptr; // Owned by the editor renderer. Replaced while it is live.
 };

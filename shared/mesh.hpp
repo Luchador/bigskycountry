@@ -136,6 +136,8 @@ public:
     explicit MeshAssets(AssetRoot location = AssetRoot::Cooked) : location(location) {}
     AssetRoot Location() const { return location; }
     void PruneUnused();
+    // Reimport cached assets once each. Failed imports retain their last good copy.
+    bool Reload();
     std::shared_ptr<const Mesh> Load(const std::string& relativePath);
 
 private:

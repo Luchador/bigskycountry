@@ -382,6 +382,29 @@ int WorldDocument::CreateIntersection(Vector3 position)
     return id;
 }
 
+bool WorldDocument::RefreshModels()
+{
+    std::string error = models.Reload() ? std::string{} : SDL_GetError();
+    const auto replacement = [&](const MeshInstance& instance) -> std::shared_ptr<const Mesh>
+    {
+        if (!instance.mesh || instance.mesh->assetPath.empty()) return {};
+        auto mesh = models.Load(instance.mesh->assetPath);
+        if (!mesh && error.empty()) error = SDL_GetError();
+        return mesh;
+    };
+    for (auto& instance : meshes)
+        if (auto mesh = replacement(instance)) instance.mesh = std::move(mesh);
+    for (const auto& object : objects)
+        if (auto mesh = replacement(object->Instance())) object->SetMesh(std::move(mesh));
+    for (const auto& chunk : terrain)
+        if (!chunk->boundary && !chunk->HasWater())
+            if (auto mesh = replacement(chunk->Instance())) chunk->SetMesh(std::move(mesh));
+    // The renderer recognizes new mesh identities; visibility and picking read
+    // their updated bounds and geometry on the next frame.
+    if (!error.empty()) return SDL_SetError("%s", error.c_str());
+    return true;
+}
+
 BSCObject* WorldDocument::PlaceObject(ObjectType type, const std::string& modelPath, const ObjectTransform& transform)
 {
     std::unique_ptr<BSCObject> object;
@@ -460,6 +483,12 @@ bool WorldDocument::InsertObject(int index, std::unique_ptr<BSCObject>&& object,
     if (!object->persistentId && !(object->persistentId = AllocatePlacementId())) return false;
     for (const auto& existing : objects)
         if (existing->persistentId == object->persistentId) return SDL_SetError("Duplicate object identity");
+    // Undo owns removed objects, which may predate an asset refresh. Restore
+    // their authored state with the current model, preserving the old copy if
+    // the source is temporarily unavailable.
+    const auto& instance = object->Instance();
+    if (instance.mesh && !instance.mesh->assetPath.empty())
+        if (auto mesh = models.Load(instance.mesh->assetPath)) object->SetMesh(std::move(mesh));
     lastPlacementId = std::max(lastPlacementId, object->persistentId);
     objects.reserve(objects.size() + 1);
     hierarchy.ReplaceRange(SceneKind::Object, index, 0, 1, folder);

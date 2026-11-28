@@ -151,7 +151,7 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     {
         return false;
     }
-    browser.Refresh();
+    browser.Refresh(false);
     browser.MeshWindow().SetMaterialOpener([this](const std::string& path)
     {
 #ifdef _WIN32
@@ -169,6 +169,13 @@ bool RoadEditor::Initialize(SDL_Window* window, MeshAssets& models)
     outlinePanel.LoadIcons(SDL_GetRenderer(window));
 #endif
     return true;
+}
+
+void RoadEditor::Update(WorldDocument& world, const FreeCamera& camera, double elapsed)
+{
+    if (browser.TakeModelRefresh())
+        status = world.RefreshModels() ? "Models refreshed" : SDL_GetError();
+    UpdateTerrainBrush(world, camera, elapsed);
 }
 
 SDL_FPoint RoadEditor::PlanGroupHandle(const ObjectTransform& frame) const

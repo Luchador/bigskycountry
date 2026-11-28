@@ -377,3 +377,21 @@ void MeshAssets::PruneUnused()
 {
     std::erase_if(loaded, [](const auto& item) { return item.second.use_count() == 1; });
 }
+
+bool MeshAssets::Reload()
+{
+    MeshAssets fresh(location);
+    std::string firstError;
+    std::size_t failed = 0;
+    for (auto& [name, mesh] : loaded)
+    {
+        if (auto replacement = fresh.Load(name)) mesh = std::move(replacement);
+        else
+        {
+            if (!failed++) firstError = SDL_GetError();
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Model refresh: %s", SDL_GetError());
+        }
+    }
+    if (failed) return SDL_SetError("Could not refresh %zu model(s); kept their previous versions. %s", failed, firstError.c_str());
+    return true;
+}

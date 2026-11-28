@@ -206,7 +206,7 @@ void ContentBrowser::SetTab(Tab next)
     }
 }
 
-void ContentBrowser::Refresh()
+void ContentBrowser::Refresh(bool reloadModels)
 {
     if (tab == Tab::Textures)
     {
@@ -222,6 +222,7 @@ void ContentBrowser::Refresh()
         texturesScanned = true;
         return;
     }
+    modelRefreshPending |= reloadModels;
     rows.clear();
     scanStatus.clear();
     previewDirty = true;
@@ -284,7 +285,7 @@ void ContentBrowser::RevealModel(const std::string& path)
     auto row = find();
     if (row == rows.end())
     {
-        Refresh();
+        Refresh(false);
         row = find();
     }
     Select(path);

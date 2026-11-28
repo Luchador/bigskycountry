@@ -115,7 +115,7 @@ void RoadEditor::FinishTerrainStroke(WorldDocument& world, bool cancel)
     UpdateWindowTitle();
 }
 
-void RoadEditor::Update(WorldDocument& world, const FreeCamera& camera, double elapsed)
+void RoadEditor::UpdateTerrainBrush(WorldDocument& world, const FreeCamera& camera, double elapsed)
 {
     const auto& settings = TerrainBrush();
     if (terrainStroke && (!settings.enabled || settings.tool != terrainStroke->settings.tool ||

@@ -31,6 +31,8 @@ public:
     bool Contains(SceneKey key) const;
     const std::string& Path() const { return path; }
     MeshAssets models;
+    // Asset refresh changes derived geometry, never placement state or world history.
+    bool RefreshModels();
     std::vector<Road> roads;
     std::map<int, Intersection> intersections; // Stable positive IDs, also used by the outliner.
     void UpdateIntersections(const std::set<int>& changedRoads = {});
