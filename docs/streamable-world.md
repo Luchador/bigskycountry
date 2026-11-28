@@ -1,7 +1,22 @@
 # Cooked worlds — milestone 3
 
 Build normally, then use **File → Cook World** in the editor. Cooking saves the
-world and writes `build/cooked/worlds/<world filename>.bscworld`. It is an explicit,
+world, incrementally rebuilds `BigSkyAssets`, reloads source models, and writes
+`build/cooked/worlds/<world filename>.bscworld`. New/re-exported models, LODs,
+material assignments, baked AO, collision settings, material definitions, and
+compressed textures are included automatically; a separate asset build is no
+longer needed. Deleted asset outputs are pruned by the existing asset pipeline.
+This also applies to `BigSkyWorldCooker`; `--inspect` remains read-only.
+
+The editor/cooker uses its configured CMake executable, build directory and build
+configuration. Keep that build tree available, and reconfigure/rebuild if moving
+the project. Only the asset target is built, so running editor/cooker executables
+are not relinked. An asset-build failure stops cooking before replacing the world
+package; the error includes the tail of `build/world-cook-assets.log` and its full
+path. Some individual assets may already have been rebuilt when a later step
+fails; fix the error and cook again before launching the game.
+
+Cooking is an explicit,
 synchronous operation; ordinary saves do not recook the world. Finish road and
 lake drafts first. The completion dialog gives the exact output path.
 
@@ -15,7 +30,7 @@ of allowing a pawn to fall through the world.
 **Recook once after updating to milestone 3.** Version 2 stores separate near,
 distant, and collision payloads. Version 1 packages cannot be streamed. Authored
 `.wld` files remain compatible. Recook after world, model, or material changes;
-texture pixel changes only need the usual texture build.
+texture pixel changes can use Cook World or an asset-only build.
 
 Traffic milestone 1 adds format **v5** with directed lane metadata in the
 manifest. Versions 2–4 remain readable, but need recooking to use the test AI

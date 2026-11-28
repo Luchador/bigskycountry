@@ -1,0 +1,8 @@
+#pragma once
+namespace AssetBuildSettings
+{
+    inline constexpr auto cmake = u8R"bsc(@CMAKE_COMMAND@)bsc";
+    inline constexpr auto script = u8R"bsc(@CMAKE_CURRENT_BINARY_DIR@/generated/$<CONFIG>/build_assets.cmake)bsc";
+    inline constexpr auto log = u8R"bsc(@CMAKE_CURRENT_BINARY_DIR@/world-cook-assets.log)bsc";
+    inline constexpr auto cooked = u8R"bsc(@cooked_root@)bsc";
+}

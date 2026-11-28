@@ -178,7 +178,7 @@ Keep editable images and `.bmat` files in the project's `assets/textures/` and G
 
 In the **Models** tab, **Refresh** also updates existing world instances of GLB and FBX models, including their LODs and hidden placements. Transforms, Outliner folders, and material assignments are preserved. Missing or invalid exports report an error and keep the last working model. Newly placed objects and objects restored by undo use the refreshed assets.
 
-Build either executable, or run `cmake --build build --target BigSkyAssets` for an asset-only update. The game reads `build/cooked/`. It contains runtime-ready GLBs, material definitions, and DDS textures. For example, `road.png` used as a base color cooks to `cooked/textures/BC7_UNORM_SRGB/road.png.dds`. When a material slot requires a different format from the filename default, the build cooks that format once and shares it across materials. The sun and moon use BC7 sRGB to preserve their colors and alpha. A packaged game needs the `cooked/` directory beside its executable.
+Build either executable, use **File → Cook World**, or run `cmake --build build --target BigSkyAssets` for an asset-only update. Cook World (including `BigSkyWorldCooker`) automatically runs the incremental asset build before writing the world package, so new models, sidecars, materials, and textures do not need a separate command-line build. Asset failures stop cooking and report `build/world-cook-assets.log`; keep the configured build directory available. The game reads `build/cooked/`. It contains runtime-ready GLBs/FBXs, material definitions, and DDS textures. For example, `road.png` used as a base color cooks to `cooked/textures/BC7_UNORM_SRGB/road.png.dds`. When a material slot requires a different format from the filename default, the build cooks that format once and shares it across materials. The sun and moon use BC7 sRGB to preserve their colors and alpha. A packaged game needs the `cooked/` directory beside its executable.
 
 **Upgrading an existing build.** Close the old editor and build in the existing build directory once. CMake recovers build-only textures, materials, and models into the project, and removes the old `build/assets/`. If both copies of a file differ, the project copy stays active and CMake reports the build copy's location under `assets-backup/` in the build directory. A successful cook also removes the old `build/texture-cache/` when all its files are accounted for.
 
@@ -285,11 +285,10 @@ Each completed edit saves to `<model>.bcollision` alongside the source GLB/FBX;
 no world save is required. Placed objects, static mesh instances, and all their
 visual LODs share these settings. Terrain surfaces retain triangle collision,
 and an object's **Has Collision = false** still disables its collision. After
-editing collision, use **Cook World** and restart the game. Cooking copies the
-referenced models' collision settings into cooked assets and refreshes dependency
-hashes and streaming bounds; collision-only edits do not require a rebuild.
-New or re-exported models, material assignments, and textures still need an asset
-build. Collision shapes use analytic capsule/sphere queries,
+editing collision, use **Cook World** and restart the game. Cooking rebuilds the
+assets, including collision settings, and refreshes dependency hashes and streaming
+bounds. New or re-exported models, material assignments, and textures are included
+in the same step. Collision shapes use analytic capsule/sphere queries,
 with a BVH and the existing streamed collision budgets. Instance translation,
 rotation, scale and mirroring are supported; nonuniform instance scaling
 conservatively widens the radius to prevent gaps. Prefer uniform placement scale

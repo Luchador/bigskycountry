@@ -963,8 +963,19 @@ void RoadEditor::RunCommand(EditorCommand command, WorldDocument& world, FreeCam
         }
         if (!Save(world)) return;
         const auto file = WorldPackage::DefaultPath(world);
+        const std::string title = SDL_GetWindowTitle(frame);
+        auto* previousCursor = SDL_GetCursor();
+        auto* waitCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+        if (waitCursor) SDL_SetCursor(waitCursor);
+        SDL_SetWindowTitle(frame, "Building assets and cooking world...");
         const bool ok = WorldPackage::Cook(world, file);
-        const std::string message = ok ? "Cooked world saved to:\n" + file + "\n\nThe game will use it on the next launch. Recook after world or material edits." : SDL_GetError();
+        const std::string message = ok ? "Assets rebuilt and cooked world saved to:\n" + file + "\n\nThe game will use them on the next launch. Use Cook World after world or asset edits." : SDL_GetError();
+        SDL_SetWindowTitle(frame, title.c_str());
+        if (waitCursor)
+        {
+            SDL_SetCursor(previousCursor);
+            SDL_DestroyCursor(waitCursor);
+        }
         SDL_ShowSimpleMessageBox(ok ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR, "Cook world", message.c_str(), frame);
         return;
     }

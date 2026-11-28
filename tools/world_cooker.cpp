@@ -23,7 +23,8 @@ int main(int argc, char** argv)
     if (argc > 3 || (argc > 1 && std::string(argv[1]) == "--help"))
     {
         std::cout << "BigSkyWorldCooker [world.wld [output.bscworld]]\nBigSkyWorldCooker --inspect output.bscworld\n"
-                     "Without arguments, cooks the default editor world. Cooking saves persistent IDs to the source world.\n";
+                     "Without arguments, cooks the default editor world. Cooking rebuilds changed assets,\n"
+                     "then writes the world package and saves persistent IDs to the source world.\n";
         return argc > 3 ? 1 : 0;
     }
     WorldDocument world(AssetRoot::Project);

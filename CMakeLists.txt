@@ -77,6 +77,7 @@ add_library(BigSkyApplication STATIC
     shared/project_settings.cpp
     shared/runtime_config.cpp
     shared/asset_paths.cpp
+    shared/asset_build.cpp
     shared/material.cpp
     shared/dds_texture.cpp
     shared/shadow_cascades.cpp
@@ -293,6 +294,7 @@ foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
 endforeach()
 
 include(cmake/textures.cmake)
+include(cmake/asset_build.cmake)
 set_property(SOURCE shared/asset_paths.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     "BIGSKY_PROJECT_ASSETS=u8\"${asset_root}/\""
     "BIGSKY_COOKED_RELATIVE=u8\"$<PATH:RELATIVE_PATH,${cooked_root},$<TARGET_FILE_DIR:BigSkyCountry>>/\"")

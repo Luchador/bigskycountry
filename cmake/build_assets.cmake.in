@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.24)
+if(NOT EXISTS [==[@CMAKE_CURRENT_BINARY_DIR@/CMakeCache.txt]==])
+    message(FATAL_ERROR "The configured build directory is missing. Reconfigure and rebuild the editor/cooker.")
+endif()
+@asset_build_environment@
+execute_process(COMMAND [==[@CMAKE_COMMAND@]==] --build [==[@CMAKE_CURRENT_BINARY_DIR@]==]
+                --config "$<CONFIG>" --target BigSkyAssets
+                RESULT_VARIABLE result)
+if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "BigSkyAssets failed (${result}). World cooking was stopped.")
+endif()
