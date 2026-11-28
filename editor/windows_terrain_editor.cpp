@@ -52,11 +52,11 @@ void WindowsTerrainEditor::Layout()
     RECT area{};
     GetClientRect(window, &area);
     const auto pad = Units(window, 8, 8), button = Units(window, 54, 16);
-    const int width = std::max(1L, area.right - 2 * pad.cx);
-    const int groupHeight = std::max(1L, area.bottom - 3 * pad.cy - button.cy);
-    MoveWindow(GetDlgItem(window, IDC_TERRAIN_TOOLS), pad.cx, pad.cy, width, groupHeight, TRUE);
     MoveWindow(GetDlgItem(window, IDCANCEL), area.right - pad.cx - button.cx,
                area.bottom - pad.cy - button.cy, button.cx, button.cy, TRUE);
+    // Let the themed dialog paint all exposed space, including the old button
+    // position after a resize. No overlapping group box should clip its fill.
+    InvalidateRect(window, nullptr, TRUE);
 }
 
 INT_PTR CALLBACK WindowsTerrainEditor::Dialog(HWND hwnd, UINT message, WPARAM w, LPARAM l)
@@ -89,8 +89,11 @@ INT_PTR CALLBACK WindowsTerrainEditor::Dialog(HWND hwnd, UINT message, WPARAM w,
         return TRUE;
     case WM_GETMINMAXINFO:
     {
-        const auto minimum = Units(hwnd, 280, 275);
-        reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize = {minimum.cx, minimum.cy};
+        const auto minimum = Units(hwnd, 260, 180);
+        RECT frame{0, 0, minimum.cx, minimum.cy};
+        AdjustWindowRectEx(&frame, GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE,
+                          GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+        reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
         return TRUE;
     }
     case WM_COMMAND:

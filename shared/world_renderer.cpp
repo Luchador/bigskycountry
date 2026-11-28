@@ -31,7 +31,7 @@ bool WorldRenderer::DrawCacheStatistics(SDL_Renderer* target, float y) const
 std::size_t WorldRenderer::ReadyBuffers() const
 {
     return std::count_if(resident.begin(), resident.end(), [](const auto& e) {
-        return e.second->buffer && e.second->uploadedBytes == e.second->bufferBytes;
+        return e.second->Ready() || (e.second->previous && e.second->previous->Ready());
     });
 }
 
@@ -39,7 +39,7 @@ std::size_t WorldRenderer::ResidentBytes() const
 {
     std::size_t bytes = 0;
     for (const auto& [key, entry] : resident)
-        bytes += entry->bufferBytes + entry->pendingUpload.capacity() * sizeof(WorldDepthVertex);
+        bytes += entry->Bytes();
     return bytes;
 }
 
@@ -71,7 +71,11 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
     // buffers remain in the bounded LRU cache until memory is needed.
     std::erase_if(resident, [&](const auto& entry) {
         const auto& geometry = *entry.second;
-        return (geometry.meshOwned && geometry.mesh.expired()) ||
+        // Sculpting can replace the source before Begin. Give a just-drawn
+        // buffer one frame to become the replacement's visible fallback.
+        const bool unowned = geometry.mesh.expired() ||
+            (geometry.preparingMesh && geometry.preparingMesh.use_count() == 1);
+        return (geometry.meshOwned && unowned && geometry.lastFrame + 1 < frame) ||
             (!geometry.buffer && geometry.pendingUpload.empty() && frame - geometry.lastFrame > 120);
     });
     // Editor objects, selections and history are never evicted. Only disposable
@@ -84,7 +88,7 @@ bool WorldRenderer::Begin(SDL_Renderer* target, const CameraView& view, const Wo
         for (auto it = resident.begin(); it != resident.end(); ++it)
             if (it->second->lastFrame + 1 < frame && (victim == resident.end() || it->second->lastFrame < victim->second->lastFrame)) victim = it;
         if (victim == resident.end()) break;
-        residentBytes -= victim->second->bufferBytes + victim->second->pendingUpload.capacity() * sizeof(WorldDepthVertex);
+        residentBytes -= victim->second->Bytes();
         resident.erase(victim);
     }
     vertices.clear();
@@ -470,8 +474,12 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
         emit();
         return;
     }
-    const auto& bounds = instance.mesh->bounds;
     auto& entry = resident[{&source, level}];
+    if (entry && entry->Ready())
+    {
+        entry->previous.reset();
+        entry->preparingMesh.reset();
+    }
     const bool sameMesh = entry && entry->mesh.lock() == instance.mesh;
     const auto revision = instance.mesh->materials ? instance.mesh->materials->revision : 0;
     const auto ao = MeshAO::Current(*instance.mesh);
@@ -482,23 +490,35 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
         entry->choiceFrame = frame;
         entry->transform = instance.transform;
         entry->moving = true;
+        entry->previous.reset();
         emit();
         return;
     }
-    if (!sameMesh || entry->moving || entry->revision != revision || entry->ambientOcclusion != ao ||
-        entry->material != material || entry->mapping != mapping ||
-        entry->tint.r != tint.r || entry->tint.g != tint.g || entry->tint.b != tint.b)
+    const bool compatible = entry && !entry->moving && entry->transform == instance.transform &&
+        entry->revision == revision && entry->ambientOcclusion == ao && entry->material == material && entry->mapping == mapping &&
+        entry->tint.r == tint.r && entry->tint.g == tint.g && entry->tint.b == tint.b;
+    if (!sameMesh && compatible && !entry->Ready() && entry->preparingMesh)
     {
+        // Do not restart a large upload on every brush stamp. Finish this
+        // snapshot, then pick up the latest mesh on the next submission.
+        instance.mesh = entry->preparingMesh;
+    }
+    else if (!sameMesh || !compatible)
+    {
+        auto previous = compatible ? (entry->Ready() ? entry : entry->previous) : nullptr;
         entry = std::make_shared<ResidentGeometry>();
+        entry->previous = std::move(previous);
         entry->device = device;
         entry->meshOwned = true;
         entry->mesh = instance.mesh;
+        entry->preparingMesh = instance.mesh;
         entry->revision = revision;
         entry->ambientOcclusion = ao;
         entry->transform = instance.transform;
         entry->material = material;
         entry->mapping = mapping;
         entry->tint = tint;
+        const auto& bounds = instance.mesh->bounds;
         entry->bounds = WorldBounds(bounds, instance.transform);
         entry->origin = bounds.Empty() ? instance.transform.origin : instance.transform.Point((bounds.min + bounds.max) * 0.5);
     }
@@ -506,10 +526,8 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
     entry->lastFrame = frame;
     entry->choiceFrame = frame;
     std::shared_ptr<ResidentGeometry> fallback;
-    const auto ready = [](const ResidentGeometry& geometry) {
-        return geometry.complete && geometry.buffer && geometry.uploadedBytes == geometry.bufferBytes;
-    };
-    if (!ready(*entry))
+    if (!entry->Ready()) fallback = entry->previous;
+    if (!entry->Ready() && !fallback)
     {
         std::size_t best = Mesh::maxLODCount;
         for (std::size_t i = 0; i <= source.mesh->lods.size(); ++i)
@@ -519,7 +537,7 @@ void WorldRenderer::SubmitWorldMesh(const MeshInstance& source, const std::strin
             if (found == resident.end() || !found->second) continue;
             const auto& other = *found->second;
             const auto gap = i > level ? i - level : level - i;
-            if (gap >= best || !ready(other) || other.moving || other.mesh.lock().get() != &source.mesh->Level(i) ||
+            if (gap >= best || !other.Ready() || other.moving || other.mesh.lock().get() != &source.mesh->Level(i) ||
                 other.transform != instance.transform || other.revision != revision || other.material != material ||
                 other.mapping != mapping || other.tint.r != tint.r || other.tint.g != tint.g || other.tint.b != tint.b) continue;
             best = gap;

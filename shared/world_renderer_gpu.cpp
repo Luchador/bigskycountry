@@ -982,7 +982,11 @@ bool WorldRenderer::DrawGPU()
         auto& mesh = *item.geometry;
         mesh.uploadedBytes = mesh.uploadEnd;
         uploadedBytes += item.size;
-        if (mesh.uploadedBytes == mesh.bufferBytes) std::vector<WorldDepthVertex>().swap(mesh.pendingUpload);
+        if (mesh.uploadedBytes == mesh.bufferBytes)
+        {
+            std::vector<WorldDepthVertex>().swap(mesh.pendingUpload);
+            mesh.preparingMesh.reset();
+        }
     }
     return true;
 }

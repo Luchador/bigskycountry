@@ -203,18 +203,28 @@ private:
         std::string material;
         std::uint64_t revision = 0, lastFrame = 0, uploadFrame = 0, choiceFrame = 0;
         std::weak_ptr<const Mesh> mesh;
+        // Finish one immutable edit snapshot while newer edits arrive. Keep at
+        // most one ready generation visible until its replacement is uploaded.
+        std::shared_ptr<const Mesh> preparingMesh;
+        std::shared_ptr<ResidentGeometry> previous;
         std::shared_ptr<const MeshAOData> ambientOcclusion;
         MeshTransform transform;
         bool moving = false;
         MeshUVs mapping = MeshUVs::Authored;
         SDL_FColor tint{};
+        bool Ready() const { return complete && buffer && uploadedBytes == bufferBytes; }
+        std::size_t Bytes() const
+        {
+            return bufferBytes + pendingUpload.capacity() * sizeof(WorldDepthVertex) +
+                (previous ? previous->Bytes() : 0);
+        }
     };
     struct ResidentDraw
     {
         std::shared_ptr<ResidentGeometry> geometry;
         size_t before; // Position in the dynamic stream, preserving submission order.
         bool selected;
-        bool uploadOnly = false; // A ready LOD remains visible while this one uploads.
+        bool uploadOnly = false; // A ready LOD or edit generation remains visible during upload.
     };
     struct ResidentKey
     {
